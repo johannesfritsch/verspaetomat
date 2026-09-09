@@ -143,6 +143,7 @@ class ApiDeparture {
     this.platform,
     this.category = ApiCategory.other,
     required this.operator,
+    this.desk = '',
     this.cancelled = false,
     this.cause,
     this.stops = const [],
@@ -156,6 +157,7 @@ class ApiDeparture {
   final String? platform;
   final ApiCategory category;
   final String operator;
+  final String desk;
   final bool cancelled;
   final String? cause;
   final List<ApiStop> stops;
@@ -172,6 +174,7 @@ class ApiDeparture {
         platform: _sn(j['platform']),
         category: categoryFromWire(_sn(j['category'] ?? j['mode'])),
         operator: _s(j['operator'] ?? j['agency'] ?? j['agency_name']),
+        desk: _s(j['desk'] ?? ''),
         cancelled: _b(j['cancelled']),
         cause: _sn(j['cause']),
         stops: _ml(j['stops']).map(ApiStop.fromJson).toList(),

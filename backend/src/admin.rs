@@ -62,9 +62,10 @@ async fn current_ride(s: &AppState, customer: Uuid) -> Result<Option<RideRow>, (
 }
 
 pub async fn customers(State(s): State<AppState>, _a: Admin) -> ApiResult {
-    let rows: Vec<CustomerRow> = sqlx::query_as("select * from customers order by created_at desc limit 100").fetch_all(&s.pool).await.map_err(internal)?;
+    let rows: Vec<CustomerRow> = sqlx::query_as("select c.* from customers c join devices d on d.id = c.id order by d.last_seen_at desc limit 100").fetch_all(&s.pool).await.map_err(internal)?;
     let mut out = Vec::new();
     for c in rows {
+        let last_seen: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar("select last_seen_at from devices where id = $1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
         let ride = current_ride(&s, c.id).await?;
         let (open, incidents): (i64, i64) = sqlx::query_as("select count(*) filter (where status in ('gesammelt','bereit'))::bigint, count(*)::bigint from incidents where customer_id = $1")
             .bind(c.id)
@@ -72,7 +73,7 @@ pub async fn customers(State(s): State<AppState>, _a: Admin) -> ApiResult {
             .await
             .map_err(internal)?;
         out.push(json!({
-            "id": c.id, "nickname": c.nickname, "relay_address": c.relay_address, "created_at": c.created_at,
+            "id": c.id, "nickname": c.nickname, "relay_address": c.relay_address, "created_at": c.created_at, "last_seen_at": last_seen,
             "riding": ride.is_some(),
             "ride": ride.map(|r| json!({ "id": r.id, "line": r.line, "exit_station_name": r.exit_station_name, "live_delay_min": r.live_delay_min, "passed_stops": r.passed_stops, "checked_in_at": r.checked_in_at, "last_polled_at": r.last_polled_at })),
             "open_incidents": open, "incidents": incidents,

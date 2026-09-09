@@ -145,13 +145,18 @@ Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? known
   await settle(tester, 800);
   final rows = find.byType(DepartureRow);
   Finder? pick;
-  for (var i = 0; i < rows.evaluate().length; i++) {
-    final d = tester.widget<DepartureRow>(rows.at(i)).departure;
-    final regional = d.category == ApiCategory.re || d.category == ApiCategory.rb || d.category == ApiCategory.s;
-    if (!d.cancelled && regional) {
-      pick = rows.at(i);
-      break;
+  // Prefer a train whose operator files at the Servicecenter, so three rides bundle at one desk.
+  for (final requireDesk in [true, false]) {
+    for (var i = 0; i < rows.evaluate().length; i++) {
+      final d = tester.widget<DepartureRow>(rows.at(i)).departure;
+      final regional = d.category == ApiCategory.re || d.category == ApiCategory.rb || d.category == ApiCategory.s;
+      final deskOk = !requireDesk || d.desk == 'Servicecenter Fahrgastrechte';
+      if (!d.cancelled && regional && deskOk) {
+        pick = rows.at(i);
+        break;
+      }
     }
+    if (pick != null) break;
   }
   pick ??= rows.first; // no regional train right now: any rail departure will do
   final picked = tester.widget<DepartureRow>(pick).departure;
@@ -183,7 +188,13 @@ Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? known
   if (find.text('ANGEKOMMEN').evaluate().isNotEmpty && find.text('Fertig').evaluate().isEmpty) {
     await tapText(tester, 'Ansehen');
   }
-  await pumpUntilFound(tester, find.textContaining('68', findRichText: true), timeout: const Duration(seconds: 20));
+  // The reveal shows the final delay: the live delay the train already had plus our 68.
+  final minutesLine = find.byWidgetPredicate((w) {
+    if (w is! Text || w.data == null) return false;
+    final m = RegExp(r'^(\d+) Minuten').firstMatch(w.data!);
+    return m != null && int.parse(m.group(1)!) >= 68;
+  });
+  await pumpUntilFound(tester, minutesLine, timeout: const Duration(seconds: 20));
   await tapText(tester, 'Fertig');
   await pumpUntilFound(tester, find.text('Kein Zug. Gut so.'), timeout: const Duration(seconds: 40));
   return customer;
@@ -203,6 +214,14 @@ void main() {
     final sw = Stellwerk(apiUrl);
     String? customer;
     try {
+      // 0. The app has booted and called /v1/me, so its customer is the most recently seen one.
+      //    Start from a clean slate: earlier runs may have left claims (5 sends per day) and rides.
+      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'Kein Zug. Gut so.' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 40));
+      customer = (await sw.customers()).first['id'] as String;
+      await sw.reset(customer);
+      // ignore: avoid_print
+      print('customer $customer reset');
+
       // 1–2. Three rides so the Servicecenter bundle reaches 4,50 €.
       for (var n = 1; n <= 3; n++) {
         customer = await rideOnce(tester, sw, n, knownCustomer: customer);
