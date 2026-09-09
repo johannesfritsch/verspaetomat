@@ -111,3 +111,22 @@ On the simulator with a simulated location at Köln Hbf: create device → nearb
 1. Go on the cut list above, or name what must move into tonight.
 2. Optional: SMTP credentials for a transactional provider if you want a real mail to leave tonight. Without them the relay dry-runs.
 3. The simulator will be driven from here; you only need to watch.
+
+
+## What shipped (updated 9 September 2026, late evening)
+
+Done and verified:
+- Postgres 17 with twelve migrations (`backend/migrations`), applied automatically at start; seed of operators, NGOs, badges, seeded boards.
+- Device auth: `POST /v1/devices` → bearer token (hashed at rest), recovery code of twelve words at the first claim, `POST /v1/devices/recover` verified end to end.
+- Transitous adapter: nearby stations, search, departures with live delays, per-stop trip data; agency → operator → claims desk mapping.
+- Trip follower: verified live. A check-in to RE 22 at Köln Hbf (19:21 UTC) finalised itself at Köln West at 19:30 UTC with +1 minute, points and audit entry, no manual call.
+- Ledger, claims, uploads, signature, send via the relay (dry-run without `SMTP_URL`, real SMTP via lettre with it), inbound webhook with classification and forwarding, community, boards, teams, export, delete.
+- Flutter: API client, repository switch (Demo / Lokal) in Einstellungen, all screens on the repository, one-shot location for nearby stations and the check-in fix, uploads and signature, recovery-code sheet. `--dart-define=BACKEND=local`, `API_URL`, `NO_LOCATION=1` for demos and screenshots.
+- Local-mode screenshots on the iPhone 15 Pro simulator: Bahnsteig with real nearby stations, Einchecken with real departures, Konto, Wir, Ich, all without exceptions.
+
+Not tonight (as planned): Typst PDF (plain-text summary attached instead), push, background geofence, Träwelling OAuth, NGO report import UI, App Attest, boards across real users, the 25 % monthly cap.
+
+Gotchas found:
+- The simulator's location permission alert survives app relaunches and hides the app; reboot the simulator or run with `NO_LOCATION=1`.
+- Transitous station names carry a country suffix ("Köln Hbf (DE)"); stripped in the adapter.
+- Late in the evening the departures page of the feed is mostly buses and trams; the adapter now fetches 150 rows before filtering to rail.
