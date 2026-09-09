@@ -301,7 +301,12 @@ class _IdleBlock extends StatelessWidget {
           )
         else if (stations.isEmpty)
           Text('Kein Bahnhof in der Nähe gefunden. Such einen.', style: VText.caption)
-        else
+        else if (nearby.simulated)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text('Standort: Stellwerk · ${nearby.label ?? ''}', style: VText.caption.copyWith(color: VColors.red)),
+          ),
+        if (stations.isNotEmpty)
           Wrap(
             spacing: 8,
             runSpacing: 8,
