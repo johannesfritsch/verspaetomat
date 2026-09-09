@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use axum::{
     extract::{Multipart, Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -656,7 +657,34 @@ async fn claim_with_incidents(pool: &PgPool, claim: &ClaimRow) -> anyhow::Result
     let mut v = json!(claim);
     v["incidents"] = json!(incidents);
     v["attachments"] = json!(attachments.into_iter().map(|(id, label)| json!({ "upload_id": id, "label": label })).collect::<Vec<_>>());
+    v["pdf_url"] = json!(format!("/v1/claims/{}/pdf", claim.id));
     Ok(v)
+}
+
+/// Loads everything the form needs and renders it. Shared by the preview route and the send path.
+async fn render_claim_pdf(pool: &PgPool, claim: &ClaimRow, customer: &CustomerRow) -> anyhow::Result<Vec<u8>> {
+    let incidents: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date").bind(claim.id).fetch_all(pool).await?;
+    let signature_png: Option<Vec<u8>> = sqlx::query_scalar(
+        "select u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1 and ca.label = 'Unterschrift' and u.content_type = 'image/png' limit 1",
+    )
+    .bind(claim.id)
+    .fetch_optional(pool)
+    .await?;
+    let claim = claim.clone();
+    let customer = customer.clone();
+    tokio::task::spawn_blocking(move || crate::pdf::render(&crate::pdf::ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png })).await?
+}
+
+/// `GET /v1/claims/{id}/pdf` — the filled EU form as it stands right now (draft or sent).
+pub async fn claim_pdf(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> Result<Response, (StatusCode, Json<Value>)> {
+    let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1 and customer_id = $2").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(claim) = claim else { return Err(err(StatusCode::NOT_FOUND, "claim not found")) };
+    let pdf = render_claim_pdf(&s.pool, &claim, &c.0).await.map_err(internal)?;
+    Ok((
+        [(header::CONTENT_TYPE, "application/pdf".to_string()), (header::CONTENT_DISPOSITION, format!("inline; filename=\"EU-Antrag-{}.pdf\"", claim.id))],
+        pdf,
+    )
+        .into_response())
 }
 
 pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<DraftRequest>) -> ApiResult {
@@ -842,7 +870,10 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         "Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
         claim.account_holder, name, name
     );
-    let attachments = json!([{ "name": "EU-Antrag.txt", "content_type": "text/plain", "text": claim_summary_text(&claim, &incidents, &name) }]);
+    let attachments = json!([
+        { "name": "EU-Antrag.pdf", "content_type": "application/pdf", "url": format!("/v1/claims/{}/pdf", claim.id) },
+        { "name": "EU-Antrag.txt", "content_type": "text/plain", "text": claim_summary_text(&claim, &incidents, &name) },
+    ]);
     let message_id = format!("<{}@verspaetomat.de>", Uuid::new_v4());
     let summary = claim_summary_text(&claim, &incidents, &name);
     let mut uploads: Vec<(String, String, Vec<u8>)> = sqlx::query_as::<_, (String, String, Vec<u8>)>(
@@ -853,6 +884,8 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     .await
     .map_err(internal)?;
     uploads.insert(0, ("EU-Antrag.txt".into(), "text/plain".into(), summary.into_bytes()));
+    let pdf = render_claim_pdf(&s.pool, &claim, &c.0).await.map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &format!("pdf: {e}")))?;
+    uploads.insert(0, ("EU-Antrag.pdf".into(), "application/pdf".into(), pdf));
     let sent = crate::mail::send(crate::mail::OutgoingMail {
         from: &format!("{name} <{relay}>"),
         to: &to,

@@ -8,6 +8,7 @@ mod fixtures;
 mod handlers;
 mod mail;
 mod model;
+mod pdf;
 mod rules;
 mod train;
 
@@ -88,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/claims", get(handlers::claims))
         .route("/v1/claims/draft", post(handlers::claim_draft))
         .route("/v1/claims/{id}", patch(handlers::claim_patch))
+        .route("/v1/claims/{id}/pdf", get(handlers::claim_pdf))
         .route("/v1/claims/{id}/sign", post(handlers::claim_sign))
         .route("/v1/claims/{id}/send", post(handlers::claim_send))
         .route("/v1/uploads", post(handlers::upload))
