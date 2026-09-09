@@ -677,7 +677,6 @@ class Mock {
 
   static const pointsTotal = 1372;
   static const pointsThisWeek = 96;
-  static const streakWeeks = 7;
   static const levelName = 'Gleis 7';
   static const nextLevelName = 'Bahnhofsmission';
   static const nextLevelAt = 1500;

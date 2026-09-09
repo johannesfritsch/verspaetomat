@@ -3,18 +3,16 @@ import 'package:go_router/go_router.dart';
 
 import '../../mock/mock_data.dart';
 import '../../router.dart';
-import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'community_widgets.dart';
 
-/// Ich: level, streak, badges, statistics, teams.
+/// Ich: level, badges, statistics, teams.
 class IchScreen extends StatelessWidget {
   const IchScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final state = DemoScope.of(context);
     final rides = Mock.rides;
     final delayed = rides.where((r) => r.delay > 0).toList();
     final avg = delayed.isEmpty ? 0 : (delayed.fold(0, (s, r) => s + r.delay) / delayed.length).round();
@@ -59,14 +57,10 @@ class IchScreen extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Expanded(child: BigFigure(value: '${Mock.streakWeeks}', label: 'Pendelwochen am Stück')),
               Expanded(child: BigFigure(value: '+${Mock.pointsThisWeek}', label: 'Diese Woche')),
+              Expanded(child: BigFigure(value: '${Mock.rides.length}', label: 'Fahrten, letzte 14 Tage')),
             ],
           ),
-          const VGap.m(),
-          WeekdayChips(selected: state.commuteDays, onToggle: state.toggleCommuteDay),
-          const SizedBox(height: 8),
-          Text('Deine Pendeltage. Andere Tage brechen die Serie nicht.', style: VText.caption),
           const VGap.xl(),
           VSection('Abzeichen', trailing: Text('$earned von ${Mock.badges.length}', style: VText.caption)),
           const VGap.s(),

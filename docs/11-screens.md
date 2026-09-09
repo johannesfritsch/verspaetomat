@@ -193,7 +193,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 
 ## 15. Ich (profile)
 
-- Name or nickname, level name, Geduldspunkte total, current Pendelwoche streak.
+- Name or nickname, level name, Geduldspunkte total, points this week.
 - Badges as a grid, earned ones in colour, others as outlines with their names visible (the museum is part of the fun).
 - History: every ride, filterable by line, with delays and points.
 - "Meine Statistik": average delay, most patient line, longest wait, minutes this year.
@@ -204,7 +204,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 
 ## 16. Einstellungen & Datenschutz
 
-- Ticket type, default NGO, working days for the streak.
+- Ticket type, default NGO.
 - Nudges: on/off, muted stations, quiet hours.
 - Standort: current permission with a plain explanation and a link to change it.
 - Persönliche Daten für Anträge: view, edit, delete.

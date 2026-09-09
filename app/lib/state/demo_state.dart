@@ -18,7 +18,6 @@ class DemoState extends ChangeNotifier {
   bool showOnBoards = true;
   bool keepCorrespondence = false;
   bool offline = false;
-  Set<int> commuteDays = {1, 2, 3, 4}; // Mo–Do
 
   Ngo get ngo => Mock.ngoById(ngoId);
 
@@ -54,15 +53,6 @@ class DemoState extends ChangeNotifier {
 
   void setKeepCorrespondence(bool v) {
     keepCorrespondence = v;
-    notifyListeners();
-  }
-
-  void toggleCommuteDay(int weekday) {
-    if (commuteDays.contains(weekday)) {
-      commuteDays.remove(weekday);
-    } else {
-      commuteDays.add(weekday);
-    }
     notifyListeners();
   }
 

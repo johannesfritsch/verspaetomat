@@ -333,41 +333,6 @@ class ChoiceRow extends StatelessWidget {
   }
 }
 
-/// Weekday chips Mo–So, some selected.
-class WeekdayChips extends StatelessWidget {
-  const WeekdayChips({super.key, required this.selected, required this.onToggle});
-  final Set<int> selected;
-  final ValueChanged<int> onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var d = 1; d <= 7; d++)
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(right: d == 7 ? 0 : 6),
-              child: InkWell(
-                onTap: () => onToggle(d),
-                borderRadius: BorderRadius.circular(4),
-                child: Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: selected.contains(d) ? VColors.ink : Colors.transparent,
-                    border: Border.all(color: selected.contains(d) ? VColors.ink : VColors.rule),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(Mock.weekdayNames[d - 1], style: VText.tab.copyWith(color: selected.contains(d) ? VColors.paper : VColors.ink)),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
 void showSnack(BuildContext context, String text) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()

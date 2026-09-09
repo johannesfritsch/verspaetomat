@@ -45,12 +45,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             chevron: true,
             onTap: () => _pickNgo(context, state),
           ),
-          const VGap.m(),
-          Text('Meine Pendeltage', style: VText.bodyStrong),
-          const SizedBox(height: 4),
-          Text('Nur diese Tage zählen für die Pendelwoche.', style: VText.caption),
-          const VGap.s(),
-          WeekdayChips(selected: state.commuteDays, onToggle: state.toggleCommuteDay),
           const VGap.xl(),
           const VSection('Bahnsteig-Hinweis'),
           SwitchRow(

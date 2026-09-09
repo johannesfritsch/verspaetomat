@@ -22,12 +22,6 @@ Named after where the customer is standing. Purely for the profile; no unlocks g
 | 5 | 1,500 | Bahnhofsmission |
 | 6 | 4,000 | Bahnsteig-Buddha |
 
-## Streaks
-
-- **Pendelwoche**: at least one check-in on each of your working days. The customer sets which days count in the profile ("Ich pendle Mo–Do"). Weekends and holidays never break a streak.
-- A missed day shows "Streak pausiert" and one free "Ersatzverkehr" per month repairs it.
-- No daily-login nagging. The streak lives on the profile, not in notifications.
-
 ## Badges
 
 Named after real causes and situations. Each badge names a thing that actually happened; the collection is a little museum of German rail life.
@@ -72,7 +66,8 @@ An NGO can set a goal with a deadline: "10.000 € für die Bahnhofsmission bis 
 ## What we deliberately do not do
 
 - No buying points, no premium tiers, no boosts.
-- No shaming: no "you missed a day" push, no red streak counters, no public loss.
+- No streaks. Commuting is not a habit to be policed, and a missed day is not a loss. Nothing in the app resets because the customer did not open it.
+- No shaming: no "you missed a day" push, no public loss.
 - No leaderboards on euros. Money is not a competition; minutes are.
 - No fake urgency. The only urgency in the app is real: "Älteste Verspätung verfällt in 3 Wochen."
 - No celebrating a delay while the customer is still in it. The ride screen stays calm; the reveal is at arrival.
