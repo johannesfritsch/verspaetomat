@@ -123,6 +123,7 @@ Done and verified:
 - Ledger, claims, uploads, signature, send via the relay (dry-run without `SMTP_URL`, real SMTP via lettre with it), inbound webhook with classification and forwarding, community, boards, teams, export, delete.
 - Flutter: API client, repository switch (Demo / Lokal) in Einstellungen, all screens on the repository, one-shot location for nearby stations and the check-in fix, uploads and signature, recovery-code sheet. `--dart-define=BACKEND=local`, `API_URL`, `NO_LOCATION=1` for demos and screenshots.
 - Local-mode screenshots on the iPhone 15 Pro simulator: Bahnsteig with real nearby stations, Einchecken with real departures, Konto, Wir, Ich, all without exceptions.
+- Proof: `app/integration_test/workflow_test.dart` passes on the simulator against the local backend: three real check-ins from live Köln Hbf departures, arrival +68 each, bundle "bereit", the five-step claim, "Abgeschickt.", "eingereicht", simulated reply, "bestätigt", Wir updated. Migration 0013 (`dismissed_at`) came out of it.
 
 Not tonight (as planned): Typst PDF (plain-text summary attached instead), push, background geofence, Träwelling OAuth, NGO report import UI, App Attest, boards across real users, the 25 % monthly cap.
 
@@ -130,19 +131,7 @@ Gotchas found:
 - The simulator's location permission alert survives app relaunches and hides the app; reboot the simulator or run with `NO_LOCATION=1`.
 - Transitous station names carry a country suffix ("Köln Hbf (DE)"); stripped in the adapter.
 - Late in the evening the departures page of the feed is mostly buses and trams; the adapter now fetches 150 rows before filtering to rail.
-
-## What actually shipped (written 22:20, 9 September 2026)
-
-Everything in "What working means tonight" is in place and verified, three hours ahead of the plan:
-
-- **Postgres**: thirteen migrations (`backend/migrations`), seed from fixtures, `backend/dev.sh` from zero.
-- **Device auth**: `POST /v1/devices`, bearer tokens hashed at rest, twelve-word recovery code issued at the first claim, `POST /v1/devices/recover` verified.
-- **Train data**: Transitous adapter for nearby stations, search, departures with live delays and operator mapping, trip stops with forecasts. The trip follower finalised a real ride on its own: RE 22 checked in at 19:21 UTC, next stop Köln West, finalised at 19:30 with +1 minute, incident rules applied.
-- **Ledger, claims, relay**: rules server-side; drafts refused below 4 €; uploads (ticket per month, signature PNG); send through the customer's relay address with BCC, real SMTP when `SMTP_URL` is set, dry-run otherwise; inbound webhook classifies and forwards; audit log.
-- **App**: every screen on the `AppRepository`, switchable between Demo (built-in) and Lokal (API) in Einstellungen or with `--dart-define=BACKEND=local`; device bootstrap, personal data at first claim, recovery-code sheet, signature upload, `NO_LOCATION=1` for demos.
-- **Proof**: `app/integration_test/workflow_test.dart` passes on the iPhone 15 Pro simulator against the local backend: three real check-ins from live Köln Hbf departures, arrival +68 each, bundle "bereit", five-step claim, "Abgeschickt.", "eingereicht", simulated reply, "bestätigt", Wir updated.
-
-Cut list unchanged (PDF, provider inbound, push, background geofence, Träwelling OAuth, NGO import UI, real boards, App Attest). Known rough edges: the Konto refreshes only when the claim or reply screen pops back; the customer nickname is never set so boards show "Fahrgast"; the reply screen's "Zum Konto" control is missing on the accepted branch.
+- Known rough edges: Konto refreshes only when the claim or reply screen pops back; the nickname is never set, so boards show "Fahrgast"; the reply screen's "Zum Konto" control is missing on the accepted branch.
 
 Run it:
 
