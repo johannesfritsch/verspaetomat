@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../mock/mock_data.dart';
+import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'community_widgets.dart';
@@ -18,8 +19,9 @@ class _HistorieScreenState extends State<HistorieScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final lines = Mock.rides.map((r) => r.line).toSet().toList()..sort();
-    final rides = Mock.rides.where((r) => _line == null || r.line == _line).toList();
+    final all = DemoScope.of(context).rides;
+    final lines = all.map((r) => r.line).toSet().toList()..sort();
+    final rides = all.where((r) => _line == null || r.line == _line).toList();
     final groups = <String, List<RideRecord>>{};
     for (final r in rides) {
       groups.putIfAbsent(Mock.shortDate(r.date), () => []).add(r);

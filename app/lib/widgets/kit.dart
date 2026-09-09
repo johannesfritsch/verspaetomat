@@ -766,6 +766,9 @@ String fmtEuro(double v) {
   return '${fmtInt(whole)},$frac €';
 }
 
+/// 48320.0 -> "48.320 €" (community and campaign figures)
+String fmtEuroWhole(double v) => '${fmtInt(v.round())} €';
+
 /// TimeOfDay -> "08:52"
 String fmtTime(TimeOfDay t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 

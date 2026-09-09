@@ -82,7 +82,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('${Mock.pointsThisWeek}', style: VText.number),
+                        Text('${Mock.pointsThisWeek + DemoScope.of(context).bonusPoints}', style: VText.number),
                         const SizedBox(height: 4),
                         Text('Geduldspunkte diese Woche', style: VText.caption),
                       ],

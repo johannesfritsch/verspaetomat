@@ -1,12 +1,34 @@
 import 'package:flutter/material.dart';
 
 import '../mock/mock_data.dart';
+import '../widgets/kit.dart';
+
+/// The one place that turns a ticket, a train and a delay into a claim amount.
+/// Deutschlandticket 1,50 €; other season tickets 1,50 € (Nahverkehr) or 5 € (Fernverkehr);
+/// single tickets 25 % of the fare from 60 minutes, 50 % from 120.
+double claimAmountFor(TicketType ticket, TrainCategory category, int delay, {double fare = 39.9}) {
+  if (delay < 60) return 0;
+  return switch (ticket) {
+    TicketType.deutschlandticket => 1.5,
+    TicketType.zeitkarte => category == TrainCategory.fern ? 5.0 : 1.5,
+    TicketType.einzelfahrkarte => (delay >= 120 ? 0.5 : 0.25) * fare,
+  };
+}
+
+/// The small label shown under the amount, or null for the Deutschlandticket.
+String? claimSubLabelFor(TicketType ticket, TrainCategory category, int delay, {double fare = 39.9}) => switch (ticket) {
+      TicketType.deutschlandticket => null,
+      TicketType.zeitkarte => category == TrainCategory.fern ? 'Zeitkarte Fernverkehr' : 'Zeitkarte Nahverkehr',
+      TicketType.einzelfahrkarte => '${delay >= 120 ? '50' : '25'} % von ${fmtEuro(fare)}',
+    };
 
 enum TripPhase { idle, riding, arrived }
 
 /// One in-memory state for the whole showcase. No persistence.
 class DemoState extends ChangeNotifier {
-  DemoState();
+  DemoState() {
+    _refreshReady();
+  }
 
   // -- Onboarding -----------------------------------------------------------
   bool onboardingDone = false;
@@ -14,12 +36,17 @@ class DemoState extends ChangeNotifier {
   LocationMode locationMode = LocationMode.always;
   TicketType ticket = TicketType.deutschlandticket;
   String ngoId = 'bahnhofsmission';
-  bool personalDataEntered = true;
+  bool personalDataEntered = false;
   bool showOnBoards = true;
   bool keepCorrespondence = false;
   bool offline = false;
 
   Ngo get ngo => Mock.ngoById(ngoId);
+
+  void savePersonalData() {
+    personalDataEntered = true;
+    notifyListeners();
+  }
 
   void completeOnboarding() {
     onboardingDone = true;
@@ -121,11 +148,7 @@ class DemoState extends ChangeNotifier {
     }
     if (trip != null && finalDelay! >= 60) {
       final t = trip!;
-      final amount = switch (t.ticket) {
-        TicketType.deutschlandticket => 1.5,
-        TicketType.zeitkarte => t.departure.category == TrainCategory.fern ? 5.0 : 1.5,
-        TicketType.einzelfahrkarte => (finalDelay! >= 120 ? 0.5 : 0.25) * 39.9,
-      };
+      final amount = claimAmountFor(t.ticket, t.departure.category, finalDelay!);
       final inc = Incident(
         id: 'i-live-${DateTime.now().millisecondsSinceEpoch}',
         date: DateTime.now(),
@@ -148,10 +171,57 @@ class DemoState extends ChangeNotifier {
       incidents.insert(0, inc);
       lastLiveIncidentId = inc.id;
     }
+    _refreshReady();
     notifyListeners();
   }
 
   String? lastLiveIncidentId;
+
+  // -- Rides and Nachtrag ---------------------------------------------------
+  final List<RideRecord> rides = List.of(Mock.rides);
+
+  /// Points earned in this session on top of the mocked weekly figure.
+  int bonusPoints = 0;
+
+  /// E4: a ride entered after the fact. One point, claimable, never ranks.
+  void addNachtrag({required Departure departure, required Stop exitStop, required DateTime date}) {
+    final delay = departure.cancelled ? 60 : departure.delay;
+    rides.insert(0, RideRecord(date: date, line: departure.line, from: Mock.homeStation, to: exitStop.name, delay: delay, cancelled: departure.cancelled, verified: false));
+    bonusPoints += 1;
+    if (delay >= 60) {
+      incidents.insert(
+        0,
+        Incident(
+          id: 'i-nachtrag-${DateTime.now().millisecondsSinceEpoch}',
+          date: date,
+          line: departure.line,
+          from: Mock.homeStation,
+          to: exitStop.name,
+          delayMinutes: delay,
+          amount: claimAmountFor(ticket, departure.category, delay),
+          ticket: ticket,
+          operator: departure.operator,
+          desk: Mock.deskFor(departure.operator),
+          status: IncidentStatus.gesammelt,
+          plannedArrival: exitStop.planned,
+          actualArrival: _add(exitStop.planned, delay),
+          cancelled: departure.cancelled,
+          ngoId: ngoId,
+          fare: ticket == TicketType.einzelfahrkarte ? 39.9 : null,
+        ),
+      );
+    }
+    _refreshReady();
+    notifyListeners();
+  }
+
+  /// Marks open incidents "bereit" when their desk's bundle can be sent.
+  void _refreshReady() {
+    for (final i in incidents) {
+      if (!i.isOpen) continue;
+      i.status = bundleReady(i.desk) ? IncidentStatus.bereit : IncidentStatus.gesammelt;
+    }
+  }
 
   void dismissArrival() {
     phase = TripPhase.idle;
@@ -283,6 +353,7 @@ class DemoState extends ChangeNotifier {
       ),
     );
     lastSentBundleId = id;
+    _refreshReady();
     draftDesk = null;
     draftIncidentIds = [];
     draftSigned = false;
@@ -328,6 +399,7 @@ class DemoState extends ChangeNotifier {
         i.status = IncidentStatus.abgelehnt;
       }
     }
+    _refreshReady();
     notifyListeners();
     return mail;
   }
@@ -335,6 +407,11 @@ class DemoState extends ChangeNotifier {
   /// Demo: reset everything to the seeded state.
   void reset() {
     onboardingDone = false;
+    personalDataEntered = false;
+    bonusPoints = 0;
+    rides
+      ..clear()
+      ..addAll(Mock.rides);
     phase = TripPhase.idle;
     trip = null;
     finalDelay = null;
@@ -364,6 +441,7 @@ class DemoState extends ChangeNotifier {
     mails
       ..clear()
       ..addAll(Mock.mails);
+    _refreshReady();
     notifyListeners();
   }
 

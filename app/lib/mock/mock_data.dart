@@ -683,7 +683,7 @@ class Mock {
 
   static const boardLine = <BoardEntry>[
     BoardEntry(rank: 1, name: 'Miri aus Hamm', points: 212),
-    BoardEntry(rank: 2, name: 'tobi_pendelt', points: 174),
+    BoardEntry(rank: 2, name: 'tobi_aus_kalk', points: 174),
     BoardEntry(rank: 3, name: 'Anke W.', points: 151),
     BoardEntry(rank: 4, name: 'Gleiswechsel', points: 133),
     BoardEntry(rank: 5, name: 'Johannes', points: 96, isMe: true),
@@ -698,7 +698,7 @@ class Mock {
     BoardEntry(rank: 1, name: 'Ehrenfeld-Express', points: 388),
     BoardEntry(rank: 2, name: 'Miri aus Hamm', points: 212),
     BoardEntry(rank: 3, name: 'Kalk-Kalle', points: 190),
-    BoardEntry(rank: 4, name: 'tobi_pendelt', points: 174),
+    BoardEntry(rank: 4, name: 'tobi_aus_kalk', points: 174),
     BoardEntry(rank: 5, name: 'Anke W.', points: 151),
     BoardEntry(rank: 6, name: 'Südstadt-Sonja', points: 140),
     BoardEntry(rank: 7, name: 'Gleiswechsel', points: 133),
@@ -718,7 +718,7 @@ class Mock {
     BoardEntry(rank: 7, name: 'Miri aus Hamm', points: 212),
     BoardEntry(rank: 8, name: 'S-Bahn Sabine', points: 199),
     BoardEntry(rank: 9, name: 'Kalk-Kalle', points: 190),
-    BoardEntry(rank: 10, name: 'tobi_pendelt', points: 174),
+    BoardEntry(rank: 10, name: 'tobi_aus_kalk', points: 174),
     BoardEntry(rank: 3021, name: 'Johannes', points: 96, isMe: true),
   ];
 

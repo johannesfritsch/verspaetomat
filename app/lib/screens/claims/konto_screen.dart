@@ -8,7 +8,7 @@ import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'claims_widgets.dart';
 
-/// Konto: the ledger ("Spendenkonto") of delays that matter.
+/// Konto: the ledger of delays that matter.
 class KontoScreen extends StatelessWidget {
   const KontoScreen({super.key});
 
@@ -26,7 +26,7 @@ class KontoScreen extends StatelessWidget {
 
     return VScreen(
       showBack: false,
-      eyebrow: 'Spendenkonto',
+      eyebrow: 'Deine Ansprüche',
       title: 'Konto',
       trailing: const Padding(padding: EdgeInsets.only(right: VSpace.s), child: VStationClock(size: 36)),
       bottom: readyDesk == null
@@ -57,10 +57,13 @@ class KontoScreen extends StatelessWidget {
           ] else
             for (final entry in _sortedDesks(open))
               _DeskGroup(desk: entry.key, incidents: entry.value, showHeading: open.length > 1, state: state),
+          if (open.length > 1)
+            Text('Ansprüche werden pro Bahnunternehmen gebündelt. Jedes Bündel muss 4 € erreichen.', style: VText.caption),
           if (submitted.isNotEmpty) ...[
             const VGap.xl(),
             VSection('Eingereicht', trailing: Text(fmtEuro(state.submittedTotal), style: VText.captionInk)),
-            for (final i in submitted) IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i)),
+            for (final i in submitted)
+              IncidentRow(incident: i, note: 'Abgeschickt ${Mock.shortDate(_sentDate(state, i))} · Antwort in etwa 4 Wochen', onTap: () => showEvidenceSheet(context, i)),
             const VGap.m(),
             VDemoControl(
               label: 'Antwort der Bahn simulieren',
@@ -90,6 +93,13 @@ class KontoScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  DateTime _sentDate(DemoState state, Incident i) {
+    for (final m in state.mails) {
+      if (m.direction == MailDirection.out && m.incidentIds.contains(i.id)) return m.date;
+    }
+    return i.date;
   }
 
   List<MapEntry<String, List<Incident>>> _sortedDesks(Map<String, List<Incident>> open) {
@@ -191,7 +201,7 @@ class _DeskGroup extends StatelessWidget {
     final ready = state.bundleReady(desk);
     final amount = state.openAmountFor(desk);
     final hasSingle = incidents.any((i) => i.ticket == TicketType.einzelfahrkarte);
-    final label = showHeading ? 'Offen · ${_shortDesk(desk)}' : 'Offen';
+    final label = showHeading ? 'Offen · ${deskDisplay(desk)}' : 'Offen';
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.l),
       child: Column(
@@ -210,7 +220,7 @@ class _DeskGroup extends StatelessWidget {
               children: [
                 VDots(filled: incidents.length, total: 3),
                 const SizedBox(width: 10),
-                Text('${incidents.length} von 3 · ${_shortDesk(desk)}', style: VText.caption),
+                Text('${incidents.length} von 3 · ${deskDisplay(desk)}', style: VText.caption),
               ],
             ),
           ],
@@ -223,5 +233,4 @@ class _DeskGroup extends StatelessWidget {
     );
   }
 
-  String _shortDesk(String d) => d == 'Servicecenter Fahrgastrechte' ? 'Servicecenter (DB, ODEG, NEB …)' : d;
 }

@@ -33,10 +33,11 @@ class _NachtragScreenState extends State<NachtragScreen> {
         label: 'Nachtragen',
         onTap: () {
           final state = DemoScope.read(context);
-          state.checkIn(departure: _departure, exitStop: _departure.stops[exitIndex], fromStation: Mock.homeStation, locationVerified: false);
-          state.simulateArrival(minutes: 0, selfEntered: true);
-          state.dismissArrival();
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nachgetragen. 1 Geduldspunkt. Verspätungsdaten werden geprüft.')));
+          final exit = _departure.stops[exitIndex];
+          state.addNachtrag(departure: _departure, exitStop: exit, date: date);
+          final d = _departure.cancelled ? 60 : _departure.delay;
+          final delayText = d > 0 ? '+$d am ${exit.name}' : 'pünktlich am ${exit.name}';
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nachgetragen: ${_departure.line}, $delayText · 1 Geduldspunkt.')));
           context.go(Routes.bahnsteig);
         },
       ),
@@ -54,7 +55,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
                     onTap: () => setState(() => _dayOffset = offset),
                     borderRadius: BorderRadius.circular(4),
                     child: Container(
-                      height: 40,
+                      height: 44,
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                       alignment: Alignment.center,
                       decoration: BoxDecoration(

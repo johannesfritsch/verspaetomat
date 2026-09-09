@@ -34,7 +34,7 @@ class TeamScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(child: BigFigure(value: fmtInt(team.minutes), label: 'Minuten zusammen', style: VText.number.copyWith(fontSize: 44, letterSpacing: -1.5))),
-              Expanded(child: BigFigure(value: fmtEuro(team.euros), label: 'Euro bestätigt')),
+              Expanded(child: BigFigure(value: fmtEuroWhole(team.euros), label: 'Euro bestätigt')),
             ],
           ),
           const VGap.l(),

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../mock/mock_data.dart';
 import '../../router.dart';
+import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'community_widgets.dart';
@@ -13,7 +14,8 @@ class IchScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rides = Mock.rides;
+    final state = DemoScope.of(context);
+    final rides = state.rides;
     final delayed = rides.where((r) => r.delay > 0).toList();
     final avg = delayed.isEmpty ? 0 : (delayed.fold(0, (s, r) => s + r.delay) / delayed.length).round();
     final longest = rides.fold(0, (m, r) => r.delay > m ? r.delay : m);
@@ -57,8 +59,8 @@ class IchScreen extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Expanded(child: BigFigure(value: '+${Mock.pointsThisWeek}', label: 'Diese Woche')),
-              Expanded(child: BigFigure(value: '${Mock.rides.length}', label: 'Fahrten, letzte 14 Tage')),
+              Expanded(child: BigFigure(value: '+${Mock.pointsThisWeek + state.bonusPoints}', label: 'Diese Woche')),
+              Expanded(child: BigFigure(value: '${rides.length}', label: 'Fahrten, letzte 14 Tage')),
             ],
           ),
           const VGap.xl(),

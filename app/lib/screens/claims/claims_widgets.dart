@@ -5,6 +5,9 @@ import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 
+/// One display name per claims desk, used on Konto, Antrag and Antwort.
+String deskDisplay(String desk) => desk == 'Servicecenter Fahrgastrechte' ? 'Servicecenter (DB, ODEG, NEB …)' : desk;
+
 VTone toneFor(IncidentStatus s) => switch (s) {
       IncidentStatus.bestaetigt => VTone.green,
       IncidentStatus.abgelehnt => VTone.red,
@@ -16,10 +19,13 @@ VTone toneFor(IncidentStatus s) => switch (s) {
 /// One incident in the ledger: date, line, route on the left; delay,
 /// amount and status on the right. Hairline below.
 class IncidentRow extends StatelessWidget {
-  const IncidentRow({super.key, required this.incident, this.onTap, this.leading});
+  const IncidentRow({super.key, required this.incident, this.onTap, this.leading, this.note});
   final Incident incident;
   final VoidCallback? onTap;
   final Widget? leading;
+
+  /// A caption under the route, e.g. "Abgeschickt 15.08. · Antwort in etwa 4 Wochen".
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +59,10 @@ class IncidentRow extends StatelessWidget {
                           [if (i.cancelled) 'Ausfall', if (i.selfEntered) 'selbst eingetragen'].join(' · '),
                           style: VText.caption,
                         ),
+                      ],
+                      if (note != null) ...[
+                        const SizedBox(height: 2),
+                        Text(note!, style: VText.caption),
                       ],
                     ],
                   ),
@@ -294,9 +304,12 @@ class _StrokePainter extends CustomPainter {
 
 /// A mail rendered as a card: header lines, body, attachments.
 class MailView extends StatelessWidget {
-  const MailView({super.key, required this.mail, this.compact = false});
+  const MailView({super.key, required this.mail, this.compact = false, this.bcc});
   final RailMail mail;
   final bool compact;
+
+  /// Shown as a BCC header line for outgoing mails (the customer's own copy).
+  final String? bcc;
 
   @override
   Widget build(BuildContext context) {
@@ -312,6 +325,7 @@ class MailView extends StatelessWidget {
         children: [
           _hdr('Von', mail.from),
           _hdr('An', mail.to),
+          if (bcc != null) _hdr('BCC', bcc!),
           _hdr('Betreff', mail.subject),
           _hdr('Datum', '${Mock.shortDate(mail.date)} ${fmtTime(TimeOfDay.fromDateTime(mail.date))}'),
           const VGap.s(),
@@ -350,6 +364,7 @@ class MailView extends StatelessWidget {
 }
 
 Future<void> showMailSheet(BuildContext context, RailMail mail) {
+  final bcc = mail.direction == MailDirection.out ? '${Mock.userEmail} (dein Postfach)' : null;
   return showVSheet(
     context,
     expand: true,
@@ -359,7 +374,7 @@ Future<void> showMailSheet(BuildContext context, RailMail mail) {
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, VSpace.xl),
-            child: MailView(mail: mail),
+            child: MailView(mail: mail, bcc: bcc),
           ),
         ),
       ],

@@ -60,6 +60,17 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     final openCount = (state.openByDesk[desk] ?? []).length;
     final counted = hasClaim ? openCount.clamp(1, 3) : openCount;
     final ready = state.bundleReady(desk);
+    final category = state.trip?.departure.category ?? TrainCategory.re;
+    final claimMinutes = cancelled ? 60 : delay;
+    Incident? live;
+    if (v == null && state.lastLiveIncidentId != null) {
+      for (final i in state.incidents) {
+        if (i.id == state.lastLiveIncidentId) live = i;
+      }
+    }
+    final amount = live?.amount ?? claimAmountFor(ticket, category, claimMinutes);
+    final sub = claimSubLabelFor(ticket, category, claimMinutes);
+    final canFile = hasClaim && (ticket == TicketType.einzelfahrkarte || ready);
 
     return VScreen(
       showBack: false,
@@ -68,12 +79,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (hasClaim && ticket != TicketType.deutschlandticket || (hasClaim && ready))
-            VPrimaryButton(label: 'Jetzt einreichen', onTap: () => context.push('${Routes.antrag}?desk=${Uri.encodeComponent(desk)}'))
-          else if (!hasClaim)
-            VPrimaryButton(label: 'Trotzdem spenden', icon: Icons.open_in_new, onTap: () => _trotzdem(context, ngo))
-          else
-            VPrimaryButton(label: 'Konto ansehen', onTap: () => context.go(Routes.konto)),
+          if (canFile) VPrimaryButton(label: 'Jetzt einreichen', onTap: () => context.push('${Routes.antrag}?desk=${Uri.encodeComponent(desk)}')),
           Row(
             children: [
               Expanded(
@@ -127,7 +133,10 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
             const VRule(),
           ],
           const VGap.m(),
-          if (hasClaim) _ClaimLine(ticket: ticket, delay: delay, ngo: ngo, counted: counted, ready: ready) else _NoClaimLine(delay: delay, ngo: ngo),
+          if (hasClaim)
+            _ClaimLine(ticket: ticket, amount: amount, sub: sub, ngo: ngo, counted: counted, ready: ready)
+          else
+            _NoClaimLine(delay: delay, ngo: ngo, onTrotzdem: () => _trotzdem(context, ngo)),
         ],
       ),
     );
@@ -169,23 +178,16 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
 }
 
 class _ClaimLine extends StatelessWidget {
-  const _ClaimLine({required this.ticket, required this.delay, required this.ngo, required this.counted, required this.ready});
+  const _ClaimLine({required this.ticket, required this.amount, required this.sub, required this.ngo, required this.counted, required this.ready});
   final TicketType ticket;
-  final int delay;
+  final double amount;
+  final String? sub;
   final Ngo ngo;
   final int counted;
   final bool ready;
 
   @override
   Widget build(BuildContext context) {
-    final (amount, sub) = switch (ticket) {
-      TicketType.deutschlandticket => (1.5, null),
-      TicketType.zeitkarte => (1.5, 'Zeitkarte Nahverkehr'),
-      TicketType.einzelfahrkarte => (
-          (delay >= 120 ? 0.5 : 0.25) * 39.9,
-          '${delay >= 120 ? '50' : '25'} % von ${fmtEuro(39.9)}',
-        ),
-    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -221,23 +223,40 @@ class _ClaimLine extends StatelessWidget {
 }
 
 class _NoClaimLine extends StatelessWidget {
-  const _NoClaimLine({required this.delay, required this.ngo});
+  const _NoClaimLine({required this.delay, required this.ngo, required this.onTrotzdem});
   final int delay;
   final Ngo ngo;
+  final VoidCallback onTrotzdem;
 
   @override
   Widget build(BuildContext context) {
-    final text = delay == 59
-        ? 'Kein Anspruch, um eine Minute. Wir wissen.'
-        : delay <= 0
-            ? 'Kein Anspruch, keine Wartezeit. Morgen wieder.'
-            : 'Kein Anspruch, aber $delay Minuten Geduld.';
+    // E7: one minute short. The line, and nothing else.
+    if (delay == 59) {
+      return Text('Kein Anspruch, um eine Minute. Wir wissen.', style: VText.bodyStrong);
+    }
+    final text = delay <= 0 ? 'Kein Anspruch, keine Wartezeit. Morgen wieder.' : 'Kein Anspruch, aber $delay Minuten Geduld.';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(text, style: VText.bodyStrong),
         const SizedBox(height: 4),
         Text('Ab 60 Minuten entsteht ein Anspruch. Bis dahin zählen die Punkte, und ${ngo.name} freut sich auch so.', style: VText.caption),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: onTrotzdem,
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.open_in_new, size: 18, color: VColors.ink),
+                const SizedBox(width: 8),
+                Text('Trotzdem spenden', style: VText.bodyStrong),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }

@@ -61,7 +61,15 @@ class _AntragScreenState extends State<AntragScreen> {
     if (_sent) return _Sent(desk: widget.desk);
 
     final content = switch (_step) {
-      0 => _Pruefen(state: state, desk: widget.desk, unknown: _unknownDesk, addressCtl: _unknownAddress, showPersonal: _showPersonal, onChanged: () => setState(() {})),
+      0 => _Pruefen(
+          state: state,
+          desk: widget.desk,
+          unknown: _unknownDesk,
+          addressCtl: _unknownAddress,
+          showPersonal: _showPersonal,
+          onChanged: () => setState(() {}),
+          onPersonalSaved: () => setState(() => _showPersonal = false),
+        ),
       1 => _Ticket(state: state),
       2 => _Zweck(state: state, other: _otherNgo, onToggle: (v) => setState(() => _otherNgo = v)),
       3 => _Unterschrift(state: state),
@@ -70,7 +78,7 @@ class _AntragScreenState extends State<AntragScreen> {
 
     final last = _step == _steps.length - 1;
     return VScreen(
-      eyebrow: 'Antrag · ${_deskShort(widget.desk)}',
+      eyebrow: 'Antrag · ${deskDisplay(widget.desk)}',
       title: _steps[_step],
       scroll: true,
       bottom: Column(
@@ -120,7 +128,6 @@ class _AntragScreenState extends State<AntragScreen> {
     );
   }
 
-  String _deskShort(String d) => d == 'Servicecenter Fahrgastrechte' ? 'Servicecenter' : d;
 }
 
 class _StepIndicator extends StatelessWidget {
@@ -180,6 +187,7 @@ class _Pruefen extends StatelessWidget {
     required this.addressCtl,
     required this.showPersonal,
     required this.onChanged,
+    required this.onPersonalSaved,
   });
   final DemoState state;
   final String desk;
@@ -187,6 +195,7 @@ class _Pruefen extends StatelessWidget {
   final TextEditingController addressCtl;
   final bool showPersonal;
   final VoidCallback onChanged;
+  final VoidCallback onPersonalSaved;
 
   @override
   Widget build(BuildContext context) {
@@ -233,7 +242,7 @@ class _Pruefen extends StatelessWidget {
         ],
         const VGap.xl(),
         VSection('Deine Angaben'),
-        if (showPersonal) _PersonalForm() else ...[
+        if (showPersonal) _PersonalForm(onSaved: onPersonalSaved) else ...[
           VKeyValue('Name', Mock.userName, strong: true),
           const VRule(),
           VKeyValue('Anschrift', Mock.userAddress.replaceAll('\n', ', ')),
@@ -319,21 +328,56 @@ class _UnknownDesk extends StatelessWidget {
   }
 }
 
-class _PersonalForm extends StatelessWidget {
+/// First claim only: name, address, private inbox, ticket number. Stored on the phone.
+class _PersonalForm extends StatefulWidget {
+  const _PersonalForm({required this.onSaved});
+  final VoidCallback onSaved;
+
+  @override
+  State<_PersonalForm> createState() => _PersonalFormState();
+}
+
+class _PersonalFormState extends State<_PersonalForm> {
+  late final _name = TextEditingController(text: Mock.userName);
+  late final _street = TextEditingController(text: Mock.userAddress.split('\n').first);
+  late final _city = TextEditingController(text: Mock.userAddress.split('\n').last);
+  late final _email = TextEditingController(text: Mock.userEmail);
+  late final _ticket = TextEditingController(text: Mock.ticketNumber);
+
+  @override
+  void dispose() {
+    for (final c in [_name, _street, _city, _email, _ticket]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const VGap.s(),
+        Text('Einmal eintragen. Steht danach auf jedem Antrag.', style: VText.caption),
         const VGap.m(),
-        TextField(decoration: const InputDecoration(hintText: 'Vor- und Nachname'), style: VText.bodyS, controller: TextEditingController(text: Mock.userName)),
+        TextField(controller: _name, decoration: const InputDecoration(hintText: 'Vor- und Nachname'), style: VText.bodyS),
         const VGap.s(),
-        TextField(decoration: const InputDecoration(hintText: 'Straße und Hausnummer'), style: VText.bodyS),
+        TextField(controller: _street, decoration: const InputDecoration(hintText: 'Straße und Hausnummer'), style: VText.bodyS),
         const VGap.s(),
-        TextField(decoration: const InputDecoration(hintText: 'PLZ und Ort'), style: VText.bodyS),
+        TextField(controller: _city, decoration: const InputDecoration(hintText: 'PLZ und Ort'), style: VText.bodyS),
         const VGap.s(),
-        TextField(decoration: const InputDecoration(hintText: 'Privates Postfach (E-Mail)'), style: VText.bodyS),
+        TextField(controller: _email, decoration: const InputDecoration(hintText: 'Privates Postfach (E-Mail)'), style: VText.bodyS, keyboardType: TextInputType.emailAddress),
         const VGap.s(),
-        TextField(decoration: const InputDecoration(hintText: 'Deutschlandticket-Nummer'), style: VText.bodyS),
+        TextField(controller: _ticket, decoration: const InputDecoration(hintText: 'Deutschlandticket-Nummer'), style: VText.bodyS),
+        const VGap.m(),
+        VOutlineButton(
+          label: 'Speichern',
+          icon: Icons.check,
+          onTap: () {
+            DemoScope.read(context).savePersonalData();
+            widget.onSaved();
+          },
+        ),
       ],
     );
   }
@@ -631,9 +675,9 @@ class _Senden extends StatelessWidget {
       children: [
         Text('Wir haben alles vorbereitet. Du schickst es ab.', style: VText.h2),
         const VGap.s(),
-        Text('Kopie an: ${Mock.userEmail}', style: VText.caption),
+        Text('Von deiner Verspätomat-Adresse, mit Kopie an dein Postfach.', style: VText.caption),
         const VGap.m(),
-        MailView(mail: mail),
+        MailView(mail: mail, bcc: '${Mock.userEmail} (dein Postfach)'),
         const VGap.m(),
         VKeyValue('Fälle', '${state.draftIncidentIds.length}'),
         const VRule(),

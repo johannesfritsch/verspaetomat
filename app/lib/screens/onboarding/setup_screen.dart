@@ -82,11 +82,15 @@ class _NgoCard extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 56,
+                  height: 56,
                   alignment: Alignment.center,
-                  decoration: BoxDecoration(color: VColors.ink, borderRadius: BorderRadius.circular(3)),
-                  child: Text(ngo.name.substring(0, 1), style: VText.h2.copyWith(color: VColors.paper)),
+                  decoration: BoxDecoration(
+                    color: VColors.paperElevated,
+                    border: Border.all(color: VColors.rule),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text('Bild\nfolgt', textAlign: TextAlign.center, style: VText.caption.copyWith(fontSize: 11)),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -114,7 +118,7 @@ class _NgoCard extends StatelessWidget {
             const SizedBox(height: 12),
             VProgress(confirmed: progress, submitted: (ngo.campaignSubmitted / ngo.campaignGoal).clamp(0.0, 1.0)),
             const SizedBox(height: 6),
-            Text('${fmtEuro(ngo.campaignConfirmed)} von ${fmtEuro(ngo.campaignGoal)} ${ngo.campaignDeadline}', style: VText.caption),
+            Text('${fmtEuroWhole(ngo.campaignConfirmed)} von ${fmtEuroWhole(ngo.campaignGoal)} ${ngo.campaignDeadline}', style: VText.caption),
           ],
         ),
       ),

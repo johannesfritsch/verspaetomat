@@ -92,7 +92,7 @@ class _WirScreenState extends State<WirScreen> {
             children: [
               Expanded(
                 child: BigFigure(
-                  value: '${fmtInt(Mock.communitySubmitted.round())} €',
+                  value: fmtEuroWhole(Mock.communitySubmitted),
                   label: 'Eingereicht',
                   onTap: () => showSourceSheet(
                     context,
@@ -105,7 +105,7 @@ class _WirScreenState extends State<WirScreen> {
               ),
               Expanded(
                 child: BigFigure(
-                  value: '${fmtInt((Mock.communityConfirmed + state.confirmedTotal - Mock.incidents.where((i) => i.status == IncidentStatus.bestaetigt).fold(0.0, (s, i) => s + i.amount)).round())} €',
+                  value: fmtEuroWhole(Mock.communityConfirmed + state.confirmedTotal - Mock.incidents.where((i) => i.status == IncidentStatus.bestaetigt).fold(0.0, (s, i) => s + i.amount)),
                   label: 'Bestätigt',
                   style: VText.number.copyWith(fontSize: 40, letterSpacing: -1.2),
                   onTap: () => showSourceSheet(
@@ -150,7 +150,7 @@ class _WirScreenState extends State<WirScreen> {
           for (final t in Mock.teams)
             VListRow(
               title: t.name,
-              subtitle: '${t.members} Mitglieder · ${fmtInt(t.minutes)} Minuten · ${fmtEuro(t.euros)}',
+              subtitle: '${t.members} Mitglieder · ${fmtInt(t.minutes)} Minuten · ${fmtEuroWhole(t.euros)}',
               chevron: true,
               onTap: () => context.push('${Routes.team}?id=${t.id}'),
             ),
@@ -186,7 +186,7 @@ class _WirScreenState extends State<WirScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        '${fmtEuro(ngo.campaignConfirmed)} von ${fmtEuro(ngo.campaignGoal)}',
+                        '${fmtEuroWhole(ngo.campaignConfirmed)} von ${fmtEuroWhole(ngo.campaignGoal)}',
                         style: VText.caption.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
                       ),
                     ),

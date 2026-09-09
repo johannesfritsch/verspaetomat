@@ -165,7 +165,7 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
         InkWell(
           onTap: widget.onSelect == null || i == 0 ? null : () => widget.onSelect!(i),
           child: SizedBox(
-            height: widget.compact ? 40 : 52,
+            height: widget.compact ? 44 : 52,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

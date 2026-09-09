@@ -50,7 +50,7 @@ class SegmentTabs extends StatelessWidget {
                 onTap: () => onChanged(i),
                 borderRadius: BorderRadius.circular(4),
                 child: Container(
-                  height: 40,
+                  height: 44,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: BoxDecoration(
                     color: i == index ? VColors.ink : Colors.transparent,
@@ -92,7 +92,7 @@ class FilterChips extends StatelessWidget {
                 onTap: () => onSelect(o),
                 borderRadius: BorderRadius.circular(4),
                 child: Container(
-                  height: 32,
+                  height: 44,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
                     color: o == selected ? VColors.ink : Colors.transparent,

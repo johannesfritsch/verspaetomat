@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../mock/mock_data.dart';
+import '../../router.dart';
 import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
@@ -19,6 +21,7 @@ class AntwortScreen extends StatefulWidget {
 class _AntwortScreenState extends State<AntwortScreen> {
   String? _mailId;
   bool _demoRan = false;
+  bool _nothingSubmitted = false;
 
   @override
   void initState() {
@@ -31,7 +34,10 @@ class _AntwortScreenState extends State<AntwortScreen> {
         final state = DemoScope.read(context);
         final outcome = widget.demo == 'rejected' ? MailOutcome.rejected : MailOutcome.question;
         final mail = state.receiveReply(outcome: outcome);
-        setState(() => _mailId = mail?.id);
+        setState(() {
+          _mailId = mail?.id;
+          _nothingSubmitted = mail == null;
+        });
       });
     }
   }
@@ -43,7 +49,9 @@ class _AntwortScreenState extends State<AntwortScreen> {
     for (final m in state.mails) {
       if (m.id == _mailId) mail = m;
     }
-    mail ??= state.mails.where((m) => m.direction == MailDirection.inbound).firstOrNull;
+    if (widget.demo == null) {
+      mail ??= state.mails.where((m) => m.direction == MailDirection.inbound).firstOrNull;
+    }
 
     return VScreen(
       eyebrow: 'Post von der Bahn',
@@ -51,7 +59,9 @@ class _AntwortScreenState extends State<AntwortScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (mail == null)
+          if (widget.demo != null && _nothingSubmitted)
+            const _NothingSubmitted()
+          else if (mail == null)
             _NothingYet(state: state)
           else if (mail.direction == MailDirection.out)
             _Outgoing(mail: mail)
@@ -71,7 +81,9 @@ class _AntwortScreenState extends State<AntwortScreen> {
                 size: 20,
                 color: m.direction == MailDirection.inbound ? VColors.red : VColors.ink2,
               ),
-              title: m.direction == MailDirection.inbound ? 'Servicecenter Fahrgastrechte' : 'Du → ${m.to.split('@').first}',
+              title: m.direction == MailDirection.inbound
+                  ? deskDisplay('Servicecenter Fahrgastrechte')
+                  : 'Du → ${m.to.contains('deutschebahn') ? deskDisplay('Servicecenter Fahrgastrechte') : m.to.split('@').first}',
               subtitle: '${Mock.shortDate(m.date)} · ${m.subject}',
               trailing: m.amount != null ? Text(fmtEuro(m.amount!), style: VText.bodySStrong) : null,
               chevron: true,
@@ -85,6 +97,26 @@ class _AntwortScreenState extends State<AntwortScreen> {
           const VGap.xl(),
         ],
       ),
+    );
+  }
+}
+
+/// Demo route opened before anything was sent.
+class _NothingSubmitted extends StatelessWidget {
+  const _NothingSubmitted();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const VGap.m(),
+        Text('Nichts eingereicht.', style: VText.h2),
+        const VGap.s(),
+        Text('Schick erst ein Bündel ab. Die Antwort der Bahn kann nur auf einen Antrag folgen.', style: VText.body.copyWith(color: VColors.ink2)),
+        const VGap.l(),
+        VDemoControl(label: 'Zum Konto', icon: Icons.receipt_long_outlined, onTap: () => context.go(Routes.konto)),
+      ],
     );
   }
 }
@@ -123,7 +155,7 @@ class _Outgoing extends StatelessWidget {
         const VGap.s(),
         Text('Abgeschickt. Noch keine Antwort dazu.', style: VText.body.copyWith(color: VColors.ink2)),
         const VGap.m(),
-        MailView(mail: mail, compact: true),
+        MailView(mail: mail, compact: true, bcc: '${Mock.userEmail} (dein Postfach)'),
         const VGap.s(),
         VGhostButton(label: 'Ganze Mail lesen', icon: Icons.mail_outline, onTap: () => showMailSheet(context, mail)),
       ],
