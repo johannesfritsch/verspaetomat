@@ -157,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.cmd {
         Cmd::Customers => {
             let v = api.get("/admin/customers").await?;
-            println!("{:<10} {:<36} {:<34} {:<8} {}", "Name", "ID", "Relay", "offen", "Fahrt");
+            println!("{:<10} {:<36} {:<34} {:<8} Fahrt", "Name", "ID", "Relay", "offen");
             for c in v.as_array().unwrap_or(&vec![]) {
                 let ride = c.get("ride").filter(|r| !r.is_null()).map(|r| format!("{} → {} (+{})", s(r, "line"), s(r, "exit_station_name"), s(r, "live_delay_min"))).unwrap_or_else(|| "–".into());
                 println!("{:<10} {:<36} {:<34} {:<8} {}", s(c, "nickname"), s(c, "id"), s(c, "relay_address"), s(c, "open_incidents"), ride);
@@ -191,7 +191,8 @@ async fn main() -> anyhow::Result<()> {
             println!("Follower-Durchlauf um {}: {} Fahrt(en) abgeschlossen", hhmm(&v["now"]), v["finalised"].as_array().map(|a| a.len()).unwrap_or(0));
         }
         Cmd::Reply { customer, accepted, question, rejected, amount } => {
-            let outcome = if question { "question" } else if rejected { "rejected" } else if accepted { "accepted" } else { "accepted" };
+            let _ = accepted;
+            let outcome = if question { "question" } else if rejected { "rejected" } else { "accepted" };
             let v = api.post(&format!("/admin/customers/{customer}/reply"), json!({ "outcome": outcome, "amount_cents": amount })).await?;
             println!("Antwort der Bahn: {}  ·  Betrag {} ct  ·  Antrag {}", s(&v, "outcome"), s(&v["mail"], "amount_cents"), s(&v, "claim_id"));
         }
