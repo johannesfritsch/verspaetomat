@@ -766,7 +766,7 @@ String fmtEuro(double v) {
   return '${fmtInt(whole)},$frac €';
 }
 
-/// 48320.0 -> "48.320 €" (community and campaign figures)
+/// 48320.0 -> "48.320 €" (community figures)
 String fmtEuroWhole(double v) => '${fmtInt(v.round())} €';
 
 /// TimeOfDay -> "08:52"

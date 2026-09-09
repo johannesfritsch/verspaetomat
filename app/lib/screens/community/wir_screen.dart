@@ -11,7 +11,7 @@ import '../../widgets/kit.dart';
 import 'community_widgets.dart';
 
 /// Wir: the community. Minutes waited together, euros submitted and
-/// confirmed, campaigns, boards, teams.
+/// confirmed, NGOs, boards, teams.
 class WirScreen extends StatefulWidget {
   const WirScreen({super.key});
 
@@ -120,8 +120,8 @@ class _WirScreenState extends State<WirScreen> {
             ],
           ),
           const VGap.xl(),
-          const VSection('Kampagnen'),
-          for (final ngo in Mock.ngos) _campaignRow(context, ngo),
+          const VSection('Vereine'),
+          for (final ngo in Mock.ngos) _ngoRow(context, ngo),
           const VGap.xl(),
           VSection('Ranglisten', trailing: Text('7 Tage', style: VText.caption)),
           const VGap.m(),
@@ -161,38 +161,30 @@ class _WirScreenState extends State<WirScreen> {
     );
   }
 
-  Widget _campaignRow(BuildContext context, Ngo ngo) {
-    final confirmed = (ngo.campaignConfirmed / ngo.campaignGoal).clamp(0.0, 1.0);
-    final submitted = (ngo.campaignSubmitted / ngo.campaignGoal).clamp(0.0, 1.0);
+  Widget _ngoRow(BuildContext context, Ngo ngo) {
     return InkWell(
       onTap: () => context.push('${Routes.zweck}?id=${ngo.id}'),
       child: Column(
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Row(
-                  children: [
-                    Expanded(child: Text(ngo.name, style: VText.bodyStrong)),
-                    const Icon(Icons.chevron_right, size: 20, color: VColors.ink3),
-                  ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(ngo.name, style: VText.bodyStrong),
+                      const SizedBox(height: 2),
+                      Text('eingereicht: ${fmtEuroWhole(ngo.submittedTotal)}', style: VText.caption),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 10),
-                VProgress(confirmed: confirmed, submitted: submitted),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${fmtEuroWhole(ngo.campaignConfirmed)} von ${fmtEuroWhole(ngo.campaignGoal)}',
-                        style: VText.caption.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
-                      ),
-                    ),
-                    Text(ngo.campaignDeadline, style: VText.caption),
-                  ],
-                ),
+                const SizedBox(width: 12),
+                Text(fmtEuroWhole(ngo.confirmedTotal), style: VText.numberM),
+                const SizedBox(width: 8),
+                const Icon(Icons.chevron_right, size: 20, color: VColors.ink3),
               ],
             ),
           ),

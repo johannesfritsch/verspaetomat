@@ -31,8 +31,8 @@ const _rows = <_Row>[
   _Row('Die Antwort der Bahn in der App', 'Die echte E-Mail, die die Bahn an deine Verspätomat-Adresse geschickt hat. Wir lesen Status, Betrag und Aktenzeichen. Wir antworten nie selbst.', fresh: 'Sobald sie eintrifft', missing: 'Antworten per Post: fotografieren.'),
   _Row('Community: Minuten', 'Summe aller endgültigen Verspätungen aller Fahrgäste.', fresh: 'Live'),
   _Row('Community: Euro „eingereicht“ und „bestätigt“', 'Summe der Kontostatus aller Fahrgäste.', fresh: 'Live für eingereicht, monatlich für bestätigt'),
-  _Row('Kampagnen-Balken', 'Bestätigte Euro für diesen Verein seit Kampagnenstart.', fresh: 'Monatlich'),
-  _Row('Sponsor „zugesagt“', 'Das Versprechen des Sponsors pro eingereichtem Antrag, von uns eingetragen.', missing: 'Bleibt „zugesagt“, bis der Verein den Eingang bestätigt.'),
+  _Row('Bestätigt pro Verein', 'Summe aller bestätigten Anträge, die diesen Verein als Empfänger nennen.', fresh: 'Live; Vereinsmeldungen monatlich'),
+  _Row('Check-ins aus Träwelling', 'Wenn du Träwelling verbunden hast, erscheinen die Fahrten, die du dort eingecheckt hast, hier als Fahrten.', fresh: 'Innerhalb einer Minute', missing: 'Ohne Verbindung ändert sich nichts.'),
   _Row('Ranglisten', 'Nur verifizierte Fahrten (ein Standort-Fix am Bahnhof beim Check-in).', fresh: 'Live, sieben Tage', missing: 'Unverifizierte Fahrten bringen Punkte, aber keinen Platz.'),
   _Row('Abzeichen', 'Von der App aus den Fahrtdaten vergeben, bei Ursachen aus der Störungsmeldung des Betreibers.', fresh: 'Bei Ankunft'),
 ];

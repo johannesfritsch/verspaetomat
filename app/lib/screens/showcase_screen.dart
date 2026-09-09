@@ -84,7 +84,7 @@ class ShowcaseScreen extends StatelessWidget {
           ]),
           const VGap.l(),
           _group(context, 'Wir und Ich', [
-            ('Wir', 'Community, Kampagnen, Ranglisten', Routes.wir),
+            ('Wir', 'Community, Vereine, Ranglisten', Routes.wir),
             ('Zweck', 'Bahnhofsmission Köln', '${Routes.zweck}?id=bahnhofsmission'),
             ('Team', 'Büro Nord', '${Routes.team}?id=buero-nord'),
             ('Ich', 'Profil, Abzeichen', Routes.ich),

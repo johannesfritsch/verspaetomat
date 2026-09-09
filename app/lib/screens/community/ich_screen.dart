@@ -93,7 +93,7 @@ class IchScreen extends StatelessWidget {
           for (final t in Mock.teams)
             VListRow(
               title: t.name,
-              subtitle: t.sponsorLine != null ? 'Mit Sponsor' : '${t.members} Mitglieder',
+              subtitle: '${t.members} Mitglieder',
               chevron: true,
               onTap: () => context.push('${Routes.team}?id=${t.id}'),
             ),

@@ -123,6 +123,12 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             chevron: true,
             onTap: () => showSnack(context, 'In der Vorführung gibt es kein Konto. Alles bleibt auf dem Gerät.'),
           ),
+          VListRow(
+            title: 'Träwelling verbinden',
+            subtitle: state.traewellingLinked ? 'Verbunden' : 'Check-ins importieren, Punkte behalten',
+            chevron: true,
+            onTap: () => _traewelling(context, state),
+          ),
           SwitchRow(title: 'Mich in Ranglisten zeigen', subtitle: 'Ohne dich bleiben die Listen trotzdem da', value: state.showOnBoards, onChanged: state.setShowOnBoards),
           const VGap.xl(),
           const VSection('Deine Daten'),
@@ -136,6 +142,39 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           const VGap.l(),
           Text('Verspätomat 0.1 · Vorführung · Alle Daten erfunden', style: VText.caption),
         ],
+      ),
+    );
+  }
+
+  void _traewelling(BuildContext context, DemoState state) {
+    showVSheet(
+      context,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.l),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const VSheetHeader(title: 'Träwelling'),
+            Text(
+              'Träwelling ist der offene Check-in-Dienst für Bahnfahrten. Wenn du dort schon eincheckst, übernehmen wir deine Fahrten hier, und du musst nichts doppelt machen.',
+              style: VText.body,
+            ),
+            const VGap.m(),
+            Text('Wir lesen nur deine Check-ins. Nichts wird bei Träwelling verändert.', style: VText.body.copyWith(color: VColors.ink2)),
+            const VGap.l(),
+            VPrimaryButton(
+              label: 'Mit Träwelling anmelden',
+              onTap: () {
+                state.setTraewellingLinked(true);
+                Navigator.of(ctx).pop();
+                showSnack(context, 'Vorführung: Verbindung folgt.');
+              },
+            ),
+            const VGap.xs(),
+            VGhostButton(label: 'Nicht jetzt', onTap: () => Navigator.of(ctx).pop()),
+          ],
+        ),
       ),
     );
   }

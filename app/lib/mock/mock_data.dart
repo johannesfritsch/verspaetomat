@@ -149,10 +149,7 @@ class Ngo {
     required this.accountHolder,
     required this.iban,
     required this.confirmedTotal,
-    required this.campaignGoal,
-    required this.campaignConfirmed,
-    required this.campaignSubmitted,
-    required this.campaignDeadline,
+    required this.submittedTotal,
     required this.donationUrl,
     required this.lastReport,
   });
@@ -163,10 +160,7 @@ class Ngo {
   final String accountHolder;
   final String iban;
   final double confirmedTotal;
-  final double campaignGoal;
-  final double campaignConfirmed;
-  final double campaignSubmitted;
-  final String campaignDeadline;
+  final double submittedTotal;
   final String donationUrl;
   final String lastReport;
 }
@@ -189,13 +183,12 @@ class BoardEntry {
 }
 
 class Team {
-  const Team({required this.id, required this.name, required this.members, required this.minutes, required this.euros, this.sponsorLine, this.topMember});
+  const Team({required this.id, required this.name, required this.members, required this.minutes, required this.euros, this.topMember});
   final String id;
   final String name;
   final int members;
   final int minutes;
   final double euros;
-  final String? sponsorLine;
   final String? topMember;
 }
 
@@ -611,10 +604,7 @@ class Mock {
       accountHolder: 'Bahnhofsmission Köln e.V.',
       iban: 'DE12 3456 7890 0000 4711 00',
       confirmedTotal: 12410,
-      campaignGoal: 10000,
-      campaignConfirmed: 6240,
-      campaignSubmitted: 1980,
-      campaignDeadline: 'bis Dezember 2026',
+      submittedTotal: 1980,
       donationUrl: 'https://beispiel.bahnhofsmission.de/spenden',
       lastReport: '1. September 2026',
     ),
@@ -629,10 +619,7 @@ class Mock {
       accountHolder: 'Wald für morgen e.V.',
       iban: 'DE98 7654 3210 0000 0815 00',
       confirmedTotal: 8730,
-      campaignGoal: 15000,
-      campaignConfirmed: 8730,
-      campaignSubmitted: 2210,
-      campaignDeadline: 'bis März 2027',
+      submittedTotal: 2210,
       donationUrl: 'https://beispiel.waldfuermorgen.de/spenden',
       lastReport: '1. September 2026',
     ),
@@ -647,10 +634,7 @@ class Mock {
       accountHolder: 'Kinderhospiz Rheinland gGmbH',
       iban: 'DE55 1122 3344 0000 9999 00',
       confirmedTotal: 27140,
-      campaignGoal: 30000,
-      campaignConfirmed: 27140,
-      campaignSubmitted: 1560,
-      campaignDeadline: 'bis Dezember 2026',
+      submittedTotal: 1560,
       donationUrl: 'https://beispiel.kinderhospiz-rheinland.de/spenden',
       lastReport: '1. September 2026',
     ),
@@ -723,7 +707,7 @@ class Mock {
   ];
 
   static const teams = <Team>[
-    Team(id: 'buero-nord', name: 'Büro Nord', members: 14, minutes: 4812, euros: 96, sponsorLine: 'Firma Nordlicht GmbH legt 1 € pro eingereichter Verspätung drauf.', topMember: 'Anke W.'),
+    Team(id: 'buero-nord', name: 'Büro Nord', members: 14, minutes: 4812, euros: 96, topMember: 'Anke W.'),
     Team(id: 'wg-ehrenfeld', name: 'WG Ehrenfeld', members: 4, minutes: 1290, euros: 12, topMember: 'Johannes'),
   ];
 

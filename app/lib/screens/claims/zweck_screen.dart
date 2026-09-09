@@ -5,7 +5,7 @@ import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 
-/// Zweck: one NGO, its story, its account, its campaign.
+/// Zweck: one NGO, its story, its account, what has reached it.
 class ZweckScreen extends StatelessWidget {
   const ZweckScreen({super.key, required this.ngoId});
   final String ngoId;
@@ -15,8 +15,6 @@ class ZweckScreen extends StatelessWidget {
     final state = DemoScope.of(context);
     final ngo = Mock.ngoById(ngoId);
     final isDefault = state.ngoId == ngo.id;
-    final progress = (ngo.campaignConfirmed / ngo.campaignGoal).clamp(0.0, 1.0);
-    final submitted = (ngo.campaignSubmitted / ngo.campaignGoal).clamp(0.0, 1.0);
 
     return VScreen(
       eyebrow: 'Zweck',
@@ -73,28 +71,14 @@ class ZweckScreen extends StatelessWidget {
               child: Text(p, style: VText.body),
             ),
           const VGap.s(),
-          VSection('Kampagne'),
-          const VGap.m(),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(fmtEuroWhole(ngo.campaignConfirmed), style: VText.numberM),
-              const SizedBox(width: 8),
-              Text('von ${fmtEuroWhole(ngo.campaignGoal)}', style: VText.caption),
-            ],
-          ),
-          const VGap.s(),
-          VProgress(confirmed: progress, submitted: submitted),
-          const VGap.xs(),
-          Text('${ngo.campaignDeadline} · heller Anteil: eingereicht, noch nicht bestätigt', style: VText.caption),
-          const VGap.xl(),
           VSection('Transparenz'),
           VKeyValue('Kontoinhaber', ngo.accountHolder, strong: true),
           const VRule(),
           VKeyValue('IBAN', ngo.iban, valueStyle: VText.mono),
           const VRule(),
           VKeyValue('Bestätigt über Verspätomat', fmtEuroWhole(ngo.confirmedTotal), strong: true),
+          const VRule(),
+          VKeyValue('Eingereicht, unterwegs', fmtEuroWhole(ngo.submittedTotal)),
           const VRule(),
           VKeyValue('Letzte Meldung', ngo.lastReport),
           const VGap.s(),

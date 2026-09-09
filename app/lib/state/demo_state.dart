@@ -83,6 +83,14 @@ class DemoState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Träwelling as a potential check-in provider. Showcase only.
+  bool traewellingLinked = false;
+
+  void setTraewellingLinked(bool v) {
+    traewellingLinked = v;
+    notifyListeners();
+  }
+
   // -- Ride -----------------------------------------------------------------
   TripPhase phase = TripPhase.idle;
   Trip? trip;

@@ -5,7 +5,7 @@ import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'community_widgets.dart';
 
-/// One team: combined minutes and euros, sponsor line, members.
+/// One team: combined minutes and euros, members.
 class TeamScreen extends StatelessWidget {
   const TeamScreen({super.key, required this.teamId});
   final String teamId;
@@ -39,22 +39,6 @@ class TeamScreen extends StatelessWidget {
           ),
           const VGap.l(),
           const VRule.red(),
-          if (team.sponsorLine != null) ...[
-            const VGap.m(),
-            Text('SPONSOR', style: VText.eyebrow),
-            const SizedBox(height: 6),
-            Text(team.sponsorLine!, style: VText.body),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const VChip('zugesagt', tone: VTone.neutral),
-                const SizedBox(width: 8),
-                Expanded(child: Text('Wird bestätigt, sobald der Verein den Eingang meldet.', style: VText.caption)),
-              ],
-            ),
-            const VGap.m(),
-            const VRule(),
-          ],
           const VGap.l(),
           VSection('Diesen Monat', trailing: Text('Geduldspunkte', style: VText.caption)),
           if (team.topMember != null)

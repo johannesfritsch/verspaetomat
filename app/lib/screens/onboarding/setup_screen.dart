@@ -65,7 +65,6 @@ class _NgoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final progress = (ngo.campaignConfirmed / ngo.campaignGoal).clamp(0.0, 1.0);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(4),
@@ -115,10 +114,8 @@ class _NgoCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            VProgress(confirmed: progress, submitted: (ngo.campaignSubmitted / ngo.campaignGoal).clamp(0.0, 1.0)),
-            const SizedBox(height: 6),
-            Text('${fmtEuroWhole(ngo.campaignConfirmed)} von ${fmtEuroWhole(ngo.campaignGoal)} ${ngo.campaignDeadline}', style: VText.caption),
+            const SizedBox(height: 10),
+            Text('Bestätigt über Verspätomat: ${fmtEuroWhole(ngo.confirmedTotal)}', style: VText.caption),
           ],
         ),
       ),
