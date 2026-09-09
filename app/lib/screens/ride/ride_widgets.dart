@@ -394,15 +394,29 @@ class NudgeBanner extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              if (onMute != null)
-                TextButton(onPressed: onMute, child: Text('Diesen Bahnhof nie', style: VText.caption)),
-              const Spacer(),
-              TextButton(onPressed: onDismiss, child: Text('Heute nicht', style: VText.bodySStrong.copyWith(color: VColors.ink2))),
-              const SizedBox(width: 4),
-              TextButton(onPressed: onCheckIn, child: Text('Einchecken', style: VText.bodySStrong.copyWith(color: VColors.red))),
+              TextButton(
+                onPressed: onDismiss,
+                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10)),
+                child: Text('Heute nicht', style: VText.bodySStrong.copyWith(color: VColors.ink2)),
+              ),
+              TextButton(
+                onPressed: onCheckIn,
+                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10)),
+                child: Text('Einchecken', style: VText.bodySStrong.copyWith(color: VColors.red)),
+              ),
             ],
           ),
+          if (onMute != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: onMute,
+                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4), minimumSize: const Size(44, 36)),
+                child: Text('Diesen Bahnhof nie', style: VText.caption),
+              ),
+            ),
         ],
       ),
     );
