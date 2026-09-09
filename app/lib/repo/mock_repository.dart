@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:convert';
 
 import 'package:flutter/material.dart' show TimeOfDay;
@@ -433,6 +434,11 @@ class MockRepository implements AppRepository {
   }
 
   @override
+  /// Demo mode has no backend PDF: a one-page placeholder that says so.
+  @override
+  Future<Uint8List> claimPdf(String id) async => Uint8List.fromList(placeholderPdf('Verspaetomat - EU-Antrag (Vorschau im Demo-Modus)').codeUnits);
+
+  @override
   Future<ApiUpload> upload({required String kind, required String filename, required List<int> bytes}) async {
     if (kind == 'ticket') state.attachTicket();
     return ApiUpload(uploadId: 'mock-upload-${DateTime.now().millisecondsSinceEpoch}');
@@ -525,4 +531,31 @@ class MockRepository implements AppRepository {
     return list.where((e) => state.showOnBoards || !e.isMe).map((e) => ApiBoardEntry(rank: e.rank, name: e.name, points: e.points, isMe: e.isMe)).toList();
   }
 
+}
+
+
+/// A minimal, valid single-page PDF with one line of Helvetica text.
+String placeholderPdf(String text) {
+  final safe = text.replaceAll('(', '[').replaceAll(')', ']');
+  final content = 'BT /F1 14 Tf 40 780 Td ($safe) Tj ET';
+  final objs = <String>[
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Length ${content.length} >>\nstream\n$content\nendstream',
+  ];
+  final buf = StringBuffer('%PDF-1.4\n');
+  final offsets = <int>[];
+  for (var i = 0; i < objs.length; i++) {
+    offsets.add(buf.length);
+    buf.write('${i + 1} 0 obj\n${objs[i]}\nendobj\n');
+  }
+  final xref = buf.length;
+  buf.write('xref\n0 ${objs.length + 1}\n0000000000 65535 f \n');
+  for (final o in offsets) {
+    buf.write('${o.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  buf.write('trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n$xref\n%%EOF\n');
+  return buf.toString();
 }

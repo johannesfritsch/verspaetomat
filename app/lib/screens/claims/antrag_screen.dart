@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
-import '../../mock/mock_data.dart' show Mock, TicketType;
+import '../../mock/mock_data.dart' show Mock;
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'claims_widgets.dart';
+import 'pdf_view.dart';
 
 /// Antrag: the five-step claim flow. Prüfen · Ticket · Zweck · Unterschrift · Senden.
 class AntragScreen extends StatefulWidget {
@@ -668,69 +669,17 @@ class _Unterschrift extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final first = incidents.isNotEmpty ? incidents.first : null;
-    final bundled = incidents.length > 1 || (first?.ticket == TicketType.deutschlandticket);
     final pd = me?.personalData;
     final name = pd?.name ?? me?.nickname ?? 'Fahrgast';
-    final relay = me?.relayAddress ?? draft.relayAddress ?? '–';
-    final amount = draft.claim.amountClaimedCents;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('So geht es raus.', style: VText.h2),
         const VGap.s(),
-        Text('Das ist das EU-Antragsformular, ausgefüllt mit deinen Daten. Lies es, dann unterschreib.', style: VText.caption),
+        Text('Das ist das EU-Antragsformular als PDF, ausgefüllt mit deinen Daten. Lies es, dann unterschreib.', style: VText.caption),
         const VGap.m(),
-        _FormPreview(
-          children: [
-            const _FormTitle('Antragsformular für Erstattungen und Entschädigungen'),
-            const _FormSub('gemäß der Verordnung (EU) 2021/782 des Europäischen Parlaments und des Rates'),
-            const SizedBox(height: 12),
-            const _FormHead('1. Grund/Gründe für Ihren Antrag'),
-            _FormLine('[X] Verspätung${incidents.any((i) => i.cancelled) ? '   [X] Ausfall' : '   [ ] Ausfall'}   [ ] Verpasster Anschluss'),
-            const SizedBox(height: 10),
-            const _FormHead('3. Angaben zu Ihrer Fahrt'),
-            _FormLine('3.1 Eisenbahnunternehmen: ${first?.operator ?? '–'}'),
-            if (first != null) ...[
-              _FormLine('3.2.1 Abreisedatum: ${dmy(first.date)}'),
-              _FormLine('3.2.2 Abreisebahnhof: ${first.from}'),
-              _FormLine('3.2.3 Zielbahnhof: ${first.to}'),
-              _FormLine('3.2.5 Ankunft laut Fahrplan: ${first.evidence?.plannedArrival != null ? fmtClock(first.evidence!.plannedArrival!) : '–'}'),
-              _FormLine('3.2.6 Zugnummer: ${first.line}'),
-              _FormLine('3.2.7 Fahrkartennummer: ${pd?.ticketNumber ?? '–'}'),
-              _FormLine('3.3.3 Tatsächliche Ankunft: ${first.evidence?.actualArrival != null ? fmtClock(first.evidence!.actualArrival!) : '–'}'),
-            ],
-            const SizedBox(height: 10),
-            const _FormHead('4. Art Ihres Antrags'),
-            _FormLine(bundled
-                ? '[X] Entschädigung: für wiederholte Verspätungen oder Ausfälle, Inhaber einer Zeitfahrkarte'
-                : '[X] Entschädigung: Verspätung bei der Ankunft von ${(first?.delayMinutes ?? 0) >= 120 ? 'mindestens 120' : '60 bis 119'} Minuten'),
-            const SizedBox(height: 10),
-            const _FormHead('5. Angaben zur Person'),
-            _FormLine('5.1 Name: $name'),
-            _FormLine('5.2 Anschrift: ${pd?.address.replaceAll('\n', ', ') ?? '–'}'),
-            _FormLine('5.3.1 E-Mail: $relay'),
-            const _FormLine('5.4 Auszahlung: [X] Geld   [ ] Gutschein'),
-            _FormLine('5.5.1 IBAN: ${draft.claim.iban}'),
-            _FormLine('5.5.4 Name des Kontoinhabers: ${draft.claim.accountHolder}', strong: true),
-            const SizedBox(height: 10),
-            const _FormHead('6. Zusätzliche Angaben'),
-            if (bundled) ...[
-              _FormLine('Wiederholte Verspätungen mit Zeitfahrkarte ${pd?.ticketNumber ?? ''}:'),
-              for (final i in incidents)
-                _FormLine(
-                  '· ${dmy(i.date)} ${i.line} ${i.from} – ${i.to}, Ankunft ${i.evidence?.plannedArrival != null ? fmtClock(i.evidence!.plannedArrival!) : '–'} geplant, ${i.evidence?.actualArrival != null ? fmtClock(i.evidence!.actualArrival!) : '–'} tatsächlich (+${i.delayMinutes} Min${i.cancelled ? ', Zugausfall' : ''}${i.selfEntered ? ', Ankunftszeit selbst eingetragen' : ''})',
-                ),
-              _FormLine('Summe: ${fmtCents(amount)} (${incidents.length} Fälle)'),
-            ] else
-              _FormLine('Fahrpreis ${first?.fareCents != null ? fmtCents(first!.fareCents!) : '–'}, Anspruch ${fmtCents(amount)}.'),
-            const SizedBox(height: 12),
-            const _FormLine('Hiermit erkläre ich, dass alle in diesem Formular gemachten Angaben der Wahrheit entsprechen.', strong: true),
-            _FormLine('Datum: ${dmy(DateTime.now())}'),
-            _FormLine('Name des Fahrgastes: $name'),
-          ],
-        ),
+        ClaimPdfPreview(claimId: draft.claim.id, reloadKey: signed),
         const VGap.l(),
         const VRule.red(),
         const VGap.m(),
@@ -765,58 +714,10 @@ class _Unterschrift extends StatelessWidget {
   }
 }
 
-class _FormPreview extends StatelessWidget {
-  const _FormPreview({required this.children});
-  final List<Widget> children;
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(VSpace.m),
-      decoration: BoxDecoration(
-        color: VColors.paperElevated,
-        border: Border.all(color: VColors.rule),
-        borderRadius: BorderRadius.circular(2),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
-    );
-  }
-}
 
-class _FormTitle extends StatelessWidget {
-  const _FormTitle(this.t);
-  final String t;
-  @override
-  Widget build(BuildContext context) => Text(t.toUpperCase(), style: VText.captionInk.copyWith(fontWeight: FontWeight.w800, letterSpacing: 0.3));
-}
 
-class _FormSub extends StatelessWidget {
-  const _FormSub(this.t);
-  final String t;
-  @override
-  Widget build(BuildContext context) => Text(t, style: VText.caption.copyWith(fontStyle: FontStyle.italic, fontSize: 11));
-}
 
-class _FormHead extends StatelessWidget {
-  const _FormHead(this.t);
-  final String t;
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 3),
-        child: Text(t, style: VText.captionInk.copyWith(fontWeight: FontWeight.w700)),
-      );
-}
 
-class _FormLine extends StatelessWidget {
-  const _FormLine(this.t, {this.strong = false});
-  final String t;
-  final bool strong;
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Text(t, style: VText.mono.copyWith(fontSize: 12, fontWeight: strong ? FontWeight.w700 : FontWeight.w400, color: VColors.ink)),
-      );
-}
 
 // ---------------------------------------------------------------------------
 // 11.5 Senden
@@ -845,7 +746,7 @@ class _Senden extends StatelessWidget {
       subject: 'Fahrgastrechte: EU-Antragsformular',
       body: draftMailBody(accountHolder: draft.claim.accountHolder, claimantName: name, incidents: incidents),
       date: DateTime.now().toUtc(),
-      attachments: ['EU-Antrag.txt', for (final m in draft.claim.ticketMonths) 'Ticket_$m.png'],
+      attachments: ['EU-Antrag.pdf', for (final m in draft.claim.ticketMonths) 'Ticket_$m.png'],
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -862,6 +763,10 @@ class _Senden extends StatelessWidget {
           const VGap.m(),
         ] else
           MailView(mail: mail),
+        const VGap.m(),
+        Text('ANHANG', style: VText.eyebrow),
+        const VGap.xs(),
+        ClaimPdfPreview(claimId: draft.claim.id, reloadKey: draft.claim.signedBy, height: 260),
         const VGap.m(),
         VKeyValue('Fälle', '${draft.claim.incidentIds.length}'),
         const VRule(),

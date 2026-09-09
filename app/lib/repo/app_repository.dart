@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import '../api/models.dart';
 
 export '../api/models.dart';
@@ -41,6 +42,7 @@ abstract class AppRepository {
   Future<ApiUpload> upload({required String kind, required String filename, required List<int> bytes});
   Future<ApiClaim> signClaim(String id, {required String typedName, String? signatureUploadId});
   Future<ApiSendResult> sendClaim(String id);
+  Future<Uint8List> claimPdf(String id);
   Future<List<ApiMail>> mails();
   Future<ApiMail> replyToMail(String id, String body);
 

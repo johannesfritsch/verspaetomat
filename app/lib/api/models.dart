@@ -737,6 +737,7 @@ class ApiClaim {
     this.expectedReplyBy,
     this.amountClaimedCents = 0,
     this.amountConfirmedCents,
+    this.pdfUrl,
   });
   final String id;
   final String desk;
@@ -752,6 +753,7 @@ class ApiClaim {
   final DateTime? expectedReplyBy;
   final int amountClaimedCents;
   final int? amountConfirmedCents;
+  final String? pdfUrl;
 
   factory ApiClaim.fromJson(Map<String, dynamic> j) => ApiClaim(
         id: _s(j['id']),
@@ -768,6 +770,7 @@ class ApiClaim {
         expectedReplyBy: _date(j['expected_reply_by']),
         amountClaimedCents: _i(j['amount_claimed_cents']),
         amountConfirmedCents: _in(j['amount_confirmed_cents']),
+        pdfUrl: _sn(j['pdf_url']),
       );
 }
 

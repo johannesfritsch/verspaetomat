@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -154,6 +155,15 @@ class ApiClient {
         '/v1/claims/${Uri.encodeComponent(id)}',
         {if (ngoId != null) 'ngo_id': ngoId, if (attachmentUploadIds != null) 'attachments': attachmentUploadIds},
       )));
+
+  /// The filled EU claim form as PDF (draft: unsigned; after signing: with the drawn signature).
+  Future<Uint8List> claimPdf(String id) async {
+    final t = await tokens.token();
+    final r = await _http.get(_uri('/v1/claims/$id/pdf'), headers: {'accept': 'application/pdf', if (t != null) 'authorization': 'Bearer $t'}).timeout(const Duration(seconds: 30));
+    if (r.statusCode >= 200 && r.statusCode < 300) return r.bodyBytes;
+    _decode(r);
+    return r.bodyBytes;
+  }
 
   Future<ApiUpload> upload({required String kind, required String filename, required List<int> bytes}) async {
     final req = http.MultipartRequest('POST', _uri('/v1/uploads'))

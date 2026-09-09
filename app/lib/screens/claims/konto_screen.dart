@@ -10,6 +10,7 @@ import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'claims_widgets.dart';
+import 'pdf_view.dart';
 
 class _KontoData {
   const _KontoData(this.ledger, this.claims);
@@ -144,6 +145,12 @@ class _KontoScreenState extends State<KontoScreen> {
                 VSection('Eingereicht', trailing: Text(fmtCents(summary.submittedCents), style: VText.captionInk)),
                 for (final i in submitted)
                   IncidentRow(incident: i, note: _sentNote(data.claims, i), onTap: () => showEvidenceSheet(context, i)),
+                for (final c in _sentClaims(data.claims, submitted))
+                  VGhostButton(
+                    label: c.sentAt != null ? 'PDF ansehen · Antrag vom ${Mock.shortDate(c.sentAt!.toLocal())}' : 'PDF ansehen',
+                    icon: Icons.picture_as_pdf_outlined,
+                    onTap: () => ClaimPdfPage.open(context, c.id),
+                  ),
                 if (!session.isLocal) ...[
                   const VGap.m(),
                   VDemoControl(
@@ -174,6 +181,14 @@ class _KontoScreenState extends State<KontoScreen> {
         );
       },
     );
+  }
+
+  /// The distinct claims behind the submitted incidents, newest first.
+  List<ApiClaim> _sentClaims(List<ApiClaim> claims, List<ApiIncident> submitted) {
+    final ids = submitted.map((i) => i.claimId).whereType<String>().toSet();
+    final list = claims.where((c) => ids.contains(c.id) || c.incidentIds.any((id) => submitted.any((i) => i.id == id))).toList();
+    list.sort((a, b) => (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)));
+    return list;
   }
 
   String? _sentNote(List<ApiClaim> claims, ApiIncident i) {

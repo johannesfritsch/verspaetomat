@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import '../api/client.dart';
 import '../api/token_store.dart';
 import 'app_repository.dart';
@@ -89,6 +90,9 @@ class HttpRepository implements AppRepository {
       client.signClaim(id, typedName: typedName, signatureUploadId: signatureUploadId);
   @override
   Future<ApiSendResult> sendClaim(String id) => client.sendClaim(id);
+
+  @override
+  Future<Uint8List> claimPdf(String id) => client.claimPdf(id);
   @override
   Future<List<ApiMail>> mails() => client.mails();
   @override

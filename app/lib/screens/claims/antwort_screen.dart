@@ -10,6 +10,7 @@ import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'claims_widgets.dart';
+import 'pdf_view.dart';
 
 /// Antwort: what the railway said, and everything else that went in and out.
 class AntwortScreen extends StatefulWidget {
@@ -199,6 +200,8 @@ class _Outgoing extends StatelessWidget {
         MailView(mail: mail, compact: true),
         const VGap.s(),
         VGhostButton(label: 'Ganze Mail lesen', icon: Icons.mail_outline, onTap: () => showMailSheet(context, mail)),
+        if (mail.claimId != null)
+          VGhostButton(label: 'PDF ansehen', icon: Icons.picture_as_pdf_outlined, onTap: () => ClaimPdfPage.open(context, mail.claimId!)),
       ],
     );
   }
@@ -409,6 +412,8 @@ class _Rejected extends StatelessWidget {
         MailView(mail: mail, compact: true),
         const VGap.s(),
         VGhostButton(label: 'Ganze Mail lesen', icon: Icons.mail_outline, onTap: () => showMailSheet(context, mail)),
+        if (mail.claimId != null)
+          VGhostButton(label: 'PDF ansehen', icon: Icons.picture_as_pdf_outlined, onTap: () => ClaimPdfPage.open(context, mail.claimId!)),
         const VGap.m(),
         const VRule(),
         const VGap.m(),

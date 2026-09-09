@@ -151,9 +151,9 @@ Step indicator at the top: "1 Prüfen · 2 Ticket · 3 Zweck · 4 Unterschrift �
 
 **11.3 Zweck.** The NGO card, large, with account holder name and IBAN shown in full: "Die Entschädigung geht direkt an: Bahnhofsmission Köln e.V., DE12 …". A switch: "Anderen Zweck für diesen Antrag wählen".
 
-**11.4 Unterschrift.** The filled form is shown as it will be sent, page by page, scrollable. Under it a signature field with the customer's name typed already; drawing is optional for the EU form, required for the paper route. The declaration text from the form is repeated in plain German: "Ich bestätige, dass die Angaben stimmen und ich Inhaber:in des Tickets bin."
+**11.4 Unterschrift.** The filled form is shown as the real PDF the server generated, first page inline with a full-screen zoomable view, exactly what will be attached. Under it a signature field with the customer's name typed already; drawing is optional for the EU form, required for the paper route. The declaration text from the form is repeated in plain German: "Ich bestätige, dass die Angaben stimmen und ich Inhaber:in des Tickets bin."
 
-**11.5 Senden.** The mail as it will go: from the customer's Verspätomat address with their name, to the claims desk, subject, the short body (which states that the mail is transmitted via Verspätomat and names the claimant), the two attachments, and "Kopie an: dein privates Postfach". One button: "Absenden". A quiet full-screen "Abgeschickt. 9. September 2026." follows, the incidents turn "eingereicht", and the copy is in the customer's inbox before they close the screen.
+**11.5 Senden.** The mail as it will go, with the signed PDF shown under "Anhang": from the customer's Verspätomat address with their name, to the claims desk, subject, the short body (which states that the mail is transmitted via Verspätomat and names the claimant), the two attachments, and "Kopie an: dein privates Postfach". One button: "Absenden". A quiet full-screen "Abgeschickt. 9. September 2026." follows, the incidents turn "eingereicht", and the copy is in the customer's inbox before they close the screen.
 
 Paper route alternative on 11.5: "Als PDF zum Drucken" with the postal address shown. Bounces (wrong or dead operator address) come back within minutes as a ledger note: "Nicht zustellbar. Wir prüfen die Adresse."
 
