@@ -1,0 +1,17 @@
+[package]
+name = "verspaetomat-api"
+version = "0.1.0"
+edition = "2021"
+description = "Verspätomat backend skeleton: serves the data the showcase app needs, in memory, from fixtures."
+license = "AGPL-3.0-only"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }

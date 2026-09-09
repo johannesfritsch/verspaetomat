@@ -1,0 +1,8 @@
+[
+  {"name": "DB Regio NRW", "desk": "Servicecenter Fahrgastrechte", "postal_address": "DB Fernverkehr AG · Servicecenter Fahrgastrechte · 60647 Frankfurt am Main", "email": "EUAntragFGR@deutschebahn.com", "accepts_email": true, "last_verified": "2026-09-09"},
+  {"name": "DB Fernverkehr", "desk": "Servicecenter Fahrgastrechte", "postal_address": "DB Fernverkehr AG · Servicecenter Fahrgastrechte · 60647 Frankfurt am Main", "email": "EUAntragFGR@deutschebahn.com", "accepts_email": true, "last_verified": "2026-09-09"},
+  {"name": "National Express", "desk": "Servicecenter Fahrgastrechte", "postal_address": "DB Fernverkehr AG · Servicecenter Fahrgastrechte · 60647 Frankfurt am Main", "email": "EUAntragFGR@deutschebahn.com", "accepts_email": true, "last_verified": "2026-09-09"},
+  {"name": "ODEG", "desk": "Servicecenter Fahrgastrechte", "postal_address": "DB Fernverkehr AG · Servicecenter Fahrgastrechte · 60647 Frankfurt am Main", "email": "EUAntragFGR@deutschebahn.com", "accepts_email": true, "last_verified": "2026-09-09"},
+  {"name": "eurobahn", "desk": "Servicecenter Fahrgastrechte", "postal_address": "DB Fernverkehr AG · Servicecenter Fahrgastrechte · 60647 Frankfurt am Main", "email": "EUAntragFGR@deutschebahn.com", "accepts_email": true, "last_verified": "2026-09-09"},
+  {"name": "NordWestBahn", "desk": "NordWestBahn", "postal_address": "NordWestBahn GmbH · Kundenservice · Wilhelm-Bock-Weg 3 · 49080 Osnabrück", "email": null, "accepts_email": false, "last_verified": null}
+]

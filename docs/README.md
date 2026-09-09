@@ -26,6 +26,15 @@ Status: research, product concept and a fully mocked Flutter showcase app (`app/
 | [12-gamification.md](12-gamification.md) | Points, badges, boards, teams |
 | [13-where-the-data-comes-from.md](13-where-the-data-comes-from.md) | Every piece of information on screen and its origin, in customer terms |
 
+## Backend
+
+| Doc | Content |
+|---|---|
+| [20-backend.md](20-backend.md) | Stack decision (Rust, axum, Postgres), service layout, the rules the backend owns |
+| [21-data-requirements.md](21-data-requirements.md) | Every entity, field and endpoint the mock implies, external sources, what the mock lacks |
+
+The skeleton lives in `backend/` (see `backend/README.md`, `backend/openapi.yaml`).
+
 [sources.md](sources.md) lists the URLs behind the research.
 
 Terms used throughout: **D-Ticket** = Deutschlandticket. **Servicecenter** = Servicecenter Fahrgastrechte, Frankfurt, the joint claims desk of DB and about 40 other railways. **Ledger** = the in-app "Konto" of qualifying delays and their claim status.

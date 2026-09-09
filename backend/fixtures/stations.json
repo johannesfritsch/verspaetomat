@@ -1,0 +1,5 @@
+[
+  {"id": "koeln-hbf", "name": "Köln Hbf", "eva": "8000207", "lat": 50.9430, "lon": 6.9586, "distance_m": 380},
+  {"id": "koeln-deutz", "name": "Köln Messe/Deutz", "eva": "8003368", "lat": 50.9410, "lon": 6.9750, "distance_m": 1200},
+  {"id": "koeln-hansaring", "name": "Köln Hansaring", "eva": "8003367", "lat": 50.9530, "lon": 6.9450, "distance_m": 1700}
+]

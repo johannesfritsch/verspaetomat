@@ -1,0 +1,11 @@
+{
+  "line": [
+    {"rank": 1, "name": "Miri aus Hamm", "points": 212}, {"rank": 2, "name": "tobi_aus_kalk", "points": 174}, {"rank": 3, "name": "Anke W.", "points": 151}, {"rank": 4, "name": "Gleiswechsel", "points": 133}, {"rank": 5, "name": "Johannes", "points": 96, "is_me": true}, {"rank": 6, "name": "nachtschicht", "points": 88}, {"rank": 7, "name": "Ruhrpott-Rita", "points": 71}, {"rank": 8, "name": "Sven aus Unna", "points": 64}, {"rank": 9, "name": "Paul & Paula", "points": 52}, {"rank": 10, "name": "ICEkalt", "points": 47}
+  ],
+  "city": [
+    {"rank": 1, "name": "Ehrenfeld-Express", "points": 388}, {"rank": 2, "name": "Miri aus Hamm", "points": 212}, {"rank": 3, "name": "Kalk-Kalle", "points": 190}, {"rank": 4, "name": "tobi_aus_kalk", "points": 174}, {"rank": 5, "name": "Anke W.", "points": 151}, {"rank": 6, "name": "Südstadt-Sonja", "points": 140}, {"rank": 7, "name": "Gleiswechsel", "points": 133}, {"rank": 8, "name": "Deutzer Brücke", "points": 118}, {"rank": 9, "name": "nachtschicht", "points": 88}, {"rank": 10, "name": "Ruhrpott-Rita", "points": 71}, {"rank": 14, "name": "Johannes", "points": 96, "is_me": true}
+  ],
+  "germany": [
+    {"rank": 1, "name": "Wartehalle Wanne", "points": 1204}, {"rank": 2, "name": "Uelzen-Ulla", "points": 987}, {"rank": 3, "name": "Stellwerk Stendal", "points": 871}, {"rank": 4, "name": "Ehrenfeld-Express", "points": 388}, {"rank": 5, "name": "BOB-Fahrer", "points": 355}, {"rank": 6, "name": "Erzgebirge Erik", "points": 301}, {"rank": 7, "name": "Miri aus Hamm", "points": 212}, {"rank": 8, "name": "S-Bahn Sabine", "points": 199}, {"rank": 9, "name": "Kalk-Kalle", "points": 190}, {"rank": 10, "name": "tobi_aus_kalk", "points": 174}, {"rank": 3021, "name": "Johannes", "points": 96, "is_me": true}
+  ]
+}

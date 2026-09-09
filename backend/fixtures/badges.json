@@ -1,0 +1,16 @@
+[
+  {"id": "erste", "name": "Erste Verspätung", "rule": "Erste verspätete Fahrt", "earned_on": "2025-05-14"},
+  {"id": "sev", "name": "Schienenersatzverkehr", "rule": "In einen Ersatzbus eingecheckt", "earned_on": "2026-09-02"},
+  {"id": "stellwerk", "name": "Stellwerksstörung", "rule": "Verspätung mit dieser Ursache", "earned_on": "2026-09-09"},
+  {"id": "gleis", "name": "Personen im Gleis", "rule": "Verspätung mit dieser Ursache"},
+  {"id": "gegenzug", "name": "Gegenzug abgewartet", "rule": "Unter 10 Minuten, am Ziel wieder pünktlich", "earned_on": "2026-06-11"},
+  {"id": "letzter", "name": "Letzter Zug", "rule": "Check-in nach 23 Uhr", "earned_on": "2026-08-30"},
+  {"id": "nacht", "name": "Nachtschicht", "rule": "Ankunft zwischen 0 und 5 Uhr"},
+  {"id": "stunde", "name": "Volle Stunde", "rule": "Erste Verspätung ab 60 Minuten", "earned_on": "2026-05-28"},
+  {"id": "bagatell", "name": "Bagatellgrenze geknackt", "rule": "Erstes Bündel über 4 €", "earned_on": "2026-06-20"},
+  {"id": "abgeschickt", "name": "Abgeschickt", "rule": "Erster Antrag gesendet", "earned_on": "2026-06-20"},
+  {"id": "bestaetigt", "name": "Bestätigt", "rule": "Erste Antwort der Bahn", "earned_on": "2026-07-18"},
+  {"id": "deutschland", "name": "Deutschlandreise", "rule": "Check-ins in fünf Bundesländern"},
+  {"id": "stammgleis", "name": "Stammgleis", "rule": "50 Fahrten auf derselben Linie", "earned_on": "2026-08-03"},
+  {"id": "geduld", "name": "Geduld ist eine Tugend", "rule": "1.000 Geduldspunkte"}
+]

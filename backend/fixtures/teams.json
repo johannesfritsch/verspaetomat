@@ -1,0 +1,4 @@
+[
+  {"id": "buero-nord", "name": "Büro Nord", "members": ["Anke W.", "Johannes", "Miri aus Hamm", "Sven aus Unna", "Gleiswechsel"], "minutes": 4812, "euros_cents": 9600, "top_member": "Anke W."},
+  {"id": "wg-ehrenfeld", "name": "WG Ehrenfeld", "members": ["Johannes", "Ehrenfeld-Express", "Südstadt-Sonja", "Kalk-Kalle"], "minutes": 1290, "euros_cents": 1200, "top_member": "Johannes"}
+]
