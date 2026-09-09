@@ -180,6 +180,8 @@ pub struct RideRow {
     pub checked_in_at: DateTime<Utc>,
     pub finalised_at: Option<DateTime<Utc>>,
     pub last_polled_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub dismissed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

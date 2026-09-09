@@ -125,9 +125,9 @@ class ApiStop {
         name: _s(j['name']),
         stationId: _sn(j['station_id'] ?? j['stop_id']),
         scheduledArrival: _dt(j['scheduled_arrival']),
-        arrival: _dt(j['arrival']),
+        arrival: _dt(j['arrival'] ?? j['live_arrival']),
         scheduledDeparture: _dt(j['scheduled_departure']),
-        departure: _dt(j['departure']),
+        departure: _dt(j['departure'] ?? j['live_departure']),
         cancelled: _b(j['cancelled']),
       );
 }
@@ -166,12 +166,12 @@ class ApiDeparture {
         tripId: _s(j['trip_id']),
         line: _s(j['line']),
         destination: _s(j['destination'] ?? j['headsign']),
-        scheduledDeparture: _dt(j['scheduled_departure']) ?? DateTime.now().toUtc(),
-        departure: _dt(j['departure']),
+        scheduledDeparture: _dt(j['scheduled_departure'] ?? j['planned_departure']) ?? DateTime.now().toUtc(),
+        departure: _dt(j['departure'] ?? j['live_departure']),
         realtime: _b(j['realtime']),
         platform: _sn(j['platform']),
         category: categoryFromWire(_sn(j['category'] ?? j['mode'])),
-        operator: _s(j['operator'] ?? j['agency']),
+        operator: _s(j['operator'] ?? j['agency'] ?? j['agency_name']),
         cancelled: _b(j['cancelled']),
         cause: _sn(j['cause']),
         stops: _ml(j['stops']).map(ApiStop.fromJson).toList(),
@@ -191,7 +191,7 @@ class ApiTrip {
   factory ApiTrip.fromJson(Map<String, dynamic> j) => ApiTrip(
         tripId: _s(j['trip_id'] ?? j['id']),
         line: _s(j['line']),
-        operator: _s(j['operator'] ?? j['agency']),
+        operator: _s(j['operator'] ?? j['agency'] ?? j['agency_name']),
         category: categoryFromWire(_sn(j['category'] ?? j['mode'])),
         cancelled: _b(j['cancelled']),
         cause: _sn(j['cause']),
@@ -510,14 +510,14 @@ class ApiRide {
         locationVerified: _b(j['location_verified']),
         status: _s(j['status']) == 'arrived' ? ApiRideStatus.arrived : ApiRideStatus.riding,
         passedStops: _i(j['passed_stops']),
-        liveDelayMinutes: _i(j['live_delay_minutes']),
+        liveDelayMinutes: _i(j['live_delay_minutes'] ?? j['live_delay_min']),
         cause: _sn(j['cause']),
-        finalDelayMinutes: _in(j['final_delay_minutes']),
+        finalDelayMinutes: _in(j['final_delay_minutes'] ?? j['final_delay_min']),
         cancelled: _b(j['cancelled']),
         selfEntered: _b(j['self_entered']),
         nachtrag: _b(j['nachtrag']),
         points: _i(j['points']),
-        date: _date(j['date']) ?? DateTime.now(),
+        date: _date(j['date']) ?? _dt(j['planned_arrival'])?.toLocal() ?? DateTime.now(),
       );
 }
 
@@ -605,11 +605,11 @@ class ApiIncident {
   factory ApiIncident.fromJson(Map<String, dynamic> j) => ApiIncident(
         id: _s(j['id']),
         rideId: _sn(j['ride_id']),
-        date: _date(j['date']) ?? DateTime.now(),
+        date: _date(j['date'] ?? j['ride_date']) ?? DateTime.now(),
         line: _s(j['line']),
-        from: _s(j['from']),
-        to: _s(j['to']),
-        delayMinutes: _i(j['delay_minutes']),
+        from: _s(j['from'] ?? j['from_name']),
+        to: _s(j['to'] ?? j['to_name']),
+        delayMinutes: _i(j['delay_minutes'] ?? j['delay_min']),
         amountCents: _i(j['amount_cents']),
         ticket: ticketFromWire(_sn(j['ticket'])),
         operator: _s(j['operator']),
@@ -718,12 +718,12 @@ class ApiClaim {
   factory ApiClaim.fromJson(Map<String, dynamic> j) => ApiClaim(
         id: _s(j['id']),
         desk: _s(j['desk']),
-        incidentIds: _sl(j['incident_ids']),
+        incidentIds: j['incident_ids'] != null ? _sl(j['incident_ids']) : _ml(j['incidents']).map((e) => _s(e['id'])).toList(),
         ngoId: _s(j['ngo_id']),
         accountHolder: _s(j['account_holder']),
         iban: _s(j['iban']),
         ticketMonths: _sl(j['ticket_months']),
-        attachments: _sl(j['attachments']),
+        attachments: _labels(j['attachments']),
         signedBy: _sn(j['signed_by']),
         status: claimStatusFromWire(_sn(j['status'])),
         sentAt: _dt(j['sent_at']),
@@ -741,7 +741,7 @@ class ApiClaimDraft {
   final bool personalDataRequired;
   final String? relayAddress;
   factory ApiClaimDraft.fromJson(Map<String, dynamic> j) => ApiClaimDraft(
-        claim: ApiClaim.fromJson(_m(j['claim'])!),
+        claim: ApiClaim.fromJson(_m(j['claim']) ?? j),
         deskAddress: _sn(j['desk_address']),
         deskEmail: _sn(j['desk_email']),
         personalDataRequired: _b(j['personal_data_required']),
@@ -790,13 +790,13 @@ class ApiMail {
         claimId: _sn(j['claim_id']),
         incidentIds: _sl(j['incident_ids']),
         direction: _s(j['direction']) == 'inbound' ? ApiMailDirection.inbound : ApiMailDirection.out,
-        from: _s(j['from']),
-        to: _s(j['to']),
-        bcc: _sn(j['bcc']),
+        from: _s(j['from'] ?? j['from_addr']),
+        to: _s(j['to'] ?? j['to_addr']),
+        bcc: _sn(j['bcc'] ?? j['bcc_addr']),
         subject: _s(j['subject']),
         body: _s(j['body']),
-        date: _dt(j['date'] ?? j['received_at'] ?? j['sent_at']) ?? DateTime.now().toUtc(),
-        attachments: _sl(j['attachments']),
+        date: _dt(j['date'] ?? j['received_at'] ?? j['sent_at'] ?? j['occurred_at']) ?? DateTime.now().toUtc(),
+        attachments: _labels(j['attachments']),
         amountCents: _in(j['amount_cents']),
         outcome: j['outcome'] == null ? null : ApiMailOutcome.values.firstWhere((o) => o.name == j['outcome'], orElse: () => ApiMailOutcome.other),
       );
@@ -877,3 +877,10 @@ class ApiTeam {
         inviteToken: _sn(j['invite_token']),
       );
 }
+
+
+/// Attachment labels from plain strings or `{label|name|upload_id}` objects.
+List<String> _labels(dynamic v) => (v as List? ?? const [])
+    .map((e) => e is Map ? (e['label'] ?? e['name'] ?? e['upload_id'] ?? '').toString() : e.toString())
+    .where((e) => e.isNotEmpty)
+    .toList();

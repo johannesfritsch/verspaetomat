@@ -904,7 +904,7 @@ class _Sent extends StatelessWidget {
                 Text('Testlauf: keine echte Mail hat das Haus verlassen.', style: VText.caption),
               ],
               const Spacer(),
-              VPrimaryButton(label: 'Zurück zum Konto', onTap: () => context.go(Routes.konto)),
+              VPrimaryButton(label: 'Zurück zum Konto', onTap: () => (context.canPop() ? context.pop() : context.go(Routes.konto))),
             ],
           ),
         ),

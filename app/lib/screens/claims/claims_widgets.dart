@@ -74,7 +74,9 @@ class _LoaderState<T> extends State<Loader<T>> {
   void _reload() {
     final repo = _repo;
     if (repo == null) return;
-    setState(() => _future = widget.load(repo));
+    setState(() {
+      _future = widget.load(repo);
+    });
   }
 
   @override

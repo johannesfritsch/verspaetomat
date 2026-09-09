@@ -401,7 +401,7 @@ pub async fn current_ride(State(s): State<AppState>, c: Customer) -> ApiResult {
     let ride: Option<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 and status = 'riding' order by checked_in_at desc limit 1").bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let Some(r) = ride else {
         // The most recent arrival, so the app can show the summary after a restart.
-        let last: Option<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 and status = 'arrived' and finalised_at > now() - interval '2 hours' order by finalised_at desc limit 1").bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+        let last: Option<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 and status = 'arrived' and dismissed_at is null and finalised_at > now() - interval '2 hours' order by finalised_at desc limit 1").bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
         return match last {
             Some(l) => Ok(Json(json!({ "ride": l, "stops": [], "eta": l.actual_arrival, "just_arrived": true }))),
             None => Err(err(StatusCode::NOT_FOUND, "no ride in progress")),
@@ -522,7 +522,8 @@ pub async fn on_ride_finalised(pool: &PgPool, ride_id: Uuid) -> anyhow::Result<F
 }
 
 pub async fn dismiss(State(s): State<AppState>, c: Customer) -> ApiResult {
-    // Nothing to store: "just arrived" is derived from finalised_at. Abandon a stale ride if any.
+    // Acknowledge the arrival summary; abandon a stale ride if any.
+    sqlx::query("update rides set dismissed_at = now() where customer_id = $1 and status = 'arrived' and dismissed_at is null").bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
     sqlx::query("update rides set status = 'abandoned' where customer_id = $1 and status = 'riding' and checked_in_at < now() - interval '12 hours'").bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
     Ok(Json(json!({ "ok": true })))
 }

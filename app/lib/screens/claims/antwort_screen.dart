@@ -137,7 +137,7 @@ class _NothingSubmitted extends StatelessWidget {
         const VGap.s(),
         Text('Schick erst ein Bündel ab. Die Antwort der Bahn kann nur auf einen Antrag folgen.', style: VText.body.copyWith(color: VColors.ink2)),
         const VGap.l(),
-        VDemoControl(label: 'Zum Konto', icon: Icons.receipt_long_outlined, onTap: () => context.go(Routes.konto)),
+        VDemoControl(label: 'Zum Konto', icon: Icons.receipt_long_outlined, onTap: () => (context.canPop() ? context.pop() : context.go(Routes.konto))),
       ],
     );
   }
