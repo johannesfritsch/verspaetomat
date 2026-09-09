@@ -1,183 +1,161 @@
 openapi: 3.1.0
 info:
   title: Verspätomat API
-  version: 0.1.0
+  version: 0.2.0
   description: >
-    The contract the Flutter app will be switched to. Amounts are euro cents. Times inside a day are "HH:MM".
-    One anonymous customer in the skeleton; device auth with bearer tokens comes with Postgres.
+    Contract for the Flutter app. Amounts are euro cents; timestamps RFC 3339 UTC; dates YYYY-MM-DD.
+    Station ids and trip ids are Transitous ids passed through unchanged (trip ids go in query parameters).
+    Identity: one anonymous device per installation. Every route except /health, /v1/devices*,
+    /v1/operators, /v1/ngos and /internal/* requires `Authorization: Bearer <token>`.
 servers:
   - url: http://127.0.0.1:8080
-tags:
-  - name: reference
-  - name: customer
-  - name: rides
-  - name: ledger
-  - name: claims
-  - name: mail
-  - name: community
 paths:
   /health:
-    get: { summary: Liveness, responses: { "200": { description: ok } } }
+    get: { summary: Liveness and database check, responses: { "200": { description: "{ok, db}" } } }
+
+  /v1/devices:
+    post: { summary: Create a device; returns {device_id, token}. Store the token in the Keychain., responses: { "200": { description: device } } }
+  /v1/devices/recover:
+    post:
+      summary: Re-attach a new phone with the recovery code; returns a fresh {device_id, token}.
+      requestBody: { content: { application/json: { schema: { type: object, required: [recovery_code], properties: { recovery_code: { type: string } } } } } }
+      responses: { "200": { description: device }, "404": { description: unknown code } }
 
   /v1/stations/nearby:
     get:
-      tags: [reference]
-      summary: Stations near the customer (skeleton ignores lat/lon)
-      parameters:
-        - { name: lat, in: query, schema: { type: number } }
-        - { name: lon, in: query, schema: { type: number } }
-      responses: { "200": { description: list of Station } }
+      summary: Rail stations near a point (Transitous). Defaults to Köln Hbf without lat/lon.
+      parameters: [{ name: lat, in: query, schema: { type: number } }, { name: lon, in: query, schema: { type: number } }]
+      responses: { "200": { description: "[{id, name, lat, lon, distance_m}]" } }
+  /v1/stations/search:
+    get:
+      parameters: [{ name: q, in: query, required: true, schema: { type: string } }]
+      responses: { "200": { description: "[Station]" } }
   /v1/stations/{id}/departures:
     get:
-      tags: [reference]
-      summary: Departures with live delays, platform, operator and stops
+      summary: Rail departures with live delays, platform, agency, our operator and claims desk, trip id.
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: list of Departure } }
-  /v1/trips/{id}:
+      responses: { "200": { description: "[{trip_id, line, train_number, headsign, agency_name, operator, desk, category, planned_departure, live_departure, delay_min, platform, cancelled, realtime}]" } }
+  /v1/trips:
     get:
-      tags: [reference]
-      summary: One trip with per-stop planned and forecast times
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: Departure }, "404": { description: not found } }
+      summary: One trip with stop-by-stop scheduled and live times.
+      parameters: [{ name: trip_id, in: query, required: true, schema: { type: string } }]
+      responses: { "200": { description: "{trip_id, line, headsign, agency_name, operator, category, cancelled, stops:[{stop_id, name, scheduled_arrival, live_arrival, scheduled_departure, live_departure, cancelled}]}" }, "404": { description: not found } }
   /v1/operators:
-    get: { tags: [reference], summary: Operator directory (operator → claims desk, address, e-mail), responses: { "200": { description: list of Operator } } }
+    get: { summary: Operator directory (name, aliases, desk, postal_address, email, accepts_email, last_verified), responses: { "200": { description: "[Operator]" } } }
   /v1/ngos:
-    get: { tags: [reference], summary: Partner NGOs with confirmed and submitted totals, responses: { "200": { description: list of Ngo } } }
+    get: { summary: Partner NGOs with confirmed_total_cents and submitted_total_cents, responses: { "200": { description: "[Ngo]" } } }
   /v1/badges:
-    get: { tags: [reference], summary: Badge catalogue with the customer's awards, responses: { "200": { description: list of Badge } } }
+    get: { summary: Badge catalogue with earned_on for this customer, responses: { "200": { description: "[Badge]" } } }
 
   /v1/me:
-    get: { tags: [customer], summary: Profile, settings, points, level, relay address, responses: { "200": { description: Customer } } }
+    get: { summary: "Profile: nickname, relay_address, personal_data?, settings, points_total, points_this_week, level_name, next_level_name, next_level_at, home_station", responses: { "200": { description: Customer } } }
     patch:
-      tags: [customer]
-      summary: Change settings (ticket, default NGO, location mode, boards, correspondence, Träwelling link)
-      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/MePatch" } } } }
+      summary: Change settings (nickname, ticket, ngo_id, location_mode, notifications, show_on_boards, keep_correspondence, traewelling_linked, onboarding_done, home_station_id/name).
       responses: { "200": { description: Customer } }
+    delete: { summary: Delete the device and everything it owns, responses: { "200": { description: "{deleted}" } } }
   /v1/me/personal-data:
     put:
-      tags: [customer]
-      summary: Name, address, private e-mail, ticket number (asked at the first claim); assigns the relay address
-      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/PersonalData" } } } }
+      summary: Name, address, private e-mail, ticket number, first_class. Assigns the relay address on first call.
+      requestBody: { content: { application/json: { schema: { type: object, required: [name, address, email], properties: { name: { type: string }, address: { type: string }, email: { type: string }, ticket_number: { type: string }, first_class: { type: boolean } } } } } }
       responses: { "200": { description: Customer } }
+  /v1/me/recovery-code:
+    get: { summary: Issue a new recovery code (twelve words). Shown once; the previous code stops working., responses: { "200": { description: "{recovery_code}" } } }
+  /v1/me/export:
+    get: { summary: Everything about this customer as JSON, responses: { "200": { description: export } } }
 
   /v1/rides:
-    get: { tags: [rides], summary: Ride history, responses: { "200": { description: list of Ride } } }
+    get: { summary: Ride history (newest first), responses: { "200": { description: "[Ride]" } } }
     post:
-      tags: [rides]
-      summary: Check in (departure, exit stop, optional location fix). Starts the trip follower.
+      summary: Check in. The follower polls the trip from now on.
       requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/CheckIn" } } } }
-      responses: { "200": { description: Ride }, "409": { description: already riding } }
+      responses: { "200": { description: "{ride, stops}" }, "409": { description: already riding } }
   /v1/rides/current:
-    get: { tags: [rides], summary: Live state of the ride in progress (delay, passed stops, cause, ETA), responses: { "200": { description: ride + stops }, "404": { description: none } } }
-  /v1/rides/current/tick:
-    post: { tags: [rides], summary: "Skeleton only: advance one stop (stands in for the trip follower)", responses: { "200": { description: Ride } } }
+    get: { summary: "Ride in progress: {ride, stops, eta, claim_from_minute, last_polled_at}; or the last arrival within 2 h as {ride, just_arrived:true}", responses: { "200": { description: live ride }, "404": { description: none } } }
   /v1/rides/current/arrival:
     post:
-      tags: [rides]
-      summary: Finalise the ride. Called by the trip follower from live data, or by the app with a manual time when there is no data.
-      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Arrival" } } } }
-      responses: { "200": { description: ride, incident (if 60+), bundle_ready, new_badge } }
+      summary: Finalise now, with a delay or an actual time (no-data case, or the demo control). Creates the incident if 60+ and awards badges.
+      requestBody: { content: { application/json: { schema: { type: object, properties: { delay_minutes: { type: integer }, actual_arrival: { type: string, format: date-time }, cancelled: { type: boolean }, self_entered: { type: boolean } } } } } }
+      responses: { "200": { description: "{ride, incident?, bundle_ready, new_badge?}" } }
+  /v1/rides/current/dismiss:
+    post: { summary: Acknowledge the arrival summary, responses: { "200": { description: ok } } }
   /v1/rides/nachtrag:
     post:
-      tags: [rides]
-      summary: Record a forgotten ride after the fact (1 point, claimable if delay data exists, never ranks)
-      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Nachtrag" } } } }
-      responses: { "200": { description: ride, incident } }
+      summary: Record a forgotten ride from a trip id (1 point, claimable if the feed shows 60+, never ranks).
+      requestBody: { content: { application/json: { schema: { type: object, required: [trip_id, from_station_id, from_station_name, exit_station_id, exit_station_name], properties: { trip_id: { type: string }, from_station_id: { type: string }, from_station_name: { type: string }, exit_station_id: { type: string }, exit_station_name: { type: string } } } } } }
+      responses: { "200": { description: "{ride, incident?}" } }
 
   /v1/incidents:
-    get:
-      tags: [ledger]
-      summary: All incidents plus the summary the ledger screen shows (open per desk, ready desk, deadline, totals). Rules are applied server-side.
-      responses: { "200": { description: incidents + summary } }
-
+    get: { summary: "Ledger: {incidents, claims, summary:{desks:[{desk, open_cents, ready, missing_cents, incident_ids}], ready_desk, confirmed_cents, submitted_cents, oldest_open:{id,line,date,deadline,days_left,warn_from}, min_payout_cents, dticket_monthly_cap_cents}}", responses: { "200": { description: ledger } } }
   /v1/claims:
-    get: { tags: [claims], summary: Claims with status, sent date, expected reply, responses: { "200": { description: list of Claim } } }
+    get: { responses: { "200": { description: "[Claim]" } } }
   /v1/claims/draft:
     post:
-      tags: [claims]
-      summary: Start a claim for one desk (all open incidents there by default). Returns desk address, ticket months required, whether personal data is missing.
-      requestBody: { content: { application/json: { schema: { type: object, properties: { desk: { type: string }, incident_ids: { type: array, items: { type: string } } }, required: [desk] } } } }
-      responses: { "200": { description: claim + desk info }, "400": { description: nothing open } }
+      summary: Start a claim for one desk (all open incidents there unless incident_ids given). Refused below the 4 € minimum.
+      requestBody: { content: { application/json: { schema: { type: object, required: [desk], properties: { desk: { type: string }, incident_ids: { type: array, items: { type: string, format: uuid } } } } } } }
+      responses: { "200": { description: "claim + incidents + desk_address, desk_email, desk_accepts_email, personal_data_required, relay_address, needs_recovery_code" }, "412": { description: bundle not ready } }
   /v1/claims/{id}:
     patch:
-      tags: [claims]
-      summary: Change the NGO for this claim, attach ticket images (one per month covered)
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: Claim } }
+      summary: "Change the NGO for this claim; set attachments [{upload_id, label}] (one ticket image per month covered)."
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { "200": { description: claim } }
+  /v1/uploads:
+    post:
+      summary: "multipart/form-data: kind (ticket|signature|postal_reply), file. Max 8 MB."
+      responses: { "200": { description: "{upload_id, kind, content_type, size}" } }
   /v1/claims/{id}/sign:
     post:
-      tags: [claims]
-      summary: Sign (typed name; a drawn signature image is uploaded as an attachment)
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: Claim } }
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [typed_name], properties: { typed_name: { type: string }, signature_upload_id: { type: string, format: uuid } } } } } }
+      responses: { "200": { description: claim } }
   /v1/claims/{id}/send:
     post:
-      tags: [claims]
-      summary: Send via the relay from the customer's address with BCC to their inbox. Refused unless signed and personal data present. Incidents become eingereicht.
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: claim + mail }, "412": { description: not signed / no relay / desk has no e-mail } }
+      summary: The relay. Refused unless signed and personal data present; max 5 per day. Real SMTP when SMTP_URL is set, else dry-run. BCC to the customer. Incidents become eingereicht.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { "200": { description: "{claim, mail}" }, "412": { description: not signed / no personal data / desk takes no e-mail }, "429": { description: daily limit } }
 
   /v1/mails:
-    get: { tags: [mail], summary: All mails in and out, responses: { "200": { description: list of Mail } } }
+    get: { summary: All mails in and out (newest first), responses: { "200": { description: "[Mail]" } } }
+  /v1/mails/{id}/reply:
+    post:
+      summary: Answer a railway's question through the customer's relay address.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string } } } } } }
+      responses: { "200": { description: Mail } }
   /internal/inbound-mail:
     post:
-      tags: [mail]
-      summary: Mail-provider webhook. Matches the claim, classifies (accepted, question, rejected, bounce), extracts the amount, forwards to the customer, updates statuses.
-      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/InboundMail" } } } }
-      responses: { "200": { description: mail + outcome } }
+      summary: Mail-provider webhook (and the demo's "Antwort simulieren"). Matches by relay address, classifies, forwards to the customer, updates statuses. Guarded by ?secret= when INBOUND_SECRET is set.
+      requestBody: { content: { application/json: { schema: { type: object, required: [to, from, subject, body], properties: { to: { type: string }, from: { type: string }, subject: { type: string }, body: { type: string }, message_id: { type: string }, in_reply_to: { type: string }, claim_id: { type: string, format: uuid } } } } } }
+      responses: { "200": { description: "{mail, outcome, claim_id}" } }
 
   /v1/community:
-    get: { tags: [community], summary: Minutes waited, euros submitted and confirmed, users, per-NGO totals, responses: { "200": { description: Community } } }
+    get: { summary: "{minutes, submitted_cents, confirmed_cents, users, ngos:[{id, name, confirmed_cents, submitted_cents}]}", responses: { "200": { description: community } } }
   /v1/boards:
     get:
-      tags: [community]
-      summary: Seven-day boards (verified rides only; hides the customer if opted out)
       parameters: [{ name: scope, in: query, schema: { type: string, enum: [line, city, germany] } }]
-      responses: { "200": { description: list of BoardEntry } }
+      responses: { "200": { description: "[{rank, name, points, is_me}]" } }
   /v1/teams:
-    get: { tags: [community], summary: Teams, responses: { "200": { description: list of Team } } }
+    get: { responses: { "200": { description: "[Team]" } } }
+    post:
+      requestBody: { content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
+      responses: { "200": { description: Team } }
+  /v1/teams/join:
+    post:
+      requestBody: { content: { application/json: { schema: { type: object, required: [invite_token], properties: { invite_token: { type: string } } } } } }
+      responses: { "200": { description: Team } }
+  /v1/teams/{id}:
+    get: { parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }], responses: { "200": { description: "Team {id, name, invite_token, members:[nickname], minutes, euros_cents, top_member}" } } }
+    delete: { parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }], responses: { "200": { description: left } } }
 
 components:
   schemas:
-    TicketType: { type: string, enum: [deutschlandticket, zeitkarte, einzelfahrkarte] }
-    TrainCategory: { type: string, enum: [s, rb, re, fern, bus] }
-    IncidentStatus: { type: string, enum: [gesammelt, bereit, eingereicht, bestaetigt, abgelehnt, verfallen, gedeckelt] }
-    ClaimStatus: { type: string, enum: [draft, sent, question, accepted, rejected, bounced] }
-    MePatch:
-      type: object
-      properties:
-        ticket: { $ref: "#/components/schemas/TicketType" }
-        ngo_id: { type: string }
-        location_mode: { type: string, enum: [never, while_using, always] }
-        notifications: { type: boolean }
-        show_on_boards: { type: boolean }
-        keep_correspondence: { type: boolean }
-        traewelling_linked: { type: boolean }
-    PersonalData:
-      type: object
-      required: [name, address, email]
-      properties: { name: { type: string }, address: { type: string }, email: { type: string }, ticket_number: { type: string } }
     CheckIn:
       type: object
-      required: [departure_id, from_station, exit_stop]
+      required: [trip_id, from_station_id, from_station_name, exit_station_id, exit_station_name]
       properties:
-        departure_id: { type: string }
-        from_station: { type: string }
-        exit_stop: { type: string }
-        ticket: { $ref: "#/components/schemas/TicketType" }
-        location_verified: { type: boolean }
-    Arrival:
-      type: object
-      properties:
-        delay_minutes: { type: integer }
-        actual_arrival: { type: string, example: "10:46" }
-        cancelled: { type: boolean }
-        self_entered: { type: boolean }
-    Nachtrag:
-      type: object
-      required: [departure_id, from_station, exit_stop, date]
-      properties: { departure_id: { type: string }, from_station: { type: string }, exit_stop: { type: string }, date: { type: string, format: date } }
-    InboundMail:
-      type: object
-      required: [to, from, subject, body]
-      properties: { to: { type: string }, from: { type: string }, subject: { type: string }, body: { type: string }, claim_id: { type: string } }
+        trip_id: { type: string }
+        from_station_id: { type: string }
+        from_station_name: { type: string }
+        exit_station_id: { type: string }
+        exit_station_name: { type: string }
+        ticket: { type: string, enum: [deutschlandticket, zeitkarte, einzelfahrkarte] }
+        location: { type: object, properties: { lat: { type: number }, lon: { type: number }, accuracy_m: { type: number } } }

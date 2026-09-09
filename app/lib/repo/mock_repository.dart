@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart' show TimeOfDay;
 
-import '../api/models.dart';
 import '../mock/mock_data.dart';
 import '../state/demo_state.dart';
 import 'app_repository.dart';
@@ -481,8 +480,7 @@ class MockRepository implements AppRepository {
       body: body,
       date: DateTime.now(),
     );
-    state.mails.insert(0, m);
-    state.notifyListeners();
+    state.addMail(m);
     return _mail(m);
   }
 

@@ -369,6 +369,12 @@ class DemoState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Repository hook: record a mail the customer wrote (a reply to a question).
+  void addMail(RailMail mail) {
+    mails.insert(0, mail);
+    notifyListeners();
+  }
+
   /// Demo: the railway answers the most recent submitted bundle.
   RailMail? receiveReply({MailOutcome outcome = MailOutcome.accepted}) {
     final submitted = incidents.where((i) => i.status == IncidentStatus.eingereicht).toList();

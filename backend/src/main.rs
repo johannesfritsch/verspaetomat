@@ -1,7 +1,9 @@
+#![allow(clippy::type_complexity)]
 mod auth;
 mod db;
 mod fixtures;
 mod handlers;
+mod mail;
 mod model;
 mod rules;
 mod train;

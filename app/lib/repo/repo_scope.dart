@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/client.dart';
-import '../api/models.dart';
 import '../api/token_store.dart';
 import '../state/demo_state.dart';
 import 'app_repository.dart';

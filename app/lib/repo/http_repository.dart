@@ -1,5 +1,4 @@
 import '../api/client.dart';
-import '../api/models.dart';
 import '../api/token_store.dart';
 import 'app_repository.dart';
 

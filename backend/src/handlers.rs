@@ -317,6 +317,7 @@ pub async fn rides(State(s): State<AppState>, c: Customer) -> ApiResult {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct LocationFix {
     pub lat: f64,
     pub lon: f64,
@@ -646,6 +647,9 @@ pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<D
     if selected.is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "no open incidents for this desk"));
     }
+    if !rules::bundle_ready(&selected) {
+        return Err(err(StatusCode::PRECONDITION_FAILED, "bundle below the 4 € minimum; keep collecting"));
+    }
     let ngo: NgoRow = sqlx::query_as("select * from ngos where id = $1").bind(&c.0.ngo_id).fetch_one(&s.pool).await.map_err(internal)?;
     let amount: Cents = selected.iter().map(|i| i.amount_cents).sum();
     let mut months: Vec<String> = selected.iter().map(|i| i.ride_date.format("%Y-%m").to_string()).collect();
@@ -818,8 +822,28 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     );
     let attachments = json!([{ "name": "EU-Antrag.txt", "content_type": "text/plain", "text": claim_summary_text(&claim, &incidents, &name) }]);
     let message_id = format!("<{}@verspaetomat.de>", Uuid::new_v4());
-    let dry_run = std::env::var("SMTP_URL").is_err();
-    // TODO tonight: lettre transport when SMTP_URL is set.
+    let summary = claim_summary_text(&claim, &incidents, &name);
+    let mut uploads: Vec<(String, String, Vec<u8>)> = sqlx::query_as::<_, (String, String, Vec<u8>)>(
+        "select ca.label || case when u.content_type like 'image/png' then '.png' when u.content_type like 'image/jpeg' then '.jpg' else '' end, u.content_type, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1",
+    )
+    .bind(id)
+    .fetch_all(&s.pool)
+    .await
+    .map_err(internal)?;
+    uploads.insert(0, ("EU-Antrag.txt".into(), "text/plain".into(), summary.into_bytes()));
+    let sent = crate::mail::send(crate::mail::OutgoingMail {
+        from: &format!("{name} <{relay}>"),
+        to: &to,
+        bcc: Some(&email),
+        subject: "Fahrgastrechte: EU-Antragsformular",
+        body: &body,
+        message_id: &message_id,
+        in_reply_to: None,
+        attachments: uploads,
+    })
+    .await
+    .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?;
+    let dry_run = matches!(sent, crate::mail::SendResult::DryRun);
     let mail_id = Uuid::new_v4();
     let mail: MailRow = sqlx::query_as(
         "insert into mails (id, customer_id, claim_id, direction, message_id, from_addr, to_addr, bcc_addr, subject, body, attachments, dry_run)
@@ -871,7 +895,20 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     let (Some(name), Some(email), Some(relay)) = (c.0.full_name.clone(), c.0.email.clone(), c.0.relay_address.clone()) else {
         return Err(err(StatusCode::PRECONDITION_FAILED, "personal data required"));
     };
-    let dry_run = std::env::var("SMTP_URL").is_err();
+    let message_id = format!("<{}@verspaetomat.de>", Uuid::new_v4());
+    let sent = crate::mail::send(crate::mail::OutgoingMail {
+        from: &format!("{name} <{relay}>"),
+        to: &orig.from_addr,
+        bcc: Some(&email),
+        subject: &format!("Re: {}", orig.subject),
+        body: &r.body,
+        message_id: &message_id,
+        in_reply_to: orig.message_id.as_deref(),
+        attachments: vec![],
+    })
+    .await
+    .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?;
+    let dry_run = matches!(sent, crate::mail::SendResult::DryRun);
     let mail: MailRow = sqlx::query_as(
         "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, bcc_addr, subject, body, dry_run)
          values ($1,$2,$3,'out',$4,$5,$6,$7,$8,$9,$10,$11) returning *",
@@ -879,7 +916,7 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     .bind(Uuid::new_v4())
     .bind(c.0.id)
     .bind(orig.claim_id)
-    .bind(format!("<{}@verspaetomat.de>", Uuid::new_v4()))
+    .bind(&message_id)
     .bind(orig.message_id)
     .bind(format!("{name} <{relay}>"))
     .bind(orig.from_addr)
@@ -979,7 +1016,20 @@ pub async fn inbound_mail(State(s): State<AppState>, axum::extract::Query(q): ax
         }
         rules::audit(&s.pool, "claim", claim.id, Some("sent"), &format!("{:?}", claim_status).to_lowercase(), "inbound mail").await.map_err(internal)?;
     }
-    // TODO tonight: forward the original to cust.email via SMTP when configured.
+    if let Some(email) = cust.email.as_deref() {
+        let fwd_body = format!("Weitergeleitet von deiner Verspätomat-Adresse {}.\nVon: {}\nBetreff: {}\n\n{}", relay, m.from, m.subject, m.body);
+        let _ = crate::mail::send(crate::mail::OutgoingMail {
+            from: &format!("Verspätomat <{}>", relay),
+            to: email,
+            bcc: None,
+            subject: &format!("Fwd: {}", m.subject),
+            body: &fwd_body,
+            message_id: &format!("<{}@verspaetomat.de>", Uuid::new_v4()),
+            in_reply_to: None,
+            attachments: vec![],
+        })
+        .await;
+    }
     Ok(Json(json!({ "mail": mail, "outcome": outcome, "claim_id": claim.map(|c| c.id) })))
 }
 

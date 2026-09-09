@@ -172,7 +172,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
                 child: Text(
                   session.busy
                       ? 'Verbinde …'
-                      : session.error ?? (session.healthy == true ? '${session.repo.label} erreichbar' + (session.isLocal && session.me != null ? ' · Gerät ${session.me!.id.substring(0, session.me!.id.length < 8 ? session.me!.id.length : 8)}' : '') : 'Nicht erreichbar'),
+                      : session.error ?? (session.healthy == true ? '${session.repo.label} erreichbar${session.isLocal && session.me != null ? ' · Gerät ${session.me!.id.substring(0, session.me!.id.length < 8 ? session.me!.id.length : 8)}' : ''}' : 'Nicht erreichbar'),
                   style: VText.caption,
                 ),
               ),
