@@ -36,7 +36,7 @@ fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<Value>) {
 }
 
 fn today() -> NaiveDate {
-    Utc::now().date_naive()
+    crate::clock::today()
 }
 
 pub async fn health(State(s): State<AppState>) -> Json<Value> {
@@ -148,7 +148,7 @@ pub async fn badges(State(s): State<AppState>, c: Customer) -> ApiResult {
 // ---------------------------------------------------------------------------
 
 async fn customer_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value> {
-    let week_ago = Utc::now() - Duration::days(7);
+    let week_ago = crate::clock::now() - Duration::days(7);
     let (points_total, points_week): (i64, i64) = sqlx::query_as(
         "select coalesce(sum(points),0)::bigint, coalesce(sum(points) filter (where finalised_at >= $2),0)::bigint from rides where customer_id = $1 and status = 'arrived'",
     )
@@ -291,7 +291,7 @@ pub async fn export_me(State(s): State<AppState>, c: Customer) -> ApiResult {
     let incidents: Vec<IncidentRow> = sqlx::query_as("select * from incidents where customer_id = $1 order by ride_date desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
     let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 order by created_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
     let mails: Vec<MailRow> = sqlx::query_as("select * from mails where customer_id = $1 order by occurred_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
-    Ok(Json(json!({ "customer": c.0, "rides": rides, "incidents": incidents, "claims": claims, "mails": mails, "exported_at": Utc::now() })))
+    Ok(Json(json!({ "customer": c.0, "rides": rides, "incidents": incidents, "claims": claims, "mails": mails, "exported_at": crate::clock::now() })))
 }
 
 pub async fn delete_me(State(s): State<AppState>, c: Customer) -> ApiResult {
@@ -953,6 +953,11 @@ pub async fn inbound_mail(State(s): State<AppState>, axum::extract::Query(q): ax
             return Err(err(StatusCode::UNAUTHORIZED, "bad secret"));
         }
     }
+    Ok(Json(process_inbound(&s, m).await?))
+}
+
+/// Shared by the provider webhook and the Stellwerk.
+pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (StatusCode, Json<Value>)> {
     let relay = m.to.trim().trim_matches(|ch| ch == '<' || ch == '>').to_lowercase();
     let cust: Option<CustomerRow> = sqlx::query_as("select * from customers where lower(relay_address) = $1").bind(&relay).fetch_optional(&s.pool).await.map_err(internal)?;
     let Some(cust) = cust else { return Err(err(StatusCode::NOT_FOUND, "no customer for this relay address")) };
@@ -1031,7 +1036,7 @@ pub async fn inbound_mail(State(s): State<AppState>, axum::extract::Query(q): ax
         })
         .await;
     }
-    Ok(Json(json!({ "mail": mail, "outcome": outcome, "claim_id": claim.map(|c| c.id) })))
+    Ok(json!({ "mail": mail, "outcome": outcome, "claim_id": claim.map(|c| c.id) }))
 }
 
 /// "4,50 EUR" / "19,95 €" → cents.

@@ -39,8 +39,23 @@ lib/
 
 `STYLE.md` is the build brief for the "Bahnhofsuhr" look. The design canvas with the chosen direction and the two alternatives is linked from the session that produced it.
 
-## Demo controls
+## Stellwerk
 
-Buttons drawn with a dashed grey outline and a "Demo:" prefix stand in for the real world: simulate the next stop, an arrival with a chosen delay, the railway's reply. They are part of the showcase, not the product.
+In local mode the app carries no simulate buttons. The world is driven from the backend's signal box, a small CLI:
+
+```bash
+cd backend
+cargo run --bin stellwerk -- customers          # who exists, who is riding
+cargo run --bin stellwerk -- watch Johannes     # live view of a customer's ride
+cargo run --bin stellwerk -- delay Johannes +25 # add 25 minutes to the current trip
+cargo run --bin stellwerk -- ff Johannes        # fast-forward: exit stop reached, ride finalised
+cargo run --bin stellwerk -- reply Johannes --accepted   # the railway answers (--question, --rejected)
+cargo run --bin stellwerk -- clock +100d        # move the system clock: deadlines, expiry
+cargo run --bin stellwerk -- reset Johannes     # wipe that customer's rides, claims, mails
+```
+
+The app polls the backend and shows whatever the Stellwerk made true: the delay grows on Unterwegs, the reveal appears on arrival, the ledger turns "bestätigt" after a reply.
+
+Demo mode (built-in data, no backend) keeps its own dashed "Demo:" buttons for the same moments, so the showcase works on a plane.
 
 Fonts load from Google Fonts on first run and are cached afterwards; without a network the app falls back to the system font.

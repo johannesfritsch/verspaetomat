@@ -127,6 +127,8 @@ Done and verified:
   `flutter test integration_test/workflow_test.dart -d <simulator> --dart-define=API_URL=http://127.0.0.1:8081 --dart-define=BACKEND=local --dart-define=NO_LOCATION=1 --dart-define=E2E=true --dart-define=INITIAL_ROUTE=/bahnsteig`
 - Proof: `app/integration_test/workflow_test.dart` passes on the simulator against the local backend: three real check-ins from live Köln Hbf departures, arrival +68 each, bundle "bereit", the five-step claim, "Abgeschickt.", "eingereicht", simulated reply, "bestätigt", Wir updated. Migration 0013 (`dismissed_at`) came out of it.
 
+- Stellwerk: server-side simulation layer (`backend/src/train/sim.rs`), admin API, and the `stellwerk` CLI (delay, cancel, fast-forward, poll, reply, clock, reset, watch). Verified: a fast-forwarded ride is finalised by the real follower, incidents and badges follow, a clock shift of +100 days expires open incidents, reset cleans up. The app has no simulate buttons in local mode.
+
 Not tonight (as planned): Typst PDF (plain-text summary attached instead), push, background geofence, Träwelling OAuth, NGO report import UI, App Attest, boards across real users, the 25 % monthly cap.
 
 Gotchas found:

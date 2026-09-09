@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
+mod admin;
 mod auth;
+mod clock;
 mod db;
 mod fixtures;
 mod handlers;
@@ -18,12 +20,13 @@ use axum::{
 use sqlx::PgPool;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
+use crate::train::sim::TrainSource;
 use crate::train::transitous::TransitousClient;
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
-    pub train: Arc<TransitousClient>,
+    pub train: Arc<TrainSource>,
 }
 
 #[tokio::main]
@@ -34,7 +37,9 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::connect().await?;
     db::seed(&pool).await?;
-    let train = Arc::new(TransitousClient::new());
+    clock::load(&pool).await?;
+    let train = Arc::new(TrainSource::new(TransitousClient::new()));
+    train.load_overrides(&pool).await?;
     let state = AppState { pool: pool.clone(), train: train.clone() };
 
     // The trip follower finalises rides; we turn finalised rides into incidents.
@@ -89,6 +94,17 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/teams", get(handlers::teams).post(handlers::create_team))
         .route("/v1/teams/join", post(handlers::join_team))
         .route("/v1/teams/{id}", get(handlers::team).delete(handlers::leave_team))
+        // Stellwerk (admin)
+        .route("/admin/customers", get(admin::customers))
+        .route("/admin/customers/{key}/ride", get(admin::ride))
+        .route("/admin/customers/{key}/delay", post(admin::delay))
+        .route("/admin/customers/{key}/cancel", post(admin::cancel))
+        .route("/admin/customers/{key}/ff", post(admin::fast_forward))
+        .route("/admin/customers/{key}/reply", post(admin::reply))
+        .route("/admin/customers/{key}/reset", post(admin::reset))
+        .route("/admin/poll", post(admin::poll))
+        .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
+        .route("/admin/overrides", get(admin::overrides).delete(admin::clear_overrides))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

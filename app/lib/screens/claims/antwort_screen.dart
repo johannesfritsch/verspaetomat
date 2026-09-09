@@ -38,9 +38,15 @@ class _AntwortScreenState extends State<AntwortScreen> {
     _mailId = widget.mailId;
   }
 
+  bool _demoIgnored = false;
+
   Future<List<ApiMail>> _load(AppRepository repo) async {
     if (widget.demo != null && !_demoRan) {
       _demoRan = true;
+      if (RepoScope.read(context).isLocal) {
+        _demoIgnored = true;
+        return repo.mails();
+      }
       try {
         final r = await repo.simulateInbound(body: _bodies[widget.demo] ?? _bodies['question']!);
         _mailId = r.mail.id;
@@ -70,7 +76,9 @@ class _AntwortScreenState extends State<AntwortScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (widget.demo != null && _demoError != null)
+              if (_demoIgnored)
+                Text('Antworten kommen vom Stellwerk oder von der Bahn.', style: VText.body.copyWith(color: VColors.ink2))
+              else if (widget.demo != null && _demoError != null)
                 const _NothingSubmitted()
               else if (mail == null)
                 const _NothingYet()
@@ -137,7 +145,7 @@ class _NothingSubmitted extends StatelessWidget {
         const VGap.s(),
         Text('Schick erst ein Bündel ab. Die Antwort der Bahn kann nur auf einen Antrag folgen.', style: VText.body.copyWith(color: VColors.ink2)),
         const VGap.l(),
-        VDemoControl(label: 'Zum Konto', icon: Icons.receipt_long_outlined, onTap: () => (context.canPop() ? context.pop() : context.go(Routes.konto))),
+        VGhostButton(label: 'Zum Konto', icon: Icons.receipt_long_outlined, onTap: () => (context.canPop() ? context.pop() : context.go(Routes.konto))),
       ],
     );
   }
@@ -444,11 +452,18 @@ class _PostalPath extends StatelessWidget {
         const VGap.xs(),
         Text('Manchmal antwortet die Bahn per Brief. Dann fotografierst du ihn, wir lesen den Betrag.', style: VText.caption),
         const VGap.s(),
-        VDemoControl(
-          label: 'Fotografiere die Antwort',
-          icon: Icons.photo_camera_outlined,
-          onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kamera öffnet sich. Wir lesen den Betrag, du bestätigst ihn.'))),
-        ),
+        if (RepoScope.of(context).isLocal)
+          VGhostButton(
+            label: 'Antwort fotografieren',
+            icon: Icons.photo_camera_outlined,
+            onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kamera folgt. Wir lesen den Betrag, du bestätigst ihn.'))),
+          )
+        else
+          VDemoControl(
+            label: 'Fotografiere die Antwort',
+            icon: Icons.photo_camera_outlined,
+            onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kamera öffnet sich. Wir lesen den Betrag, du bestätigst ihn.'))),
+          ),
       ],
     );
   }

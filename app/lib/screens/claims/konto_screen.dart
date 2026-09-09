@@ -127,12 +127,14 @@ class _KontoScreenState extends State<KontoScreen> {
                 VSection('Eingereicht', trailing: Text(fmtCents(summary.submittedCents), style: VText.captionInk)),
                 for (final i in submitted)
                   IncidentRow(incident: i, note: _sentNote(data.claims, i), onTap: () => showEvidenceSheet(context, i)),
-                const VGap.m(),
-                VDemoControl(
-                  label: 'Antwort der Bahn simulieren',
-                  icon: Icons.mark_email_unread_outlined,
-                  onTap: () => _simulateReply(context),
-                ),
+                if (!session.isLocal) ...[
+                  const VGap.m(),
+                  VDemoControl(
+                    label: 'Antwort der Bahn simulieren',
+                    icon: Icons.mark_email_unread_outlined,
+                    onTap: () => _simulateReply(context),
+                  ),
+                ],
               ],
               if (confirmed.isNotEmpty) ...[
                 const VGap.xl(),

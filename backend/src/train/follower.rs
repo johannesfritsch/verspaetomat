@@ -11,7 +11,7 @@ use sqlx::PgPool;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-use super::transitous::TransitousClient;
+use super::sim::TrainSource;
 use super::TripInfo;
 
 /// Grace after the (live or scheduled) arrival at the exit stop before we call it arrived.
@@ -45,7 +45,7 @@ pub fn points_for(final_delay_min: i64, cancelled: bool) -> i64 {
 }
 
 /// Start the follower loop. Returns a receiver on which every finalised ride is announced.
-pub fn spawn(pool: PgPool, client: Arc<TransitousClient>, interval: Duration) -> broadcast::Receiver<RideFinalised> {
+pub fn spawn(pool: PgPool, client: Arc<TrainSource>, interval: Duration) -> broadcast::Receiver<RideFinalised> {
     let (tx, rx) = broadcast::channel::<RideFinalised>(64);
     let announce = tx.clone();
     tokio::spawn(async move {
@@ -62,7 +62,7 @@ pub fn spawn(pool: PgPool, client: Arc<TransitousClient>, interval: Duration) ->
 }
 
 /// One pass over all riding rides. Public so a demo control or a test can drive it.
-pub async fn poll_once(pool: &PgPool, client: &TransitousClient, announce: &broadcast::Sender<RideFinalised>) -> Result<()> {
+pub async fn poll_once(pool: &PgPool, client: &TrainSource, announce: &broadcast::Sender<RideFinalised>) -> Result<()> {
     let riding: Vec<RidingRow> = sqlx::query_as(
         "select id, customer_id, trip_id, exit_station_id, exit_station_name, planned_arrival \
          from rides where status = 'riding' order by checked_in_at",
@@ -92,7 +92,7 @@ pub async fn poll_once(pool: &PgPool, client: &TransitousClient, announce: &broa
 }
 
 async fn apply_trip(pool: &PgPool, row: &RidingRow, trip: &TripInfo, announce: &broadcast::Sender<RideFinalised>) -> Result<()> {
-    let now = Utc::now();
+    let now = crate::clock::now();
 
     sqlx::query("insert into ride_snapshots (ride_id, source, payload) values ($1, 'transitous', $2)")
         .bind(row.id)

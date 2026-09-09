@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 
 export DATABASE_URL="${DATABASE_URL:-postgres://localhost/verspaetomat}"
 export RUST_LOG="${RUST_LOG:-info,tower_http=info,sqlx=warn}"
+export ADMIN_TOKEN="${ADMIN_TOKEN:-stellwerk}"   # the Stellwerk CLI uses the same default
 
 if ! pg_isready -q 2>/dev/null; then
   echo "starting postgresql@17"; brew services start postgresql@17 >/dev/null

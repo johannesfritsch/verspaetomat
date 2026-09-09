@@ -49,12 +49,18 @@ class _UnterwegsScreenState extends State<UnterwegsScreen> {
     try {
       final live = await repo.currentRide();
       if (!mounted) return;
+      final wasRiding = _live?.ride.status == ApiRideStatus.riding;
       setState(() {
         _live = live;
         _stale = false;
         _stamp = DateTime.now();
         _error = null;
       });
+      // The ride ended while we were watching: the reveal, once.
+      if (wasRiding && live != null && live.ride.status == ApiRideStatus.arrived && mounted) {
+        context.go(Routes.angekommen);
+        return;
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -105,24 +111,25 @@ class _UnterwegsScreenState extends State<UnterwegsScreen> {
       scroll: true,
       trailing: VIconButton(icon: Icons.close, onTap: () => context.go(Routes.bahnsteig)),
       showBack: false,
-      bottom: Row(
-        children: [
-          if (!session.isLocal) ...[
-            Expanded(
-              child: VDemoControl(
-                label: 'Nächster Halt',
-                icon: Icons.skip_next_outlined,
-                onTap: () {
-                  session.demo.tickRide();
-                  _load(quiet: true);
-                },
-              ),
+      // Demo mode fakes the world from here. In local mode the Stellwerk on the backend does.
+      bottom: session.isLocal
+          ? null
+          : Row(
+              children: [
+                Expanded(
+                  child: VDemoControl(
+                    label: 'Nächster Halt',
+                    icon: Icons.skip_next_outlined,
+                    onTap: () {
+                      session.demo.tickRide();
+                      _load(quiet: true);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: VDemoControl(label: 'Ankunft +68', icon: Icons.flag_outlined, onTap: _simulateArrival)),
+              ],
             ),
-            const SizedBox(width: 8),
-          ],
-          Expanded(child: VDemoControl(label: 'Ankunft +68', icon: Icons.flag_outlined, onTap: _simulateArrival)),
-        ],
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -247,6 +254,7 @@ class _NotRiding extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLocal = RepoScope.of(context).isLocal;
     return VScreen(
       title: 'Unterwegs',
       child: Column(
@@ -265,6 +273,8 @@ class _NotRiding extends StatelessWidget {
           const VGap.xl(),
           if (arrived)
             VPrimaryButton(label: 'Ankunft ansehen', onTap: () => context.go(Routes.angekommen))
+          else if (isLocal)
+            VGhostButton(label: 'Zum Bahnsteig', onTap: () => context.go(Routes.bahnsteig))
           else
             VDemoControl(label: 'Nächsten Regio einchecken', icon: Icons.train_outlined, onTap: () => demoCheckIn(context)),
         ],

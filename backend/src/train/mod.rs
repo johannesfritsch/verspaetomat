@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 pub mod follower;
+pub mod sim;
 pub mod transitous;
 
 use chrono::{DateTime, Utc};

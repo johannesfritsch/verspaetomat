@@ -98,7 +98,13 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   Future<void> _refreshRide() async {
     try {
       final live = await RepoScope.read(context).repo.currentRide();
-      if (mounted) setState(() => _live = live);
+      if (!mounted) return;
+      final wasRiding = _live?.ride.status == ApiRideStatus.riding;
+      setState(() => _live = live);
+      // The ride ended while the customer was on the Bahnsteig: the reveal, once.
+      if (wasRiding && live != null && live.ride.status == ApiRideStatus.arrived) {
+        context.push(Routes.angekommen);
+      }
     } catch (_) {
       // keep the last state
     }

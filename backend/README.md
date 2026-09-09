@@ -51,6 +51,26 @@ openapi.yaml       the contract
 dev.sh             one-command dev start
 ```
 
+## Stellwerk: drive the world from the server
+
+The app carries no simulate buttons when it talks to a real backend. Instead a thin layer in front of the train-data source applies per-trip overrides, and a CLI sets them. The follower, the API and the app all see the same altered world, so a simulated delay creates a real incident through the real code path.
+
+```bash
+cargo run --bin stellwerk -- customers              # who exists, who is riding
+cargo run --bin stellwerk -- ride Johannes          # current ride, stops, live state
+cargo run --bin stellwerk -- delay Johannes +25     # add delay to the current trip
+cargo run --bin stellwerk -- cancel Johannes        # cancel it
+cargo run --bin stellwerk -- ff Johannes            # fast-forward: exit reached, follower finalises
+cargo run --bin stellwerk -- poll                   # one follower pass now
+cargo run --bin stellwerk -- reply Johannes --accepted   # or --question, --rejected, --amount 450
+cargo run --bin stellwerk -- clock +100d            # shift the system clock (deadlines, nudges); `clock now` resets
+cargo run --bin stellwerk -- reset Johannes         # wipe one customer's rides, incidents, claims, mails
+cargo run --bin stellwerk -- overrides [--clear]
+cargo run --bin stellwerk -- watch Johannes         # live view, refreshes every 3 s
+```
+
+Env: `STELLWERK_URL` (default `http://127.0.0.1:8080`), `ADMIN_TOKEN` (default `stellwerk`, same on the server). Customers can be addressed by nickname, id prefix or relay address. Clock shifts are global and one-way for expiry: an incident marked `verfallen` under a shifted clock stays so; use `reset`. Tables: `sim_trip_overrides`, `sim_clock` (migration 0014). Admin routes live under `/admin/*` and must not be exposed publicly.
+
 ## Loops
 
 - Trip follower: every 45 s, every ride in `riding` is polled; snapshots go to `ride_snapshots`; at the exit stop the ride is finalised and an incident is created when the rules say so.
