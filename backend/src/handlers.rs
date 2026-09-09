@@ -54,11 +54,21 @@ pub struct LatLon {
     pub lon: Option<f64>,
 }
 
-pub async fn stations_nearby(State(s): State<AppState>, _c: Customer, Query(q): Query<LatLon>) -> ApiResult {
-    // Default: Köln Hbf, so the simulator works without a location.
-    let (lat, lon) = (q.lat.unwrap_or(50.9430), q.lon.unwrap_or(6.9586));
+/// Nearby stations. The phone's position decides; a Stellwerk override per customer wins.
+/// Without either there is nothing to answer: the app shows the search field instead.
+pub async fn stations_nearby(State(s): State<AppState>, c: Customer, Query(q): Query<LatLon>) -> ApiResult {
+    let sim: Option<(f64, f64, String)> = sqlx::query_as("select lat, lon, label from sim_customer_location where customer_id = $1")
+        .bind(c.0.id)
+        .fetch_optional(&s.pool)
+        .await
+        .map_err(internal)?;
+    let (lat, lon, source, label) = match (sim, q.lat, q.lon) {
+        (Some((lat, lon, label)), _, _) => (lat, lon, "stellwerk", Some(label)),
+        (None, Some(lat), Some(lon)) => (lat, lon, "gps", None),
+        _ => return Ok(Json(json!({ "stations": [], "source": "none", "label": null }))),
+    };
     let stops = s.train.nearby_stops(lat, lon).await.map_err(internal)?;
-    Ok(Json(json!(stops)))
+    Ok(Json(json!({ "stations": stops, "source": source, "label": label, "lat": lat, "lon": lon })))
 }
 
 #[derive(Deserialize)]
@@ -876,6 +886,7 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         rules::audit(&s.pool, "incident", i.id, Some(rules::from_label(i.status)), "eingereicht", "claim sent").await.map_err(internal)?;
     }
     let _ = sqlx::query("insert into badge_awards (customer_id, badge_id) values ($1, 'abgeschickt') on conflict do nothing").bind(c.0.id).execute(&s.pool).await;
+    s.events.publish(c.0.id, "claim", json!({ "claim_id": claim.id, "status": "sent" }));
     Ok(Json(json!({ "claim": claim_with_incidents(&s.pool, &claim).await.map_err(internal)?, "mail": mail })))
 }
 
@@ -1036,6 +1047,8 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
         })
         .await;
     }
+    s.events.publish(cust.id, "mail", json!({ "claim_id": claim.as_ref().map(|c| c.id), "outcome": outcome }));
+    s.events.publish(cust.id, "incident", json!({}));
     Ok(json!({ "mail": mail, "outcome": outcome, "claim_id": claim.map(|c| c.id) }))
 }
 

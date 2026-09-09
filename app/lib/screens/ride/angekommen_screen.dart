@@ -75,7 +75,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
   Future<ApiArrivalResult> _demoVariant(AppRepository repo, String v) async {
     final live = await repo.currentRide();
     if (live == null || live.ride.status != ApiRideStatus.riding) {
-      final stations = await repo.nearbyStations();
+      final stations = (await repo.nearbyStations()).stations;
       final deps = await repo.departures(stations.first.id);
       final d = deps.firstWhere((x) => !x.cancelled, orElse: () => deps.first);
       final trip = await repo.trip(d.tripId);

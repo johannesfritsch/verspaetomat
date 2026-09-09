@@ -11,6 +11,7 @@
 //!   stellwerk reset Johannes
 //!   stellwerk overrides [--clear]
 //!   stellwerk watch Johannes
+//!   stellwerk locate Johannes "Köln Hbf"   |  locate Johannes 50.943,6.9586  |  locate Johannes --clear
 //!
 //! Env: STELLWERK_URL (default http://127.0.0.1:8080), ADMIN_TOKEN (default stellwerk).
 
@@ -70,6 +71,14 @@ enum Cmd {
     },
     /// Live view of a customer's ride, refreshed every 3 s (Ctrl-C to stop)
     Watch { customer: String },
+    /// Put a customer at a station ("Köln Hbf") or at lat,lon; --clear returns to the phone's GPS
+    Locate {
+        customer: String,
+        /// Station name, or "lat,lon"
+        place: Option<String>,
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 struct Api {
@@ -221,6 +230,20 @@ async fn main() -> anyhow::Result<()> {
                 for o in list {
                     println!("{:<48} +{:>3} min  storniert {:<5}  Versatz {} s", s(&o, "trip_id"), s(&o, "extra_delay_min"), s(&o, "cancelled"), s(&o, "time_shift_secs"));
                 }
+            }
+        }
+        Cmd::Locate { customer, place, clear } => {
+            if clear {
+                api.delete(&format!("/admin/customers/{customer}/locate")).await?;
+                println!("Standort-Override entfernt; das Telefon entscheidet wieder.");
+            } else {
+                let place = place.ok_or_else(|| anyhow::anyhow!("give a station name or lat,lon, or --clear"))?;
+                let body = match place.split_once(',') {
+                    Some((a, b)) if a.trim().parse::<f64>().is_ok() && b.trim().parse::<f64>().is_ok() => json!({ "lat": a.trim().parse::<f64>()?, "lon": b.trim().parse::<f64>()? }),
+                    _ => json!({ "station": place }),
+                };
+                let v = api.post(&format!("/admin/customers/{customer}/locate"), body).await?;
+                println!("{} steht jetzt bei {} ({}, {})", s(&v, "customer"), s(&v, "label"), s(&v, "lat"), s(&v, "lon"));
             }
         }
         Cmd::Watch { customer } => loop {

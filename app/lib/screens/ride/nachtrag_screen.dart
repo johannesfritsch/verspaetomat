@@ -42,7 +42,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
     });
     try {
       if (_station == null) {
-        final nearby = await repo.nearbyStations();
+        final nearby = (await repo.nearbyStations()).stations;
         if (nearby.isEmpty) throw StateError('Kein Bahnhof gefunden. Such einen.');
         _station = nearby.first;
       }

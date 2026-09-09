@@ -580,7 +580,7 @@ class _StationSearchSheetState extends State<_StationSearchSheet> {
 Future<void> demoCheckIn(BuildContext context) async {
   final repo = RepoScope.read(context).repo;
   try {
-    final stations = await repo.nearbyStations();
+    final stations = (await repo.nearbyStations()).stations;
     if (stations.isEmpty) throw StateError('Kein Bahnhof gefunden.');
     final station = stations.first;
     final deps = await repo.departures(station.id);

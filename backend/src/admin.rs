@@ -111,6 +111,7 @@ pub async fn delay(State(s): State<AppState>, _a: Admin, Path(key): Path<String>
     s.train.set_override(&s.pool, o.clone()).await.map_err(internal)?;
     let _ = crate::train::follower::poll_once(&s.pool, &s.train, &tokio::sync::broadcast::channel(1).0).await;
     let r: RideRow = sqlx::query_as("select * from rides where id = $1").bind(r.id).fetch_one(&s.pool).await.map_err(internal)?;
+    s.events.publish(c.id, "ride", json!({ "ride_id": r.id, "status": "riding", "live_delay_min": r.live_delay_min }));
     Ok(Json(json!({ "override": o, "ride": r })))
 }
 
@@ -123,6 +124,7 @@ pub async fn cancel(State(s): State<AppState>, _a: Admin, Path(key): Path<String
     let _ = crate::train::follower::poll_once(&s.pool, &s.train, &tokio::sync::broadcast::channel(1).0).await;
     let fin = handlers::on_ride_finalised(&s.pool, r.id).await.map_err(internal)?;
     let r: RideRow = sqlx::query_as("select * from rides where id = $1").bind(r.id).fetch_one(&s.pool).await.map_err(internal)?;
+    s.events.publish(c.id, "ride", json!({ "ride_id": r.id, "status": r.status, "cancelled": true }));
     Ok(Json(json!({ "override": o, "ride": r, "incident": fin.incident, "new_badge": fin.new_badge })))
 }
 
@@ -145,6 +147,7 @@ pub async fn fast_forward(State(s): State<AppState>, _a: Admin, Path(key): Path<
         return Err(err(StatusCode::CONFLICT, "follower did not finalise the ride; check the exit stop"));
     }
     let fin = handlers::on_ride_finalised(&s.pool, r.id).await.map_err(internal)?;
+    s.events.publish(c.id, "ride", json!({ "ride_id": r2.id, "status": "arrived", "final_delay_min": r2.final_delay_min, "incident": fin.incident.as_ref().map(|i| i.id) }));
     Ok(Json(json!({ "ride": r2, "incident": fin.incident, "new_badge": fin.new_badge, "override": o })))
 }
 
@@ -154,6 +157,7 @@ pub async fn poll(State(s): State<AppState>, _a: Admin) -> ApiResult {
     let mut finalised = Vec::new();
     while let Ok(ev) = rx.try_recv() {
         let fin = handlers::on_ride_finalised(&s.pool, ev.ride_id).await.map_err(internal)?;
+        s.events.publish(ev.customer_id, "ride", json!({ "ride_id": ev.ride_id, "status": "arrived", "final_delay_min": ev.final_delay_min, "incident": fin.incident.as_ref().map(|i| i.id) }));
         finalised.push(json!({ "ride_id": ev.ride_id, "delay": ev.final_delay_min, "incident": fin.incident.map(|i| i.id) }));
     }
     Ok(Json(json!({ "finalised": finalised, "now": clock::now() })))
@@ -193,6 +197,8 @@ pub async fn reply(State(s): State<AppState>, _a: Admin, Path(key): Path<String>
         },
     )
     .await?;
+    s.events.publish(c.id, "mail", json!({ "claim_id": claim.id, "outcome": b.outcome }));
+    s.events.publish(c.id, "incident", json!({ "claim_id": claim.id }));
     Ok(Json(result))
 }
 
@@ -215,6 +221,7 @@ pub async fn set_clock(State(s): State<AppState>, _a: Admin, Json(b): Json<Clock
         (None, None) => 0,
     };
     clock::set_offset(&s.pool, secs).await.map_err(internal)?;
+    s.events.publish_all("clock", json!({ "now": clock::now(), "offset_secs": secs }));
     Ok(Json(json!({ "now": clock::now(), "offset_secs": secs })))
 }
 
@@ -224,9 +231,10 @@ pub async fn reset(State(s): State<AppState>, _a: Admin, Path(key): Path<String>
     for t in &trips {
         let _ = s.train.clear_override(&s.pool, t).await;
     }
-    for table in ["mails", "claims", "incidents", "uploads", "rides", "badge_awards"] {
+    for table in ["mails", "claims", "incidents", "uploads", "rides", "badge_awards", "sim_customer_location"] {
         sqlx::query(&format!("delete from {table} where customer_id = $1")).bind(c.id).execute(&s.pool).await.map_err(internal)?;
     }
+    s.events.publish(c.id, "reset", json!({}));
     Ok(Json(json!({ "reset": c.nickname, "trip_overrides_cleared": trips.len() })))
 }
 
@@ -237,4 +245,46 @@ pub async fn overrides(State(s): State<AppState>, _a: Admin) -> ApiResult {
 pub async fn clear_overrides(State(s): State<AppState>, _a: Admin) -> ApiResult {
     s.train.clear_all(&s.pool).await.map_err(internal)?;
     Ok(Json(json!({ "cleared": true })))
+}
+
+#[derive(Deserialize)]
+pub struct LocateBody {
+    #[serde(default)]
+    pub lat: Option<f64>,
+    #[serde(default)]
+    pub lon: Option<f64>,
+    /// A station name to geocode instead of coordinates, e.g. "Köln Hbf".
+    #[serde(default)]
+    pub station: Option<String>,
+}
+
+/// Put a customer somewhere. Overrides the phone's GPS for nearby stations until cleared.
+pub async fn locate(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<LocateBody>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let (lat, lon, label) = match (b.lat, b.lon, b.station) {
+        (Some(lat), Some(lon), station) => (lat, lon, station.unwrap_or_default()),
+        (_, _, Some(name)) => {
+            let hits = s.train.search_stops(&name).await.map_err(internal)?;
+            let hit = hits.into_iter().next().ok_or_else(|| err(StatusCode::NOT_FOUND, "no station with that name"))?;
+            (hit.lat, hit.lon, hit.name)
+        }
+        _ => return Err(err(StatusCode::BAD_REQUEST, "give lat and lon, or a station name")),
+    };
+    sqlx::query("insert into sim_customer_location (customer_id, lat, lon, label) values ($1,$2,$3,$4) on conflict (customer_id) do update set lat = excluded.lat, lon = excluded.lon, label = excluded.label, updated_at = now()")
+        .bind(c.id)
+        .bind(lat)
+        .bind(lon)
+        .bind(&label)
+        .execute(&s.pool)
+        .await
+        .map_err(internal)?;
+    s.events.publish(c.id, "location", json!({ "lat": lat, "lon": lon, "label": label, "source": "stellwerk" }));
+    Ok(Json(json!({ "customer": c.nickname, "lat": lat, "lon": lon, "label": label })))
+}
+
+pub async fn clear_location(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    sqlx::query("delete from sim_customer_location where customer_id = $1").bind(c.id).execute(&s.pool).await.map_err(internal)?;
+    s.events.publish(c.id, "location", json!({ "source": "gps" }));
+    Ok(Json(json!({ "customer": c.nickname, "cleared": true })))
 }

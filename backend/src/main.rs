@@ -3,6 +3,7 @@ mod admin;
 mod auth;
 mod clock;
 mod db;
+mod events;
 mod fixtures;
 mod handlers;
 mod mail;
@@ -27,6 +28,7 @@ use crate::train::transitous::TransitousClient;
 pub struct AppState {
     pub pool: PgPool,
     pub train: Arc<TrainSource>,
+    pub events: Arc<events::EventHub>,
 }
 
 #[tokio::main]
@@ -40,15 +42,18 @@ async fn main() -> anyhow::Result<()> {
     clock::load(&pool).await?;
     let train = Arc::new(TrainSource::new(TransitousClient::new()));
     train.load_overrides(&pool).await?;
-    let state = AppState { pool: pool.clone(), train: train.clone() };
+    let events = Arc::new(events::EventHub::default());
+    let state = AppState { pool: pool.clone(), train: train.clone(), events: events.clone() };
 
     // The trip follower finalises rides; we turn finalised rides into incidents.
     let mut finalised = train::follower::spawn(pool.clone(), train.clone(), Duration::from_secs(45));
     let pool_for_incidents = pool.clone();
+    let events_for_follower = events.clone();
     tokio::spawn(async move {
         while let Ok(ev) = finalised.recv().await {
-            if let Err(e) = handlers::on_ride_finalised(&pool_for_incidents, ev.ride_id).await {
-                tracing::error!("incident creation for ride {}: {e}", ev.ride_id);
+            match handlers::on_ride_finalised(&pool_for_incidents, ev.ride_id).await {
+                Ok(fin) => events_for_follower.publish(ev.customer_id, "ride", serde_json::json!({ "ride_id": ev.ride_id, "status": "arrived", "final_delay_min": ev.final_delay_min, "incident": fin.incident.map(|i| i.id) })),
+                Err(e) => tracing::error!("incident creation for ride {}: {e}", ev.ride_id),
             }
         }
     });
@@ -67,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/ngos", get(handlers::ngos))
         .route("/v1/badges", get(handlers::badges))
         // customer
+        .route("/v1/events", get(events::stream))
         .route("/v1/me", get(handlers::me).patch(handlers::patch_me).delete(handlers::delete_me))
         .route("/v1/me/personal-data", put(handlers::put_personal_data))
         .route("/v1/me/recovery-code", get(handlers::recovery_code))
@@ -102,6 +108,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/customers/{key}/ff", post(admin::fast_forward))
         .route("/admin/customers/{key}/reply", post(admin::reply))
         .route("/admin/customers/{key}/reset", post(admin::reset))
+        .route("/admin/customers/{key}/locate", post(admin::locate).delete(admin::clear_location))
         .route("/admin/poll", post(admin::poll))
         .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
         .route("/admin/overrides", get(admin::overrides).delete(admin::clear_overrides))

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import '../api/events.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -43,6 +46,13 @@ class Session extends ChangeNotifier {
   String? error;
   bool busy = false;
 
+  EventStream? _events;
+  final _eventsOut = StreamController<AppEvent>.broadcast();
+
+  /// Live events from the backend (local mode). Screens refresh what an event names.
+  Stream<AppEvent> get events => _eventsOut.stream;
+  bool get eventsConnected => _events?.connected ?? false;
+
   AppRepository get repo => mode == BackendMode.local ? _http : _mock;
   bool get isLocal => mode == BackendMode.local;
 
@@ -51,6 +61,26 @@ class Session extends ChangeNotifier {
     const forced = String.fromEnvironment('BACKEND', defaultValue: '');
     mode = forced == 'local' || (forced.isEmpty && stored == 'local') ? BackendMode.local : BackendMode.demo;
     await _bootstrap();
+  }
+
+  Future<void> _restartEvents() async {
+    _events?.dispose();
+    _events = null;
+    if (!isLocal || healthy != true) return;
+    final t = await tokens.token();
+    if (t == null) return;
+    final es = EventStream(baseUrl: apiUrl, token: () => t);
+    es.events.listen((e) async {
+      _eventsOut.add(e);
+      if (e.kind == 'reset' || e.kind == 'clock') {
+        try {
+          me = await repo.getMe();
+          notifyListeners();
+        } catch (_) {}
+      }
+    });
+    es.start();
+    _events = es;
   }
 
   Future<void> switchMode(BackendMode m) async {
@@ -79,6 +109,7 @@ class Session extends ChangeNotifier {
         me = await repo.getMe();
         ngos = await repo.ngos();
       }
+      await _restartEvents();
     } catch (e) {
       error = e.toString();
     } finally {
@@ -159,6 +190,8 @@ class Session extends ChangeNotifier {
 
   @override
   void dispose() {
+    _events?.dispose();
+    _eventsOut.close();
     demo.removeListener(_onDemoChanged);
     super.dispose();
   }

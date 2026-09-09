@@ -90,10 +90,10 @@ class ApiClient {
 
   // -- reference ------------------------------------------------------------
 
-  Future<List<ApiStation>> stationsNearby({double? lat, double? lon}) async => _list(await _get('/v1/stations/nearby', {
+  Future<ApiNearby> stationsNearby({double? lat, double? lon}) async => ApiNearby.fromJson(await _get('/v1/stations/nearby', {
         if (lat != null) 'lat': '$lat',
         if (lon != null) 'lon': '$lon',
-      })).map(ApiStation.fromJson).toList();
+      }));
 
   Future<List<ApiStation>> stationsSearch(String q) async => _list(await _get('/v1/stations/search', {'q': q})).map(ApiStation.fromJson).toList();
 

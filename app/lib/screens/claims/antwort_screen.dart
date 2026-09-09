@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../mock/mock_data.dart' show Mock;
 import '../../repo/app_repository.dart';
+import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
@@ -20,6 +22,7 @@ class AntwortScreen extends StatefulWidget {
 }
 
 class _AntwortScreenState extends State<AntwortScreen> {
+  StreamSubscription<AppEvent>? _eventSub;
   final _loader = LoaderController();
   String? _mailId;
   bool _demoRan = false;
@@ -35,7 +38,16 @@ class _AntwortScreenState extends State<AntwortScreen> {
   @override
   void initState() {
     super.initState();
+    _eventSub = RepoScope.read(context).events.listen((e) {
+      if (mounted && e.touchesLedger) _loader.refresh();
+    });
     _mailId = widget.mailId;
+  }
+
+  @override
+  void dispose() {
+    _eventSub?.cancel();
+    super.dispose();
   }
 
   bool _demoIgnored = false;

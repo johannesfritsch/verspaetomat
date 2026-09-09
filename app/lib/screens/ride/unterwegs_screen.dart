@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../repo/app_repository.dart';
+import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
@@ -19,6 +20,7 @@ class UnterwegsScreen extends StatefulWidget {
 }
 
 class _UnterwegsScreenState extends State<UnterwegsScreen> {
+  StreamSubscription<AppEvent>? _eventSub;
   ApiRideLive? _live;
   bool _loading = true;
   bool _stale = false;
@@ -29,11 +31,15 @@ class _UnterwegsScreenState extends State<UnterwegsScreen> {
   @override
   void initState() {
     super.initState();
+    _eventSub = RepoScope.read(context).events.listen((e) {
+      if (mounted && e.touchesRide) _load(quiet: true);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   @override
   void dispose() {
+    _eventSub?.cancel();
     _poll?.cancel();
     super.dispose();
   }

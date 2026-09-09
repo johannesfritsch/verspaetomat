@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
+import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
@@ -27,6 +28,7 @@ class WirScreen extends StatefulWidget {
 }
 
 class _WirScreenState extends State<WirScreen> {
+  StreamSubscription<AppEvent>? _eventSub;
   final _loader = LoaderController();
   int _board = 0;
   int _extraMinutes = 0;
@@ -36,6 +38,9 @@ class _WirScreenState extends State<WirScreen> {
   @override
   void initState() {
     super.initState();
+    _eventSub = RepoScope.read(context).events.listen((e) {
+      if (mounted && e.touchesLedger) _loader.refresh();
+    });
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       _tick++;
       setState(() => _extraMinutes += 1 + (_tick * 7) % 3);
@@ -44,6 +49,7 @@ class _WirScreenState extends State<WirScreen> {
 
   @override
   void dispose() {
+    _eventSub?.cancel();
     _timer?.cancel();
     super.dispose();
   }

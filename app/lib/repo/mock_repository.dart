@@ -249,13 +249,15 @@ class MockRepository implements AppRepository {
   // -- reference ------------------------------------------------------------
 
   @override
-  Future<List<ApiStation>> nearbyStations({double? lat, double? lon}) async =>
-      Mock.nearbyStations.map((s) => ApiStation(id: s.id, name: s.name, distanceM: s.distanceM, eva: s.evaNr)).toList();
+  Future<ApiNearby> nearbyStations({double? lat, double? lon}) async => ApiNearby(
+        stations: Mock.nearbyStations.map((s) => ApiStation(id: s.id, name: s.name, distanceM: s.distanceM, eva: s.evaNr)).toList(),
+        source: 'demo',
+      );
 
   @override
   Future<List<ApiStation>> searchStations(String query) async {
     final q = query.toLowerCase();
-    return (await nearbyStations()).where((s) => s.name.toLowerCase().contains(q)).toList();
+    return (await nearbyStations()).stations.where((s) => s.name.toLowerCase().contains(q)).toList();
   }
 
   @override

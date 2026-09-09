@@ -84,6 +84,23 @@ class DeviceAuth {
 // Reference data
 // ---------------------------------------------------------------------------
 
+/// Nearby stations plus where the position came from: gps, stellwerk (with a label), demo, or none.
+class ApiNearby {
+  const ApiNearby({required this.stations, required this.source, this.label});
+  final List<ApiStation> stations;
+  final String source;
+  final String? label;
+  bool get simulated => source == 'stellwerk';
+  bool get none => source == 'none';
+
+  factory ApiNearby.fromJson(dynamic j) {
+    if (j is List) return ApiNearby(stations: j.map((e) => ApiStation.fromJson(e as Map<String, dynamic>)).toList(), source: 'gps');
+    final m = j as Map<String, dynamic>;
+    final list = (m['stations'] as List? ?? const []).map((e) => ApiStation.fromJson(e as Map<String, dynamic>)).toList();
+    return ApiNearby(stations: list, source: (m['source'] ?? 'gps').toString(), label: m['label'] as String?);
+  }
+}
+
 class ApiStation {
   const ApiStation({required this.id, required this.name, this.lat = 0, this.lon = 0, this.distanceM, this.eva});
   final String id;

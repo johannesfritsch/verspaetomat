@@ -17,7 +17,7 @@ abstract class AppRepository {
   Future<String> exportMe();
 
   // -- reference ------------------------------------------------------------
-  Future<List<ApiStation>> nearbyStations({double? lat, double? lon});
+  Future<ApiNearby> nearbyStations({double? lat, double? lon});
   Future<List<ApiStation>> searchStations(String query);
   Future<List<ApiDeparture>> departures(String stationId);
   Future<ApiTrip> trip(String tripId);

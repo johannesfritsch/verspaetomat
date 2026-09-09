@@ -45,7 +45,7 @@ class HttpRepository implements AppRepository {
   Future<String> exportMe() => client.exportMe();
 
   @override
-  Future<List<ApiStation>> nearbyStations({double? lat, double? lon}) => client.stationsNearby(lat: lat, lon: lon);
+  Future<ApiNearby> nearbyStations({double? lat, double? lon}) => client.stationsNearby(lat: lat, lon: lon);
   @override
   Future<List<ApiStation>> searchStations(String query) => client.stationsSearch(query);
   @override

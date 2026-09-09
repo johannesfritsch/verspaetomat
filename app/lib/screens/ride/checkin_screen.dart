@@ -48,7 +48,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
       });
       var station = _station;
       if (station == null) {
-        final nearby = await repo.nearbyStations();
+        final nearby = (await repo.nearbyStations()).stations;
         final byId = widget.stationId == null ? null : nearby.where((s) => s.id == widget.stationId).firstOrNull;
         station = byId ??
             (widget.stationId != null

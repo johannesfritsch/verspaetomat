@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../repo/app_repository.dart';
+import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
@@ -19,9 +20,11 @@ class BahnsteigScreen extends StatefulWidget {
 }
 
 class _BahnsteigScreenState extends State<BahnsteigScreen> {
+  StreamSubscription<AppEvent>? _eventSub;
   bool _nudgeDismissed = false;
   ApiLocation? _position;
-  List<ApiStation> _stations = const [];
+  ApiNearby _nearby = const ApiNearby(stations: [], source: 'none');
+  List<ApiStation> get _stations => _nearby.stations;
   ApiRideLive? _live;
   ApiIncidents? _incidents;
   ApiCommunity? _community;
@@ -35,6 +38,11 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   @override
   void initState() {
     super.initState();
+    _eventSub = RepoScope.read(context).events.listen((e) {
+      if (!mounted) return;
+      if (e.touchesLocation) _position = null;
+      if (e.touchesLocation || e.touchesRide || e.touchesLedger) _load();
+    });
     _ticker = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted && _community != null) setState(() => _minuteTick += 1 + DateTime.now().second % 3);
     });
@@ -52,6 +60,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
 
   @override
   void dispose() {
+    _eventSub?.cancel();
     _poll?.cancel();
     _ticker?.cancel();
     super.dispose();
@@ -73,7 +82,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
       ]);
       if (!mounted) return;
       setState(() {
-        _stations = results[0] as List<ApiStation>;
+        _nearby = results[0] as ApiNearby;
         _live = results[1] as ApiRideLive?;
         _incidents = results[2] as ApiIncidents;
         _community = results[3] as ApiCommunity;
@@ -119,8 +128,8 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   }
 
   ApiStation? get _nearStation {
-    final p = _position;
-    if (p == null || _stations.isEmpty) return null;
+    // The nudge needs a position: the phone's, or a Stellwerk override. Never a guess.
+    if (_nearby.none || _stations.isEmpty) return null;
     final s = _stations.first;
     final d = s.distanceM;
     if (d != null) return d <= 300 ? s : null;
@@ -172,7 +181,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             else if (arrived)
               _ArrivedBlock(live: _live!, onDismiss: _dismiss)
             else
-              _IdleBlock(stations: _stations, onStation: _openStation, onSearch: _search),
+              _IdleBlock(nearby: _nearby, hasPosition: _position != null, onStation: _openStation, onSearch: _search, onLocate: _locate),
             const VGap.xl(),
             const VSection('Deine Zahlen'),
             InkWell(
@@ -251,6 +260,12 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     context.push('${Routes.checkin}?station=${Uri.encodeComponent(s.id)}&name=${Uri.encodeComponent(s.name)}');
   }
 
+  /// "Standort erlauben": ask the phone once, then reload. Never a guess.
+  Future<void> _locate() async {
+    _position = await currentPosition(timeout: const Duration(seconds: 5));
+    if (mounted) await _load();
+  }
+
   Future<void> _search() async {
     final s = await showStationSearch(context);
     if (s != null && mounted) _openStation(s);
@@ -258,10 +273,13 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
 }
 
 class _IdleBlock extends StatelessWidget {
-  const _IdleBlock({required this.stations, required this.onStation, required this.onSearch});
-  final List<ApiStation> stations;
+  const _IdleBlock({required this.nearby, required this.hasPosition, required this.onStation, required this.onSearch, required this.onLocate});
+  final ApiNearby nearby;
+  final bool hasPosition;
   final ValueChanged<ApiStation> onStation;
   final VoidCallback onSearch;
+  final VoidCallback onLocate;
+  List<ApiStation> get stations => nearby.stations;
 
   @override
   Widget build(BuildContext context) {
@@ -274,7 +292,14 @@ class _IdleBlock extends StatelessWidget {
         const VGap.s(),
         Text('Wenn du an einem Bahnhof stehst, sagen wir Bescheid.', style: VText.bodyS.copyWith(color: VColors.ink2)),
         const VGap.m(),
-        if (stations.isEmpty)
+        if (nearby.none && !hasPosition)
+          Row(
+            children: [
+              Expanded(child: Text('Ohne Standort zeigen wir keinen Bahnhof. Such einen, oder:', style: VText.caption)),
+              TextButton(onPressed: onLocate, child: Text('Standort erlauben', style: VText.bodySStrong.copyWith(color: VColors.red))),
+            ],
+          )
+        else if (stations.isEmpty)
           Text('Kein Bahnhof in der Nähe gefunden. Such einen.', style: VText.caption)
         else
           Wrap(

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
 import '../../mock/mock_data.dart' show Mock, IncidentStatus, TicketType;
+import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
@@ -24,6 +26,21 @@ class KontoScreen extends StatefulWidget {
 }
 
 class _KontoScreenState extends State<KontoScreen> {
+  StreamSubscription<AppEvent>? _eventSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _eventSub = RepoScope.read(context).events.listen((e) {
+      if (mounted && e.touchesLedger) _loader.refresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _eventSub?.cancel();
+    super.dispose();
+  }
   final _loader = LoaderController();
   bool _busy = false;
 
