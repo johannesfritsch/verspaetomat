@@ -32,7 +32,7 @@ Named after real causes and situations. Each badge names a thing that actually h
 | Schienenersatzverkehr | checked in to a replacement bus on a rail line |
 | Stellwerksstörung | a delay whose stated cause is a signal box failure |
 | Personen im Gleis | same, for "Personen im Gleis" |
-| Gegenzug abgewartet | delay under 10 minutes on a single-track line |
+| Gegenzug abgewartet | a delay under 10 minutes that ends on time or better at the exit stop |
 | Letzter Zug | a check-in after 23:00 |
 | Nachtschicht | arrival between 0:00 and 5:00 |
 | Volle Stunde | first 60-minute delay |
@@ -44,6 +44,8 @@ Named after real causes and situations. Each badge names a thing that actually h
 | Geduld ist eine Tugend | 1,000 Geduldspunkte |
 
 Badges are shown once, on the arrival screen, then live quietly on the profile. They can be shared as a card.
+
+Badges that depend on the operator's stated cause (Stellwerksstörung, Personen im Gleis) or on trip type (Schienenersatzverkehr) are awarded only when the live data carries that information; otherwise nothing happens. They are post-launch until the data sources in 06 confirm the fields.
 
 ## Boards
 

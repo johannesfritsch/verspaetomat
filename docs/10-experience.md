@@ -16,16 +16,16 @@ The app does not fight the railway and it does not sell the customer a fantasy o
 
 ## Look
 
-- **Two grounds.** By day: paper white with a slight cool tint, navy ink, one signal-amber accent. At night, and on the ride screen always: the departure board, deep blue-black with warm amber digits. The amber "+14" chip is the one thing every German passenger already reads without thinking.
+- **One ground.** Paper white with a slight cool tint, near-black ink, and one red: the second hand. No dark mode, no night variant. The ride screen is the same paper as everything else; what changes is the size of the number.
 - **Numbers are the typography.** Minutes and euros are set large in a condensed face with tabular digits, the way a board sets them. Everything else is quiet.
-- **Split-flap motion.** Minute counters tick over like a Fallblattanzeige. Used for the three moments that deserve it: check-in confirmed, delay grows, arrival revealed. Nowhere else.
+- **One motion.** The delay counts up once, at arrival. The station clock's second hand sweeps and waits at twelve on the idle home screen. Nothing else moves.
 - **No mascots, no confetti.** The reward for a 40-minute delay is a large, calm "40" and a line of text that makes you exhale.
-- **Colour means state.** Green: on time. Amber: late. Red only for "Ausfall" and expiring claims. The accent is amber; red is never decoration.
+- **Colour means state.** Green: on time. A red "+" before the minutes: late. Red text: "Ausfall", a rejected claim, an expiring deadline. Red is the accent and the alarm at once, so it is used sparingly: the plus sign, the second hand, the one thick rule, the progress dots. Never as a fill behind text.
 
 ## Sound and touch
 
 - Check-in: the two-tone station chime, soft, optional.
-- Delay grows: a single haptic "clack", like a flap turning. No sound.
+- Delay grows: a single soft haptic. No sound.
 - Arrival: a warmer three-tone. This is the one moment the app is allowed to feel like a reward.
 - Claim sent: silence and a full-screen "Abgeschickt." with the date. Some things are better quiet.
 

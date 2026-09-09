@@ -28,9 +28,9 @@ The app already holds every field. The timestamped check-in, with an optional on
 
 ## Bundling
 
-- **D-Ticket: collect.** Send a bundle when at least three incidents (4.50 €) have accumulated, all against the same claims desk, and the oldest incident is still inside the deadline. A customer with two incidents at the three-month mark has nothing to send; the app must say so honestly.
+- **D-Ticket: collect.** Send a bundle when the incidents reach 4 € (three in 2nd class, two in 1st class), all against the same claims desk, and the oldest incident is still inside the deadline. A customer with two incidents at the three-month mark has nothing to send; the app must say so honestly.
 - **Ordinary tickets: one claim per incident, immediately.** Each ticket clears the 4 € minimum on its own.
-- Practical limits: about 15 incidents per EU form free text; at most 10 paid incidents per D-Ticket month because of the 25 % cap.
+- Practical limits: about 15 to 20 incidents per EU form free text; at most 10 paid incidents per D-Ticket month because of the 25 % cap.
 - Open question: whether DB accepts incidents from different months in one D-Ticket bundle (each month is technically a new ticket). The EU form allows several ticket numbers. Build the ledger so it can bundle per month if needed.
 - Open question: whether the Servicecenter applies the 4 € minimum per bundle or per operator inside a bundle.
 
@@ -52,7 +52,7 @@ Each customer gets a personal sender address on our domain, e.g. `fahrgast-4711@
 - every inbound mail is forwarded to the customer's private address immediately and unchanged, and the ledger status is updated from it;
 - the customer can answer a follow-up question from inside the app, again through their own address.
 
-What we get: automatic "eingereicht" and "bestätigt", bounce detection for wrong operator addresses, response times and acceptance rates per operator, and no share-sheet dance.
+What we get: "eingereicht" set at send time and "bestätigt" set when the reply arrives, both without the customer doing anything, bounce detection for wrong operator addresses, response times and acceptance rates per operator, and no share-sheet dance.
 
 Rules that keep this a relay and not representation:
 

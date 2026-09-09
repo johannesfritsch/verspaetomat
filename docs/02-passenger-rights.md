@@ -9,7 +9,7 @@ The D-Ticket is classed as an "erheblich ermäßigter Fahrausweis" (significantl
 | Rule | Value |
 |---|---|
 | Compensation per delay of 60+ min at the destination (Nahverkehr) | 1.50 € (2nd class), 2.25 € (1st class) |
-| Minimum payout ("Bagatellgrenze") | 4.00 €, so at least three incidents must be bundled |
+| Minimum payout ("Bagatellgrenze") | 4.00 €, so incidents must be bundled: three in 2nd class, two in 1st class |
 | Monthly cap | 25 % of the ticket price = 15.75 € at the 2026 price of 63 € |
 | Delay measured | at the destination station, per journey |
 | Cancellations | count when the resulting arrival is 60+ min late ("Reise nicht angetreten" option on the form) |
@@ -43,7 +43,7 @@ Season-ticket holders may bundle repeated delays within the validity period and 
 
 ## What this means in practice
 
-Estimated figures. DB does not publish the share of regional trips delayed 60+ minutes. The 0.5 % used below is a generous estimate that includes cancellations on hourly lines. Regional punctuality (arrival under 6 min late) was 88.5 % in August 2026; long-distance 54.2 %.
+Estimated figures. DB does not publish the share of regional trips delayed 60+ minutes. The 0.5 % used below is a high-side estimate that includes cancellations on hourly lines. Regional punctuality (arrival under 6 min late) was 88.5 % in August 2026; long-distance 54.2 %.
 
 | Passenger | Trips / year | Qualifying delays | Claimable | Paid out? |
 |---|---|---|---|---|

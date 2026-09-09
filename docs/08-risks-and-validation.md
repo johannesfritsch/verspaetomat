@@ -18,7 +18,7 @@
 
 ## Four-week validation plan (no code)
 
-1. **File two real test claims** with an NGO's IBAN as account holder: one EU form by e-mail from a relay-style address with a three-incident D-Ticket bundle, one DB paper form by post. This settles the model, and shows whether DB's reply comes by e-mail with a readable amount.
+1. **File two real test claims** with an NGO's IBAN as account holder: one EU form by e-mail from a relay-style address with a D-Ticket bundle of three 2nd-class incidents, one DB paper form by post. This settles the model, and shows whether DB's reply comes by e-mail with a readable amount.
 2. **Measure incidence.** Record the gtfs.de realtime feed for four weeks; count regional arrivals by delay bucket (6+, 60+ minutes). Replaces the 0.5 % guess.
 3. **Sign three NGOs**: Bahnhofsmission, a climate NGO, a children's charity. Dedicated IBAN and monthly reporting of railway transfers.
 4. **Fake-door landing page** with the slogan and "Meine nächste Verspätung spenden". Success bar: 10 % leave an e-mail. Ask one question: D-Ticket or other tickets?

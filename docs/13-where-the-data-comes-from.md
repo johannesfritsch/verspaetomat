@@ -21,9 +21,9 @@ Every number in the app should be tappable and answer "Woher weißt du das?". Th
 | The NGO's name and account on the claim | Provided by the NGO in writing to us. Shown in full on the NGO page for transparency. | Updated when the NGO tells us | — |
 | The claim form itself | The official EU passenger-rights form (or DB's own form for the paper route), filled in by the app. | Form version shown on the preview | — |
 | Where the claim is sent | Our operator directory: the joint Servicecenter for about 40 railways, a specific address for the others. | Reviewed monthly | The app shows the operator's public passenger-rights page and lets you enter the address. |
-| "Bestätigt: 4,50 € an Bahnhofsmission" | Your photo of the railway's reply letter, or the NGO's monthly report of transfers received from railways. | Reply letters: when you upload. NGO reports: monthly. | Stays "eingereicht". We never guess. |
+| "Bestätigt: 4,50 € an Bahnhofsmission" | The railway's e-mail reply to your Verspätomat address, read automatically; or your photo of a postal reply; or the NGO's monthly report of transfers received from railways. | E-mail replies: the moment they arrive. Photos: when you upload. NGO reports: monthly. | Stays "eingereicht". We never guess. |
 | Community totals: minutes | Sum of all customers' final delays. | Live | — |
-| Community totals: euros "eingereicht" and "bestätigt" | Sum of ledger states across all customers. | Live for eingereicht, monthly for bestätigt | — |
+| Community totals: euros "eingereicht" and "bestätigt" | Sum of ledger states across all customers. | Live for both; NGO-report confirmations land monthly | — |
 | Campaign progress bar | Confirmed euros for that NGO since the campaign start. | Monthly | — |
 | Employer match "zugesagt" | The sponsor's promise per submitted claim, entered by us. | — | Shown as promised until the NGO confirms receipt. |
 | Boards | Verified rides only (a location fix at the station at check-in). | Live, seven-day window | Unverified rides earn points but do not rank. |

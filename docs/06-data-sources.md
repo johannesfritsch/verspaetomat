@@ -24,7 +24,7 @@ The trip's agency from the timetable feed, mapped to a claims desk via the opera
 
 ## Phone constraints
 
-- Android: geofencing API with a native "dwell" trigger, up to 100 fences. Background location needs a Play Console declaration. From late October 2026 Play removes geofencing as a use case for foreground location services, so the OS geofence API is the only route anyway.
+- Android: geofencing API with a native "dwell" trigger, up to 100 fences. Background location needs a Play Console declaration. Google has announced that from late October 2026 Play removes geofencing as a use case for foreground location services, so the OS geofence API is the only route anyway.
 - iOS: 20 monitored regions per app, rotated to the nearest stations; background delivery needs a CLServiceSession since iOS 18; "Always" location is reviewed strictly. Response latency 3 to 5 minutes, which matches the dwell idea.
 - No tracking during the ride. The server follows the trip.
 

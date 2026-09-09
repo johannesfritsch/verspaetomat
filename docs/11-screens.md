@@ -1,6 +1,6 @@
 # 11 — Every screen
 
-Navigation: four tabs at the bottom, named after places, not features. **Bahnsteig** (home), **Konto** (the ledger, "Spendenkonto"), **Wir** (community), **Ich** (profile). The ride view and the claim flow are full-screen moments that sit on top of the tabs.
+Navigation: four tabs at the bottom, named after places, not features. **Bahnsteig** (home), **Konto** (the ledger of claims), **Wir** (community), **Ich** (profile). The ledger is never called "Spendenkonto": most of what it holds is not a donation yet, and some of it never will be. The ride view and the claim flow are full-screen moments that sit on top of the tabs.
 
 All copy below is German because that is what the customer reads. Explanations are in English.
 
@@ -8,7 +8,7 @@ All copy below is German because that is what the customer reads. Explanations a
 
 ## 0. Before the app: icon, widget, lock screen
 
-- **Icon:** the station clock face, second hand at twelve, amber on deep blue.
+- **Icon:** the station clock face, second hand at twelve, black and red on paper white.
 - **Home-screen widget (small):** "Einchecken" button and, when a ride is running, the train and its delay. This is the fallback for people who refuse background location.
 - **Lock screen / Live Activity during a ride:** one line. "RE 7 → Münster Hbf · nächster Halt Rheine · +14".
 
@@ -16,7 +16,7 @@ All copy below is German because that is what the customer reads. Explanations a
 
 ## 1. Welcome (three cards, swipe)
 
-**Card 1 — the idea.** A large amber "+14" ticks up from 0 in split-flap motion. "Du wartest sowieso. Mach was draus." One line below: "Verspätungen werden Punkte. Große Verspätungen werden Spenden."
+**Card 1 — the idea.** A large "+14" with a red plus counts up from 0. "Du wartest sowieso. Mach was draus." One line below: "Verspätungen werden Punkte. Große Verspätungen werden Spenden."
 
 **Card 2 — the promise.** Three short lines, each with a small icon: "Dein Standort bleibt am Bahnhof." "Kein Geld läuft durch uns." "Kein Euro gilt als gespendet, bevor er es ist."
 
@@ -58,7 +58,6 @@ The screen the customer sees a hundred times. Three stacked blocks, no cards wit
 
 **Bottom: the community line.** One sentence, ticking: "Wir haben zusammen 1.208.311 Minuten gewartet und 48.320 € bestätigt." Tap for Wir.
 
-At night the ground flips to the board colours automatically.
 
 ---
 
@@ -77,7 +76,7 @@ If the customer dismisses nudges three times in a row without checking in, the a
 A bottom sheet, one thumb.
 
 - **Header:** station name, time, "Standort bestätigt ✓" if a fix was taken (makes the ride board-eligible), or "Ohne Standort" otherwise.
-- **List of departures** in board style: line, destination, planned time, platform, and the amber "+3" chip if already late. Cancelled trains show "Ausfall" in red and stay tappable (see edge state E1).
+- **List of departures** in board style: line, destination, planned time, platform, and "+3" in red-plus notation if already late. Cancelled trains show "Ausfall" in red and stay tappable (see edge state E1).
 - **Filter chips:** "Alle", "RE/RB", "S", "Fern". A search field for a train number.
 - Tapping a train slides to screen 7.
 - **Ticket toggle** at the bottom, preset from setup: "Deutschlandticket ▾".
@@ -96,10 +95,10 @@ Confirm: chime, haptic, the sheet closes, the ride card appears on Bahnsteig. To
 
 ## 8. Unterwegs (ride)
 
-Full screen, always in board colours. Designed to be glanced at, not read.
+Full screen, same paper as everywhere. Designed to be glanced at, not read.
 
 - **Top:** line and destination, the operator in small type ("DB Regio NRW").
-- **Centre:** the delay in very large split-flap digits, "+14", or "pünktlich" in green. Under it: "Ankunft Rheine 09:06 statt 08:52".
+- **Centre:** the delay in very large digits, "+14", or "pünktlich" in green. Under it: "Ankunft Rheine 09:06 statt 08:52".
 - **Stop line:** stops as dots, passed ones filled, next one pulsing, the exit stop marked.
 - **Quiet footer:** "Stand 08:41 · Wir folgen dem Zug, nicht dir."
 - **One button:** "Falscher Zug?" opens edge state E2. No sharing here; the reveal is at arrival.
@@ -127,18 +126,18 @@ If the claim is ready, "Jetzt einreichen" opens the claim flow (screen 11).
 
 ---
 
-## 10. Konto (the ledger, "Spendenkonto")
+## 10. Konto (the ledger)
 
 The customer's delays that matter, as a list.
 
 - **Header:** "Bereit: 4,50 €" or "Gesammelt: 3,00 € · noch 1,50 € bis zur Auszahlung" and, below, the total ever confirmed for this customer.
-- **Deadline line** when relevant, in amber: "Älteste Verspätung verfällt in 3 Wochen."
-- **Grouped by claims desk** with a heading only when there is more than one: "Servicecenter Fahrgastrechte (DB, ODEG, NEB …)", "NordWestBahn".
-- **Each incident:** date, line, route, "+68", the amount, and a status chip: gesammelt · bereit · eingereicht · bestätigt · verfallen.
+- **Deadline line** when relevant, in red when under 30 days: "Älteste Verspätung verfällt in 3 Wochen."
+- **Grouped by claims desk** with a heading only when there is more than one: "Servicecenter Fahrgastrechte (DB, ODEG, NEB …)", "NordWestBahn". Each group carries its own total and its own distance to 4 €, and one line explains why: "Ansprüche werden pro Bahnunternehmen gebündelt. Jedes Bündel muss 4 € erreichen."
+- **Each incident:** date, line, route, "+68", the amount, and a status chip: gesammelt · bereit · eingereicht · bestätigt · abgelehnt · verfallen. An "eingereicht" incident shows when it was sent and "Antwort in etwa 4 Wochen", so silence has a shape.
 - **Primary button:** "Antrag vorbereiten" when a bundle is ready.
 - Tapping an incident shows the evidence sheet: planned and actual times, source, timestamp, and "Als Nachweis exportieren".
 
-Ordinary-ticket incidents appear here too, each with its own "Einreichen".
+Ordinary-ticket incidents appear here too, each with its own "Einreichen". They take the same five steps with one incident instead of a bundle: step 1 shows the fare and the booking number instead of the D-Ticket number, step 2 asks for the ticket itself (the booking PDF or a photo of the paper ticket), and the amount is 25 % or 50 % of the fare.
 
 ---
 
@@ -148,7 +147,7 @@ Step indicator at the top: "1 Prüfen · 2 Ticket · 3 Zweck · 4 Unterschrift �
 
 **11.1 Prüfen.** The incidents in this bundle, each with its details, editable. The desk it goes to. First time only: name, address, private e-mail, D-Ticket number, asked here. The app then shows the customer's new sender address: "Deine Anträge gehen von fahrgast-4711@verspaetomat.de raus. Antworten der Bahn landen dort und sofort auch in deinem Postfach." One line: "Diese Daten stehen nur auf dem Formular."
 
-**11.2 Ticket.** "Füge einen Screenshot deines Tickets mit Barcode an." Buttons: "Aus Fotos", "Aus Ticket-App" (share-in). The image is shown, with: "Wird nur diesem Antrag beigefügt und nicht gespeichert."
+**11.2 Ticket.** "Füge einen Screenshot deines Tickets mit Barcode an." Buttons: "Aus Fotos", "Aus Ticket-App" (share-in). When the bundle spans months, the app asks for one screenshot per month covered ("August und September") because each month is technically a new ticket. The images are shown, with: "Werden nur diesem Antrag beigefügt und nach Abschluss gelöscht."
 
 **11.3 Zweck.** The NGO card, large, with account holder name and IBAN shown in full: "Die Entschädigung geht direkt an: Bahnhofsmission Köln e.V., DE12 …". A switch: "Anderen Zweck für diesen Antrag wählen".
 
@@ -168,7 +167,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 - **Question from the railway:** the mail is shown, with "Antworten" opening a reply composed by the customer, again through their own address. Templates for the usual questions (ticket copy, exact train) are offered; nothing is sent without the customer.
 - **Rejected:** the mail is shown, the reason highlighted if recognisable, incidents turn "abgelehnt". The customer sees the mediation link (söp) once, without pressure, and a template for a reply if they want to push back themselves.
 - **Postal reply instead:** four weeks after sending, if nothing has arrived: "Post von der Bahn bekommen?" with "Fotografiere die Antwort"; the app reads the amount if it can.
-- Confirmation also arrives when the NGO's monthly report lists the transfer.
+- Confirmation also arrives when the NGO's monthly report lists the transfer. That report is entered by us from the NGO's statement; affected customers get one notification ("Bahnhofsmission bestätigt 4,50 € aus deinem Antrag vom 20. Juni") and the incidents turn "bestätigt" the same way.
 
 ---
 
@@ -176,7 +175,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 
 - **Top figure, board type:** minutes waited together, ticking.
 - **Two euro figures side by side:** "Eingereicht" and "Bestätigt", the second larger. Tap either for the source sheet.
-- **Campaigns:** one row per NGO with a progress bar (confirmed in solid amber, submitted as a lighter segment behind it), the goal, the deadline.
+- **Campaigns:** one row per NGO with a progress bar (confirmed in solid red, submitted as a lighter segment behind it), the goal, the deadline.
 - **Boards:** "Meine Linie" as the default, with "Meine Stadt" and "Deutschland" as tabs. Seven-day window, ten names, the customer's own row pinned at the bottom if not in the ten.
 - **Teams:** the customer's teams, and "Team gründen".
 
@@ -224,11 +223,11 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 
 **E3 — Keine Daten bei Ankunft.** "Wann bist du angekommen?" with a time picker preset to the planned arrival. The ride earns points; the ledger marks it "selbst eingetragen" and the claim PDF says so in the free text.
 
-**E4 — Nachtrag.** "Gestern vergessen einzuchecken?" from Bahnsteig. The customer picks date, station, train and exit stop. Earns one point, is claimable if the delay data exists, never ranks on boards.
+**E4 — Nachtrag.** "Gestern vergessen einzuchecken?" from Bahnsteig. The customer picks date, station, train and exit stop. Earns one point, is claimable if the delay data exists, never ranks on boards. The screen says why the two differ: points reward being there, claims rest on the railway's own delay record.
 
 **E5 — Betreiber nicht im Verzeichnis.** At the claim step: the operator's name, "Wir kennen die Adresse für Anträge noch nicht.", a link to the operator's passenger-rights page, and a field to enter the address. We add it to the directory afterwards.
 
-**E6 — Verfall.** Three weeks before the oldest incident hits the three-month deadline: one notification, one amber line in Konto. If the bundle is under 4 € at the deadline, the incident turns "verfallen" with a plain explanation, and its minutes and points stay.
+**E6 — Verfall.** Three weeks before the oldest incident hits the three-month deadline: one notification, one red line in Konto. If the bundle is under 4 € at the deadline, that incident alone turns "verfallen" with a plain explanation; its minutes and points stay, and the remaining incidents keep collecting toward the next bundle.
 
 **E7 — Grenzfall 59 Minuten.** The arrival screen says "+59. Kein Anspruch, um eine Minute. Wir wissen." Nothing else. The customer will screenshot it.
 

@@ -28,4 +28,4 @@ Status: research, product concept and a fully mocked Flutter showcase app (`app/
 
 [sources.md](sources.md) lists the URLs behind the research.
 
-Terms used throughout: **D-Ticket** = Deutschlandticket. **Servicecenter** = Servicecenter Fahrgastrechte, Frankfurt, the joint claims desk of DB and about 40 other railways. **Ledger** = the in-app "Spendenkonto" of qualifying delays not yet claimed.
+Terms used throughout: **D-Ticket** = Deutschlandticket. **Servicecenter** = Servicecenter Fahrgastrechte, Frankfurt, the joint claims desk of DB and about 40 other railways. **Ledger** = the in-app "Konto" of qualifying delays and their claim status.
