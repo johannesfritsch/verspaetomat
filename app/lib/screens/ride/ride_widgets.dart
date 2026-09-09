@@ -357,10 +357,13 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
 
 /// The station nudge as an in-app banner (the real one is a notification).
 class NudgeBanner extends StatelessWidget {
-  const NudgeBanner({super.key, required this.station, required this.onCheckIn, required this.onDismiss});
+  const NudgeBanner({super.key, required this.station, required this.onCheckIn, required this.onDismiss, this.onMute});
   final String station;
   final VoidCallback onCheckIn;
   final VoidCallback onDismiss;
+
+  /// "Diesen Bahnhof nie": mutes the station on the account. Quiet, left of the snooze.
+  final VoidCallback? onMute;
 
   @override
   Widget build(BuildContext context) {
@@ -391,8 +394,10 @@ class NudgeBanner extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
             children: [
+              if (onMute != null)
+                TextButton(onPressed: onMute, child: Text('Diesen Bahnhof nie', style: VText.caption)),
+              const Spacer(),
               TextButton(onPressed: onDismiss, child: Text('Heute nicht', style: VText.bodySStrong.copyWith(color: VColors.ink2))),
               const SizedBox(width: 4),
               TextButton(onPressed: onCheckIn, child: Text('Einchecken', style: VText.bodySStrong.copyWith(color: VColors.red))),

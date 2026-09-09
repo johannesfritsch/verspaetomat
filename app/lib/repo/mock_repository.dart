@@ -207,6 +207,7 @@ class MockRepository implements AppRepository {
           keepCorrespondence: state.keepCorrespondence,
           traewellingLinked: state.traewellingLinked,
           onboardingDone: state.onboardingDone,
+          mutedStations: [for (final m in state.mutedStations) ApiMutedStation(id: m['id'] ?? '', name: m['name'] ?? '')],
         ),
         pointsTotal: Mock.pointsTotal + state.bonusPoints,
         pointsThisWeek: Mock.pointsThisWeek + state.bonusPoints,
@@ -228,6 +229,7 @@ class MockRepository implements AppRepository {
     if (p.keepCorrespondence != null) state.setKeepCorrespondence(p.keepCorrespondence!);
     if (p.traewellingLinked != null) state.setTraewellingLinked(p.traewellingLinked!);
     if (p.onboardingDone == true) state.completeOnboarding();
+    if (p.mutedStations != null) state.setMutedStations([for (final m in p.mutedStations!) {'id': m.id, 'name': m.name}]);
     return getMe();
   }
 

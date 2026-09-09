@@ -21,7 +21,6 @@ class EinstellungenScreen extends StatefulWidget {
 class _EinstellungenScreenState extends State<EinstellungenScreen> {
   bool _nudges = true;
   bool _quietHours = true;
-  final Set<String> _muted = {'Köln Hansaring'};
 
   @override
   Widget build(BuildContext context) {
@@ -76,7 +75,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           ),
           VListRow(
             title: 'Stumme Bahnhöfe',
-            subtitle: _muted.isEmpty ? 'Keine' : _muted.join(', '),
+            subtitle: session.mutedStations.isEmpty ? 'Keine' : session.mutedStations.map((m) => m.name).join(', '),
             chevron: true,
             onTap: () => _mutedStations(context),
           ),
@@ -296,36 +295,67 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
   void _mutedStations(BuildContext context) {
     showVSheet(
       context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Padding(
-          padding: const EdgeInsets.only(bottom: VSpace.l),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const VSheetHeader(title: 'Stumme Bahnhöfe', subtitle: 'Hier kommt nie ein Hinweis'),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
-                child: Column(
-                  children: [
-                    for (final s in Mock.nearbyStations)
-                      SwitchRow(
-                        title: s.name,
-                        subtitle: s.distanceLabel,
-                        value: _muted.contains(s.name),
-                        onChanged: (v) {
-                          setState(() => v ? _muted.add(s.name) : _muted.remove(s.name));
-                          setSheet(() {});
+      builder: (ctx) => ListenableBuilder(
+        listenable: RepoScope.of(context),
+        builder: (ctx, _) {
+          final session = RepoScope.of(context);
+          final muted = session.mutedStations;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: VSpace.l),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const VSheetHeader(title: 'Stumme Bahnhöfe', subtitle: 'Hier kommt nie ein Hinweis'),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (muted.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: VSpace.s),
+                          child: Text('Kein Bahnhof stumm. Du kannst einen direkt am Hinweis stummschalten oder hier suchen.', style: VText.caption),
+                        )
+                      else
+                        for (final m in muted)
+                          VListRow(
+                            title: m.name,
+                            trailing: VIconButton(icon: Icons.close, color: VColors.ink2, onTap: () => session.unmuteStation(m.id)),
+                          ),
+                      VListRow(
+                        title: 'Bahnhof hinzufügen',
+                        subtitle: 'Bahnhof suchen und stummschalten',
+                        leading: const Icon(Icons.search, size: 20, color: VColors.ink),
+                        onTap: () async {
+                          Navigator.of(ctx).pop();
+                          await _addMutedStation(context);
                         },
                       ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ),
+              ],
+            ),
+          );
+        },
       ),
     );
+  }
+
+  /// Search a station and mute it. Same search the Bahnsteig uses.
+  Future<void> _addMutedStation(BuildContext context) async {
+    final session = RepoScope.read(context);
+    final picked = await showVSheet<ApiStation>(
+      context,
+      expand: true,
+      builder: (ctx) => _StationSearchSheet(search: session.repo.searchStations),
+    );
+    if (picked == null || !context.mounted) return;
+    await session.muteStation(ApiMutedStation(id: picked.id, name: picked.name));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${picked.name} bleibt still.')));
+    _mutedStations(context);
   }
 
   void _personalData(BuildContext context, Session session, ApiPersonalData? current) {
@@ -439,5 +469,81 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     } catch (e) {
       if (context.mounted) showSnack(context, 'Export fehlgeschlagen: $e');
     }
+  }
+}
+
+/// Debounced station search; pops with the chosen station.
+class _StationSearchSheet extends StatefulWidget {
+  const _StationSearchSheet({required this.search});
+  final Future<List<ApiStation>> Function(String) search;
+
+  @override
+  State<_StationSearchSheet> createState() => _StationSearchSheetState();
+}
+
+class _StationSearchSheetState extends State<_StationSearchSheet> {
+  final _controller = TextEditingController();
+  List<ApiStation> _results = const [];
+  bool _busy = false;
+  String? _error;
+  int _seq = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onChanged(String q) async {
+    final seq = ++_seq;
+    if (q.trim().length < 2) {
+      setState(() => _results = const []);
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    if (seq != _seq || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final r = await widget.search(q.trim());
+      if (seq != _seq || !mounted) return;
+      setState(() => _results = r);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Suche fehlgeschlagen. Erneut versuchen.');
+    } finally {
+      if (mounted && seq == _seq) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const VSheetHeader(title: 'Bahnhof stummschalten', subtitle: 'Hier kommt dann nie ein Hinweis'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, VSpace.s),
+          child: TextField(
+            controller: _controller,
+            autofocus: true,
+            onChanged: _onChanged,
+            decoration: const InputDecoration(hintText: 'Bahnhof suchen', prefixIcon: Icon(Icons.search, color: VColors.ink3)),
+          ),
+        ),
+        if (_busy) const Padding(padding: EdgeInsets.symmetric(horizontal: VSpace.page), child: Text('Sucht …', style: TextStyle(color: VColors.ink2))),
+        if (_error != null) Padding(padding: const EdgeInsets.symmetric(horizontal: VSpace.page), child: Text(_error!, style: VText.caption.copyWith(color: VColors.red))),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            children: [
+              for (final s in _results) VListRow(title: s.name, onTap: () => Navigator.of(context).pop(s)),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }

@@ -293,6 +293,16 @@ class ApiPersonalData {
   Map<String, dynamic> toJson() => {'name': name, 'address': address, 'email': email, if (ticketNumber != null) 'ticket_number': ticketNumber};
 }
 
+/// A station the customer never wants the nudge for. Part of the account.
+class ApiMutedStation {
+  const ApiMutedStation({required this.id, required this.name});
+  final String id;
+  final String name;
+
+  factory ApiMutedStation.fromJson(Map<String, dynamic> j) => ApiMutedStation(id: _s(j['id']), name: _s(j['name']));
+  Map<String, dynamic> toJson() => {'id': id, 'name': name};
+}
+
 class ApiSettings {
   const ApiSettings({
     required this.ticket,
@@ -303,6 +313,7 @@ class ApiSettings {
     this.keepCorrespondence = false,
     this.traewellingLinked = false,
     this.onboardingDone = false,
+    this.mutedStations = const [],
   });
   final TicketType ticket;
   final String ngoId;
@@ -312,6 +323,9 @@ class ApiSettings {
   final bool keepCorrespondence;
   final bool traewellingLinked;
   final bool onboardingDone;
+  final List<ApiMutedStation> mutedStations;
+
+  bool isMuted(String stationId) => mutedStations.any((m) => m.id == stationId);
 
   factory ApiSettings.fromJson(Map<String, dynamic> j) => ApiSettings(
         ticket: ticketFromWire(_sn(j['ticket'])),
@@ -322,12 +336,13 @@ class ApiSettings {
         keepCorrespondence: _b(j['keep_correspondence']),
         traewellingLinked: _b(j['traewelling_linked']),
         onboardingDone: _b(j['onboarding_done']),
+        mutedStations: (j['muted_stations'] as List? ?? const []).whereType<Map<String, dynamic>>().map(ApiMutedStation.fromJson).toList(),
       );
 }
 
 /// PATCH /v1/me body. Only set fields are sent.
 class MePatch {
-  const MePatch({this.ticket, this.ngoId, this.locationMode, this.notifications, this.showOnBoards, this.keepCorrespondence, this.traewellingLinked, this.onboardingDone, this.nickname});
+  const MePatch({this.ticket, this.ngoId, this.locationMode, this.notifications, this.showOnBoards, this.keepCorrespondence, this.traewellingLinked, this.onboardingDone, this.nickname, this.mutedStations});
   final TicketType? ticket;
   final String? ngoId;
   final LocationMode? locationMode;
@@ -337,6 +352,8 @@ class MePatch {
   final bool? traewellingLinked;
   final bool? onboardingDone;
   final String? nickname;
+  /// Full replacement of the muted list.
+  final List<ApiMutedStation>? mutedStations;
 
   Map<String, dynamic> toJson() => {
         if (ticket != null) 'ticket': ticketToWire(ticket!),
@@ -348,6 +365,7 @@ class MePatch {
         if (traewellingLinked != null) 'traewelling_linked': traewellingLinked,
         if (onboardingDone != null) 'onboarding_done': onboardingDone,
         if (nickname != null) 'nickname': nickname,
+        if (mutedStations != null) 'muted_stations': mutedStations!.map((m) => m.toJson()).toList(),
       };
 }
 

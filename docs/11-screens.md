@@ -201,7 +201,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 ## 16. Einstellungen & Datenschutz
 
 - Ticket type, default NGO.
-- Nudges: on/off, muted stations, quiet hours.
+- Nudges: on/off, quiet hours. Stumme Bahnhöfe: the muted list with a remove action, and "Bahnhof hinzufügen" via the station search; muting also happens on the nudge itself ("Diesen Bahnhof nie"). The list lives on the account, not the phone.
 - Standort: current permission with a plain explanation and a link to change it.
 - Persönliche Daten für Anträge: view, edit, delete.
 - Meine Verspätomat-Adresse: the sender address, what arrives there, "Korrespondenz nach Abschluss behalten" switch (off by default), and a full export of all sent and received mails.

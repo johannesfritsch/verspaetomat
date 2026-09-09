@@ -155,6 +155,19 @@ class Session extends ChangeNotifier {
 
   Future<void> completeOnboarding() => updateSettings(const MePatch(onboardingDone: true));
 
+  /// Stumme Bahnhöfe live on the account. Full replacement each time.
+  List<ApiMutedStation> get mutedStations => me?.settings.mutedStations ?? const [];
+  bool isMuted(String stationId) => mutedStations.any((m) => m.id == stationId);
+
+  Future<void> muteStation(ApiMutedStation station) async {
+    if (isMuted(station.id)) return;
+    await updateSettings(MePatch(mutedStations: [...mutedStations, station]));
+  }
+
+  Future<void> unmuteStation(String stationId) async {
+    await updateSettings(MePatch(mutedStations: mutedStations.where((m) => m.id != stationId).toList()));
+  }
+
   Future<void> savePersonalData(ApiPersonalData data) async {
     try {
       me = await repo.putPersonalData(data);

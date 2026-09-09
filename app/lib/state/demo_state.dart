@@ -86,6 +86,16 @@ class DemoState extends ChangeNotifier {
   /// Träwelling as a potential check-in provider. Showcase only.
   bool traewellingLinked = false;
 
+  /// Stumme Bahnhöfe in demo mode: [{id, name}]. Starts empty, like a fresh account.
+  final List<Map<String, String>> mutedStations = [];
+
+  void setMutedStations(List<Map<String, String>> list) {
+    mutedStations
+      ..clear()
+      ..addAll(list);
+    notifyListeners();
+  }
+
   void setTraewellingLinked(bool v) {
     traewellingLinked = v;
     notifyListeners();

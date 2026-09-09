@@ -136,6 +136,13 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     return null;
   }
 
+  Future<void> _muteStation(ApiStation s) async {
+    final session = RepoScope.read(context);
+    await session.muteStation(ApiMutedStation(id: s.id, name: s.name));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${s.name} bleibt still. Ändern in den Einstellungen.')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = RepoScope.of(context);
@@ -143,7 +150,8 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     final riding = _live?.ride.status == ApiRideStatus.riding;
     final arrived = _live != null && _live!.ride.status == ApiRideStatus.arrived;
     final near = _nearStation;
-    final showNudge = !riding && !arrived && !_nudgeDismissed && near != null;
+    final muted = near != null && session.isMuted(near.id);
+    final showNudge = !riding && !arrived && !_nudgeDismissed && near != null && !muted;
     final now = DateTime.now();
     final open = _incidents?.incidents.where((i) => i.isOpen).toList() ?? const [];
     final openCents = open.fold(0, (s, i) => s + i.amountCents);
@@ -171,6 +179,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                 station: near.name,
                 onCheckIn: () => _openStation(near),
                 onDismiss: () => setState(() => _nudgeDismissed = true),
+                onMute: () => _muteStation(near),
               ),
             ],
             const VGap.l(),
