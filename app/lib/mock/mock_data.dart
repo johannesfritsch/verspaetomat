@@ -182,16 +182,6 @@ class BoardEntry {
   final bool isMe;
 }
 
-class Team {
-  const Team({required this.id, required this.name, required this.members, required this.minutes, required this.euros, this.topMember});
-  final String id;
-  final String name;
-  final int members;
-  final int minutes;
-  final double euros;
-  final String? topMember;
-}
-
 class RailMail {
   const RailMail({
     required this.id,
@@ -704,11 +694,6 @@ class Mock {
     BoardEntry(rank: 9, name: 'Kalk-Kalle', points: 190),
     BoardEntry(rank: 10, name: 'tobi_aus_kalk', points: 174),
     BoardEntry(rank: 3021, name: 'Johannes', points: 96, isMe: true),
-  ];
-
-  static const teams = <Team>[
-    Team(id: 'buero-nord', name: 'Büro Nord', members: 14, minutes: 4812, euros: 96, topMember: 'Anke W.'),
-    Team(id: 'wg-ehrenfeld', name: 'WG Ehrenfeld', members: 4, minutes: 1290, euros: 12, topMember: 'Johannes'),
   ];
 
   static const communityMinutes = 1208311;

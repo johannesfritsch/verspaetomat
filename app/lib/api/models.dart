@@ -877,28 +877,6 @@ class ApiBoardEntry {
   final bool isMe;
   factory ApiBoardEntry.fromJson(Map<String, dynamic> j) => ApiBoardEntry(rank: _i(j['rank']), name: _s(j['name']), points: _i(j['points']), isMe: _b(j['is_me']));
 }
-
-class ApiTeam {
-  const ApiTeam({required this.id, required this.name, this.members = const [], this.minutes = 0, this.eurosCents = 0, this.topMember, this.inviteToken});
-  final String id;
-  final String name;
-  final List<String> members;
-  final int minutes;
-  final int eurosCents;
-  final String? topMember;
-  final String? inviteToken;
-  factory ApiTeam.fromJson(Map<String, dynamic> j) => ApiTeam(
-        id: _s(j['id']),
-        name: _s(j['name']),
-        members: _sl(j['members']),
-        minutes: _i(j['minutes']),
-        eurosCents: _i(j['euros_cents']),
-        topMember: _sn(j['top_member']),
-        inviteToken: _sn(j['invite_token']),
-      );
-}
-
-
 /// Attachment labels from plain strings or `{label|name|upload_id}` objects.
 List<String> _labels(dynamic v) => (v as List? ?? const [])
     .map((e) => e is Map ? (e['label'] ?? e['name'] ?? e['upload_id'] ?? '').toString() : e.toString())

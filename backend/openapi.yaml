@@ -23,7 +23,7 @@ paths:
 
   /v1/stations/nearby:
     get:
-      summary: Rail stations near a point (Transitous). Defaults to Köln Hbf without lat/lon.
+      summary: "Rail stations near a point: the phone's fix, or a Stellwerk override for this customer, never a default. Answers {stations, source: gps|stellwerk|none, label}."
       parameters: [{ name: lat, in: query, schema: { type: number } }, { name: lon, in: query, schema: { type: number } }]
       responses: { "200": { description: "[{id, name, lat, lon, distance_m}]" } }
   /v1/stations/search:
@@ -133,18 +133,6 @@ paths:
     get:
       parameters: [{ name: scope, in: query, schema: { type: string, enum: [line, city, germany] } }]
       responses: { "200": { description: "[{rank, name, points, is_me}]" } }
-  /v1/teams:
-    get: { responses: { "200": { description: "[Team]" } } }
-    post:
-      requestBody: { content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
-      responses: { "200": { description: Team } }
-  /v1/teams/join:
-    post:
-      requestBody: { content: { application/json: { schema: { type: object, required: [invite_token], properties: { invite_token: { type: string } } } } } }
-      responses: { "200": { description: Team } }
-  /v1/teams/{id}:
-    get: { parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }], responses: { "200": { description: "Team {id, name, invite_token, members:[nickname], minutes, euros_cents, top_member}" } } }
-    delete: { parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }], responses: { "200": { description: left } } }
 
 components:
   schemas:

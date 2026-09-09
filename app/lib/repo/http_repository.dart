@@ -106,10 +106,4 @@ class HttpRepository implements AppRepository {
   Future<ApiCommunity> community() => client.community();
   @override
   Future<List<ApiBoardEntry>> boards(String scope) => client.boards(scope);
-  @override
-  Future<List<ApiTeam>> teams() => client.teams();
-  @override
-  Future<ApiTeam> createTeam(String name) => client.createTeam(name);
-  @override
-  Future<ApiTeam> joinTeam(String inviteToken) => client.joinTeam(inviteToken);
 }

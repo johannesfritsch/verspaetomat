@@ -191,9 +191,4 @@ class ApiClient {
 
   Future<List<ApiBoardEntry>> boards(String scope) async => _list(await _get('/v1/boards', {'scope': scope})).map(ApiBoardEntry.fromJson).toList();
 
-  Future<List<ApiTeam>> teams() async => _list(await _get('/v1/teams')).map(ApiTeam.fromJson).toList();
-
-  Future<ApiTeam> createTeam(String name) async => ApiTeam.fromJson(_map(await _post('/v1/teams', {'name': name})));
-
-  Future<ApiTeam> joinTeam(String inviteToken) async => ApiTeam.fromJson(_map(await _post('/v1/teams/join', {'invite_token': inviteToken})));
 }

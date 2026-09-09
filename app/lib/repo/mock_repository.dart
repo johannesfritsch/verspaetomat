@@ -523,14 +523,4 @@ class MockRepository implements AppRepository {
     return list.where((e) => state.showOnBoards || !e.isMe).map((e) => ApiBoardEntry(rank: e.rank, name: e.name, points: e.points, isMe: e.isMe)).toList();
   }
 
-  @override
-  Future<List<ApiTeam>> teams() async => Mock.teams
-      .map((t) => ApiTeam(id: t.id, name: t.name, members: List.generate(t.members, (i) => 'Mitglied ${i + 1}'), minutes: t.minutes, eurosCents: _cents(t.euros), topMember: t.topMember))
-      .toList();
-
-  @override
-  Future<ApiTeam> createTeam(String name) async => ApiTeam(id: 'team-${DateTime.now().millisecondsSinceEpoch}', name: name, members: const [Mock.userName], inviteToken: 'demo-invite');
-
-  @override
-  Future<ApiTeam> joinTeam(String inviteToken) async => (await teams()).first;
 }

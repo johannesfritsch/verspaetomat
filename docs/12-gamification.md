@@ -55,14 +55,10 @@ Badges that depend on the operator's stated cause (Stellwerksstörung, Personen 
 - Boards rank only rides verified by a location fix at the station. Unverified rides still earn points and euros for the customer; they just do not rank.
 - Everyone can hide themselves from boards with one switch.
 
-## Teams
-
-- Any customer can open a team ("Büro Nord", "WG Ehrenfeld") and share a link.
-- A team page shows combined minutes, combined euros, and this month's top patient member.
-
 ## What we deliberately do not do
 
 - No buying points, no premium tiers, no boosts.
+- No teams for now. Nothing in the product points at them, not even the statistics; they can come back when there are enough customers on one line to make one.
 - No NGO campaigns with goals and deadlines. The confirmed total per NGO is the story; a finish line would need NGO-side tooling and invites fake urgency.
 - No employer matching. A sponsor's promise would be a second kind of money in a ledger that is honest precisely because it holds only one.
 - No streaks. Commuting is not a habit to be policed, and a missed day is not a loss. Nothing in the app resets because the customer did not open it.

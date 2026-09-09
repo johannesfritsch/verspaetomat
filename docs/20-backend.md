@@ -30,7 +30,7 @@ Where Rust costs more: development speed for a solo developer new to it, and slo
 | PDF | Typst template rendered server-side; signature PNG embedded |
 | Object storage | S3-compatible (ticket images, signatures, PDFs, inbound attachments), encrypted at rest, keyed per claim |
 | Push | APNs (`a2`) and FCM HTTP v1 (`reqwest`) |
-| Auth | Anonymous device accounts with a bearer token; optional e-mail sign-in later for backup and teams |
+| Auth | Anonymous device accounts with a bearer token; optional e-mail sign-in later for backup |
 | Observability | `tracing` with JSON logs, OpenTelemetry export |
 | Deployment | Docker image, one container plus Postgres, behind a reverse proxy |
 

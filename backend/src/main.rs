@@ -97,9 +97,6 @@ async fn main() -> anyhow::Result<()> {
         // community
         .route("/v1/community", get(handlers::community))
         .route("/v1/boards", get(handlers::boards))
-        .route("/v1/teams", get(handlers::teams).post(handlers::create_team))
-        .route("/v1/teams/join", post(handlers::join_team))
-        .route("/v1/teams/{id}", get(handlers::team).delete(handlers::leave_team))
         // Stellwerk (admin)
         .route("/admin/customers", get(admin::customers))
         .route("/admin/customers/{key}/ride", get(admin::ride))

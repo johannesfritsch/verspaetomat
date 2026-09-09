@@ -50,7 +50,4 @@ abstract class AppRepository {
   // -- community ------------------------------------------------------------
   Future<ApiCommunity> community();
   Future<List<ApiBoardEntry>> boards(String scope);
-  Future<List<ApiTeam>> teams();
-  Future<ApiTeam> createTeam(String name);
-  Future<ApiTeam> joinTeam(String inviteToken);
 }

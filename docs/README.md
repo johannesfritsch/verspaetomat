@@ -23,7 +23,7 @@ Status: research, product concept and a fully mocked Flutter showcase app (`app/
 |---|---|
 | [10-experience.md](10-experience.md) | The feeling of the app: tone, look, sound, principles |
 | [11-screens.md](11-screens.md) | Every screen, what it shows, what the customer does there |
-| [12-gamification.md](12-gamification.md) | Points, badges, boards, teams |
+| [12-gamification.md](12-gamification.md) | Points, badges, boards |
 | [13-where-the-data-comes-from.md](13-where-the-data-comes-from.md) | Every piece of information on screen and its origin, in customer terms |
 | [14-location-concept.md](14-location-concept.md) | Where the customer is: the phone at three moments, no server guessing, the Stellwerk override |
 

@@ -30,7 +30,6 @@ class Routes {
   static const antrag = '/antrag'; // ?desk=Servicecenter%20Fahrgastrechte | NordWestBahn | Unbekannt
   static const antwort = '/antwort'; // ?mail=<mail id>  or  ?demo=question|rejected
   static const zweck = '/zweck'; // ?id=bahnhofsmission
-  static const team = '/team'; // ?id=buero-nord
   static const historie = '/historie';
   static const einstellungen = '/einstellungen';
   static const datenherkunft = '/einstellungen/daten';

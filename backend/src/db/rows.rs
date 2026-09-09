@@ -251,15 +251,6 @@ pub struct MailRow {
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
-pub struct TeamRow {
-    pub id: Uuid,
-    pub name: String,
-    pub invite_token: String,
-    pub created_by: Uuid,
-    pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, FromRow)]
 pub struct BoardSeedRow {
     pub scope: String,
     pub rank: i32,

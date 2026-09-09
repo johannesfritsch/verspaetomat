@@ -4,10 +4,10 @@ Written 9 September 2026, 20:40. Goal for tonight: the Flutter app on the simula
 
 ## What "working" means tonight
 
-- Postgres holds customers, rides, incidents, claims, mails, NGOs, operators, badges, teams. Clean numbered migrations, reproducible from zero with one command.
+- Postgres holds customers, rides, incidents, claims, mails, NGOs, operators, badges. Clean numbered migrations, reproducible from zero with one command.
 - Device auth: first launch creates a device, gets a bearer token, stores it in the Keychain. No accounts. Recovery code shown at the first claim.
 - Train data is real: stations near the phone, departures with live delays and operator, trip stops with forecast times, all from Transitous. The trip follower polls riding trips every 45 seconds, persists the forecast, finalises the ride at the exit stop and creates the incident if 60+.
-- Ledger, claim draft, attachments (as uploads), signature, send, inbound webhook, reply classification, community and teams run against the database.
+- Ledger, claim draft, attachments (as uploads), signature, send, inbound webhook, reply classification and community run against the database.
 - Every screen in the app reads and writes through the API. Demo controls stay for the two things the real world will not do on demand tonight: "Ankunft simulieren" (forces the follower to finalise with a chosen delay) and "Antwort der Bahn simulieren" (posts to the inbound webhook).
 
 ## What is not tonight (cut list)
@@ -30,8 +30,8 @@ Written 9 September 2026, 20:40. Goal for tonight: the Flutter app on the simula
 | 20:40–21:00 | Phase 0: start Postgres, create db, freeze the contract (device auth, Transitous ids), decide the cut list | read the contract | both |
 | 21:00–22:00 | Phase 1: migrations, sqlx repositories, device auth, `me`, settings, personal data | Phase 4a: API client, models, repository interface with mock and HTTP implementations, device bootstrap, settings screen on the API | A: me · B: builder agent |
 | 21:00–22:00 | Phase 2 (parallel agent): Transitous adapter (stations nearby, search, departures, trip), operator mapping, trip follower loop | | builder agent |
-| 22:00–23:00 | Phase 3: rides, incidents, rules on Postgres, claims, sign, send (dry-run or SMTP), inbound webhook, mails, community, teams | Phase 4b: Bahnsteig, Einchecken, Ausstieg, Unterwegs, Angekommen, Nachtrag on the API with device location | both |
-| 23:00–23:45 | seed script, `make dev`, clippy, tests | Phase 4c: Konto, Antrag, Antwort, Zweck, Wir, Team, Ich, Historie on the API | both |
+| 22:00–23:00 | Phase 3: rides, incidents, rules on Postgres, claims, sign, send (dry-run or SMTP), inbound webhook, mails, community | Phase 4b: Bahnsteig, Einchecken, Ausstieg, Unterwegs, Angekommen, Nachtrag on the API with device location | both |
+| 23:00–23:45 | seed script, `make dev`, clippy, tests | Phase 4c: Konto, Antrag, Antwort, Zweck, Wir, Ich, Historie on the API | both |
 | 23:45–00:30 | Phase 5: integration on the simulator, walk the four workflows, fix what breaks | | me |
 | 00:30–00:45 | Phase 6: commit, README run instructions, this doc updated with what actually shipped | | me |
 
@@ -64,8 +64,7 @@ Migrations, one file each, in this order:
 8. `incidents` (id, ride_id, customer_id, date, line, from, to, delay, amount_cents, ticket, operator, desk, status, ngo_id, claim_id, fare_cents, legal_deadline, warned_at, evidence jsonb)
 9. `claims` (id, customer_id, desk, ngo snapshot, ticket_months, status, signed_by, signed_at, sent_at, expected_reply_by, amount_claimed, amount_confirmed) and `claim_incidents`, `claim_attachments`
 10. `mails` (id, claim_id, customer_id, direction, message_id, from, to, bcc, subject, body, attachments jsonb, outcome, amount_cents, forwarded_at, received_at)
-11. `teams`, `team_members`
-12. `audit_log` (entity, entity_id, from_status, to_status, at, reason)
+11. `audit_log` (entity, entity_id, from_status, to_status, at, reason)
 
 Seed script loads operators, NGOs and badges from `backend/fixtures`. Auth is a tower middleware: hash the bearer, load the customer, inject it. Rate limit per device: 60 requests per minute, 5 claim sends per day.
 
@@ -120,7 +119,7 @@ Done and verified:
 - Device auth: `POST /v1/devices` → bearer token (hashed at rest), recovery code of twelve words at the first claim, `POST /v1/devices/recover` verified end to end.
 - Transitous adapter: nearby stations, search, departures with live delays, per-stop trip data; agency → operator → claims desk mapping.
 - Trip follower: verified live. A check-in to RE 22 at Köln Hbf (19:21 UTC) finalised itself at Köln West at 19:30 UTC with +1 minute, points and audit entry, no manual call.
-- Ledger, claims, uploads, signature, send via the relay (dry-run without `SMTP_URL`, real SMTP via lettre with it), inbound webhook with classification and forwarding, community, boards, teams, export, delete.
+- Ledger, claims, uploads, signature, send via the relay (dry-run without `SMTP_URL`, real SMTP via lettre with it), inbound webhook with classification and forwarding, community, boards, export, delete. (Teams were removed on 10 September 2026.)
 - Flutter: API client, repository switch (Demo / Lokal) in Einstellungen, all screens on the repository, one-shot location for nearby stations and the check-in fix, uploads and signature, recovery-code sheet. `--dart-define=BACKEND=local`, `API_URL`, `NO_LOCATION=1` for demos and screenshots.
 - Local-mode screenshots on the iPhone 15 Pro simulator: Bahnsteig with real nearby stations, Einchecken with real departures, Konto, Wir, Ich, all without exceptions.
 - End-to-end integration test (`app/integration_test/workflow_test.dart`) passing on the simulator against the local backend, driving the world through the Stellwerk admin API (no in-app simulate buttons in local mode): three check-ins to live departures with +68 delay and fast-forward, the five-step claim with personal data, recovery code, ticket upload, signature and relay send, the simulated railway reply, ledger "bestätigt", community figure. Run:

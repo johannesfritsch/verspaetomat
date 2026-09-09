@@ -22,7 +22,7 @@ All copy below is German because that is what the customer reads. Explanations a
 
 **Card 3 — start.** "Los geht's" and, in small type, "Ohne Konto. Ohne Kreditkarte."
 
-No account is created here. Sign-in is offered later, only for people who want a backup or a team.
+No account is created here. Sign-in is offered later, only for people who want a backup.
 
 ---
 
@@ -177,7 +177,6 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 - **Two euro figures side by side:** "Eingereicht" and "Bestätigt", the second larger. Tap either for the source sheet.
 - **Vereine:** one row per NGO with the euros confirmed for it and, smaller, the euros submitted and still unanswered. No goals, no deadlines, no progress bars: the number is the story.
 - **Boards:** "Meine Linie" as the default, with "Meine Stadt" and "Deutschland" as tabs. Seven-day window, ten names, the customer's own row pinned at the bottom if not in the ten.
-- **Teams:** the customer's teams, and "Team gründen".
 
 ---
 
@@ -195,7 +194,6 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 - Badges as a grid, earned ones in colour, others as outlines with their names visible (the museum is part of the fun).
 - History: every ride, filterable by line, with delays and points.
 - "Meine Statistik": average delay, most patient line, longest wait, minutes this year.
-- Teams.
 - Links to Einstellungen.
 
 ---
@@ -207,7 +205,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 - Standort: current permission with a plain explanation and a link to change it.
 - Persönliche Daten für Anträge: view, edit, delete.
 - Meine Verspätomat-Adresse: the sender address, what arrives there, "Korrespondenz nach Abschluss behalten" switch (off by default), and a full export of all sent and received mails.
-- Konto (optional sign-in for backup and teams).
+- Konto (optional sign-in for backup).
 - Träwelling verbinden: import check-ins from a linked Träwelling account so nobody checks in twice. Read-only, off by default.
 - Boards: "Mich in Ranglisten zeigen" switch.
 - Daten exportieren · Alles löschen: one tap each, with a confirmation.

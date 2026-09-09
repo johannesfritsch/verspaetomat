@@ -86,7 +86,6 @@ class ShowcaseScreen extends StatelessWidget {
           _group(context, 'Wir und Ich', [
             ('Wir', 'Community, Vereine, Ranglisten', Routes.wir),
             ('Zweck', 'Bahnhofsmission Köln', '${Routes.zweck}?id=bahnhofsmission'),
-            ('Team', 'Büro Nord', '${Routes.team}?id=buero-nord'),
             ('Ich', 'Profil, Abzeichen', Routes.ich),
             ('Alle Fahrten', 'Historie', Routes.historie),
             ('Einstellungen', 'und Datenschutz', Routes.einstellungen),

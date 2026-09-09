@@ -13,13 +13,12 @@ import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
 
 class _WirData {
-  const _WirData(this.community, this.teams);
+  const _WirData(this.community);
   final ApiCommunity community;
-  final List<ApiTeam> teams;
 }
 
 /// Wir: the community. Minutes waited together, euros submitted and
-/// confirmed, NGOs, boards, teams.
+/// confirmed, NGOs, boards.
 class WirScreen extends StatefulWidget {
   const WirScreen({super.key});
 
@@ -63,11 +62,7 @@ class _WirScreenState extends State<WirScreen> {
       controller: _loader,
       load: (repo) async {
         final c = await repo.community();
-        List<ApiTeam> teams = const [];
-        try {
-          teams = await repo.teams();
-        } catch (_) {}
-        return _WirData(c, teams);
+        return _WirData(c);
       },
       builder: (context, data, refresh) {
         final c = data.community;
@@ -156,23 +151,6 @@ class _WirScreenState extends State<WirScreen> {
                 (session.me?.settings.showOnBoards ?? true) ? 'Nur verifizierte Fahrten zählen.' : 'Nur verifizierte Fahrten zählen. Du bist in den Ranglisten verborgen.',
                 style: VText.caption,
               ),
-              const VGap.xl(),
-              const VSection('Teams'),
-              if (data.teams.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: VSpace.m, bottom: VSpace.s),
-                  child: Text('Noch kein Team. Gründe eins oder tritt mit einem Link bei.', style: VText.caption),
-                ),
-              for (final t in data.teams)
-                VListRow(
-                  title: t.name,
-                  subtitle: '${t.members.length} Mitglieder · ${fmtInt(t.minutes)} Minuten · ${fmtEuroWhole(t.eurosCents / 100)}',
-                  chevron: true,
-                  onTap: () => context.push('${Routes.team}?id=${t.id}').then((_) => refresh()),
-                ),
-              const VGap.s(),
-              VGhostButton(label: 'Team gründen', icon: Icons.add, onTap: () => _foundTeam(context, refresh)),
-              VGhostButton(label: 'Mit Link beitreten', icon: Icons.link, onTap: () => _joinTeam(context, refresh)),
             ],
           ),
         );
@@ -209,95 +187,6 @@ class _WirScreenState extends State<WirScreen> {
           ),
           const VRule(),
         ],
-      ),
-    );
-  }
-
-  void _foundTeam(BuildContext context, VoidCallback refresh) {
-    final ctrl = TextEditingController();
-    showVSheet(
-      context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.only(bottom: VSpace.l),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const VSheetHeader(title: 'Team gründen', subtitle: 'Ein Name, ein Link. Fertig.'),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(controller: ctrl, decoration: const InputDecoration(hintText: 'z. B. Büro Nord'), style: VText.body),
-                  const VGap.m(),
-                  VPrimaryButton(
-                    label: 'Gründen',
-                    icon: Icons.add,
-                    onTap: () async {
-                      final name = ctrl.text.trim();
-                      if (name.isEmpty) return;
-                      try {
-                        final t = await RepoScope.read(context).repo.createTeam(name);
-                        if (!ctx.mounted) return;
-                        Navigator.of(ctx).pop();
-                        showSnack(context, 'Team „${t.name}“ gegründet. Einladungslink: verspaetomat.de/t/${t.inviteToken ?? t.id}');
-                        refresh();
-                      } catch (e) {
-                        if (!ctx.mounted) return;
-                        showSnack(context, 'Nicht gegründet: $e');
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _joinTeam(BuildContext context, VoidCallback refresh) {
-    final ctrl = TextEditingController();
-    showVSheet(
-      context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.only(bottom: VSpace.l),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const VSheetHeader(title: 'Team beitreten', subtitle: 'Den Code aus dem Einladungslink eingeben.'),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(controller: ctrl, decoration: const InputDecoration(hintText: 'Einladungscode'), style: VText.mono),
-                  const VGap.m(),
-                  VPrimaryButton(
-                    label: 'Beitreten',
-                    onTap: () async {
-                      final token = ctrl.text.trim();
-                      if (token.isEmpty) return;
-                      try {
-                        final t = await RepoScope.read(context).repo.joinTeam(token);
-                        if (!ctx.mounted) return;
-                        Navigator.of(ctx).pop();
-                        showSnack(context, 'Du bist jetzt bei „${t.name}“.');
-                        refresh();
-                      } catch (e) {
-                        if (!ctx.mounted) return;
-                        showSnack(context, 'Nicht beigetreten: $e');
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

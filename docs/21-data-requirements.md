@@ -62,9 +62,6 @@ Everything the showcase app reads from `Mock` or from `DemoState`, turned into w
 
 `Mock.boardLine`, `boardCity`, `boardGermany` (rank, name, points, is me), `Mock.communityMinutes`, `communitySubmitted`, `communityConfirmed`, `communityUsers`, per-NGO confirmed and submitted totals. Backend: rolling seven-day sums per customer, scoped by line, city and country, verified rides only, respecting `showOnBoards`; community aggregates recomputed every minute. `GET /v1/boards?scope=&key=`, `GET /v1/community`.
 
-### Team
-
-`Mock.teams`: id, name, members, minutes, euros, top member. Backend: team id, name, invite link token, members, created by; aggregates derived. `GET /v1/teams`, `POST /v1/teams`, `GET /v1/teams/{id}`, `POST /v1/teams/join`.
 
 ## 2. What each screen needs
 
@@ -81,10 +78,9 @@ Everything the showcase app reads from `Mock` or from `DemoState`, turned into w
 | Konto | incidents grouped by desk with summary, confirmed and submitted totals, deadline, sent dates and expected reply per bundle, evidence per incident | start a draft |
 | Antrag | draft, desk address, personal data, ticket months required, NGO account details, form preview, mail preview with BCC | personal data, attachments, NGO override, signature, send |
 | Antwort | mails for a claim, classification, amount, templates | customer reply, postal reply upload |
-| Wir | community aggregates, per-NGO totals, boards, teams | create team |
+| Wir | community aggregates, per-NGO totals, boards | — |
 | Zweck | NGO detail and totals | set default NGO |
-| Team | team aggregates and members | share link |
-| Ich | profile, points, level, badges, statistics from rides, teams | — |
+| Ich | profile, points, level, badges, statistics from rides | — |
 | Alle Fahrten | rides with delays, cancellations, verified flag | — |
 | Einstellungen | settings, personal data, relay address, Träwelling link state | all settings, delete account, export |
 | Woher kommen die Daten? | static content | — |

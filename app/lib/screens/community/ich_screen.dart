@@ -10,14 +10,13 @@ import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
 
 class _IchData {
-  const _IchData(this.me, this.badges, this.rides, this.teams);
+  const _IchData(this.me, this.badges, this.rides);
   final ApiCustomer me;
   final List<ApiBadge> badges;
   final List<ApiRide> rides;
-  final List<ApiTeam> teams;
 }
 
-/// Ich: level, badges, statistics, teams.
+/// Ich: level, badges, statistics.
 class IchScreen extends StatelessWidget {
   const IchScreen({super.key});
 
@@ -28,14 +27,10 @@ class IchScreen extends StatelessWidget {
         final me = await repo.getMe();
         final badges = await repo.badges();
         List<ApiRide> rides = const [];
-        List<ApiTeam> teams = const [];
         try {
           rides = await repo.rides();
         } catch (_) {}
-        try {
-          teams = await repo.teams();
-        } catch (_) {}
-        return _IchData(me, badges, rides, teams);
+        return _IchData(me, badges, rides);
       },
       builder: (context, data, refresh) {
         final me = data.me;
@@ -120,20 +115,6 @@ class IchScreen extends StatelessWidget {
               VKeyValue('Minuten dieses Jahr', fmtInt(minutesThisYear), strong: true),
               const VRule.soft(),
               VKeyValue('Fahrten dieses Jahr', fmtInt(thisYear.length), strong: true),
-              const VGap.xl(),
-              const VSection('Teams'),
-              if (data.teams.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: VSpace.m),
-                  child: Text('Noch kein Team.', style: VText.caption),
-                ),
-              for (final t in data.teams)
-                VListRow(
-                  title: t.name,
-                  subtitle: '${t.members.length} Mitglieder',
-                  chevron: true,
-                  onTap: () => context.push('${Routes.team}?id=${t.id}'),
-                ),
               const VGap.xl(),
               const VSection('Mehr'),
               VListRow(title: 'Alle Fahrten', subtitle: '${rides.length} zuletzt', chevron: true, onTap: () => context.push(Routes.historie)),
