@@ -123,12 +123,14 @@ Done and verified:
 - Ledger, claims, uploads, signature, send via the relay (dry-run without `SMTP_URL`, real SMTP via lettre with it), inbound webhook with classification and forwarding, community, boards, teams, export, delete.
 - Flutter: API client, repository switch (Demo / Lokal) in Einstellungen, all screens on the repository, one-shot location for nearby stations and the check-in fix, uploads and signature, recovery-code sheet. `--dart-define=BACKEND=local`, `API_URL`, `NO_LOCATION=1` for demos and screenshots.
 - Local-mode screenshots on the iPhone 15 Pro simulator: Bahnsteig with real nearby stations, Einchecken with real departures, Konto, Wir, Ich, all without exceptions.
+- End-to-end integration test (`app/integration_test/workflow_test.dart`) passing on the simulator against the local backend: three check-ins to live departures with simulated +68 arrivals, the five-step claim with personal data, recovery code, ticket upload, signature and relay send, the simulated railway reply, ledger "bestätigt", community figure. Run:
+  `flutter test integration_test/workflow_test.dart -d <simulator> --dart-define=API_URL=http://127.0.0.1:8081 --dart-define=BACKEND=local --dart-define=NO_LOCATION=1 --dart-define=E2E=true --dart-define=INITIAL_ROUTE=/bahnsteig`
 - Proof: `app/integration_test/workflow_test.dart` passes on the simulator against the local backend: three real check-ins from live Köln Hbf departures, arrival +68 each, bundle "bereit", the five-step claim, "Abgeschickt.", "eingereicht", simulated reply, "bestätigt", Wir updated. Migration 0013 (`dismissed_at`) came out of it.
 
 Not tonight (as planned): Typst PDF (plain-text summary attached instead), push, background geofence, Träwelling OAuth, NGO report import UI, App Attest, boards across real users, the 25 % monthly cap.
 
 Gotchas found:
-- The simulator's location permission alert survives app relaunches and hides the app; reboot the simulator or run with `NO_LOCATION=1`.
+- The simulator's location permission alert survives app relaunches and hides the app; reboot the simulator or run with `NO_LOCATION=1` (a string compare: Flutter's `bool.fromEnvironment` only accepts the literal `true`).
 - Transitous station names carry a country suffix ("Köln Hbf (DE)"); stripped in the adapter.
 - Late in the evening the departures page of the feed is mostly buses and trams; the adapter now fetches 150 rows before filtering to rail.
 - Known rough edges: Konto refreshes only when the claim or reply screen pops back; the nickname is never set, so boards show "Fahrgast"; the reply screen's "Zum Konto" control is missing on the accepted branch.
