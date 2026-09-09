@@ -67,7 +67,10 @@ cargo run --bin stellwerk -- clock +100d            # shift the system clock (de
 cargo run --bin stellwerk -- reset Johannes         # wipe one customer's rides, incidents, claims, mails
 cargo run --bin stellwerk -- overrides [--clear]
 cargo run --bin stellwerk -- watch Johannes         # live view, refreshes every 3 s
+cargo run --bin stellwerk -- locate Johannes "Köln Hbf"   # put the customer at a station (or lat,lon); --clear returns to the phone's GPS
 ```
+
+Every Stellwerk change is pushed to the app immediately over `GET /v1/events` (server-sent events per customer: location, ride, incident, claim, mail, clock, reset). The app keeps that stream open in local mode and refreshes the screen an event names; polling stays as the fallback.
 
 Env: `STELLWERK_URL` (default `http://127.0.0.1:8080`), `ADMIN_TOKEN` (default `stellwerk`, same on the server). Customers can be addressed by nickname, id prefix or relay address. Clock shifts are global and one-way for expiry: an incident marked `verfallen` under a shifted clock stays so; use `reset`. Tables: `sim_trip_overrides`, `sim_clock` (migration 0014). Admin routes live under `/admin/*` and must not be exposed publicly.
 
