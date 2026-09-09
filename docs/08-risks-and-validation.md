@@ -4,7 +4,7 @@
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| D-Ticket euros too small to make the community total feel alive | High | All ticket types from day one; minutes as headline metric; "Trotzdem spenden"; employer matching. |
+| D-Ticket euros too small to make the community total feel alive | High | All ticket types from day one; minutes as headline metric; "Trotzdem spenden". |
 | DB refuses payment to a third-party account, or changes the form | High | Test claims before building. Fallback: customer receives the money and gets a one-tap link to the NGO's donation page. |
 | Community total cannot be verified | Low with the relay | Railway replies arrive at the customer's Verspätomat address and update the ledger; NGO monthly reporting; photo upload for postal replies; separate "eingereicht" and "bestätigt" counters. |
 | Railways treat mail from one domain as a claims agency and demand powers of attorney, or block it | Medium | Transparent body text naming the claimant and the service; customer's name as sender display name; one bundle per customer; talk to the Servicecenter early; paper route as fallback. |
@@ -32,5 +32,5 @@
 | When | What |
 |---|---|
 | Month 3 after launch | 2,000 monthly active check-in users; 500 claims generated; first 5,000 € confirmed by NGOs |
-| Month 6 | One employer matching programme live; one NGO campaign reached its goal; store rating above 4.5 |
+| Month 6 | Three partner NGOs reporting monthly; first 20,000 € confirmed; store rating above 4.5 |
 | Month 12 | A Verkehrsverbund or operator in talks about a charity tick box in their own claim flow |

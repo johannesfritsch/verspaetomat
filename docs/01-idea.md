@@ -28,7 +28,6 @@ Slogan candidates: *"Du bist spät, du spendest."* / *"Verspätung mit Sinn."*
 1. Support every ticket type from day one. Ordinary tickets refund 25 % at 60 minutes and 50 % at 120. A late ICE is worth 10 to 40 €.
 2. Make delay minutes the headline metric. Everyone earns them; few earn euros.
 3. Offer "Trotzdem spenden", a link out to the NGO's own donation page, so the 95 % of delays that pay nothing can still become a gift. No money flows through the app.
-4. Employer matching for Jobticket holders as the growth lever, again paid by the employer to the NGO directly.
 
 ## What the customer gets
 

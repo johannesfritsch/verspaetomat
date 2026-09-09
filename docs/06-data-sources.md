@@ -14,6 +14,10 @@ The customer-facing view is in [13-where-the-data-comes-from.md](13-where-the-da
 
 Plan: Transitous plus gtfs.de behind one abstraction, RIS::Journeys later. Delay = forecast arrival minus planned arrival at the exit stop. Keep the raw evidence per journey (planned, actual, source, timestamp) because it goes on the claim.
 
+## Check-ins from Träwelling
+
+Träwelling (traewelling.de, AGPL, public REST API with token auth) is treated as a potential API provider, not as a codebase to fork. A customer who already checks in there can link the account; we read their check-ins (trip, exit stop, times) and record them as rides here, so nobody checks in twice. We never write to Träwelling. Station ids need mapping (Träwelling uses IBNR, Transitous uses its own stop ids). Optional, off by default.
+
 ## Stations
 
 About 5,400 DB stations from RIS::Stations (CC BY 4.0), DELFI's free stop directory, or OpenStreetMap. Geofences are only needed for the station nudge.
@@ -36,4 +40,4 @@ The trip's agency from the timetable feed, mapped to a claims desk via the opera
 
 ## NGO content
 
-Name, story, campaign goal, dedicated IBAN, donation-page URL, monthly confirmation of railway transfers.
+Name, story, dedicated IBAN, donation-page URL, monthly confirmation of railway transfers.

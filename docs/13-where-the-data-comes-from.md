@@ -24,8 +24,8 @@ Every number in the app should be tappable and answer "Woher weißt du das?". Th
 | "Bestätigt: 4,50 € an Bahnhofsmission" | The railway's e-mail reply to your Verspätomat address, read automatically; or your photo of a postal reply; or the NGO's monthly report of transfers received from railways. | E-mail replies: the moment they arrive. Photos: when you upload. NGO reports: monthly. | Stays "eingereicht". We never guess. |
 | Community totals: minutes | Sum of all customers' final delays. | Live | — |
 | Community totals: euros "eingereicht" and "bestätigt" | Sum of ledger states across all customers. | Live for both; NGO-report confirmations land monthly | — |
-| Campaign progress bar | Confirmed euros for that NGO since the campaign start. | Monthly | — |
-| Employer match "zugesagt" | The sponsor's promise per submitted claim, entered by us. | — | Shown as promised until the NGO confirms receipt. |
+| "Bestätigt" per NGO on the Wir screen | Sum of confirmed claims that named that NGO as payee. | Live; NGO reports land monthly | — |
+| Rides imported from Träwelling | Your check-ins there, read once you linked the account. We never write to Träwelling. | Within a minute of the check-in | Nothing changes if you did not link it. |
 | Boards | Verified rides only (a location fix at the station at check-in). | Live, seven-day window | Unverified rides earn points but do not rank. |
 | Badges | Awarded by the app from ride data and, for causes, from the operator's service message. | At arrival | — |
 

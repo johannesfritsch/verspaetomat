@@ -59,15 +59,12 @@ Badges that depend on the operator's stated cause (Stellwerksstörung, Personen 
 
 - Any customer can open a team ("Büro Nord", "WG Ehrenfeld") and share a link.
 - A team page shows combined minutes, combined euros, and this month's top patient member.
-- **Employer teams** are the same thing with a sponsor line: "Firma X legt 1 € pro eingereichter Verspätung drauf." The employer pays the NGO directly and the app shows the matched amount as "zugesagt" until the NGO confirms.
-
-## Campaigns
-
-An NGO can set a goal with a deadline: "10.000 € für die Bahnhofsmission bis Dezember." The community screen shows the progress bar built from confirmed euros only, with submitted euros as a lighter segment behind it.
 
 ## What we deliberately do not do
 
 - No buying points, no premium tiers, no boosts.
+- No NGO campaigns with goals and deadlines. The confirmed total per NGO is the story; a finish line would need NGO-side tooling and invites fake urgency.
+- No employer matching. A sponsor's promise would be a second kind of money in a ledger that is honest precisely because it holds only one.
 - No streaks. Commuting is not a habit to be policed, and a missed day is not a loss. Nothing in the app resets because the customer did not open it.
 - No shaming: no "you missed a day" push, no public loss.
 - No leaderboards on euros. Money is not a competition; minutes are.

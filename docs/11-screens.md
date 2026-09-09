@@ -39,7 +39,7 @@ Every path continues to the next screen. Nothing is gated.
 
 **Ticket.** Large cards: "Deutschlandticket", "Andere Zeitkarte", "Einzelfahrkarten". One line under each with what a delay is worth. The D-Ticket card says honestly: "1,50 € pro Verspätung ab 60 Minuten. Ausgezahlt ab 4 €. Wir sammeln für dich." Can be changed per ride and in the profile.
 
-**Zweck.** The NGO list, three to five partners, each as a card with a photo, one sentence, and a campaign line ("6.240 € von 10.000 € bis Dezember"). The customer picks one default. Tapping a card opens screen 14.
+**Zweck.** The NGO list, three to five partners, each as a card with a photo, one sentence, and the money confirmed so far ("Bestätigt über Verspätomat: 12.410 €"). The customer picks one default. Tapping a card opens screen 14.
 
 Personal details and the ticket number are **not** asked here. They are asked the first time a claim is ready.
 
@@ -175,7 +175,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 
 - **Top figure, board type:** minutes waited together, ticking.
 - **Two euro figures side by side:** "Eingereicht" and "Bestätigt", the second larger. Tap either for the source sheet.
-- **Campaigns:** one row per NGO with a progress bar (confirmed in solid red, submitted as a lighter segment behind it), the goal, the deadline.
+- **Vereine:** one row per NGO with the euros confirmed for it and, smaller, the euros submitted and still unanswered. No goals, no deadlines, no progress bars: the number is the story.
 - **Boards:** "Meine Linie" as the default, with "Meine Stadt" and "Deutschland" as tabs. Seven-day window, ten names, the customer's own row pinned at the bottom if not in the ten.
 - **Teams:** the customer's teams, and "Team gründen".
 
@@ -185,7 +185,6 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 
 - Photo, name, the one sentence, three short paragraphs about what the money does.
 - **Transparency block:** account holder, IBAN, "Bestätigt über Verspätomat: 12.410 €", last report date.
-- **Campaign** progress and goal.
 - Two buttons: "Als Standard wählen" and "Trotzdem spenden" (opens the NGO's own donation page in the browser, with one line first: "Das läuft nicht über uns. Du landest direkt bei der Bahnhofsmission.").
 
 ---
@@ -196,7 +195,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 - Badges as a grid, earned ones in colour, others as outlines with their names visible (the museum is part of the fun).
 - History: every ride, filterable by line, with delays and points.
 - "Meine Statistik": average delay, most patient line, longest wait, minutes this year.
-- Teams and sponsor line if any.
+- Teams.
 - Links to Einstellungen.
 
 ---
@@ -209,6 +208,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 - Persönliche Daten für Anträge: view, edit, delete.
 - Meine Verspätomat-Adresse: the sender address, what arrives there, "Korrespondenz nach Abschluss behalten" switch (off by default), and a full export of all sent and received mails.
 - Konto (optional sign-in for backup and teams).
+- Träwelling verbinden: import check-ins from a linked Träwelling account so nobody checks in twice. Read-only, off by default.
 - Boards: "Mich in Ranglisten zeigen" switch.
 - Daten exportieren · Alles löschen: one tap each, with a confirmation.
 - "Woher kommen die Daten?" opens the content of doc 13 as a page.

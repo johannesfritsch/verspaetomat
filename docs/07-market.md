@@ -38,7 +38,7 @@ Nobody in Germany combines check-in, gamification and delay-to-donation. No Germ
 
 ## Träwelling decision
 
-Options: integrate its API so users can link accounts and import check-ins; contribute the claim-and-donate layer upstream; or build independently with a friendlier UX. Decide before the prototype.
+Decided 9 September 2026: build independently, and treat Träwelling as a potential API provider. Customers can link their Träwelling account and have their check-ins imported as rides. We do not fork it and do not build on its code. See 06.
 
 ## Funding
 
@@ -47,7 +47,6 @@ Options: integrate its API so users can link accounts and import check-ins; cont
 | Prototype Fund (BMBF) | up to 47,500 €, 6 months, rolling | Civic tech. Bahn-Vorhersage was funded on a narrower pitch. Best first step. |
 | mFUND line 1 (BMV) | up to 200,000 €, 18 months | Data-based mobility. Follow-on once a prototype exists. |
 | DSEE TransformD | programme-level | Digitalisation plus social cohesion. |
-| Employer matching | per deal | Jobticket employers add a fixed amount per claimed delay, paid to the NGO directly. |
 | Operator sponsorship | later | The UK model. A Verkehrsverbund adding a charity tick box is the 12-month goal. |
 
 ## Name
