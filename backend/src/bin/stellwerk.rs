@@ -166,10 +166,11 @@ async fn main() -> anyhow::Result<()> {
     match cli.cmd {
         Cmd::Customers => {
             let v = api.get("/admin/customers").await?;
-            println!("{:<10} {:<36} {:<34} {:<8} Fahrt", "Name", "ID", "Relay", "offen");
+            println!("{:<10} {:<36} {:<34} {:<8} {:<14} Fahrt", "Name", "ID", "Relay", "offen", "Standort");
             for c in v.as_array().unwrap_or(&vec![]) {
                 let ride = c.get("ride").filter(|r| !r.is_null()).map(|r| format!("{} → {} (+{})", s(r, "line"), s(r, "exit_station_name"), s(r, "live_delay_min"))).unwrap_or_else(|| "–".into());
-                println!("{:<10} {:<36} {:<34} {:<8} {}", s(c, "nickname"), s(c, "id"), s(c, "relay_address"), s(c, "open_incidents"), ride);
+                let loc = c.get("sim_location").and_then(|l| l.as_str()).map(|l| format!("SW: {l}")).unwrap_or_else(|| "Telefon".into());
+                println!("{:<10} {:<36} {:<34} {:<8} {:<14} {}", s(c, "nickname"), s(c, "id"), s(c, "relay_address"), s(c, "open_incidents"), loc, ride);
             }
         }
         Cmd::Ride { customer } => print_ride(&api.get(&format!("/admin/customers/{customer}/ride")).await?),

@@ -67,6 +67,7 @@ pub async fn customers(State(s): State<AppState>, _a: Admin) -> ApiResult {
     for c in rows {
         let last_seen: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar("select last_seen_at from devices where id = $1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
         let ride = current_ride(&s, c.id).await?;
+        let sim_location: Option<String> = sqlx::query_scalar("select label from sim_customer_location where customer_id = $1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
         let (open, incidents): (i64, i64) = sqlx::query_as("select count(*) filter (where status in ('gesammelt','bereit'))::bigint, count(*)::bigint from incidents where customer_id = $1")
             .bind(c.id)
             .fetch_one(&s.pool)
@@ -76,7 +77,7 @@ pub async fn customers(State(s): State<AppState>, _a: Admin) -> ApiResult {
             "id": c.id, "nickname": c.nickname, "relay_address": c.relay_address, "created_at": c.created_at, "last_seen_at": last_seen,
             "riding": ride.is_some(),
             "ride": ride.map(|r| json!({ "id": r.id, "line": r.line, "exit_station_name": r.exit_station_name, "live_delay_min": r.live_delay_min, "passed_stops": r.passed_stops, "checked_in_at": r.checked_in_at, "last_polled_at": r.last_polled_at })),
-            "open_incidents": open, "incidents": incidents,
+            "open_incidents": open, "incidents": incidents, "sim_location": sim_location,
         }));
     }
     Ok(Json(json!(out)))
