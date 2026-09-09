@@ -113,6 +113,7 @@ pub struct CustomerRow {
     pub onboarding_done: bool,
     pub home_station_id: Option<String>,
     pub home_station_name: Option<String>,
+    pub muted_stations: serde_json::Value,
     pub created_at: DateTime<Utc>,
 }
 

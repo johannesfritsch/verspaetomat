@@ -178,6 +178,7 @@ async fn customer_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value> 
             "ticket": c.ticket, "ngo_id": c.ngo_id, "location_mode": c.loc_mode, "notifications": c.notifications,
             "show_on_boards": c.show_on_boards, "keep_correspondence": c.keep_correspondence,
             "traewelling_linked": c.traewelling_linked, "onboarding_done": c.onboarding_done,
+            "muted_stations": c.muted_stations,
         },
         "points_total": points_total,
         "points_this_week": points_week,
@@ -220,6 +221,14 @@ pub struct MePatch {
     pub onboarding_done: Option<bool>,
     pub home_station_id: Option<String>,
     pub home_station_name: Option<String>,
+    /// Full replacement: [{id, name}]
+    pub muted_stations: Option<Vec<MutedStation>>,
+}
+
+#[derive(Deserialize, serde::Serialize)]
+pub struct MutedStation {
+    pub id: String,
+    pub name: String,
 }
 
 pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePatch>) -> ApiResult {
@@ -235,7 +244,8 @@ pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePa
             loc_mode = coalesce($5, loc_mode), notifications = coalesce($6, notifications),
             show_on_boards = coalesce($7, show_on_boards), keep_correspondence = coalesce($8, keep_correspondence),
             traewelling_linked = coalesce($9, traewelling_linked), onboarding_done = coalesce($10, onboarding_done),
-            home_station_id = coalesce($11, home_station_id), home_station_name = coalesce($12, home_station_name)
+            home_station_id = coalesce($11, home_station_id), home_station_name = coalesce($12, home_station_name),
+            muted_stations = coalesce($13, muted_stations)
          where id = $1 returning *",
     )
     .bind(c.0.id)
@@ -250,6 +260,7 @@ pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePa
     .bind(p.onboarding_done)
     .bind(p.home_station_id)
     .bind(p.home_station_name)
+    .bind(p.muted_stations.map(|m| serde_json::to_value(m).unwrap_or(serde_json::json!([]))))
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;

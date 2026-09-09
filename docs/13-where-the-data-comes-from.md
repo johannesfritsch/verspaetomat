@@ -16,6 +16,7 @@ Every number in the app should be tappable and answer "Woher weißt du das?". Th
 | "Älteste Verspätung verfällt in 3 Wochen" | Three months after the ride date (the legal deadline). | Daily | — |
 | Your name, address, ticket number on the claim | Typed by you the first time you send a claim. Stored on your phone. | — | Asked for at the claim step. |
 | Ticket screenshot on the claim | Attached by you from your ticket app or photos. Kept encrypted only while the claim is open, in case the railway asks. | — | The claim cannot be sent without it. |
+| Stumme Bahnhöfe | Stations you muted, on the nudge or in Einstellungen. Stored with your account, so they survive a new phone. | — | The nudge simply appears again after you remove a station from the list. |
 | Your Verspätomat address (fahrgast-4711@verspaetomat.de) | Created by us at your first claim. Your name is the sender name. Every mail out gets copied to your private inbox; every mail in is forwarded to it whole. | — | — |
 | The railway's reply shown in the app | The actual e-mail the railway sent to your Verspätomat address. We read status, amount and reference from it; we never answer it ourselves. | The moment it arrives | Postal replies: photograph them. |
 | The NGO's name and account on the claim | Provided by the NGO in writing to us. Shown in full on the NGO page for transparency. | Updated when the NGO tells us | — |
