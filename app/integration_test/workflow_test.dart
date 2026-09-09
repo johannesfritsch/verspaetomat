@@ -20,6 +20,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/models.dart';
 import 'package:verspaetomat/main.dart';
+import 'package:verspaetomat/api/token_store.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart';
 import 'package:verspaetomat/screens/ride/ride_widgets.dart';
@@ -56,6 +57,7 @@ class Stellwerk {
   Future<void> poll() => _post('/admin/poll');
   Future<void> reply(String id, String outcome) => _post('/admin/customers/$id/reply', {'outcome': outcome});
   Future<void> reset(String id) => _post('/admin/customers/$id/reset');
+  Future<void> locate(String id, String station) => _post('/admin/customers/$id/locate', {'station': station});
 
   /// The customer that is riding `line` right now. Polls for up to [timeout].
   Future<String> ridingCustomer({String? line, Set<String> exclude = const {}, Duration timeout = const Duration(seconds: 30)}) async {
@@ -206,7 +208,8 @@ void main() {
   testWidgets('check-in x3 via Stellwerk, claim, send, reply', (tester) async {
     final prefs = await SharedPreferences.getInstance();
     final demo = DemoState();
-    final session = Session(demo: demo, prefs: prefs, apiUrl: apiUrl);
+    // Own keychain slot: the test gets its own customer and never resets the one a person uses on this device.
+    final session = Session(demo: demo, prefs: prefs, apiUrl: apiUrl, tokens: TokenStore(namespace: 'e2e.'));
     session.init();
     await tester.pumpWidget(VerspaetomatApp(state: demo, session: session));
     await settle(tester, 1500);
@@ -216,9 +219,13 @@ void main() {
     try {
       // 0. The app has booted and called /v1/me, so its customer is the most recently seen one.
       //    Start from a clean slate: earlier runs may have left claims (5 sends per day) and rides.
-      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'Kein Zug. Gut so.' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 40));
+      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'Kein Zug. Gut so.' || w.data == 'ANGEKOMMEN' || w.data == 'UNTERWEGS')), timeout: const Duration(seconds: 40));
       customer = (await sw.customers()).first['id'] as String;
       await sw.reset(customer);
+      // The reset arrives over the event stream; the platform is empty again.
+      await pumpUntilFound(tester, find.text('Kein Zug. Gut so.'), timeout: const Duration(seconds: 20));
+      // The test phone has no GPS (NO_LOCATION): Stellwerk puts the customer at Köln Hbf.
+      await sw.locate(customer, 'Köln Hbf');
       // ignore: avoid_print
       print('customer $customer reset');
 

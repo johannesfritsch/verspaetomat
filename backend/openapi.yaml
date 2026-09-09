@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Verspätomat API
-  version: 0.2.0
+  version: 0.3.0
   description: >
     Contract for the Flutter app. Amounts are euro cents; timestamps RFC 3339 UTC; dates YYYY-MM-DD.
     Station ids and trip ids are Transitous ids passed through unchanged (trip ids go in query parameters).
@@ -14,7 +14,7 @@ paths:
     get: { summary: Liveness and database check, responses: { "200": { description: "{ok, db}" } } }
 
   /v1/devices:
-    post: { summary: Create a device; returns {device_id, token}. Store the token in the Keychain., responses: { "200": { description: device } } }
+    post: { summary: "Create a device; returns {device_id, token}. Store the token in the Keychain.", responses: { "200": { description: device } } }
   /v1/devices/recover:
     post:
       summary: Re-attach a new phone with the recovery code; returns a fresh {device_id, token}.
@@ -62,6 +62,12 @@ paths:
     get: { summary: Issue a new recovery code (twelve words). Shown once; the previous code stops working., responses: { "200": { description: "{recovery_code}" } } }
   /v1/me/export:
     get: { summary: Everything about this customer as JSON, responses: { "200": { description: export } } }
+  /v1/me/push-token:
+    put:
+      summary: Register the device's push token (devices.push_platform, push_token, push_updated_at). Stored only; APNs/FCM delivery is not wired.
+      requestBody: { content: { application/json: { schema: { type: object, required: [platform, token], properties: { platform: { type: string, enum: [ios, android] }, token: { type: string } } } } } }
+      responses: { "200": { description: "{stored: true, platform}" }, "400": { description: bad platform or token } }
+    delete: { summary: Clear the push token, responses: { "200": { description: "{stored: false}" } } }
 
   /v1/rides:
     get: { summary: Ride history (newest first), responses: { "200": { description: "[Ride]" } } }
@@ -85,9 +91,9 @@ paths:
       responses: { "200": { description: "{ride, incident?}" } }
 
   /v1/incidents:
-    get: { summary: "Ledger: {incidents, claims, summary:{desks:[{desk, open_cents, ready, missing_cents, incident_ids}], ready_desk, confirmed_cents, submitted_cents, oldest_open:{id,line,date,deadline,days_left,warn_from}, min_payout_cents, dticket_monthly_cap_cents}}", responses: { "200": { description: ledger } } }
+    get: { summary: "Ledger: {incidents, claims, summary:{desks:[{desk, open_cents, ready, missing_cents, incident_ids}], ready_desk, confirmed_cents, submitted_cents, capped_cents, oldest_open:{id,line,date,deadline,days_left,warn_from}, min_payout_cents, dticket_monthly_cap_cents}}. Reading refreshes statuses: expiry at the legal deadline, bundle readiness, and the 25 % monthly Deutschlandticket cap (incidents beyond it are `gedeckelt`; capped_cents sums them).", responses: { "200": { description: ledger } } }
   /v1/claims:
-    get: { responses: { "200": { description: "[Claim]" } } }
+    get: { summary: "Claim: {id, desk, ngo_id, status: draft|sent|question|accepted|rejected|bounced, sent_at, expected_reply_by, amount_claimed_cents, amount_confirmed_cents, closed_at, pdf_url}. The scanner's reply nudge (claims.nudged_at) reaches the app as the SSE event claim {nudge: true}, not as a field.", responses: { "200": { description: "[Claim]" } } }
   /v1/claims/draft:
     post:
       summary: Start a claim for one desk (all open incidents there unless incident_ids given). Refused below the 4 € minimum.
@@ -102,6 +108,11 @@ paths:
     post:
       summary: "multipart/form-data: kind (ticket|signature|postal_reply), file. Max 8 MB."
       responses: { "200": { description: "{upload_id, kind, content_type, size}" } }
+  /v1/claims/{id}/pdf:
+    get:
+      summary: The filled EU claim form (Typst) as it stands, draft or sent; the same file is attached to the claim mail as EU-Antrag.pdf. Claim JSON carries it as pdf_url.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { "200": { description: PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }, "404": { description: not found } }
   /v1/claims/{id}/sign:
     post:
       parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
@@ -126,13 +137,40 @@ paths:
       summary: Mail-provider webhook (and the demo's "Antwort simulieren"). Matches by relay address, classifies, forwards to the customer, updates statuses. Guarded by ?secret= when INBOUND_SECRET is set.
       requestBody: { content: { application/json: { schema: { type: object, required: [to, from, subject, body], properties: { to: { type: string }, from: { type: string }, subject: { type: string }, body: { type: string }, message_id: { type: string }, in_reply_to: { type: string }, claim_id: { type: string, format: uuid } } } } } }
       responses: { "200": { description: "{mail, outcome, claim_id}" } }
+  /internal/inbound-mail/raw:
+    post:
+      summary: The same webhook taking the raw RFC 822 message as the body (mail-parser). From, To (the address on our domain), Subject, text body (HTML stripped as fallback), Message-ID, In-Reply-To and attachments are extracted; attachments are stored as uploads of kind `inbound` and listed in the mail's attachments. Guarded by ?secret= when INBOUND_SECRET is set.
+      requestBody: { content: { message/rfc822: { schema: { type: string } } } }
+      responses: { "200": { description: "{mail, outcome, claim_id}" }, "400": { description: not parseable } }
 
   /v1/community:
     get: { summary: "{minutes, submitted_cents, confirmed_cents, users, ngos:[{id, name, confirmed_cents, submitted_cents}]}", responses: { "200": { description: community } } }
   /v1/boards:
     get:
+      summary: "Seven-day board: points of location-verified rides finalised in the last seven days, per customer with show_on_boards. Scope line = rides on my most frequent line of the last 30 days; city = rides starting at a station whose first word matches my home station's; germany = all; a scope with nothing to narrow on falls back to all. Filled from board_seed (seed: true) up to ten entries; the requesting customer always appears with is_me."
       parameters: [{ name: scope, in: query, schema: { type: string, enum: [line, city, germany] } }]
-      responses: { "200": { description: "[{rank, name, points, is_me}]" } }
+      responses: { "200": { description: "[{rank, name, points, is_me, seed}]" } }
+
+  # Server-sent events on GET /v1/events also carry the deadline scanner's output (hourly):
+  #   incident {incident_id, warning: true, legal_deadline, days_left}   21 days before the deadline, once
+  #   incident {expired: [ids]}                                          open incidents past the deadline became verfallen
+  #   claim    {claim_id, nudge: true, expected_reply_by}                a sent claim passed its expected reply date without an answer, once
+  #   claim    {claim_id, status: accepted, source: ngo_report}          an NGO statement confirmed the transfer
+
+  # Stellwerk admin API (x-admin-token; dev and staging only)
+  /admin/customers/{key}:
+    delete:
+      summary: Forget a customer (id, id prefix, nickname or relay address). Deletes the device row; everything cascades. Refused with 409 when the customer has a relay address and a sent claim (a railway may still write to it) unless ?force=true.
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }, { name: force, in: query, schema: { type: boolean } }]
+      responses: { "200": { description: "{forgotten, nickname, sent_claims, trip_overrides_cleared}" }, "404": { description: no such customer }, "409": { description: "relay address and sent claims; repeat with ?force=true" } }
+  /admin/scan:
+    post: { summary: "Run one deadline-scanner pass now: warnings, expiry across all customers, reply nudges, retention sweep.", responses: { "200": { description: "{today, warned, expired, nudged, retained}" } } }
+  /admin/ngos/{id}/report:
+    post:
+      summary: "Import an NGO's monthly statement: JSON {transfers:[{date, amount_cents | amount \"4,50\", reference, counterparty}]} (CSV text `date,amount,reference,counterparty` is accepted too). Each transfer is matched to a sent/question claim of that NGO with exactly that amount, sent within the 60 days before the transfer date, oldest unmatched first (a claim named in reference/counterparty by claimant or id prefix wins). Matches become accepted (amount_confirmed_cents, closed_at), incidents bestätigt with an audit entry \"ngo report\", the bestaetigt badge is awarded, incident and claim events go to the customer, retention runs. One ngo_reports row per import."
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { transfers: { type: array, items: { type: object, required: [date], properties: { date: { type: string, format: date }, amount_cents: { type: integer }, amount: { type: string }, reference: { type: string }, counterparty: { type: string } } } } } } }, text/csv: { schema: { type: string } } } }
+      responses: { "200": { description: "{report_id, ngo_id, rows, matched:[claim ids], unmatched:[{date, amount_cents, reference, counterparty}]}" }, "400": { description: no transfers }, "404": { description: no such ngo } }
 
 components:
   schemas:

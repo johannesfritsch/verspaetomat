@@ -44,7 +44,7 @@ Everything the showcase app reads from `Mock` or from `DemoState`, turned into w
 
 ### Claim (a sent bundle)
 
-`draftDesk`, `draftIncidentIds`, `draftTicketAttached`, `draftNgoId`, `draftSigned`, `draftAmount`, `lastSentBundleId`. Backend: claim id, customer, desk, incident ids, NGO (account holder, IBAN snapshot at send time), ticket months covered, attachments (one ticket image per month, or the ordinary ticket), signature image or typed name, generated PDF, status (`draft`, `sent`, `question`, `accepted`, `rejected`, `bounced`), sent at, expected reply by, reply mail id, amount claimed, amount confirmed, closed at. `POST /v1/claims/draft`, `POST /v1/claims/{id}/attachments`, `PATCH /v1/claims/{id}`, `GET /v1/claims/{id}/preview.pdf`, `POST /v1/claims/{id}/sign`, `POST /v1/claims/{id}/send`, `POST /v1/claims/{id}/postal-reply`.
+`draftDesk`, `draftIncidentIds`, `draftTicketAttached`, `draftNgoId`, `draftSigned`, `draftAmount`, `lastSentBundleId`. Backend: claim id, customer, desk, incident ids, NGO (account holder, IBAN snapshot at send time), ticket months covered, attachments (one ticket image per month, or the ordinary ticket), signature image or typed name, generated PDF, status (`draft`, `sent`, `question`, `accepted`, `rejected`, `bounced`), sent at, expected reply by, reply mail id, amount claimed, amount confirmed, closed at. `POST /v1/claims/draft`, `POST /v1/claims/{id}/attachments`, `PATCH /v1/claims/{id}`, `GET /v1/claims/{id}/pdf`, `POST /v1/claims/{id}/sign`, `POST /v1/claims/{id}/send`, `POST /v1/claims/{id}/postal-reply`.
 
 ### Mail
 

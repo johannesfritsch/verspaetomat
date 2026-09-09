@@ -6,18 +6,22 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// Holds the device token. Keychain / Keystore on phones; in-memory fallback
 /// on web and desktop so the showcase runs everywhere.
 class TokenStore {
-  TokenStore._(this._secure);
+  TokenStore._(this._secure, String namespace)
+      : _key = 'verspaetomat.${namespace}device_token',
+        _deviceKey = 'verspaetomat.${namespace}device_id';
 
-  static const _key = 'verspaetomat.device_token';
-  static const _deviceKey = 'verspaetomat.device_id';
+  /// Keychain keys. A namespace ("e2e.") keeps a test run on its own customer,
+  /// so the integration test never touches the account a person uses on the same device.
+  final String _key;
+  final String _deviceKey;
 
   final FlutterSecureStorage? _secure;
   String? _memToken;
   String? _memDevice;
 
-  factory TokenStore() {
+  factory TokenStore({String namespace = ''}) {
     final usePlatform = !kIsWeb && (Platform.isIOS || Platform.isAndroid);
-    return TokenStore._(usePlatform ? const FlutterSecureStorage() : null);
+    return TokenStore._(usePlatform ? const FlutterSecureStorage() : null, namespace);
   }
 
   Future<String?> token() async {

@@ -321,6 +321,30 @@ pub async fn delete_me(State(s): State<AppState>, c: Customer) -> ApiResult {
     Ok(Json(json!({ "deleted": true })))
 }
 
+#[derive(Deserialize)]
+pub struct PushToken {
+    pub platform: String,
+    pub token: String,
+}
+
+/// `PUT /v1/me/push-token`: stored on the device row. Delivery (APNs/FCM) is not wired yet.
+pub async fn put_push_token(State(s): State<AppState>, c: Customer, Json(p): Json<PushToken>) -> ApiResult {
+    if !matches!(p.platform.as_str(), "ios" | "android") {
+        return Err(err(StatusCode::BAD_REQUEST, "platform must be ios or android"));
+    }
+    let token = p.token.trim();
+    if token.is_empty() || token.len() > 4096 {
+        return Err(err(StatusCode::BAD_REQUEST, "token missing or too long"));
+    }
+    sqlx::query("update devices set push_platform = $2, push_token = $3, push_updated_at = now() where id = $1").bind(c.0.id).bind(&p.platform).bind(token).execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "stored": true, "platform": p.platform })))
+}
+
+pub async fn delete_push_token(State(s): State<AppState>, c: Customer) -> ApiResult {
+    sqlx::query("update devices set push_platform = null, push_token = null, push_updated_at = now() where id = $1").bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "stored": false })))
+}
+
 // ---------------------------------------------------------------------------
 // Rides
 // ---------------------------------------------------------------------------
@@ -623,6 +647,7 @@ pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
     let oldest = rows.iter().filter(|i| i.status.is_open()).min_by_key(|i| i.ride_date);
     let confirmed: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Bestaetigt).map(|i| i.amount_cents).sum();
     let submitted: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Eingereicht).map(|i| i.amount_cents).sum();
+    let capped: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).map(|i| i.amount_cents).sum();
     let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and status <> 'draft' order by sent_at desc nulls last").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
     Ok(Json(json!({
         "incidents": rows,
@@ -632,6 +657,7 @@ pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
             "ready_desk": ready_desk,
             "confirmed_cents": confirmed,
             "submitted_cents": submitted,
+            "capped_cents": capped,
             "oldest_open": oldest.map(|i| json!({ "id": i.id, "line": i.line, "date": i.ride_date, "deadline": i.legal_deadline, "days_left": rules::days_until(i.legal_deadline, today), "warn_from": rules::warn_from(i.legal_deadline) })),
             "min_payout_cents": rules::MIN_PAYOUT_CENTS,
             "dticket_monthly_cap_cents": rules::dticket_monthly_cap_cents(),
@@ -998,17 +1024,89 @@ pub struct InboundMail {
     pub in_reply_to: Option<String>,
     #[serde(default)]
     pub claim_id: Option<Uuid>,
+    /// (file name, content type, bytes). Only the raw-MIME route fills this; the JSON webhook carries none.
+    #[serde(skip)]
+    pub attachments: Vec<(String, String, Vec<u8>)>,
 }
 
-/// Mail-provider webhook (and the showcase's "Antwort simulieren"). Match by relay
-/// address and claim reference, classify, forward, update statuses.
-pub async fn inbound_mail(State(s): State<AppState>, axum::extract::Query(q): axum::extract::Query<BTreeMap<String, String>>, Json(m): Json<InboundMail>) -> ApiResult {
+fn inbound_secret_ok(q: &BTreeMap<String, String>) -> Result<(), (StatusCode, Json<Value>)> {
     if let Ok(secret) = std::env::var("INBOUND_SECRET") {
         if q.get("secret") != Some(&secret) {
             return Err(err(StatusCode::UNAUTHORIZED, "bad secret"));
         }
     }
+    Ok(())
+}
+
+/// Mail-provider webhook (and the showcase's "Antwort simulieren"). Match by relay
+/// address and claim reference, classify, forward, update statuses.
+pub async fn inbound_mail(State(s): State<AppState>, axum::extract::Query(q): axum::extract::Query<BTreeMap<String, String>>, Json(m): Json<InboundMail>) -> ApiResult {
+    inbound_secret_ok(&q)?;
     Ok(Json(process_inbound(&s, m).await?))
+}
+
+/// `POST /internal/inbound-mail/raw`: the RFC 822 message as the body, for providers that
+/// hand over the original mail. Parsed with mail-parser, then the same path as the JSON webhook.
+pub async fn inbound_mail_raw(State(s): State<AppState>, axum::extract::Query(q): axum::extract::Query<BTreeMap<String, String>>, body: axum::body::Bytes) -> ApiResult {
+    inbound_secret_ok(&q)?;
+    let m = parse_raw_mail(&body).ok_or_else(|| err(StatusCode::BAD_REQUEST, "not a parseable RFC 822 message"))?;
+    Ok(Json(process_inbound(&s, m).await?))
+}
+
+/// Raw MIME → InboundMail. The relay address is the To: entry on our domain when there is one.
+pub fn parse_raw_mail(raw: &[u8]) -> Option<InboundMail> {
+    use mail_parser::{MessageParser, MimeHeaders};
+    let msg = MessageParser::default().parse(raw)?;
+    let mailbox = |a: &mail_parser::Addr| match (a.name(), a.address()) {
+        (Some(n), Some(ad)) => format!("{n} <{ad}>"),
+        (None, Some(ad)) => ad.to_string(),
+        (Some(n), None) => n.to_string(),
+        (None, None) => String::new(),
+    };
+    let from = msg.from().or_else(|| msg.sender()).and_then(|a| a.first()).map(mailbox).unwrap_or_default();
+    let to = msg
+        .to()
+        .and_then(|a| {
+            a.iter().find(|x| x.address().map(|ad| ad.to_lowercase().ends_with("@verspaetomat.de")).unwrap_or(false)).or_else(|| a.first()).and_then(|x| x.address().map(|s| s.to_string()))
+        })
+        .unwrap_or_default();
+    let body = msg
+        .body_text(0)
+        .map(|t| t.to_string())
+        .or_else(|| msg.body_html(0).map(|h| strip_html(&h)))
+        .unwrap_or_default();
+    let attachments = msg
+        .attachments()
+        .map(|p| {
+            let ct = p.content_type().map(|c| match c.subtype() { Some(sub) => format!("{}/{}", c.ctype(), sub), None => c.ctype().to_string() }).unwrap_or_else(|| "application/octet-stream".into());
+            (p.attachment_name().unwrap_or("Anhang").to_string(), ct, p.contents().to_vec())
+        })
+        .collect();
+    Some(InboundMail {
+        to,
+        from,
+        subject: msg.subject().unwrap_or("").to_string(),
+        body,
+        message_id: msg.message_id().map(|id| format!("<{id}>")),
+        in_reply_to: msg.in_reply_to().as_text().map(|id| format!("<{id}>")),
+        claim_id: None,
+        attachments,
+    })
+}
+
+/// Enough for classification: drop tags, decode the common entities.
+fn strip_html(h: &str) -> String {
+    let mut out = String::with_capacity(h.len());
+    let mut in_tag = false;
+    for ch in h.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
 }
 
 /// Shared by the provider webhook and the Stellwerk.
@@ -1036,9 +1134,20 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
         MailOutcome::Other
     };
     let amount = extract_amount_cents(&m.body).or_else(|| if outcome == MailOutcome::Accepted { claim.as_ref().map(|c| c.amount_claimed_cents) } else { None });
+    // Attachments become uploads of kind 'inbound'; retention deletes them when the claim closes.
+    let mut stored: Vec<Value> = Vec::new();
+    for (name, ct, bytes) in &m.attachments {
+        if bytes.len() > 8 * 1024 * 1024 {
+            stored.push(json!({ "name": name, "content_type": ct, "size": bytes.len(), "upload_id": null, "skipped": "max 8 MB" }));
+            continue;
+        }
+        let uid = Uuid::new_v4();
+        sqlx::query("insert into uploads (id, customer_id, kind, content_type, bytes) values ($1,$2,'inbound',$3,$4)").bind(uid).bind(cust.id).bind(ct).bind(bytes).execute(&s.pool).await.map_err(internal)?;
+        stored.push(json!({ "name": name, "content_type": ct, "size": bytes.len(), "upload_id": uid }));
+    }
     let mail: MailRow = sqlx::query_as(
-        "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, subject, body, outcome, amount_cents, forwarded_at)
-         values ($1,$2,$3,'inbound',$4,$5,$6,$7,$8,$9,$10,$11,now()) returning *",
+        "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, subject, body, attachments, outcome, amount_cents, forwarded_at)
+         values ($1,$2,$3,'inbound',$4,$5,$6,$7,$8,$9,$10,$11,$12,now()) returning *",
     )
     .bind(Uuid::new_v4())
     .bind(cust.id)
@@ -1049,6 +1158,7 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
     .bind(&m.to)
     .bind(&m.subject)
     .bind(&m.body)
+    .bind(json!(stored))
     .bind(outcome)
     .bind(if outcome == MailOutcome::Accepted { amount } else { None })
     .fetch_one(&s.pool)
@@ -1076,6 +1186,9 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
             }
         }
         rules::audit(&s.pool, "claim", claim.id, Some("sent"), &format!("{:?}", claim_status).to_lowercase(), "inbound mail").await.map_err(internal)?;
+        if matches!(claim_status, ClaimStatus::Accepted | ClaimStatus::Rejected) {
+            crate::scanner::retain_closed_claim(&s.pool, claim.id).await.map_err(internal)?;
+        }
     }
     if let Some(email) = cust.email.as_deref() {
         let fwd_body = format!("Weitergeleitet von deiner Verspätomat-Adresse {}.\nVon: {}\nBetreff: {}\n\n{}", relay, m.from, m.subject, m.body);
@@ -1153,20 +1266,66 @@ pub struct BoardQuery {
     pub scope: Option<String>,
 }
 
+/// Seven-day boards: points of location-verified rides finalised in the last seven days, per customer,
+/// only customers with `show_on_boards`. Scope `line` = rides on my most frequent line of the last 30 days,
+/// `city` = rides starting at a station that shares the first word with my home station, `germany` = all;
+/// a scope with nothing to narrow on falls back to all. The list is filled from `board_seed` (marked `seed`)
+/// until it holds at least ten entries, and I always appear with `is_me`.
 pub async fn boards(State(s): State<AppState>, c: Customer, Query(q): Query<BoardQuery>) -> ApiResult {
     let scope = match q.scope.as_deref() {
         Some("city") => "city",
         Some("germany") => "germany",
         _ => "line",
     };
-    let seed: Vec<BoardSeedRow> = sqlx::query_as("select * from board_seed where scope = $1 order by rank").bind(scope).fetch_all(&s.pool).await.map_err(internal)?;
-    let my_points: i64 = sqlx::query_scalar("select coalesce(sum(points),0)::bigint from rides where customer_id = $1 and status = 'arrived' and location_verified and finalised_at > now() - interval '7 days'").bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?;
-    let mut entries: Vec<Value> = seed.iter().map(|e| json!({ "rank": e.rank, "name": e.name, "points": e.points, "is_me": false })).collect();
-    if c.0.show_on_boards {
-        let better = seed.iter().filter(|e| e.points as i64 > my_points).count() as i64;
-        let rank = better + 1;
-        entries.push(json!({ "rank": rank, "name": c.0.nickname, "points": my_points, "is_me": true }));
-        entries.sort_by_key(|e| e["rank"].as_i64().unwrap_or(0));
+    let now = crate::clock::now();
+    let week_ago = now - Duration::days(7);
+    let ride_filter = "r.location_verified and r.finalised_at > $1";
+    let base = |extra: &str| {
+        format!(
+            "select c.id, c.nickname, sum(r.points)::bigint as points
+             from rides r join customers c on c.id = r.customer_id
+             where c.show_on_boards and {ride_filter} {extra}
+             group by c.id, c.nickname, c.created_at order by points desc, c.created_at limit 100"
+        )
+    };
+    let mut real: Vec<(Uuid, String, i64)> = Vec::new();
+    match scope {
+        "line" => {
+            let line: Option<String> = sqlx::query_scalar(
+                "select line from rides where customer_id = $1 and finalised_at > $2 group by line order by count(*) desc, max(finalised_at) desc limit 1",
+            )
+            .bind(c.0.id)
+            .bind(now - Duration::days(30))
+            .fetch_optional(&s.pool)
+            .await
+            .map_err(internal)?;
+            if let Some(line) = line {
+                real = sqlx::query_as(&base("and r.line = $2")).bind(week_ago).bind(line).fetch_all(&s.pool).await.map_err(internal)?;
+            }
+        }
+        "city" => {
+            let city = c.0.home_station_name.as_deref().and_then(|n| n.split_whitespace().next()).map(|w| w.to_string());
+            if let Some(city) = city {
+                real = sqlx::query_as(&base("and split_part(r.from_station_name, ' ', 1) = $2")).bind(week_ago).bind(city).fetch_all(&s.pool).await.map_err(internal)?;
+            }
+        }
+        _ => {}
     }
-    Ok(Json(json!(entries)))
+    if real.is_empty() {
+        real = sqlx::query_as(&base("")).bind(week_ago).fetch_all(&s.pool).await.map_err(internal)?;
+    }
+    if !real.iter().any(|(id, _, _)| *id == c.0.id) {
+        let my_points: i64 = sqlx::query_scalar("select coalesce(sum(points),0)::bigint from rides r where r.customer_id = $2 and r.location_verified and r.finalised_at > $1").bind(week_ago).bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?;
+        real.push((c.0.id, c.0.nickname.clone(), my_points));
+    }
+    let mut entries: Vec<(String, i64, bool, bool)> = real.into_iter().map(|(id, name, points)| (name, points, id == c.0.id, false)).collect();
+    if entries.len() < 10 {
+        let seed: Vec<BoardSeedRow> = sqlx::query_as("select * from board_seed where scope = $1 order by rank").bind(scope).fetch_all(&s.pool).await.map_err(internal)?;
+        for e in seed.iter().take(10 - entries.len()) {
+            entries.push((e.name.clone(), e.points as i64, false, true));
+        }
+    }
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)));
+    let out: Vec<Value> = entries.into_iter().enumerate().map(|(k, (name, points, is_me, seed))| json!({ "rank": k + 1, "name": name, "points": points, "is_me": is_me, "seed": seed })).collect();
+    Ok(Json(json!(out)))
 }

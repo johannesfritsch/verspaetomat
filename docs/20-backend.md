@@ -26,10 +26,10 @@ Where Rust costs more: development speed for a solo developer new to it, and slo
 | Live train data | Transitous (MOTIS) HTTP API and the gtfs.de realtime protobuf feed via `prost`; DB RIS::Journeys behind the same trait later |
 | Stations | DB RIS::Stations or DELFI stop directory, imported nightly into Postgres with PostGIS for "nearby" |
 | Outbound mail | `lettre` over SMTP to a transactional provider (Postmark, Mailgun or SES) with SPF, DKIM, DMARC on the relay domain |
-| Inbound mail | Provider inbound webhook → `POST /internal/inbound-mail`, parsed with `mail-parser`, attachments to object storage |
+| Inbound mail | Provider inbound webhook → `POST /internal/inbound-mail` (JSON) or `/internal/inbound-mail/raw` (RFC 822, parsed with `mail-parser`); attachments as uploads of kind `inbound` today, object storage later |
 | PDF | Typst template rendered server-side; signature PNG embedded |
 | Object storage | S3-compatible (ticket images, signatures, PDFs, inbound attachments), encrypted at rest, keyed per claim |
-| Push | APNs (`a2`) and FCM HTTP v1 (`reqwest`) |
+| Push | APNs (`a2`) and FCM HTTP v1 (`reqwest`); today only the token is stored (`PUT /v1/me/push-token`), no sender |
 | Auth | Anonymous device accounts with a bearer token; optional e-mail sign-in later for backup |
 | Observability | `tracing` with JSON logs, OpenTelemetry export |
 | Deployment | Docker image, one container plus Postgres, behind a reverse proxy |
@@ -41,16 +41,16 @@ One binary, several loops:
 - **API** — the routes in `backend/openapi.yaml`.
 - **Trip follower** — for each ride in `riding`, poll the trip every 30 to 60 s, store the latest stop-by-stop forecast, detect arrival at the exit stop (forecast turned actual, or the trip's next stop is beyond the exit stop), finalise the delay, create an incident when the rules in 21 say so, send the arrival push.
 - **Relay** — outbound queue (send claim mails with BCC, retry, record message ids), inbound processing (match by relay address and claim reference, classify accepted / question / rejected / bounce, extract amount, forward the original to the customer's private inbox, update the claim).
-- **Deadline scanner** — daily: warn 21 days before an incident's legal deadline, mark `verfallen` at the deadline, remind after 4 weeks without a reply.
-- **NGO report matcher** — monthly import of each NGO's statement; match transfers to sent claims by amount, date window and claimant name; mark `bestätigt`; push.
-- **Aggregates** — community totals and seven-day boards recomputed every minute from the rides and incidents tables.
-- **Retention** — delete attachments, mails and signatures when a claim closes, unless the customer set "keep correspondence".
+- **Deadline scanner** (`backend/src/scanner.rs`, shipped 10 September 2026) — hourly on the simulated clock: warn 21 days before an incident's legal deadline (once, `warned_at`), mark `verfallen` at the deadline across all customers, nudge once when a sent claim passed its expected reply date without an answer (`nudged_at`), sweep retention. Events go out over SSE; a push sender can hang off the same events later.
+- **NGO report matcher** (`POST /admin/ngos/{id}/report`, `stellwerk ngo-report`, shipped) — import of each NGO's statement as JSON or CSV; match transfers to sent claims by amount, a 90-day window and the claimant's name or claim reference; mark `bestätigt`; SSE event. Imports are recorded in `ngo_reports`.
+- **Aggregates** — community totals and seven-day boards computed on read from the rides and incidents tables (boards: real customers first, seeded rows fill the list).
+- **Retention** (shipped) — delete attachment bytes and inbound-mail attachments when a claim closes, unless the customer set "keep correspondence"; ledger, claim, mail and audit rows stay.
 
 ## Rules the backend owns (single source of truth)
 
 - Claim amount per ticket type and category: D-Ticket 1.50 € (2.25 € first class); other season tickets 1.50 € regional or 5.00 € long-distance; ordinary tickets 25 % of the fare at 60 min, 50 % at 120 min.
 - Bundle readiness: an ordinary-ticket incident is always ready; season-ticket incidents are ready when the open sum for that claims desk reaches 4.00 €.
-- Monthly cap: at most 25 % of the ticket price per D-Ticket month; incidents beyond the cap are recorded but marked `gedeckelt`.
+- Monthly cap: at most 25 % of the ticket price per D-Ticket month; incidents beyond the cap are recorded but marked `gedeckelt` (in ride order per calendar month, rejected and expired ones not counted; released when an earlier one drops out). Enforced in `rules::apply_monthly_cap` on every status refresh.
 - Deadlines: legal 3 months from the ride, warning at 21 days before, expiry at the deadline; DB's 12-month goodwill is noted on the incident but never relied on.
 - Status machine for incidents: `gesammelt → bereit → eingereicht → bestätigt | abgelehnt`, plus `verfallen` from any open state, plus `gedeckelt`.
 - Points: one per minute late from minute 1; cancellation counts as 60; Nachtrag earns 1; only rides with a location fix at the station rank on boards.

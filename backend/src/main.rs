@@ -10,13 +10,14 @@ mod mail;
 mod model;
 mod pdf;
 mod rules;
+mod scanner;
 mod train;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
-    routing::{get, patch, post, put},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use sqlx::PgPool;
@@ -59,6 +60,9 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Deadlines, reply nudges, retention: hourly on the simulated clock.
+    scanner::spawn(state.clone());
+
     let app = Router::new()
         .route("/health", get(handlers::health))
         // identity
@@ -78,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/me/personal-data", put(handlers::put_personal_data))
         .route("/v1/me/recovery-code", get(handlers::recovery_code))
         .route("/v1/me/export", get(handlers::export_me))
+        .route("/v1/me/push-token", put(handlers::put_push_token).delete(handlers::delete_push_token))
         // rides
         .route("/v1/rides", get(handlers::rides).post(handlers::check_in))
         .route("/v1/rides/current", get(handlers::current_ride))
@@ -96,11 +101,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/mails", get(handlers::mails))
         .route("/v1/mails/{id}/reply", post(handlers::mail_reply))
         .route("/internal/inbound-mail", post(handlers::inbound_mail))
+        .route("/internal/inbound-mail/raw", post(handlers::inbound_mail_raw))
         // community
         .route("/v1/community", get(handlers::community))
         .route("/v1/boards", get(handlers::boards))
         // Stellwerk (admin)
         .route("/admin/customers", get(admin::customers))
+        .route("/admin/customers/{key}", delete(admin::forget))
         .route("/admin/customers/{key}/ride", get(admin::ride))
         .route("/admin/customers/{key}/delay", post(admin::delay))
         .route("/admin/customers/{key}/cancel", post(admin::cancel))
@@ -109,6 +116,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/customers/{key}/reset", post(admin::reset))
         .route("/admin/customers/{key}/locate", post(admin::locate).delete(admin::clear_location))
         .route("/admin/poll", post(admin::poll))
+        .route("/admin/scan", post(admin::scan))
+        .route("/admin/ngos/{id}/report", post(admin::ngo_report))
         .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
         .route("/admin/overrides", get(admin::overrides).delete(admin::clear_overrides))
         .layer(CorsLayer::permissive())

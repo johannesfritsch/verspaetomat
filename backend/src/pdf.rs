@@ -122,6 +122,13 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
 
 /// Renders the PDF. CPU-bound: call from `spawn_blocking`.
 pub fn render(doc: &ClaimDocument<'_>) -> anyhow::Result<Vec<u8>> {
+    let document = compile(doc)?;
+    let pdf = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()).map_err(|e| anyhow::anyhow!("typst pdf: {e:?}"))?;
+    Ok(pdf)
+}
+
+/// Compiles the template into a laid-out document (pages, no PDF bytes yet).
+pub fn compile(doc: &ClaimDocument<'_>) -> anyhow::Result<typst_layout::PagedDocument> {
     let inputs = claim_inputs(doc);
     let mut claim: Dict = match serde_json::from_value::<TValue>(inputs)? {
         TValue::Dict(d) => d,
@@ -136,9 +143,7 @@ pub fn render(doc: &ClaimDocument<'_>) -> anyhow::Result<Vec<u8>> {
     for w in &compiled.warnings {
         tracing::debug!("typst: {}", w.message);
     }
-    let document = compiled.output.map_err(|e| anyhow::anyhow!("typst compile: {e}"))?;
-    let pdf = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()).map_err(|e| anyhow::anyhow!("typst pdf: {e:?}"))?;
-    Ok(pdf)
+    compiled.output.map_err(|e| anyhow::anyhow!("typst compile: {e}"))
 }
 
 #[cfg(test)]
@@ -217,21 +222,15 @@ mod tests {
         let pdf = render(&ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png: None }).expect("render");
         assert!(pdf.starts_with(b"%PDF"));
         // a drawn signature, 300x90 PNG with transparency
-        let png = base64_png();
-        let signed = render(&ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png: Some(png) }).expect("render with signature");
+        let png = signature_png();
+        let signed_doc = ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png: Some(png) };
+        assert_eq!(compile(&signed_doc).expect("compile with signature").pages().len(), 1, "the signed form must fit on one page");
+        let signed = render(&signed_doc).expect("render with signature");
         assert!(signed.starts_with(b"%PDF"));
-        assert_eq!(count_pages(&signed), 1, "the signed form must fit on one page");
-        assert_eq!(count_pages(&pdf), 1);
         std::fs::write(std::env::temp_dir().join("verspaetomat-test.pdf"), &signed).ok();
     }
 
-    fn count_pages(pdf: &[u8]) -> usize {
-        // "/Type /Page" not followed by 's'
-        let hay = String::from_utf8_lossy(pdf);
-        hay.match_indices("/Type /Page").filter(|(i, _)| !hay[i + 11..].starts_with('s')).count()
-    }
-
-    fn base64_png() -> Vec<u8> {
+    fn signature_png() -> Vec<u8> {
         include_bytes!("../tests/fixtures/signature.png").to_vec()
     }
-}}
+}

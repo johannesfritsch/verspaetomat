@@ -14,7 +14,7 @@ Written 9 September 2026, 20:40. Goal for tonight: the Flutter app on the simula
 
 | Cut | Why | Stand-in tonight |
 |---|---|---|
-| Typst claim PDF | half a day on its own | claim attached as a plain-text summary; PDF next |
+| Typst claim PDF | half a day on its own | shipped 10 September: real EU form rendered server-side, see below |
 | Real SMTP send and provider inbound | needs a provider account, DNS (SPF/DKIM) | `lettre` wired behind `SMTP_URL`; without it "dry-run" records the mail; inbound via our own webhook |
 | Push notifications | APNs/FCM setup | in-app state only |
 | Background geofence nudge | a day of native work and store review | in-app banner when the app is open near a station |
@@ -128,7 +128,21 @@ Done and verified:
 
 - Stellwerk: server-side simulation layer (`backend/src/train/sim.rs`), admin API, and the `stellwerk` CLI (delay, cancel, fast-forward, poll, reply, clock, reset, watch). Verified: a fast-forwarded ride is finalised by the real follower, incidents and badges follow, a clock shift of +100 days expires open incidents, reset cleans up. The app has no simulate buttons in local mode.
 
-Not tonight (as planned): Typst PDF (plain-text summary attached instead), push, background geofence, Träwelling OAuth, NGO report import UI, App Attest, boards across real users, the 25 % monthly cap.
+- Claim PDF (10 September): the EU standard form rebuilt as a Typst template (`backend/templates/eu_form.typ`), filled from the ledger per claim, served at `GET /v1/claims/{id}/pdf` and attached to the relay mail as `EU-Antrag.pdf` next to the plain-text summary. Verified: two pages, all six sections, the incident table, the sum and the 4 € note, signature line.
+
+Not on 9 September (as planned): Typst PDF, push, background geofence, Träwelling OAuth, NGO report import, App Attest, boards across real users, the 25 % monthly cap. Most of that list shipped the next day, see below; what remains needs external accounts.
+
+Shipped on 10 September 2026 (backend cut list, migration 0018):
+- Typst PDF: `GET /v1/claims/{id}/pdf`, `pdf_url` in the claim JSON, `EU-Antrag.pdf` attached to the claim mail.
+- 25 % monthly Deutschlandticket cap: incidents beyond the cap are `gedeckelt` per calendar month, released when an earlier one drops out; `capped_cents` in the ledger summary.
+- Deadline scanner loop (`backend/src/scanner.rs`, hourly, `stellwerk scan` for one pass): 21-day warnings, expiry across all customers, reply nudges after the expected reply date, retention of attachment bytes when a claim closes (unless "keep correspondence").
+- NGO monthly statement import: `POST /admin/ngos/{id}/report` (JSON or CSV), `stellwerk ngo-report <ngo> <file>`, matches confirm claims, recorded in `ngo_reports`.
+- Real boards: customers with `show_on_boards` ranked by verified seven-day points, seeded rows fill the rest, `is_me` on the caller.
+- `stellwerk forget <customer>` (`DELETE /admin/customers/{key}`).
+- Raw-MIME inbound: `POST /internal/inbound-mail/raw` parsed with mail-parser, attachments stored as uploads.
+- Push-token registration: `PUT/DELETE /v1/me/push-token` (stored only; APNs/FCM delivery, Träwelling OAuth, App Attest, SMTP credentials and an inbound mail provider still need external setup).
+- App: the claim flow, Konto and Antwort show the backend's PDF (pdfx). Demo mode (no backend) ships one backend-rendered sample form as an asset instead of a placeholder.
+- E2E: the test now uses its own keychain slot (`TokenStore(namespace: 'e2e.')`), so it gets its own customer and never resets the account a person uses on the same simulator; it locates that customer at Köln Hbf through Stellwerk.
 
 Gotchas found:
 - The simulator's location permission alert survives app relaunches and hides the app; reboot the simulator or run with `NO_LOCATION=1` (a string compare: Flutter's `bool.fromEnvironment` only accepts the literal `true`).

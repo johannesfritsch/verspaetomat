@@ -101,6 +101,7 @@ pub async fn refresh_statuses(pool: &PgPool, customer_id: Uuid, today: NaiveDate
             i.status = IncidentStatus::Verfallen;
         }
     }
+    changes.extend(apply_monthly_cap(&mut rows));
     let mut desks: Vec<String> = rows.iter().filter(|i| i.status.is_open()).map(|i| i.desk.clone()).collect();
     desks.sort();
     desks.dedup();
@@ -116,9 +117,47 @@ pub async fn refresh_statuses(pool: &PgPool, customer_id: Uuid, today: NaiveDate
     }
     for (id, from, to) in changes {
         sqlx::query("update incidents set status = $2 where id = $1").bind(id).bind(to).execute(pool).await?;
-        audit(pool, "incident", id, Some(from_label(from)), from_label(to), "refresh").await?;
+        let reason = match (from, to) {
+            (_, IncidentStatus::Gedeckelt) => "monthly cap",
+            (IncidentStatus::Gedeckelt, _) => "cap released",
+            _ => "refresh",
+        };
+        audit(pool, "incident", id, Some(from_label(from)), from_label(to), reason).await?;
     }
     Ok(rows)
+}
+
+/// The 25 % monthly cap for the Deutschlandticket. Per calendar month of the ride, incidents
+/// are summed in ride order (rejected and expired ones do not count); from the incident that
+/// pushes the month over the cap on, open ones become `gedeckelt`. A `gedeckelt` incident
+/// that fits again (an earlier one was rejected or expired) returns to `gesammelt`.
+/// Mutates the rows and returns the transitions; the caller writes and audits them.
+pub fn apply_monthly_cap(rows: &mut [IncidentRow]) -> Vec<(Uuid, IncidentStatus, IncidentStatus)> {
+    let cap = dticket_monthly_cap_cents();
+    let mut order: Vec<usize> = (0..rows.len()).filter(|&k| rows[k].ticket == TicketType::Deutschlandticket).collect();
+    order.sort_by_key(|&k| (rows[k].ride_date, rows[k].created_at));
+    let mut sums: std::collections::BTreeMap<(i32, u32), Cents> = std::collections::BTreeMap::new();
+    let mut changes = Vec::new();
+    for k in order {
+        let i = &mut rows[k];
+        if matches!(i.status, IncidentStatus::Abgelehnt | IncidentStatus::Verfallen) {
+            continue;
+        }
+        use chrono::Datelike;
+        let sum = sums.entry((i.ride_date.year(), i.ride_date.month())).or_insert(0);
+        *sum += i.amount_cents;
+        let over = *sum > cap;
+        let target = match (i.status, over) {
+            (s, true) if s.is_open() => Some(IncidentStatus::Gedeckelt),
+            (IncidentStatus::Gedeckelt, false) => Some(IncidentStatus::Gesammelt),
+            _ => None,
+        };
+        if let Some(t) = target {
+            changes.push((i.id, i.status, t));
+            i.status = t;
+        }
+    }
+    changes
 }
 
 pub fn from_label(s: IncidentStatus) -> &'static str {
@@ -163,6 +202,51 @@ mod tests {
     fn deadline() {
         let d = legal_deadline(NaiveDate::from_ymd_opt(2026, 9, 9).unwrap());
         assert_eq!(d, NaiveDate::from_ymd_opt(2026, 12, 9).unwrap());
+    }
+
+    fn incident(day: u32, status: IncidentStatus, amount: Cents) -> IncidentRow {
+        IncidentRow {
+            id: Uuid::new_v4(),
+            customer_id: Uuid::nil(),
+            ride_id: None,
+            ride_date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
+            line: "RE 1".into(),
+            from_name: "A".into(),
+            to_name: "B".into(),
+            delay_min: 70,
+            amount_cents: amount,
+            ticket: TicketType::Deutschlandticket,
+            operator: "DB Regio NRW".into(),
+            desk: "DB".into(),
+            status,
+            cancelled: false,
+            self_entered: false,
+            ngo_id: "bahnhofsmission".into(),
+            claim_id: None,
+            fare_cents: None,
+            legal_deadline: NaiveDate::from_ymd_opt(2026, 12, day).unwrap(),
+            evidence: None,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn monthly_cap() {
+        // 6300 / 4 = 1575: ten incidents of 150 fit, the eleventh is capped.
+        let mut rows: Vec<IncidentRow> = (1..=12).map(|d| incident(d, IncidentStatus::Gesammelt, 150)).collect();
+        let changes = apply_monthly_cap(&mut rows);
+        assert_eq!(changes.len(), 2);
+        assert_eq!(rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).count(), 2);
+        assert_eq!(rows[10].status, IncidentStatus::Gedeckelt);
+        assert_eq!(rows[9].status, IncidentStatus::Gesammelt);
+        // A rejection earlier in the month releases one capped incident.
+        rows[0].status = IncidentStatus::Abgelehnt;
+        let changes = apply_monthly_cap(&mut rows);
+        assert_eq!(changes, vec![(rows[10].id, IncidentStatus::Gedeckelt, IncidentStatus::Gesammelt)]);
+        // Other months and other tickets are untouched.
+        let mut other = vec![incident(3, IncidentStatus::Gesammelt, 5000)];
+        other[0].ticket = TicketType::Zeitkarte;
+        assert!(apply_monthly_cap(&mut other).is_empty());
     }
 
     #[test]

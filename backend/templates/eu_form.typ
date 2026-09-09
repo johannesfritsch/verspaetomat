@@ -4,7 +4,7 @@
 #import sys: inputs
 #let d = inputs.claim
 
-#set page(paper: "a4", margin: (x: 20mm, top: 14mm, bottom: 14mm), numbering: "1 / 1", number-align: right)
+#set page(paper: "a4", margin: (x: 20mm, top: 12mm, bottom: 12mm), numbering: "1 / 1", number-align: right)
 #set text(font: ("Helvetica Neue", "Arial", "Liberation Sans", "Libertinus Serif"), size: 9pt, lang: "de")
 #set par(leading: 0.55em)
 
@@ -13,7 +13,7 @@
   #text(size: 7.5pt, fill: rgb("#555555"))[#label] \
   #text(size: 10pt)[#value]
 ]
-#let section(title) = block(above: 10pt, below: 5pt)[
+#let section(title) = block(above: 8pt, below: 4pt)[
   #text(weight: "bold", size: 10.5pt)[#title]
   #line(length: 100%, stroke: 0.6pt + black)
 ]
@@ -42,9 +42,6 @@
   field("3.2.5 Ankunftszeit am Zielort laut Fahrplan", d.first.planned),
   field("3.3.3 Tatsächliche Ankunftszeit am Zielort", d.first.actual),
 )
-#if d.incidents.len() > 1 [
-  #text(size: 8pt, fill: rgb("#555555"))[Weitere Fahrten dieser Zeitfahrkarte siehe Abschnitt 6.]
-]
 
 #section("4. Art Ihres Antrags an das Eisenbahnunternehmen")
 #box_(false) Erstattung der Fahrkarte(n) \
@@ -61,9 +58,9 @@
   field("5.2 Anschrift", d.person.address),
   field("5.3.2 Telefonnummer", "–"),
 )
-#v(7pt)
+#v(5pt)
 #field("5.4 Bevorzugte Auszahlungsform", [#box_(true) Geld #h(1.5em) #box_(false) Gutscheine und/oder andere Dienstleistungen])
-#v(7pt)
+#v(5pt)
 #grid(columns: (1fr, 1fr), column-gutter: 12pt, row-gutter: 7pt,
   field("5.5.1 IBAN (Kontonummer)", d.payee.iban),
   field("5.5.4 Name des Kontoinhabers", text(weight: "bold")[#d.payee.holder]),
@@ -79,7 +76,7 @@
   #table(
     columns: (auto, auto, 1fr, auto, auto, auto, auto),
     stroke: 0.4pt + rgb("#999999"),
-    inset: 4pt,
+    inset: 3.5pt,
     align: (left, left, left, right, right, right, right),
     text(size: 8pt, weight: "bold")[Datum], text(size: 8pt, weight: "bold")[Zug], text(size: 8pt, weight: "bold")[Strecke],
     text(size: 8pt, weight: "bold")[Plan], text(size: 8pt, weight: "bold")[Ist], text(size: 8pt, weight: "bold")[Verspätung], text(size: 8pt, weight: "bold")[Anspruch],
@@ -101,7 +98,7 @@
 *Hiermit erkläre ich, dass alle in diesem Formular gemachten Angaben in jeder Hinsicht und für alle Fahrgäste der Wahrheit entsprechen und zutreffend sind.*
 Ich erkläre, dass der Empfänger dieses Formulars meine personenbezogenen Daten erforderlichenfalls zum Zwecke der Bearbeitung meines Antrags weitergeben darf. #box_(true) JA
 
-#v(8pt)
+#v(4pt)
 #grid(columns: (1fr, 1fr, 1fr, 1.3fr), column-gutter: 12pt,
   field("Datum der Antragstellung", d.signed_on),
   field("Ort der Antragstellung", d.place),

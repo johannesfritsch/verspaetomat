@@ -136,7 +136,9 @@ async fn apply_trip(pool: &PgPool, row: &RidingRow, trip: &TripInfo, announce: &
     let arrived = arrival_estimate + ARRIVAL_GRACE < now;
     if cancelled || arrived {
         let final_delay = if cancelled { live_delay_min.max(60) } else { live_delay_min };
-        let actual = if cancelled { None } else { Some(arrival_estimate) };
+        // Actual = the ride's own planned time plus the delay: consistent evidence even when the
+        // Stellwerk has shifted the trip's clock.
+        let actual = if cancelled { None } else { Some(row.planned_arrival + ChronoDuration::minutes(live_delay_min)) };
         finalise_ride(pool, row.id, final_delay, cancelled, actual, false).await?;
         let _ = announce.send(RideFinalised {
             ride_id: row.id,

@@ -19,7 +19,8 @@ Environment:
 | `DATABASE_URL` | `postgres://localhost/verspaetomat` | Postgres |
 | `BIND` | `127.0.0.1:8080` | use `0.0.0.0:8080` for a phone on the LAN |
 | `SMTP_URL` | unset → dry-run | `smtps://user:pass@host:465` or `smtp://user:pass@host:587` (STARTTLS) |
-| `INBOUND_SECRET` | unset | when set, `/internal/inbound-mail` requires `?secret=` |
+| `INBOUND_SECRET` | unset | when set, `/internal/inbound-mail` and `/internal/inbound-mail/raw` require `?secret=` |
+| `ADMIN_TOKEN` | `stellwerk` | the `x-admin-token` for `/admin/*` and the `stellwerk` CLI |
 | `RUST_LOG` | `info,tower_http=info,sqlx=warn` | tracing filter |
 
 ## Try it
@@ -38,12 +39,15 @@ curl -s -H "$A" localhost:8080/v1/incidents | jq .summary
 ## Layout
 
 ```
-migrations/        0001…0012, applied automatically at start (sqlx migrate)
+migrations/        0001…0018, applied automatically at start (sqlx migrate)
 src/main.rs        router, state, follower wiring
 src/auth.rs        device tokens, recovery codes, the Customer extractor
 src/db/            pool + seed (mod.rs), row types (rows.rs)
-src/rules.rs       amounts, readiness, deadlines, status refresh, audit
+src/rules.rs       amounts, readiness, deadlines, monthly cap, status refresh, audit
 src/handlers.rs    HTTP handlers
+src/scanner.rs     deadline scanner loop (warnings, expiry, reply nudges, retention)
+src/admin.rs       Stellwerk admin API (simulation, forget, NGO report import, scan)
+src/pdf.rs         the EU claim form via Typst (templates/eu_form.typ)
 src/train/         Transitous client (transitous.rs), trip follower (follower.rs), shared types (mod.rs)
 src/mail.rs        SMTP via lettre, dry-run without SMTP_URL
 src/fixtures.rs    seed data (operators, NGOs, badges, seeded boards, community baseline) from fixtures/*.json
@@ -68,6 +72,9 @@ cargo run --bin stellwerk -- reset Johannes         # wipe one customer's rides,
 cargo run --bin stellwerk -- overrides [--clear]
 cargo run --bin stellwerk -- watch Johannes         # live view, refreshes every 3 s
 cargo run --bin stellwerk -- locate Johannes "Köln Hbf"   # put the customer at a station (or lat,lon); --clear returns to the phone's GPS
+cargo run --bin stellwerk -- forget Johannes [--force]   # delete the customer entirely (device row; everything cascades); --force when claims were already sent
+cargo run --bin stellwerk -- ngo-report bahnhofsmission statement.csv   # import the NGO's statement (CSV date,amount,reference,counterparty; amount "4,50" or "4.50"); matches confirm claims
+cargo run --bin stellwerk -- scan                  # one deadline-scanner pass now (the loop runs hourly)
 ```
 
 Every Stellwerk change is pushed to the app immediately over `GET /v1/events` (server-sent events per customer: location, ride, incident, claim, mail, clock, reset). The app keeps that stream open in local mode and refreshes the screen an event names; polling stays as the fallback.
@@ -77,8 +84,18 @@ Env: `STELLWERK_URL` (default `http://127.0.0.1:8080`), `ADMIN_TOKEN` (default `
 ## Loops
 
 - Trip follower: every 45 s, every ride in `riding` is polled; snapshots go to `ride_snapshots`; at the exit stop the ride is finalised and an incident is created when the rules say so.
-- Deadline scanner, NGO report import, retention: not yet (see docs/20-backend.md).
+- Deadline scanner (`src/scanner.rs`): hourly on the simulated clock, first pass 30 s after start, `POST /admin/scan` or `stellwerk scan` for one pass now. It warns 21 days before an incident's legal deadline (`incidents.warned_at`, SSE `incident {incident_id, warning: true, legal_deadline}`), marks open incidents `verfallen` at the deadline for every customer, nudges once when a sent claim passed `expected_reply_by` without an inbound mail (`claims.nudged_at`, SSE `claim {claim_id, nudge: true}`), and sweeps retention.
+- Retention: when a claim becomes accepted or rejected (inbound mail, Stellwerk reply, NGO report) the bytes of its uploads and of the inbound mails' attachments are deleted unless the customer set `keep_correspondence`. Ledger, claim, mail and audit rows stay; an upload still attached to another open claim is kept.
+- Monthly cap: on every status refresh (incident creation, ledger read, scanner) Deutschlandticket incidents are summed per calendar month in ride order; from the one that pushes the month over 25 % of the ticket price they are `gedeckelt`, and released again when an earlier one is rejected or expires. The ledger summary reports `capped_cents`.
+- NGO report import: `POST /admin/ngos/{id}/report` with `{transfers:[{date, amount_cents, reference, counterparty}]}` (or CSV). A transfer matches a sent claim of that NGO with exactly that amount, sent within the 60 days before the transfer, oldest unmatched first; a reference naming the claimant or the claim id prefix wins. Matches become `accepted` with the confirmed amount, incidents `bestaetigt` (audit "ngo report"), the badge is awarded, the customer gets incident and claim events, retention runs; one `ngo_reports` row (rows, matched) per import. Answer: `{matched:[claim ids], unmatched:[transfers]}`.
+- Boards (`GET /v1/boards?scope=`): seven-day sums of `points` over location-verified rides finalised in the last seven days, per customer with `show_on_boards`. `line` = rides on my most frequent line of the last 30 days, `city` = rides starting at a station whose first word matches my home station's, `germany` = all; a scope with nothing to narrow on falls back to all. Filled from `board_seed` (entries carry `seed: true`) up to ten entries; the requesting customer always appears with `is_me`.
+- Inbound mail: `POST /internal/inbound-mail` (JSON) and `POST /internal/inbound-mail/raw` (the RFC 822 message, parsed with mail-parser; attachments stored as uploads of kind `inbound`).
+- Push tokens: `PUT/DELETE /v1/me/push-token` stores the platform and token on the device row. Nothing is sent yet.
 
-## Not yet
+## Needs external setup
 
-Typst PDF (the claim mail carries a plain-text summary), push notifications, provider inbound webhook verification beyond the shared secret, App Attest, real boards across users, the 25 % monthly cap enforcement.
+- Push delivery: APNs and FCM credentials; the tokens are stored, no sender exists.
+- SMTP credentials (`SMTP_URL`) for real outbound mail; without them the relay dry-runs.
+- An inbound mail provider that posts to `/internal/inbound-mail` or `/internal/inbound-mail/raw`, plus `INBOUND_SECRET`.
+- Träwelling OAuth (client registration).
+- App Attest / Play Integrity; today only per-device rate limits.

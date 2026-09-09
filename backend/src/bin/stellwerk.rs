@@ -12,6 +12,9 @@
 //!   stellwerk overrides [--clear]
 //!   stellwerk watch Johannes
 //!   stellwerk locate Johannes "Köln Hbf"   |  locate Johannes 50.943,6.9586  |  locate Johannes --clear
+//!   stellwerk forget Johannes
+//!   stellwerk ngo-report bahnhofsmission statement.csv   (or .json)
+//!   stellwerk scan
 //!
 //! Env: STELLWERK_URL (default http://127.0.0.1:8080), ADMIN_TOKEN (default stellwerk).
 
@@ -71,6 +74,21 @@ enum Cmd {
     },
     /// Live view of a customer's ride, refreshed every 3 s (Ctrl-C to stop)
     Watch { customer: String },
+    /// Delete a customer entirely (device, rides, incidents, claims, mails, uploads); --force when claims were already sent
+    Forget {
+        customer: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Import an NGO's monthly statement (CSV date,amount,reference,counterparty; amount "4,50" or "4.50") and confirm matching claims
+    NgoReport {
+        /// NGO id, e.g. bahnhofsmission
+        ngo: String,
+        /// CSV file; a .json file ({transfers:[…]}) is sent as is
+        file: std::path::PathBuf,
+    },
+    /// Run one deadline-scanner pass now (warnings, expiry, reply nudges, retention)
+    Scan,
     /// Put a customer at a station ("Köln Hbf") or at lat,lon; --clear returns to the phone's GPS
     Locate {
         customer: String,
@@ -246,6 +264,46 @@ async fn main() -> anyhow::Result<()> {
                 let v = api.post(&format!("/admin/customers/{customer}/locate"), body).await?;
                 println!("{} steht jetzt bei {} ({}, {})", s(&v, "customer"), s(&v, "label"), s(&v, "lat"), s(&v, "lon"));
             }
+        }
+        Cmd::Forget { customer, force } => {
+            let path = format!("/admin/customers/{customer}{}", if force { "?force=true" } else { "" });
+            let v = api.delete(&path).await?;
+            println!("Vergessen: {} ({}), {} gesendete Anträge", s(&v, "nickname"), s(&v, "forgotten"), s(&v, "sent_claims"));
+        }
+        Cmd::NgoReport { ngo, file } => {
+            let text = std::fs::read_to_string(&file)?;
+            let body = if file.extension().and_then(|e| e.to_str()) == Some("json") {
+                serde_json::from_str::<Value>(&text)?
+            } else {
+                let transfers: Vec<Value> = text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    .filter_map(|l| {
+                        let sep = if l.matches(';').count() >= l.matches(',').count() { ';' } else { ',' };
+                        let f: Vec<&str> = l.splitn(4, sep).map(|x| x.trim().trim_matches('"')).collect();
+                        // The header line has no parsable date.
+                        let first = *f.first()?;
+                        let date = chrono::NaiveDate::parse_from_str(first, "%Y-%m-%d").or_else(|_| chrono::NaiveDate::parse_from_str(first, "%d.%m.%Y")).ok()?;
+                        Some(json!({ "date": date, "amount": f.get(1)?, "reference": f.get(2).unwrap_or(&""), "counterparty": f.get(3).unwrap_or(&"") }))
+                    })
+                    .collect();
+                json!({ "transfers": transfers })
+            };
+            let v = api.post(&format!("/admin/ngos/{ngo}/report"), body).await?;
+            let matched = v.get("matched").and_then(|m| m.as_array()).cloned().unwrap_or_default();
+            let unmatched = v.get("unmatched").and_then(|m| m.as_array()).cloned().unwrap_or_default();
+            println!("Bericht {}: {} Überweisungen, {} zugeordnet, {} offen", s(&v, "report_id"), s(&v, "rows"), matched.len(), unmatched.len());
+            for id in &matched {
+                println!("  ✓ Antrag {}", id.as_str().unwrap_or_default());
+            }
+            for u in &unmatched {
+                println!("  · {}  {:>8} ct  {}  {}", s(u, "date"), s(u, "amount_cents"), s(u, "reference"), s(u, "counterparty"));
+            }
+        }
+        Cmd::Scan => {
+            let v = api.post("/admin/scan", json!({})).await?;
+            println!("Scanner ({}): {} gewarnt, {} verfallen, {} angestupst, {} bereinigt", s(&v, "today"), s(&v, "warned"), s(&v, "expired"), s(&v, "nudged"), s(&v, "retained"));
         }
         Cmd::Watch { customer } => loop {
             let v = api.get(&format!("/admin/customers/{customer}/ride")).await;
