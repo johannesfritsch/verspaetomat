@@ -43,8 +43,9 @@ impl FromRequestParts<AppState> for Admin {
 async fn resolve(s: &AppState, key: &str) -> Result<CustomerRow, (StatusCode, Json<Value>)> {
     let key = key.trim();
     let row: Option<CustomerRow> = sqlx::query_as(
-        "select * from customers where id::text = $1 or id::text like $1 || '%' or lower(nickname) = lower($1) or lower(relay_address) = lower($1)
-         order by created_at desc limit 1",
+        "select c.* from customers c join devices d on d.id = c.id
+         where c.id::text = $1 or c.id::text like $1 || '%' or lower(c.nickname) = lower($1) or lower(c.relay_address) = lower($1)
+         order by d.last_seen_at desc limit 1",
     )
     .bind(key)
     .fetch_optional(&s.pool)
