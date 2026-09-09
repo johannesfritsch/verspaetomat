@@ -72,7 +72,7 @@ pub async fn stations_search(State(s): State<AppState>, _c: Customer, Query(q): 
 }
 
 pub async fn departures(State(s): State<AppState>, _c: Customer, Path(id): Path<String>) -> ApiResult {
-    let deps = s.train.departures(&id, 30).await.map_err(internal)?;
+    let deps = s.train.departures(&id, 150).await.map_err(internal)?;
     let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
     let out: Vec<Value> = deps
         .into_iter()

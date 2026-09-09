@@ -72,7 +72,7 @@ impl TransitousClient {
             .map(|p| StopInfo {
                 distance_m: Some(haversine_m(lat, lon, p.lat, p.lon).round() as i64),
                 id: p.id,
-                name: p.name,
+                name: crate::train::display_station_name(&p.name),
                 lat: p.lat,
                 lon: p.lon,
             })
@@ -109,7 +109,7 @@ impl TransitousClient {
         Ok(places
             .into_iter()
             .filter(|p| p.r#type.as_deref() == Some("STOP"))
-            .map(|p| StopInfo { id: p.id, name: p.name, lat: p.lat, lon: p.lon, distance_m: None })
+            .map(|p| StopInfo { id: p.id, name: crate::train::display_station_name(&p.name), lat: p.lat, lon: p.lon, distance_m: None })
             .collect())
     }
 

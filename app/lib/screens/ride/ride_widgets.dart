@@ -33,6 +33,8 @@ DateTime? liveAt(ApiStop s) => s.arrival ?? s.departure;
 
 /// One-shot position. Null when the platform, the permission or the time budget says no.
 Future<ApiLocation?> currentPosition({Duration timeout = const Duration(seconds: 4)}) async {
+  // `--dart-define=NO_LOCATION=1` keeps the OS permission dialog out of demos and screenshots.
+  if (const bool.fromEnvironment('NO_LOCATION', defaultValue: false)) return null;
   try {
     if (!await Geolocator.isLocationServiceEnabled()) return null;
     var p = await Geolocator.checkPermission();

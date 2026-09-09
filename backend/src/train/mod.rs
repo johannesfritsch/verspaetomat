@@ -273,3 +273,10 @@ mod tests {
         assert!((1100.0..1300.0).contains(&d), "{d}");
     }
 }
+
+/// Feed names carry country suffixes like "Köln Hbf (DE)". The customer never needs them.
+pub fn display_station_name(name: &str) -> String {
+    let n = name.trim();
+    let n = n.strip_suffix(" (DE)").unwrap_or(n);
+    n.to_string()
+}
