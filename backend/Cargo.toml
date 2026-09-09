@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Verspätomat backend skeleton: serves the data the showcase app needs, in memory, from fixtures."
 license = "AGPL-3.0-only"
+default-run = "verspaetomat-api"
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }

@@ -19,4 +19,4 @@ if [[ "${1:-}" == "--reset" ]]; then
 fi
 
 # Optional: SMTP_URL=smtps://user:pass@host:465  INBOUND_SECRET=…  BIND=0.0.0.0:8080 (for a phone on the LAN)
-exec cargo run
+exec cargo run --bin verspaetomat-api
