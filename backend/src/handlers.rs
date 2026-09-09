@@ -1,19 +1,33 @@
-//! HTTP handlers. Thin: parse, call rules, mutate state, answer.
+//! HTTP handlers on Postgres. Thin: parse, call rules, write rows, answer.
 
 use std::collections::BTreeMap;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::StatusCode,
     Json,
 };
-use chrono::{Duration, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
+use serde::Deserialize;
 use serde_json::{json, Value};
+use sqlx::PgPool;
+use uuid::Uuid;
 
-use crate::model::*;
-use crate::rules;
-use crate::Shared;
+use crate::auth::{internal, sha256, Customer};
+use crate::db::rows::*;
+use crate::rules::{self, Cents};
+use crate::train::{agency_to_operator, normalise_station_name, TripInfo};
+
+fn row_category(c: crate::train::TrainCategory) -> TrainCategory {
+    match c.as_str() {
+        "s" => TrainCategory::S,
+        "rb" => TrainCategory::Rb,
+        "re" => TrainCategory::Re,
+        "fern" => TrainCategory::Fern,
+        _ => TrainCategory::Bus,
+    }
+}
+use crate::AppState;
 
 type ApiResult = Result<Json<Value>, (StatusCode, Json<Value>)>;
 
@@ -21,83 +35,171 @@ fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<Value>) {
     (status, Json(json!({ "error": msg })))
 }
 
-fn now() -> chrono::NaiveDateTime {
-    Utc::now().naive_utc()
+fn today() -> NaiveDate {
+    Utc::now().date_naive()
 }
 
-fn add_minutes(hhmm: &str, minutes: i64) -> String {
-    let (h, m) = hhmm.split_once(':').unwrap_or(("0", "0"));
-    let total = (h.parse::<i64>().unwrap_or(0) * 60 + m.parse::<i64>().unwrap_or(0) + minutes).rem_euclid(24 * 60);
-    format!("{:02}:{:02}", total / 60, total % 60)
-}
-
-pub async fn health() -> Json<Value> {
-    Json(json!({ "ok": true, "service": "verspaetomat-api" }))
+pub async fn health(State(s): State<AppState>) -> Json<Value> {
+    let db_ok = sqlx::query_scalar::<_, i32>("select 1").fetch_one(&s.pool).await.is_ok();
+    Json(json!({ "ok": db_ok, "service": "verspaetomat-api", "db": db_ok }))
 }
 
 // ---------------------------------------------------------------------------
 // Reference data
 // ---------------------------------------------------------------------------
 
-pub async fn stations_nearby(State(s): State<Shared>) -> Json<Vec<Station>> {
-    Json(s.read().unwrap().stations.clone())
+#[derive(Deserialize)]
+pub struct LatLon {
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
 }
 
-pub async fn departures(State(s): State<Shared>, Path(id): Path<String>) -> Json<Vec<Departure>> {
-    let s = s.read().unwrap();
-    Json(s.departures.iter().filter(|d| d.station_id == id).cloned().collect())
+pub async fn stations_nearby(State(s): State<AppState>, _c: Customer, Query(q): Query<LatLon>) -> ApiResult {
+    // Default: Köln Hbf, so the simulator works without a location.
+    let (lat, lon) = (q.lat.unwrap_or(50.9430), q.lon.unwrap_or(6.9586));
+    let stops = s.train.nearby_stops(lat, lon).await.map_err(internal)?;
+    Ok(Json(json!(stops)))
 }
 
-pub async fn trip(State(s): State<Shared>, Path(id): Path<String>) -> ApiResult {
-    let s = s.read().unwrap();
-    s.departures
-        .iter()
-        .find(|d| d.id == id)
-        .map(|d| Json(json!(d)))
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "trip not found"))
+#[derive(Deserialize)]
+pub struct SearchQ {
+    pub q: String,
 }
 
-pub async fn operators(State(s): State<Shared>) -> Json<Vec<Operator>> {
-    Json(s.read().unwrap().operators.clone())
+pub async fn stations_search(State(s): State<AppState>, _c: Customer, Query(q): Query<SearchQ>) -> ApiResult {
+    let stops = s.train.search_stops(&q.q).await.map_err(internal)?;
+    Ok(Json(json!(stops)))
 }
 
-pub async fn ngos(State(s): State<Shared>) -> Json<Vec<Ngo>> {
-    let s = s.read().unwrap();
-    let mut ngos = s.ngos.clone();
-    for n in ngos.iter_mut() {
-        n.confirmed_total_cents += s
-            .incidents
-            .iter()
-            .filter(|i| i.ngo_id == n.id && i.status == IncidentStatus::Bestaetigt)
-            .map(|i| i.amount_cents)
-            .sum::<Cents>();
-        n.submitted_total_cents += s
-            .incidents
-            .iter()
-            .filter(|i| i.ngo_id == n.id && i.status == IncidentStatus::Eingereicht)
-            .map(|i| i.amount_cents)
-            .sum::<Cents>();
-    }
-    Json(ngos)
+pub async fn departures(State(s): State<AppState>, _c: Customer, Path(id): Path<String>) -> ApiResult {
+    let deps = s.train.departures(&id, 30).await.map_err(internal)?;
+    let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
+    let out: Vec<Value> = deps
+        .into_iter()
+        .map(|d| {
+            let operator = map_operator(&ops, &d.agency_name);
+            let desk = ops.iter().find(|o| o.name == operator).map(|o| o.desk.clone()).unwrap_or_else(|| "Unbekannt".into());
+            let mut v = json!(d);
+            v["operator"] = json!(operator);
+            v["desk"] = json!(desk);
+            v
+        })
+        .collect();
+    Ok(Json(json!(out)))
 }
 
-pub async fn badges(State(s): State<Shared>) -> Json<Vec<Badge>> {
-    Json(s.read().unwrap().badges.clone())
+#[derive(Deserialize)]
+pub struct TripQ {
+    pub trip_id: String,
+}
+
+pub async fn trip(State(s): State<AppState>, _c: Customer, Query(q): Query<TripQ>) -> ApiResult {
+    let t = s.train.trip(&q.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip: {e}")))?;
+    Ok(Json(json!(t)))
+}
+
+pub async fn operators(State(s): State<AppState>) -> ApiResult {
+    let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators order by name").fetch_all(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!(ops)))
+}
+
+pub async fn ngos(State(s): State<AppState>) -> ApiResult {
+    Ok(Json(json!(ngo_totals(&s.pool).await.map_err(internal)?)))
+}
+
+async fn ngo_totals(pool: &PgPool) -> anyhow::Result<Vec<Value>> {
+    let rows: Vec<(String, String, String, Value, String, String, String, Option<NaiveDate>, i64, i64, i64, i64)> = sqlx::query_as(
+        "select n.id, n.name, n.tagline, n.story, n.account_holder, n.iban, n.donation_url, n.last_report,
+                n.seed_confirmed_cents, n.seed_submitted_cents,
+                coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'bestaetigt'), 0)::bigint,
+                coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'eingereicht'), 0)::bigint
+         from ngos n where n.active order by n.name",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, name, tagline, story, holder, iban, url, last_report, sc, ss, c, sub)| {
+            json!({
+                "id": id, "name": name, "tagline": tagline, "story": story, "account_holder": holder, "iban": iban,
+                "donation_url": url, "last_report": last_report,
+                "confirmed_total_cents": sc + c, "submitted_total_cents": ss + sub,
+            })
+        })
+        .collect())
+}
+
+pub async fn badges(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let rows: Vec<(String, String, String, Option<DateTime<Utc>>)> = sqlx::query_as(
+        "select b.id, b.name, b.rule, a.awarded_at from badges b left join badge_awards a on a.badge_id = b.id and a.customer_id = $1 order by b.id",
+    )
+    .bind(c.0.id)
+    .fetch_all(&s.pool)
+    .await
+    .map_err(internal)?;
+    Ok(Json(json!(rows
+        .into_iter()
+        .map(|(id, name, rule, at)| json!({ "id": id, "name": name, "rule": rule, "earned_on": at.map(|t| t.date_naive()) }))
+        .collect::<Vec<_>>())))
 }
 
 // ---------------------------------------------------------------------------
 // Customer
 // ---------------------------------------------------------------------------
 
-pub async fn me(State(s): State<Shared>) -> Json<Customer> {
-    let s = s.read().unwrap();
-    let mut me = s.me.clone();
-    me.points_this_week += s.rides.iter().filter(|r| r.nachtrag).map(|r| r.points).sum::<i64>();
-    Json(me)
+async fn customer_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value> {
+    let week_ago = Utc::now() - Duration::days(7);
+    let (points_total, points_week): (i64, i64) = sqlx::query_as(
+        "select coalesce(sum(points),0)::bigint, coalesce(sum(points) filter (where finalised_at >= $2),0)::bigint from rides where customer_id = $1 and status = 'arrived'",
+    )
+    .bind(c.id)
+    .bind(week_ago)
+    .fetch_one(pool)
+    .await?;
+    let (level, next, next_at) = level_for(points_total);
+    Ok(json!({
+        "id": c.id,
+        "nickname": c.nickname,
+        "relay_address": c.relay_address,
+        "personal_data": c.full_name.as_ref().map(|n| json!({
+            "name": n, "address": c.postal_address, "email": c.email, "ticket_number": c.ticket_number, "first_class": c.first_class
+        })),
+        "settings": {
+            "ticket": c.ticket, "ngo_id": c.ngo_id, "location_mode": c.loc_mode, "notifications": c.notifications,
+            "show_on_boards": c.show_on_boards, "keep_correspondence": c.keep_correspondence,
+            "traewelling_linked": c.traewelling_linked, "onboarding_done": c.onboarding_done,
+        },
+        "points_total": points_total,
+        "points_this_week": points_week,
+        "level_name": level,
+        "next_level_name": next,
+        "next_level_at": next_at,
+        "home_station": c.home_station_name,
+        "home_station_id": c.home_station_id,
+    }))
+}
+
+fn level_for(points: i64) -> (&'static str, &'static str, i64) {
+    const LEVELS: [(&str, i64); 6] = [
+        ("Frischer Fahrgast", 0),
+        ("Bahnsteigkante", 60),
+        ("Wartehäuschen", 240),
+        ("Gleis 7", 600),
+        ("Bahnhofsmission", 1500),
+        ("Bahnsteig-Buddha", 4000),
+    ];
+    let idx = LEVELS.iter().rposition(|(_, at)| points >= *at).unwrap_or(0);
+    let next = LEVELS.get(idx + 1).unwrap_or(&LEVELS[idx]);
+    (LEVELS[idx].0, next.0, next.1)
+}
+
+pub async fn me(State(s): State<AppState>, c: Customer) -> ApiResult {
+    Ok(Json(customer_json(&s.pool, &c.0).await.map_err(internal)?))
 }
 
 #[derive(Deserialize)]
 pub struct MePatch {
+    pub nickname: Option<String>,
     pub ticket: Option<TicketType>,
     pub ngo_id: Option<String>,
     pub location_mode: Option<LocationMode>,
@@ -105,149 +207,214 @@ pub struct MePatch {
     pub show_on_boards: Option<bool>,
     pub keep_correspondence: Option<bool>,
     pub traewelling_linked: Option<bool>,
+    pub onboarding_done: Option<bool>,
+    pub home_station_id: Option<String>,
+    pub home_station_name: Option<String>,
 }
 
-pub async fn patch_me(State(s): State<Shared>, Json(p): Json<MePatch>) -> ApiResult {
-    let mut s = s.write().unwrap();
+pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePatch>) -> ApiResult {
     if let Some(n) = &p.ngo_id {
-        if !s.ngos.iter().any(|x| &x.id == n) {
+        let exists: bool = sqlx::query_scalar("select exists(select 1 from ngos where id = $1 and active)").bind(n).fetch_one(&s.pool).await.map_err(internal)?;
+        if !exists {
             return Err(err(StatusCode::BAD_REQUEST, "unknown ngo"));
         }
     }
-    let st = &mut s.me.settings;
-    if let Some(v) = p.ticket {
-        st.ticket = v;
-    }
-    if let Some(v) = p.ngo_id {
-        st.ngo_id = v;
-    }
-    if let Some(v) = p.location_mode {
-        st.location_mode = v;
-    }
-    if let Some(v) = p.notifications {
-        st.notifications = v;
-    }
-    if let Some(v) = p.show_on_boards {
-        st.show_on_boards = v;
-    }
-    if let Some(v) = p.keep_correspondence {
-        st.keep_correspondence = v;
-    }
-    if let Some(v) = p.traewelling_linked {
-        st.traewelling_linked = v;
-    }
-    Ok(Json(json!(s.me)))
+    let row: CustomerRow = sqlx::query_as(
+        "update customers set
+            nickname = coalesce($2, nickname), ticket = coalesce($3, ticket), ngo_id = coalesce($4, ngo_id),
+            loc_mode = coalesce($5, loc_mode), notifications = coalesce($6, notifications),
+            show_on_boards = coalesce($7, show_on_boards), keep_correspondence = coalesce($8, keep_correspondence),
+            traewelling_linked = coalesce($9, traewelling_linked), onboarding_done = coalesce($10, onboarding_done),
+            home_station_id = coalesce($11, home_station_id), home_station_name = coalesce($12, home_station_name)
+         where id = $1 returning *",
+    )
+    .bind(c.0.id)
+    .bind(p.nickname)
+    .bind(p.ticket)
+    .bind(p.ngo_id)
+    .bind(p.location_mode)
+    .bind(p.notifications)
+    .bind(p.show_on_boards)
+    .bind(p.keep_correspondence)
+    .bind(p.traewelling_linked)
+    .bind(p.onboarding_done)
+    .bind(p.home_station_id)
+    .bind(p.home_station_name)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    Ok(Json(customer_json(&s.pool, &row).await.map_err(internal)?))
 }
 
-pub async fn put_personal_data(State(s): State<Shared>, Json(p): Json<PersonalData>) -> Json<Customer> {
-    let mut s = s.write().unwrap();
-    s.me.personal_data = Some(p);
-    if s.me.relay_address.is_none() {
-        s.me.relay_address = Some(format!("fahrgast-{}@verspaetomat.de", &s.me.id[..4]));
-    }
-    Json(s.me.clone())
+#[derive(Deserialize)]
+pub struct PersonalData {
+    pub name: String,
+    pub address: String,
+    pub email: String,
+    #[serde(default)]
+    pub ticket_number: Option<String>,
+    #[serde(default)]
+    pub first_class: bool,
+}
+
+/// Asked at the first claim. Assigns the relay address the first time.
+pub async fn put_personal_data(State(s): State<AppState>, c: Customer, Json(p): Json<PersonalData>) -> ApiResult {
+    let relay = c.0.relay_address.clone().unwrap_or_else(|| {
+        let short = c.0.id.simple().to_string();
+        format!("fahrgast-{}@verspaetomat.de", &short[..8])
+    });
+    let row: CustomerRow = sqlx::query_as(
+        "update customers set full_name = $2, postal_address = $3, email = $4, ticket_number = $5, first_class = $6, relay_address = $7 where id = $1 returning *",
+    )
+    .bind(c.0.id)
+    .bind(p.name)
+    .bind(p.address)
+    .bind(p.email)
+    .bind(p.ticket_number)
+    .bind(p.first_class)
+    .bind(relay)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    Ok(Json(customer_json(&s.pool, &row).await.map_err(internal)?))
+}
+
+/// Issues a new recovery code (the previous one stops working). Shown once in the app.
+pub async fn recovery_code(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let code = crate::auth::recovery_code();
+    sqlx::query("update devices set recovery_hash = $2 where id = $1").bind(c.0.id).bind(sha256(&code)).execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "recovery_code": code })))
+}
+
+pub async fn export_me(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let rides: Vec<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 order by checked_in_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    let incidents: Vec<IncidentRow> = sqlx::query_as("select * from incidents where customer_id = $1 order by ride_date desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 order by created_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    let mails: Vec<MailRow> = sqlx::query_as("select * from mails where customer_id = $1 order by occurred_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "customer": c.0, "rides": rides, "incidents": incidents, "claims": claims, "mails": mails, "exported_at": Utc::now() })))
+}
+
+pub async fn delete_me(State(s): State<AppState>, c: Customer) -> ApiResult {
+    sqlx::query("delete from devices where id = $1").bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "deleted": true })))
 }
 
 // ---------------------------------------------------------------------------
 // Rides
 // ---------------------------------------------------------------------------
 
-pub async fn rides(State(s): State<Shared>) -> Json<Vec<Ride>> {
-    Json(s.read().unwrap().rides.clone())
+fn map_operator(ops: &[OperatorRow], agency: &str) -> String {
+    let a = agency_to_operator(agency);
+    if let Some(o) = ops.iter().find(|o| o.name == a || o.aliases.iter().any(|x| x == agency || x == &a)) {
+        return o.name.clone();
+    }
+    a
+}
+
+pub async fn rides(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let rows: Vec<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 order by checked_in_at desc limit 200").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!(rows)))
+}
+
+#[derive(Deserialize)]
+pub struct LocationFix {
+    pub lat: f64,
+    pub lon: f64,
+    #[serde(default)]
+    pub accuracy_m: Option<f64>,
 }
 
 #[derive(Deserialize)]
 pub struct CheckIn {
-    pub departure_id: String,
-    pub from_station: String,
-    pub exit_stop: String,
+    pub trip_id: String,
+    pub from_station_id: String,
+    pub from_station_name: String,
+    pub exit_station_id: String,
+    pub exit_station_name: String,
     #[serde(default)]
     pub ticket: Option<TicketType>,
     #[serde(default)]
-    pub location_verified: bool,
+    pub location: Option<LocationFix>,
 }
 
-pub async fn check_in(State(s): State<Shared>, Json(c): Json<CheckIn>) -> ApiResult {
-    let mut s = s.write().unwrap();
-    if s.rides.iter().any(|r| r.status == RideStatus::Riding) {
-        return Err(err(StatusCode::CONFLICT, "already riding; dismiss or arrive first"));
-    }
-    let dep = s
-        .departures
+fn find_stop<'a>(t: &'a TripInfo, id: &str, name: &str) -> Option<&'a crate::train::TripStop> {
+    let n = normalise_station_name(name);
+    t.stops
         .iter()
-        .find(|d| d.id == c.departure_id)
-        .cloned()
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "departure not found"))?;
-    let stop = dep
-        .stops
-        .iter()
-        .find(|st| st.name == c.exit_stop)
-        .cloned()
-        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "exit stop not on this trip"))?;
-    let ride = Ride {
-        id: uuid::Uuid::new_v4().to_string(),
-        departure_id: dep.id.clone(),
-        line: dep.line.clone(),
-        operator: dep.operator.clone(),
-        category: dep.category,
-        from_station: c.from_station,
-        exit_stop: stop.name,
-        planned_arrival: stop.planned,
-        ticket: c.ticket.unwrap_or(s.me.settings.ticket),
-        checked_in_at: now(),
-        location_verified: c.location_verified,
-        status: RideStatus::Riding,
-        passed_stops: 0,
-        live_delay_minutes: dep.delay_minutes,
-        cause: dep.cause.clone(),
-        final_delay_minutes: None,
-        cancelled: dep.cancelled,
-        self_entered: false,
-        nachtrag: false,
-        points: 0,
-        date: s.today,
-    };
-    s.rides.insert(0, ride.clone());
-    Ok(Json(json!(ride)))
+        .find(|st| st.stop_id.as_deref() == Some(id))
+        .or_else(|| t.stops.iter().find(|st| normalise_station_name(&st.name) == n))
+        .or_else(|| t.stops.iter().find(|st| {
+            let a = normalise_station_name(&st.name);
+            a.starts_with(&n) || n.starts_with(&a)
+        }))
 }
 
-pub async fn current_ride(State(s): State<Shared>) -> ApiResult {
-    let s = s.read().unwrap();
-    let ride = s.rides.iter().find(|r| r.status == RideStatus::Riding);
-    match ride {
-        Some(r) => {
-            let dep = s.departures.iter().find(|d| d.id == r.departure_id);
-            Ok(Json(json!({
-                "ride": r,
-                "stops": dep.map(|d| d.stops.clone()).unwrap_or_default(),
-                "eta": add_minutes(&r.planned_arrival, r.live_delay_minutes),
-                "claim_from_minute": 60,
-            })))
-        }
-        None => Err(err(StatusCode::NOT_FOUND, "no ride in progress")),
+pub async fn check_in(State(s): State<AppState>, c: Customer, Json(ci): Json<CheckIn>) -> ApiResult {
+    let riding: bool = sqlx::query_scalar("select exists(select 1 from rides where customer_id = $1 and status = 'riding')").bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?;
+    if riding {
+        return Err(err(StatusCode::CONFLICT, "already riding; arrive or dismiss first"));
     }
+    let t = s.train.trip(&ci.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip: {e}")))?;
+    let from = find_stop(&t, &ci.from_station_id, &ci.from_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "from station not on this trip"))?;
+    let exit = find_stop(&t, &ci.exit_station_id, &ci.exit_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "exit stop not on this trip"))?;
+    let planned_departure = from.scheduled_departure.or(from.scheduled_arrival).ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled departure"))?;
+    let planned_arrival = exit.scheduled_arrival.or(exit.scheduled_departure).ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled arrival"))?;
+    let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
+    let operator = map_operator(&ops, &t.agency_name);
+    let live_delay = exit.live_arrival.zip(exit.scheduled_arrival).map(|(l, p)| (l - p).num_minutes()).unwrap_or(0);
+    let id = Uuid::new_v4();
+    let row: RideRow = sqlx::query_as(
+        "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name,
+            exit_station_id, exit_station_name, planned_departure, planned_arrival, ticket, live_delay_min, cancelled,
+            location_verified, location_lat, location_lon)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning *",
+    )
+    .bind(id)
+    .bind(c.0.id)
+    .bind(&t.trip_id)
+    .bind(&t.line)
+    .bind(&t.headsign)
+    .bind(&operator)
+    .bind(row_category(t.category))
+    .bind(&ci.from_station_id)
+    .bind(&ci.from_station_name)
+    .bind(exit.stop_id.clone().unwrap_or_else(|| ci.exit_station_id.clone()))
+    .bind(&exit.name)
+    .bind(planned_departure)
+    .bind(planned_arrival)
+    .bind(ci.ticket.unwrap_or(c.0.ticket))
+    .bind(live_delay as i32)
+    .bind(t.cancelled || exit.cancelled)
+    .bind(ci.location.is_some())
+    .bind(ci.location.as_ref().map(|l| l.lat))
+    .bind(ci.location.as_ref().map(|l| l.lon))
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    let _ = sqlx::query("insert into ride_snapshots (ride_id, source, payload) values ($1, 'transitous', $2)").bind(id).bind(json!(t)).execute(&s.pool).await;
+    rules::audit(&s.pool, "ride", id, None, "riding", "check-in").await.map_err(internal)?;
+    Ok(Json(json!({ "ride": row, "stops": t.stops })))
 }
 
-/// Stand-in for the trip follower: advance one stop, grow the delay a little.
-pub async fn tick_ride(State(s): State<Shared>) -> ApiResult {
-    let mut s = s.write().unwrap();
-    let today = s.today;
-    let departures = s.departures.clone();
-    let Some(r) = s.rides.iter_mut().find(|r| r.status == RideStatus::Riding) else {
-        return Err(err(StatusCode::NOT_FOUND, "no ride in progress"));
+pub async fn current_ride(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let ride: Option<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 and status = 'riding' order by checked_in_at desc limit 1").bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(r) = ride else {
+        // The most recent arrival, so the app can show the summary after a restart.
+        let last: Option<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 and status = 'arrived' and finalised_at > now() - interval '2 hours' order by finalised_at desc limit 1").bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+        return match last {
+            Some(l) => Ok(Json(json!({ "ride": l, "stops": [], "eta": l.actual_arrival, "just_arrived": true }))),
+            None => Err(err(StatusCode::NOT_FOUND, "no ride in progress")),
+        };
     };
-    let _ = today;
-    if let Some(dep) = departures.iter().find(|d| d.id == r.departure_id) {
-        let exit_index = dep.stops.iter().position(|st| st.name == r.exit_stop).unwrap_or(0);
-        if r.passed_stops < exit_index {
-            r.passed_stops += 1;
-            r.live_delay_minutes += [3, 5, 9, 14, 21, 12, 4][r.passed_stops % 7];
-            if r.live_delay_minutes >= 20 && r.cause.is_none() {
-                r.cause = Some("Stellwerksstörung".into());
-            }
+    let stops = match s.train.trip(&r.trip_id).await {
+        Ok(t) => json!(t.stops),
+        Err(_) => {
+            let snap: Option<Value> = sqlx::query_scalar("select payload from ride_snapshots where ride_id = $1 order by fetched_at desc limit 1").bind(r.id).fetch_optional(&s.pool).await.map_err(internal)?;
+            snap.and_then(|p| p.get("stops").cloned()).unwrap_or(json!([]))
         }
-    }
-    Ok(Json(json!(r)))
+    };
+    let eta = r.planned_arrival + Duration::minutes(r.live_delay_min as i64);
+    Ok(Json(json!({ "ride": r, "stops": stops, "eta": eta, "claim_from_minute": 60, "last_polled_at": r.last_polled_at })))
 }
 
 #[derive(Deserialize)]
@@ -255,378 +422,475 @@ pub struct Arrival {
     #[serde(default)]
     pub delay_minutes: Option<i64>,
     #[serde(default)]
-    pub actual_arrival: Option<String>,
+    pub actual_arrival: Option<DateTime<Utc>>,
     #[serde(default)]
     pub cancelled: bool,
     #[serde(default)]
     pub self_entered: bool,
 }
 
-/// Finalise the current ride. The trip follower will call this from live data;
-/// the app calls it with a time when there is no data (E3).
-pub async fn arrival(State(s): State<Shared>, Json(a): Json<Arrival>) -> ApiResult {
-    let mut s = s.write().unwrap();
-    let today = s.today;
-    let idx = s
-        .rides
-        .iter()
-        .position(|r| r.status == RideStatus::Riding)
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "no ride in progress"))?;
-    let (ride, incident) = {
-        let r = &mut s.rides[idx];
-        let delay = match (a.delay_minutes, &a.actual_arrival) {
-            (Some(d), _) => d,
-            (None, Some(t)) => minutes_between(&r.planned_arrival, t),
-            (None, None) => r.live_delay_minutes,
-        };
-        r.final_delay_minutes = Some(delay);
-        r.cancelled = a.cancelled || r.cancelled;
-        r.self_entered = a.self_entered;
-        r.status = RideStatus::Arrived;
-        r.points = rules::points_for(delay, r.cancelled, false);
-        let amount = rules::claim_amount_cents(r.ticket, r.category, delay, false, if r.ticket == TicketType::Einzelfahrkarte { Some(3990) } else { None });
-        let incident = amount.map(|amount_cents| Incident {
-            id: uuid::Uuid::new_v4().to_string(),
-            ride_id: Some(r.id.clone()),
-            date: r.date,
-            line: r.line.clone(),
-            from: r.from_station.clone(),
-            to: r.exit_stop.clone(),
-            delay_minutes: delay,
-            amount_cents,
-            ticket: r.ticket,
-            operator: r.operator.clone(),
-            desk: String::new(),
-            status: IncidentStatus::Gesammelt,
-            cancelled: r.cancelled,
-            self_entered: r.self_entered,
-            ngo_id: String::new(),
-            claim_id: None,
-            fare_cents: if r.ticket == TicketType::Einzelfahrkarte { Some(3990) } else { None },
-            legal_deadline: rules::legal_deadline(r.date),
-            evidence: Some(Evidence {
-                planned_arrival: Some(r.planned_arrival.clone()),
-                actual_arrival: Some(add_minutes(&r.planned_arrival, delay)),
-                source: if r.self_entered { "selbst eingetragen".into() } else { "Live-Daten Transitous".into() },
-                fetched_at: now(),
-            }),
-        });
-        (r.clone(), incident)
+/// Manual arrival (no data, E3) or the showcase's "Ankunft simulieren".
+pub async fn arrival(State(s): State<AppState>, c: Customer, Json(a): Json<Arrival>) -> ApiResult {
+    let ride: Option<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 and status = 'riding' order by checked_in_at desc limit 1").bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(r) = ride else { return Err(err(StatusCode::NOT_FOUND, "no ride in progress")) };
+    let delay = match (a.delay_minutes, a.actual_arrival) {
+        (Some(d), _) => d,
+        (None, Some(t)) => (t - r.planned_arrival).num_minutes().max(0),
+        (None, None) => r.live_delay_min as i64,
     };
-    let mut created = None;
-    if let Some(mut inc) = incident {
-        inc.desk = s.desk_for(&inc.operator);
-        inc.ngo_id = s.me.settings.ngo_id.clone();
-        s.incidents.insert(0, inc.clone());
-        rules::refresh_statuses(&mut s.incidents, today);
-        created = s.incidents.iter().find(|i| i.id == inc.id).cloned();
-    }
-    let new_badge = match ride.final_delay_minutes {
-        Some(d) if d >= 60 => s.badges.iter().find(|b| b.id == "stunde").cloned(),
-        Some(d) if (1..10).contains(&d) => s.badges.iter().find(|b| b.id == "gegenzug").cloned(),
-        _ => None,
-    };
-    let desk_ready = created.as_ref().map(|i| i.status == IncidentStatus::Bereit).unwrap_or(false);
+    let actual = a.actual_arrival.unwrap_or(r.planned_arrival + Duration::minutes(delay));
+    crate::train::follower::finalise_ride(&s.pool, r.id, delay, a.cancelled || r.cancelled, Some(actual), a.self_entered).await.map_err(internal)?;
+    let created = on_ride_finalised(&s.pool, r.id).await.map_err(internal)?;
+    let ride: RideRow = sqlx::query_as("select * from rides where id = $1").bind(r.id).fetch_one(&s.pool).await.map_err(internal)?;
     Ok(Json(json!({
         "ride": ride,
-        "incident": created,
-        "bundle_ready": desk_ready,
-        "new_badge": new_badge,
+        "incident": created.incident,
+        "bundle_ready": created.incident.as_ref().map(|i| i.status == IncidentStatus::Bereit).unwrap_or(false),
+        "new_badge": created.new_badge,
     })))
 }
 
-fn minutes_between(planned: &str, actual: &str) -> i64 {
-    let to_min = |t: &str| {
-        let (h, m) = t.split_once(':').unwrap_or(("0", "0"));
-        h.parse::<i64>().unwrap_or(0) * 60 + m.parse::<i64>().unwrap_or(0)
-    };
-    (to_min(actual) - to_min(planned)).rem_euclid(24 * 60)
+pub struct Finalised {
+    pub incident: Option<IncidentRow>,
+    pub new_badge: Option<BadgeRow>,
 }
 
-pub async fn dismiss(State(s): State<Shared>) -> Json<Value> {
-    let s = s.read().unwrap();
-    Json(json!({ "ok": true, "rides": s.rides.len() }))
+/// Called after a ride is finalised (by the follower or manually): incident, badges.
+pub async fn on_ride_finalised(pool: &PgPool, ride_id: Uuid) -> anyhow::Result<Finalised> {
+    let r: RideRow = sqlx::query_as("select * from rides where id = $1").bind(ride_id).fetch_one(pool).await?;
+    let c: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(r.customer_id).fetch_one(pool).await?;
+    let delay = r.final_delay_min.unwrap_or(0) as i64;
+    let existing: Option<IncidentRow> = sqlx::query_as("select * from incidents where ride_id = $1").bind(ride_id).fetch_optional(pool).await?;
+    let mut incident = existing;
+    if incident.is_none() {
+        let fare = if r.ticket == TicketType::Einzelfahrkarte { Some(rules::DEFAULT_FARE_CENTS) } else { None };
+        if let Some(amount) = rules::claim_amount_cents(r.ticket, r.category, delay, c.first_class, fare) {
+            let desk: String = sqlx::query_scalar("select desk from operators where name = $1").bind(&r.operator).fetch_optional(pool).await?.unwrap_or_else(|| "Unbekannt".into());
+            let evidence = json!({
+                "planned_arrival": r.planned_arrival, "actual_arrival": r.actual_arrival,
+                "source": if r.self_entered { "selbst eingetragen" } else { "Live-Daten Transitous" },
+                "fetched_at": r.finalised_at,
+            });
+            let id = Uuid::new_v4();
+            let row: IncidentRow = sqlx::query_as(
+                "insert into incidents (id, customer_id, ride_id, ride_date, line, from_name, to_name, delay_min, amount_cents, ticket, operator, desk, cancelled, self_entered, ngo_id, fare_cents, legal_deadline, evidence)
+                 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning *",
+            )
+            .bind(id)
+            .bind(r.customer_id)
+            .bind(r.id)
+            .bind(r.planned_arrival.date_naive())
+            .bind(&r.line)
+            .bind(&r.from_station_name)
+            .bind(&r.exit_station_name)
+            .bind(delay as i32)
+            .bind(amount)
+            .bind(r.ticket)
+            .bind(&r.operator)
+            .bind(&desk)
+            .bind(r.cancelled)
+            .bind(r.self_entered)
+            .bind(&c.ngo_id)
+            .bind(fare)
+            .bind(rules::legal_deadline(r.planned_arrival.date_naive()))
+            .bind(evidence)
+            .fetch_one(pool)
+            .await?;
+            rules::audit(pool, "incident", id, None, "gesammelt", "ride finalised").await?;
+            incident = Some(row);
+        }
+    }
+    let rows = rules::refresh_statuses(pool, r.customer_id, today()).await?;
+    let incident = incident.and_then(|i| rows.into_iter().find(|x| x.id == i.id));
+
+    // Badges: first hour, short delays, first delay.
+    let mut new_badge = None;
+    let candidates: Vec<&str> = if delay >= 60 { vec!["stunde", "erste"] } else if (1..10).contains(&delay) { vec!["gegenzug", "erste"] } else if delay > 0 { vec!["erste"] } else { vec![] };
+    for b in candidates {
+        let inserted: Option<(String,)> = sqlx::query_as("insert into badge_awards (customer_id, badge_id, ride_id) values ($1, $2, $3) on conflict do nothing returning badge_id")
+            .bind(r.customer_id)
+            .bind(b)
+            .bind(r.id)
+            .fetch_optional(pool)
+            .await?;
+        if inserted.is_some() && new_badge.is_none() {
+            new_badge = sqlx::query_as::<_, BadgeRow>("select * from badges where id = $1").bind(b).fetch_optional(pool).await?;
+        }
+    }
+    Ok(Finalised { incident, new_badge })
+}
+
+pub async fn dismiss(State(s): State<AppState>, c: Customer) -> ApiResult {
+    // Nothing to store: "just arrived" is derived from finalised_at. Abandon a stale ride if any.
+    sqlx::query("update rides set status = 'abandoned' where customer_id = $1 and status = 'riding' and checked_in_at < now() - interval '12 hours'").bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[derive(Deserialize)]
 pub struct Nachtrag {
-    pub departure_id: String,
-    pub from_station: String,
-    pub exit_stop: String,
-    pub date: chrono::NaiveDate,
+    pub trip_id: String,
+    pub from_station_id: String,
+    pub from_station_name: String,
+    pub exit_station_id: String,
+    pub exit_station_name: String,
 }
 
-pub async fn nachtrag(State(s): State<Shared>, Json(n): Json<Nachtrag>) -> ApiResult {
-    let mut s = s.write().unwrap();
-    let today = s.today;
-    let dep = s
-        .departures
-        .iter()
-        .find(|d| d.id == n.departure_id)
-        .cloned()
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "departure not found"))?;
-    let stop = dep
-        .stops
-        .iter()
-        .find(|st| st.name == n.exit_stop)
-        .cloned()
-        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "exit stop not on this trip"))?;
-    let delay = dep.delay_minutes;
-    let ride = Ride {
-        id: uuid::Uuid::new_v4().to_string(),
-        departure_id: dep.id.clone(),
-        line: dep.line.clone(),
-        operator: dep.operator.clone(),
-        category: dep.category,
-        from_station: n.from_station.clone(),
-        exit_stop: stop.name.clone(),
-        planned_arrival: stop.planned.clone(),
-        ticket: s.me.settings.ticket,
-        checked_in_at: now(),
-        location_verified: false,
-        status: RideStatus::Arrived,
-        passed_stops: dep.stops.len(),
-        live_delay_minutes: delay,
-        cause: dep.cause.clone(),
-        final_delay_minutes: Some(delay),
-        cancelled: dep.cancelled,
-        self_entered: false,
-        nachtrag: true,
-        points: rules::points_for(delay, dep.cancelled, true),
-        date: n.date,
-    };
-    let mut incident = None;
-    if let Some(amount) = rules::claim_amount_cents(ride.ticket, ride.category, delay, false, None) {
-        let inc = Incident {
-            id: uuid::Uuid::new_v4().to_string(),
-            ride_id: Some(ride.id.clone()),
-            date: n.date,
-            line: ride.line.clone(),
-            from: ride.from_station.clone(),
-            to: ride.exit_stop.clone(),
-            delay_minutes: delay,
-            amount_cents: amount,
-            ticket: ride.ticket,
-            operator: ride.operator.clone(),
-            desk: s.desk_for(&ride.operator),
-            status: IncidentStatus::Gesammelt,
-            cancelled: ride.cancelled,
-            self_entered: false,
-            ngo_id: s.me.settings.ngo_id.clone(),
-            claim_id: None,
-            fare_cents: None,
-            legal_deadline: rules::legal_deadline(n.date),
-            evidence: None,
-        };
-        s.incidents.insert(0, inc.clone());
-        rules::refresh_statuses(&mut s.incidents, today);
-        incident = Some(inc);
-    }
-    s.rides.insert(0, ride.clone());
-    Ok(Json(json!({ "ride": ride, "incident": incident })))
+pub async fn nachtrag(State(s): State<AppState>, c: Customer, Json(n): Json<Nachtrag>) -> ApiResult {
+    let t = s.train.trip(&n.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip: {e}")))?;
+    let from = find_stop(&t, &n.from_station_id, &n.from_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "from station not on this trip"))?;
+    let exit = find_stop(&t, &n.exit_station_id, &n.exit_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "exit stop not on this trip"))?;
+    let planned_departure = from.scheduled_departure.or(from.scheduled_arrival).ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled departure"))?;
+    let planned_arrival = exit.scheduled_arrival.ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled arrival"))?;
+    let actual = exit.live_arrival.unwrap_or(planned_arrival);
+    let delay = (actual - planned_arrival).num_minutes().max(0);
+    let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
+    let operator = map_operator(&ops, &t.agency_name);
+    let id = Uuid::new_v4();
+    let row: RideRow = sqlx::query_as(
+        "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name, exit_station_id, exit_station_name,
+            planned_departure, planned_arrival, actual_arrival, ticket, status, live_delay_min, final_delay_min, cancelled, nachtrag, points, finalised_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'arrived',$16,$16,$17,true,$18,now()) returning *",
+    )
+    .bind(id)
+    .bind(c.0.id)
+    .bind(&t.trip_id)
+    .bind(&t.line)
+    .bind(&t.headsign)
+    .bind(&operator)
+    .bind(row_category(t.category))
+    .bind(&n.from_station_id)
+    .bind(&n.from_station_name)
+    .bind(exit.stop_id.clone().unwrap_or_else(|| n.exit_station_id.clone()))
+    .bind(&exit.name)
+    .bind(planned_departure)
+    .bind(planned_arrival)
+    .bind(actual)
+    .bind(c.0.ticket)
+    .bind(delay as i32)
+    .bind(t.cancelled || exit.cancelled)
+    .bind(rules::points_for(delay, t.cancelled, true) as i32)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    rules::audit(&s.pool, "ride", id, None, "arrived", "nachtrag").await.map_err(internal)?;
+    let created = on_ride_finalised(&s.pool, id).await.map_err(internal)?;
+    Ok(Json(json!({ "ride": row, "incident": created.incident })))
 }
 
 // ---------------------------------------------------------------------------
 // Ledger and claims
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize)]
-struct DeskSummary {
-    desk: String,
-    open_cents: Cents,
-    ready: bool,
-    missing_cents: Cents,
-    incident_ids: Vec<String>,
-}
-
-pub async fn incidents(State(s): State<Shared>) -> Json<Value> {
-    let mut s = s.write().unwrap();
-    let today = s.today;
-    rules::refresh_statuses(&mut s.incidents, today);
-    let mut by_desk: BTreeMap<String, Vec<&Incident>> = BTreeMap::new();
-    for i in s.incidents.iter().filter(|i| i.status.is_open()) {
+pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let today = today();
+    let rows = rules::refresh_statuses(&s.pool, c.0.id, today).await.map_err(internal)?;
+    let mut by_desk: BTreeMap<String, Vec<&IncidentRow>> = BTreeMap::new();
+    for i in rows.iter().filter(|i| i.status.is_open()) {
         by_desk.entry(i.desk.clone()).or_default().push(i);
     }
-    let desks: Vec<DeskSummary> = by_desk
+    let desks: Vec<Value> = by_desk
         .iter()
         .map(|(desk, list)| {
             let open: Cents = list.iter().map(|i| i.amount_cents).sum();
-            DeskSummary {
-                desk: desk.clone(),
-                open_cents: open,
-                ready: rules::bundle_ready(list),
-                missing_cents: (rules::MIN_PAYOUT_CENTS - open).max(0),
-                incident_ids: list.iter().map(|i| i.id.clone()).collect(),
-            }
+            json!({ "desk": desk, "open_cents": open, "ready": rules::bundle_ready(list), "missing_cents": (rules::MIN_PAYOUT_CENTS - open).max(0), "incident_ids": list.iter().map(|i| i.id).collect::<Vec<_>>() })
         })
         .collect();
-    let oldest_open = s.incidents.iter().filter(|i| i.status.is_open()).min_by_key(|i| i.date).cloned();
-    let confirmed: Cents = s.incidents.iter().filter(|i| i.status == IncidentStatus::Bestaetigt).map(|i| i.amount_cents).sum();
-    let submitted: Cents = s.incidents.iter().filter(|i| i.status == IncidentStatus::Eingereicht).map(|i| i.amount_cents).sum();
-    Json(json!({
-        "incidents": s.incidents,
+    let ready_desk = by_desk.iter().find(|(_, l)| rules::bundle_ready(l)).map(|(d, _)| d.clone());
+    let oldest = rows.iter().filter(|i| i.status.is_open()).min_by_key(|i| i.ride_date);
+    let confirmed: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Bestaetigt).map(|i| i.amount_cents).sum();
+    let submitted: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Eingereicht).map(|i| i.amount_cents).sum();
+    let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and status <> 'draft' order by sent_at desc nulls last").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({
+        "incidents": rows,
+        "claims": claims,
         "summary": {
             "desks": desks,
-            "ready_desk": desks.iter().find(|d| d.ready).map(|d| d.desk.clone()),
+            "ready_desk": ready_desk,
             "confirmed_cents": confirmed,
             "submitted_cents": submitted,
-            "oldest_open": oldest_open.as_ref().map(|i| json!({
-                "id": i.id,
-                "line": i.line,
-                "date": i.date,
-                "deadline": i.legal_deadline,
-                "days_left": rules::days_until(i.legal_deadline, today),
-                "warn_from": rules::warn_from(i.legal_deadline),
-            })),
+            "oldest_open": oldest.map(|i| json!({ "id": i.id, "line": i.line, "date": i.ride_date, "deadline": i.legal_deadline, "days_left": rules::days_until(i.legal_deadline, today), "warn_from": rules::warn_from(i.legal_deadline) })),
             "min_payout_cents": rules::MIN_PAYOUT_CENTS,
             "dticket_monthly_cap_cents": rules::dticket_monthly_cap_cents(),
         }
-    }))
+    })))
 }
 
-pub async fn claims(State(s): State<Shared>) -> Json<Vec<Claim>> {
-    Json(s.read().unwrap().claims.clone())
+pub async fn claims(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let rows: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 order by created_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!(rows)))
 }
 
 #[derive(Deserialize)]
 pub struct DraftRequest {
     pub desk: String,
     #[serde(default)]
-    pub incident_ids: Option<Vec<String>>,
+    pub incident_ids: Option<Vec<Uuid>>,
 }
 
-pub async fn claim_draft(State(s): State<Shared>, Json(d): Json<DraftRequest>) -> ApiResult {
-    let mut s = s.write().unwrap();
-    let ids: Vec<String> = match d.incident_ids {
-        Some(ids) => ids,
-        None => s.incidents.iter().filter(|i| i.status.is_open() && i.desk == d.desk).map(|i| i.id.clone()).collect(),
-    };
-    if ids.is_empty() {
+async fn claim_with_incidents(pool: &PgPool, claim: &ClaimRow) -> anyhow::Result<Value> {
+    let incidents: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date").bind(claim.id).fetch_all(pool).await?;
+    let attachments: Vec<(Uuid, String)> = sqlx::query_as("select upload_id, label from claim_attachments where claim_id = $1").bind(claim.id).fetch_all(pool).await?;
+    let mut v = json!(claim);
+    v["incidents"] = json!(incidents);
+    v["attachments"] = json!(attachments.into_iter().map(|(id, label)| json!({ "upload_id": id, "label": label })).collect::<Vec<_>>());
+    Ok(v)
+}
+
+pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<DraftRequest>) -> ApiResult {
+    let today = today();
+    let rows = rules::refresh_statuses(&s.pool, c.0.id, today).await.map_err(internal)?;
+    let selected: Vec<&IncidentRow> = rows
+        .iter()
+        .filter(|i| i.status.is_open() && i.desk == d.desk && d.incident_ids.as_ref().map(|ids| ids.contains(&i.id)).unwrap_or(true))
+        .collect();
+    if selected.is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "no open incidents for this desk"));
     }
-    let ngo_id = s.me.settings.ngo_id.clone();
-    let ngo = s.ngos.iter().find(|n| n.id == ngo_id).cloned().ok_or_else(|| err(StatusCode::BAD_REQUEST, "unknown ngo"))?;
-    let selected: Vec<&Incident> = s.incidents.iter().filter(|i| ids.contains(&i.id)).collect();
+    let ngo: NgoRow = sqlx::query_as("select * from ngos where id = $1").bind(&c.0.ngo_id).fetch_one(&s.pool).await.map_err(internal)?;
     let amount: Cents = selected.iter().map(|i| i.amount_cents).sum();
-    let mut months: Vec<String> = selected.iter().map(|i| i.date.format("%Y-%m").to_string()).collect();
+    let mut months: Vec<String> = selected.iter().map(|i| i.ride_date.format("%Y-%m").to_string()).collect();
     months.sort();
     months.dedup();
-    let operator = s.operators.iter().find(|o| o.desk == d.desk).cloned();
-    let claim = Claim {
-        id: uuid::Uuid::new_v4().to_string(),
-        desk: d.desk.clone(),
-        incident_ids: ids,
-        ngo_id: ngo.id.clone(),
-        account_holder: ngo.account_holder.clone(),
-        iban: ngo.iban.clone(),
-        ticket_months: months,
-        attachments: vec![],
-        signed_by: None,
-        status: ClaimStatus::Draft,
-        sent_at: None,
-        expected_reply_by: None,
-        amount_claimed_cents: amount,
-        amount_confirmed_cents: None,
-    };
-    s.claims.insert(0, claim.clone());
-    Ok(Json(json!({
-        "claim": claim,
-        "desk_address": operator.as_ref().map(|o| o.postal_address.clone()),
-        "desk_email": operator.as_ref().and_then(|o| o.email.clone()),
-        "personal_data_required": s.me.personal_data.is_none(),
-        "relay_address": s.me.relay_address,
-    })))
+    let id = Uuid::new_v4();
+    let claim: ClaimRow = sqlx::query_as(
+        "insert into claims (id, customer_id, desk, ngo_id, account_holder, iban, ticket_months, amount_claimed_cents) values ($1,$2,$3,$4,$5,$6,$7,$8) returning *",
+    )
+    .bind(id)
+    .bind(c.0.id)
+    .bind(&d.desk)
+    .bind(&ngo.id)
+    .bind(&ngo.account_holder)
+    .bind(&ngo.iban)
+    .bind(&months)
+    .bind(amount)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    for i in &selected {
+        sqlx::query("insert into claim_incidents (claim_id, incident_id) values ($1, $2)").bind(id).bind(i.id).execute(&s.pool).await.map_err(internal)?;
+    }
+    let op: Option<OperatorRow> = sqlx::query_as("select * from operators where desk = $1 limit 1").bind(&d.desk).fetch_optional(&s.pool).await.map_err(internal)?;
+    let mut v = claim_with_incidents(&s.pool, &claim).await.map_err(internal)?;
+    v["desk_address"] = json!(op.as_ref().map(|o| o.postal_address.clone()));
+    v["desk_email"] = json!(op.as_ref().and_then(|o| o.email.clone()));
+    v["desk_accepts_email"] = json!(op.as_ref().map(|o| o.accepts_email).unwrap_or(false));
+    v["personal_data_required"] = json!(c.0.full_name.is_none());
+    v["relay_address"] = json!(c.0.relay_address);
+    v["needs_recovery_code"] = json!(sqlx::query_scalar::<_, bool>("select recovery_hash is null from devices where id = $1").bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?);
+    Ok(Json(v))
 }
 
 #[derive(Deserialize)]
 pub struct ClaimPatch {
     pub ngo_id: Option<String>,
-    pub attachments: Option<Vec<String>>,
+    pub attachments: Option<Vec<AttachmentRef>>,
 }
 
-pub async fn claim_patch(State(s): State<Shared>, Path(id): Path<String>, Json(p): Json<ClaimPatch>) -> ApiResult {
-    let mut s = s.write().unwrap();
-    let ngo = p.ngo_id.as_ref().and_then(|n| s.ngos.iter().find(|x| &x.id == n).cloned());
-    let c = s.claims.iter_mut().find(|c| c.id == id).ok_or_else(|| err(StatusCode::NOT_FOUND, "claim not found"))?;
-    if let Some(n) = ngo {
-        c.ngo_id = n.id;
-        c.account_holder = n.account_holder;
-        c.iban = n.iban;
+#[derive(Deserialize)]
+pub struct AttachmentRef {
+    pub upload_id: Uuid,
+    pub label: String,
+}
+
+pub async fn claim_patch(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(p): Json<ClaimPatch>) -> ApiResult {
+    let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1 and customer_id = $2").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(claim) = claim else { return Err(err(StatusCode::NOT_FOUND, "claim not found")) };
+    if claim.status != ClaimStatus::Draft {
+        return Err(err(StatusCode::CONFLICT, "claim already sent"));
     }
-    if let Some(a) = p.attachments {
-        c.attachments = a;
+    if let Some(n) = &p.ngo_id {
+        let ngo: Option<NgoRow> = sqlx::query_as("select * from ngos where id = $1 and active").bind(n).fetch_optional(&s.pool).await.map_err(internal)?;
+        let Some(ngo) = ngo else { return Err(err(StatusCode::BAD_REQUEST, "unknown ngo")) };
+        sqlx::query("update claims set ngo_id = $2, account_holder = $3, iban = $4 where id = $1").bind(id).bind(&ngo.id).bind(&ngo.account_holder).bind(&ngo.iban).execute(&s.pool).await.map_err(internal)?;
+        sqlx::query("update incidents set ngo_id = $2 where claim_id = $1 or id in (select incident_id from claim_incidents where claim_id = $1)").bind(id).bind(&ngo.id).execute(&s.pool).await.map_err(internal)?;
     }
-    Ok(Json(json!(c)))
+    if let Some(atts) = p.attachments {
+        sqlx::query("delete from claim_attachments where claim_id = $1").bind(id).execute(&s.pool).await.map_err(internal)?;
+        for a in atts {
+            sqlx::query("insert into claim_attachments (claim_id, upload_id, label) select $1, $2, $3 where exists (select 1 from uploads where id = $2 and customer_id = $4)")
+                .bind(id)
+                .bind(a.upload_id)
+                .bind(a.label)
+                .bind(c.0.id)
+                .execute(&s.pool)
+                .await
+                .map_err(internal)?;
+        }
+    }
+    let claim: ClaimRow = sqlx::query_as("select * from claims where id = $1").bind(id).fetch_one(&s.pool).await.map_err(internal)?;
+    Ok(Json(claim_with_incidents(&s.pool, &claim).await.map_err(internal)?))
+}
+
+/// Multipart: fields `kind` (ticket|signature|postal_reply) and `file`.
+pub async fn upload(State(s): State<AppState>, c: Customer, mut mp: Multipart) -> ApiResult {
+    let mut kind = "ticket".to_string();
+    let mut bytes: Option<(String, Vec<u8>)> = None;
+    while let Some(field) = mp.next_field().await.map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))? {
+        match field.name().unwrap_or("") {
+            "kind" => kind = field.text().await.unwrap_or_default(),
+            "file" => {
+                let ct = field.content_type().unwrap_or("application/octet-stream").to_string();
+                let data = field.bytes().await.map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?;
+                bytes = Some((ct, data.to_vec()));
+            }
+            _ => {}
+        }
+    }
+    let Some((ct, data)) = bytes else { return Err(err(StatusCode::BAD_REQUEST, "file missing")) };
+    if data.len() > 8 * 1024 * 1024 {
+        return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "max 8 MB"));
+    }
+    let id = Uuid::new_v4();
+    sqlx::query("insert into uploads (id, customer_id, kind, content_type, bytes) values ($1,$2,$3,$4,$5)").bind(id).bind(c.0.id).bind(&kind).bind(&ct).bind(&data).execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "upload_id": id, "kind": kind, "content_type": ct, "size": data.len() })))
 }
 
 #[derive(Deserialize)]
 pub struct Sign {
     pub typed_name: String,
+    #[serde(default)]
+    pub signature_upload_id: Option<Uuid>,
 }
 
-pub async fn claim_sign(State(s): State<Shared>, Path(id): Path<String>, Json(p): Json<Sign>) -> ApiResult {
-    let mut s = s.write().unwrap();
-    let c = s.claims.iter_mut().find(|c| c.id == id).ok_or_else(|| err(StatusCode::NOT_FOUND, "claim not found"))?;
-    c.signed_by = Some(p.typed_name);
-    Ok(Json(json!(c)))
+pub async fn claim_sign(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(p): Json<Sign>) -> ApiResult {
+    let claim: Option<ClaimRow> = sqlx::query_as("update claims set signed_by = $3, signed_at = now() where id = $1 and customer_id = $2 and status = 'draft' returning *")
+        .bind(id)
+        .bind(c.0.id)
+        .bind(p.typed_name.trim())
+        .fetch_optional(&s.pool)
+        .await
+        .map_err(internal)?;
+    let Some(claim) = claim else { return Err(err(StatusCode::NOT_FOUND, "claim not found or already sent")) };
+    if let Some(u) = p.signature_upload_id {
+        sqlx::query("insert into claim_attachments (claim_id, upload_id, label) select $1, $2, 'Unterschrift' where exists (select 1 from uploads where id = $2 and customer_id = $3) on conflict do nothing").bind(id).bind(u).bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
+    }
+    Ok(Json(claim_with_incidents(&s.pool, &claim).await.map_err(internal)?))
+}
+
+fn claim_summary_text(claim: &ClaimRow, incidents: &[IncidentRow], name: &str) -> String {
+    let mut s = String::new();
+    s.push_str("ANTRAGSFORMULAR FÜR ERSTATTUNGEN UND ENTSCHÄDIGUNGEN (VO (EU) 2021/782)\n\n");
+    s.push_str("1. Grund: Verspätung / Ausfall\n4. Entschädigung: wiederholte Verspätungen oder Ausfälle, Inhaber einer Zeitfahrkarte\n\n");
+    s.push_str("6. Einzelfälle:\n");
+    for i in incidents {
+        s.push_str(&format!(
+            "- {} {} {} → {}: {} Minuten{}; Anspruch {},{:02} EUR\n",
+            i.ride_date.format("%d.%m.%Y"),
+            i.line,
+            i.from_name,
+            i.to_name,
+            i.delay_min,
+            if i.cancelled { " (Ausfall)" } else { "" },
+            i.amount_cents / 100,
+            i.amount_cents % 100
+        ));
+    }
+    s.push_str(&format!("\nSumme: {},{:02} EUR\n", claim.amount_claimed_cents / 100, claim.amount_claimed_cents % 100));
+    s.push_str(&format!("Kontoinhaber: {}\nIBAN: {}\n\nName des Fahrgastes: {}\n", claim.account_holder, claim.iban, name));
+    s
 }
 
 /// The relay: nothing leaves without a signature and this explicit call.
-pub async fn claim_send(State(s): State<Shared>, Path(id): Path<String>) -> ApiResult {
-    let mut s = s.write().unwrap();
-    let today = s.today;
-    let me_name = s.me.personal_data.as_ref().map(|p| p.name.clone()).unwrap_or_else(|| s.me.nickname.clone());
-    let me_email = s.me.personal_data.as_ref().map(|p| p.email.clone());
-    let relay = s.me.relay_address.clone();
-    let claim = s.claims.iter().find(|c| c.id == id).cloned().ok_or_else(|| err(StatusCode::NOT_FOUND, "claim not found"))?;
+pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
+    let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1 and customer_id = $2").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(claim) = claim else { return Err(err(StatusCode::NOT_FOUND, "claim not found")) };
+    if claim.status != ClaimStatus::Draft {
+        return Err(err(StatusCode::CONFLICT, "claim already sent"));
+    }
     if claim.signed_by.is_none() {
         return Err(err(StatusCode::PRECONDITION_FAILED, "claim not signed"));
     }
-    let (Some(relay), Some(me_email)) = (relay, me_email) else {
-        return Err(err(StatusCode::PRECONDITION_FAILED, "personal data and relay address required"));
+    let (Some(name), Some(email), Some(relay)) = (c.0.full_name.clone(), c.0.email.clone(), c.0.relay_address.clone()) else {
+        return Err(err(StatusCode::PRECONDITION_FAILED, "personal data required"));
     };
-    let to = s
-        .operators
-        .iter()
-        .find(|o| o.desk == claim.desk)
-        .and_then(|o| o.email.clone())
-        .ok_or_else(|| err(StatusCode::PRECONDITION_FAILED, "this desk has no e-mail address; use the paper route"))?;
+    let sent_today: i64 = sqlx::query_scalar("select count(*) from claims where customer_id = $1 and sent_at > now() - interval '1 day'").bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?;
+    if sent_today >= 5 {
+        return Err(err(StatusCode::TOO_MANY_REQUESTS, "max 5 claims per day"));
+    }
+    let op: Option<OperatorRow> = sqlx::query_as("select * from operators where desk = $1 limit 1").bind(&claim.desk).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(to) = op.as_ref().and_then(|o| if o.accepts_email { o.email.clone() } else { None }) else {
+        return Err(err(StatusCode::PRECONDITION_FAILED, "this desk takes no e-mail; use the paper route"));
+    };
+    let incidents: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date").bind(id).fetch_all(&s.pool).await.map_err(internal)?;
     let body = format!(
         "Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
-        claim.account_holder, me_name, me_name
+        claim.account_holder, name, name
     );
-    let mail = Mail {
-        id: uuid::Uuid::new_v4().to_string(),
-        claim_id: Some(claim.id.clone()),
-        incident_ids: claim.incident_ids.clone(),
-        direction: MailDirection::Out,
-        from: format!("{me_name} <{relay}>"),
-        to,
-        bcc: Some(me_email),
-        subject: "Fahrgastrechte: EU-Antragsformular".into(),
-        body,
-        date: now(),
-        attachments: vec!["EU-Antrag.pdf".into()],
-        amount_cents: None,
-        outcome: None,
-        forwarded_at: None,
-    };
-    s.mails.insert(0, mail.clone());
-    for i in s.incidents.iter_mut().filter(|i| claim.incident_ids.contains(&i.id)) {
-        i.status = IncidentStatus::Eingereicht;
-        i.claim_id = Some(claim.id.clone());
+    let attachments = json!([{ "name": "EU-Antrag.txt", "content_type": "text/plain", "text": claim_summary_text(&claim, &incidents, &name) }]);
+    let message_id = format!("<{}@verspaetomat.de>", Uuid::new_v4());
+    let dry_run = std::env::var("SMTP_URL").is_err();
+    // TODO tonight: lettre transport when SMTP_URL is set.
+    let mail_id = Uuid::new_v4();
+    let mail: MailRow = sqlx::query_as(
+        "insert into mails (id, customer_id, claim_id, direction, message_id, from_addr, to_addr, bcc_addr, subject, body, attachments, dry_run)
+         values ($1,$2,$3,'out',$4,$5,$6,$7,$8,$9,$10,$11) returning *",
+    )
+    .bind(mail_id)
+    .bind(c.0.id)
+    .bind(id)
+    .bind(&message_id)
+    .bind(format!("{name} <{relay}>"))
+    .bind(&to)
+    .bind(&email)
+    .bind("Fahrgastrechte: EU-Antragsformular")
+    .bind(&body)
+    .bind(attachments)
+    .bind(dry_run)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    sqlx::query("update incidents set status = 'eingereicht', claim_id = $1 where id in (select incident_id from claim_incidents where claim_id = $1)").bind(id).execute(&s.pool).await.map_err(internal)?;
+    let claim: ClaimRow = sqlx::query_as("update claims set status = 'sent', sent_at = now(), expected_reply_by = $2 where id = $1 returning *")
+        .bind(id)
+        .bind(today() + Duration::days(rules::REPLY_EXPECTED_DAYS))
+        .fetch_one(&s.pool)
+        .await
+        .map_err(internal)?;
+    rules::audit(&s.pool, "claim", id, Some("draft"), "sent", if dry_run { "dry-run" } else { "smtp" }).await.map_err(internal)?;
+    for i in &incidents {
+        rules::audit(&s.pool, "incident", i.id, Some(rules::from_label(i.status)), "eingereicht", "claim sent").await.map_err(internal)?;
     }
-    let c = s.claims.iter_mut().find(|c| c.id == id).unwrap();
-    c.status = ClaimStatus::Sent;
-    c.sent_at = Some(now());
-    c.expected_reply_by = Some(today + Duration::days(rules::REPLY_EXPECTED_DAYS));
-    let claim = c.clone();
-    rules::refresh_statuses(&mut s.incidents, today);
-    Ok(Json(json!({ "claim": claim, "mail": mail })))
+    let _ = sqlx::query("insert into badge_awards (customer_id, badge_id) values ($1, 'abgeschickt') on conflict do nothing").bind(c.0.id).execute(&s.pool).await;
+    Ok(Json(json!({ "claim": claim_with_incidents(&s.pool, &claim).await.map_err(internal)?, "mail": mail })))
 }
 
-pub async fn mails(State(s): State<Shared>) -> Json<Vec<Mail>> {
-    Json(s.read().unwrap().mails.clone())
+pub async fn mails(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let rows: Vec<MailRow> = sqlx::query_as("select * from mails where customer_id = $1 order by occurred_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!(rows)))
+}
+
+#[derive(Deserialize)]
+pub struct Reply {
+    pub body: String,
+}
+
+/// The customer answers a railway's question, through their own relay address.
+pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(r): Json<Reply>) -> ApiResult {
+    let original: Option<MailRow> = sqlx::query_as("select * from mails where id = $1 and customer_id = $2 and direction = 'inbound'").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(orig) = original else { return Err(err(StatusCode::NOT_FOUND, "inbound mail not found")) };
+    let (Some(name), Some(email), Some(relay)) = (c.0.full_name.clone(), c.0.email.clone(), c.0.relay_address.clone()) else {
+        return Err(err(StatusCode::PRECONDITION_FAILED, "personal data required"));
+    };
+    let dry_run = std::env::var("SMTP_URL").is_err();
+    let mail: MailRow = sqlx::query_as(
+        "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, bcc_addr, subject, body, dry_run)
+         values ($1,$2,$3,'out',$4,$5,$6,$7,$8,$9,$10,$11) returning *",
+    )
+    .bind(Uuid::new_v4())
+    .bind(c.0.id)
+    .bind(orig.claim_id)
+    .bind(format!("<{}@verspaetomat.de>", Uuid::new_v4()))
+    .bind(orig.message_id)
+    .bind(format!("{name} <{relay}>"))
+    .bind(orig.from_addr)
+    .bind(&email)
+    .bind(format!("Re: {}", orig.subject))
+    .bind(r.body)
+    .bind(dry_run)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    Ok(Json(json!(mail)))
 }
 
 #[derive(Deserialize)]
@@ -636,98 +900,138 @@ pub struct InboundMail {
     pub subject: String,
     pub body: String,
     #[serde(default)]
-    pub claim_id: Option<String>,
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub in_reply_to: Option<String>,
+    #[serde(default)]
+    pub claim_id: Option<Uuid>,
 }
 
-/// What the mail provider's webhook will deliver. Classification is a stub:
-/// a real implementation parses the reply for amount and outcome.
-pub async fn inbound_mail(State(s): State<Shared>, Json(m): Json<InboundMail>) -> ApiResult {
-    let mut s = s.write().unwrap();
-    let today = s.today;
-    let claim = match &m.claim_id {
-        Some(id) => s.claims.iter().find(|c| &c.id == id).cloned(),
-        None => s.claims.iter().find(|c| c.status == ClaimStatus::Sent).cloned(),
+/// Mail-provider webhook (and the showcase's "Antwort simulieren"). Match by relay
+/// address and claim reference, classify, forward, update statuses.
+pub async fn inbound_mail(State(s): State<AppState>, axum::extract::Query(q): axum::extract::Query<BTreeMap<String, String>>, Json(m): Json<InboundMail>) -> ApiResult {
+    if let Ok(secret) = std::env::var("INBOUND_SECRET") {
+        if q.get("secret") != Some(&secret) {
+            return Err(err(StatusCode::UNAUTHORIZED, "bad secret"));
+        }
     }
-    .ok_or_else(|| err(StatusCode::NOT_FOUND, "no sent claim to match"))?;
+    let relay = m.to.trim().trim_matches(|ch| ch == '<' || ch == '>').to_lowercase();
+    let cust: Option<CustomerRow> = sqlx::query_as("select * from customers where lower(relay_address) = $1").bind(&relay).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(cust) = cust else { return Err(err(StatusCode::NOT_FOUND, "no customer for this relay address")) };
+    let claim: Option<ClaimRow> = match m.claim_id {
+        Some(id) => sqlx::query_as("select * from claims where id = $1 and customer_id = $2").bind(id).bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
+        None => match &m.in_reply_to {
+            Some(mid) => sqlx::query_as("select c.* from claims c join mails ml on ml.claim_id = c.id where ml.message_id = $1 and c.customer_id = $2").bind(mid).bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
+            None => sqlx::query_as("select * from claims where customer_id = $1 and status in ('sent','question') order by sent_at desc limit 1").bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
+        },
+    };
     let lower = m.body.to_lowercase();
-    let outcome = if lower.contains("nicht entsprechen") || lower.contains("abgelehnt") {
+    let outcome = if lower.contains("nicht entsprechen") || lower.contains("abgelehnt") || lower.contains("keine entschädigung") {
         MailOutcome::Rejected
-    } else if lower.contains("benötigen wir") || lower.contains("rückfrage") {
+    } else if lower.contains("benötigen wir") || lower.contains("rückfrage") || lower.contains("bitte senden sie") {
         MailOutcome::Question
-    } else if lower.contains("überwiesen") || lower.contains("entschädigung von") {
+    } else if lower.contains("überwiesen") || lower.contains("entschädigung von") || lower.contains("wird ausgezahlt") {
         MailOutcome::Accepted
+    } else if lower.contains("undeliverable") || lower.contains("unzustellbar") || lower.contains("mailer-daemon") {
+        MailOutcome::Bounce
     } else {
         MailOutcome::Other
     };
-    let amount = if outcome == MailOutcome::Accepted { Some(claim.amount_claimed_cents) } else { None };
-    let mail = Mail {
-        id: uuid::Uuid::new_v4().to_string(),
-        claim_id: Some(claim.id.clone()),
-        incident_ids: claim.incident_ids.clone(),
-        direction: MailDirection::Inbound,
-        from: m.from,
-        to: m.to,
-        bcc: None,
-        subject: m.subject,
-        body: m.body,
-        date: now(),
-        attachments: vec![],
-        amount_cents: amount,
-        outcome: Some(outcome),
-        forwarded_at: Some(now()),
-    };
-    s.mails.insert(0, mail.clone());
-    let new_status = match outcome {
-        MailOutcome::Accepted => Some(IncidentStatus::Bestaetigt),
-        MailOutcome::Rejected => Some(IncidentStatus::Abgelehnt),
-        _ => None,
-    };
-    if let Some(ns) = new_status {
-        for i in s.incidents.iter_mut().filter(|i| claim.incident_ids.contains(&i.id)) {
-            i.status = ns;
+    let amount = extract_amount_cents(&m.body).or_else(|| if outcome == MailOutcome::Accepted { claim.as_ref().map(|c| c.amount_claimed_cents) } else { None });
+    let mail: MailRow = sqlx::query_as(
+        "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, subject, body, outcome, amount_cents, forwarded_at)
+         values ($1,$2,$3,'inbound',$4,$5,$6,$7,$8,$9,$10,$11,now()) returning *",
+    )
+    .bind(Uuid::new_v4())
+    .bind(cust.id)
+    .bind(claim.as_ref().map(|c| c.id))
+    .bind(m.message_id)
+    .bind(m.in_reply_to)
+    .bind(&m.from)
+    .bind(&m.to)
+    .bind(&m.subject)
+    .bind(&m.body)
+    .bind(outcome)
+    .bind(if outcome == MailOutcome::Accepted { amount } else { None })
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    if let Some(claim) = &claim {
+        let (claim_status, inc_status): (ClaimStatus, Option<IncidentStatus>) = match outcome {
+            MailOutcome::Accepted => (ClaimStatus::Accepted, Some(IncidentStatus::Bestaetigt)),
+            MailOutcome::Rejected => (ClaimStatus::Rejected, Some(IncidentStatus::Abgelehnt)),
+            MailOutcome::Question => (ClaimStatus::Question, None),
+            MailOutcome::Bounce => (ClaimStatus::Bounced, None),
+            MailOutcome::Other => (claim.status, None),
+        };
+        sqlx::query("update claims set status = $2, amount_confirmed_cents = coalesce($3, amount_confirmed_cents), closed_at = case when $2 in ('accepted','rejected') then now() else closed_at end where id = $1")
+            .bind(claim.id)
+            .bind(claim_status)
+            .bind(if outcome == MailOutcome::Accepted { amount } else { None })
+            .execute(&s.pool)
+            .await
+            .map_err(internal)?;
+        if let Some(st) = inc_status {
+            sqlx::query("update incidents set status = $2 where id in (select incident_id from claim_incidents where claim_id = $1)").bind(claim.id).bind(st).execute(&s.pool).await.map_err(internal)?;
+            if st == IncidentStatus::Bestaetigt {
+                let _ = sqlx::query("insert into badge_awards (customer_id, badge_id) values ($1, 'bestaetigt') on conflict do nothing").bind(cust.id).execute(&s.pool).await;
+            }
+        }
+        rules::audit(&s.pool, "claim", claim.id, Some("sent"), &format!("{:?}", claim_status).to_lowercase(), "inbound mail").await.map_err(internal)?;
+    }
+    // TODO tonight: forward the original to cust.email via SMTP when configured.
+    Ok(Json(json!({ "mail": mail, "outcome": outcome, "claim_id": claim.map(|c| c.id) })))
+}
+
+/// "4,50 EUR" / "19,95 €" → cents.
+fn extract_amount_cents(text: &str) -> Option<Cents> {
+    let bytes: Vec<char> = text.chars().collect();
+    let mut best: Option<Cents> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == '.') {
+                i += 1;
+            }
+            if i < bytes.len() && bytes[i] == ',' && i + 2 < bytes.len() && bytes[i + 1].is_ascii_digit() && bytes[i + 2].is_ascii_digit() {
+                let whole: String = bytes[start..i].iter().filter(|c| c.is_ascii_digit()).collect();
+                let frac: String = bytes[i + 1..i + 3].iter().collect();
+                let rest: String = bytes[i + 3..(i + 8).min(bytes.len())].iter().collect();
+                if rest.contains("EUR") || rest.contains('€') {
+                    let v = whole.parse::<i64>().unwrap_or(0) * 100 + frac.parse::<i64>().unwrap_or(0);
+                    best = Some(best.map_or(v, |b| b.max(v)));
+                }
+                i += 3;
+            }
+        } else {
+            i += 1;
         }
     }
-    if let Some(c) = s.claims.iter_mut().find(|c| c.id == claim.id) {
-        c.status = match outcome {
-            MailOutcome::Accepted => ClaimStatus::Accepted,
-            MailOutcome::Rejected => ClaimStatus::Rejected,
-            MailOutcome::Question => ClaimStatus::Question,
-            MailOutcome::Bounce => ClaimStatus::Bounced,
-            MailOutcome::Other => c.status,
-        };
-        c.amount_confirmed_cents = amount;
-    }
-    rules::refresh_statuses(&mut s.incidents, today);
-    Ok(Json(json!({ "mail": mail, "outcome": outcome })))
+    best
 }
 
 // ---------------------------------------------------------------------------
 // Community
 // ---------------------------------------------------------------------------
 
-pub async fn community(State(s): State<Shared>) -> Json<Value> {
-    let s = s.read().unwrap();
-    let confirmed_here: Cents = s.incidents.iter().filter(|i| i.status == IncidentStatus::Bestaetigt).map(|i| i.amount_cents).sum();
-    let submitted_here: Cents = s.incidents.iter().filter(|i| i.status == IncidentStatus::Eingereicht).map(|i| i.amount_cents).sum();
-    let per_ngo: Vec<Value> = s
-        .ngos
-        .iter()
-        .map(|n| {
-            json!({
-                "id": n.id,
-                "name": n.name,
-                "confirmed_cents": n.confirmed_total_cents + s.incidents.iter().filter(|i| i.ngo_id == n.id && i.status == IncidentStatus::Bestaetigt).map(|i| i.amount_cents).sum::<Cents>(),
-                "submitted_cents": n.submitted_total_cents + s.incidents.iter().filter(|i| i.ngo_id == n.id && i.status == IncidentStatus::Eingereicht).map(|i| i.amount_cents).sum::<Cents>(),
-            })
-        })
-        .collect();
-    Json(json!({
-        "minutes": s.community.minutes + s.rides.iter().filter_map(|r| r.final_delay_minutes).sum::<i64>(),
-        "submitted_cents": s.community.submitted_cents + submitted_here,
-        "confirmed_cents": s.community.confirmed_cents + confirmed_here,
-        "users": s.community.users,
-        "ngos": per_ngo,
-    }))
+pub async fn community(State(s): State<AppState>, _c: Customer) -> ApiResult {
+    let (minutes, users): (i64, i64) = sqlx::query_as("select coalesce(sum(final_delay_min),0)::bigint, (select count(*) from customers)::bigint from rides where status = 'arrived'").fetch_one(&s.pool).await.map_err(internal)?;
+    let (submitted, confirmed): (i64, i64) = sqlx::query_as(
+        "select coalesce(sum(amount_cents) filter (where status = 'eingereicht'),0)::bigint, coalesce(sum(amount_cents) filter (where status = 'bestaetigt'),0)::bigint from incidents",
+    )
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    let seed = crate::fixtures::Fixtures::embedded().community;
+    let ngos = ngo_totals(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({
+        "minutes": seed.minutes + minutes,
+        "submitted_cents": seed.submitted_cents + submitted,
+        "confirmed_cents": seed.confirmed_cents + confirmed,
+        "users": seed.users + users,
+        "ngos": ngos.into_iter().map(|n| json!({ "id": n["id"], "name": n["name"], "confirmed_cents": n["confirmed_total_cents"], "submitted_cents": n["submitted_total_cents"] })).collect::<Vec<_>>(),
+    })))
 }
 
 #[derive(Deserialize)]
@@ -736,17 +1040,84 @@ pub struct BoardQuery {
     pub scope: Option<String>,
 }
 
-pub async fn boards(State(s): State<Shared>, Query(q): Query<BoardQuery>) -> Json<Vec<BoardEntry>> {
-    let s = s.read().unwrap();
-    let list = match q.scope.as_deref() {
-        Some("city") => &s.boards.city,
-        Some("germany") => &s.boards.germany,
-        _ => &s.boards.line,
+pub async fn boards(State(s): State<AppState>, c: Customer, Query(q): Query<BoardQuery>) -> ApiResult {
+    let scope = match q.scope.as_deref() {
+        Some("city") => "city",
+        Some("germany") => "germany",
+        _ => "line",
     };
-    let list = if s.me.settings.show_on_boards { list.clone() } else { list.iter().filter(|e| !e.is_me).cloned().collect() };
-    Json(list)
+    let seed: Vec<BoardSeedRow> = sqlx::query_as("select * from board_seed where scope = $1 order by rank").bind(scope).fetch_all(&s.pool).await.map_err(internal)?;
+    let my_points: i64 = sqlx::query_scalar("select coalesce(sum(points),0)::bigint from rides where customer_id = $1 and status = 'arrived' and location_verified and finalised_at > now() - interval '7 days'").bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?;
+    let mut entries: Vec<Value> = seed.iter().map(|e| json!({ "rank": e.rank, "name": e.name, "points": e.points, "is_me": false })).collect();
+    if c.0.show_on_boards {
+        let better = seed.iter().filter(|e| e.points as i64 > my_points).count() as i64;
+        let rank = better + 1;
+        entries.push(json!({ "rank": rank, "name": c.0.nickname, "points": my_points, "is_me": true }));
+        entries.sort_by_key(|e| e["rank"].as_i64().unwrap_or(0));
+    }
+    Ok(Json(json!(entries)))
 }
 
-pub async fn teams(State(s): State<Shared>) -> Json<Vec<Team>> {
-    Json(s.read().unwrap().teams.clone())
+async fn team_json(pool: &PgPool, t: &TeamRow) -> anyhow::Result<Value> {
+    let members: Vec<(Uuid, String)> = sqlx::query_as("select c.id, c.nickname from team_members m join customers c on c.id = m.customer_id where m.team_id = $1 order by m.joined_at").bind(t.id).fetch_all(pool).await?;
+    let ids: Vec<Uuid> = members.iter().map(|m| m.0).collect();
+    let (minutes, euros): (i64, i64) = sqlx::query_as(
+        "select coalesce((select sum(final_delay_min) from rides where customer_id = any($1) and status = 'arrived'),0)::bigint,
+                coalesce((select sum(amount_cents) from incidents where customer_id = any($1) and status = 'bestaetigt'),0)::bigint",
+    )
+    .bind(&ids)
+    .fetch_one(pool)
+    .await?;
+    let top: Option<String> = sqlx::query_scalar("select c.nickname from rides r join customers c on c.id = r.customer_id where r.customer_id = any($1) and r.status = 'arrived' and r.finalised_at > date_trunc('month', now()) group by c.nickname order by sum(r.points) desc limit 1").bind(&ids).fetch_optional(pool).await?;
+    Ok(json!({ "id": t.id, "name": t.name, "invite_token": t.invite_token, "members": members.iter().map(|m| &m.1).collect::<Vec<_>>(), "minutes": minutes, "euros_cents": euros, "top_member": top }))
+}
+
+pub async fn teams(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let rows: Vec<TeamRow> = sqlx::query_as("select t.* from teams t join team_members m on m.team_id = t.id where m.customer_id = $1 order by t.created_at").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    let mut out = Vec::new();
+    for t in &rows {
+        out.push(team_json(&s.pool, t).await.map_err(internal)?);
+    }
+    Ok(Json(json!(out)))
+}
+
+pub async fn team(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
+    let t: Option<TeamRow> = sqlx::query_as("select t.* from teams t join team_members m on m.team_id = t.id where t.id = $1 and m.customer_id = $2").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(t) = t else { return Err(err(StatusCode::NOT_FOUND, "team not found")) };
+    Ok(Json(team_json(&s.pool, &t).await.map_err(internal)?))
+}
+
+#[derive(Deserialize)]
+pub struct NewTeam {
+    pub name: String,
+}
+
+pub async fn create_team(State(s): State<AppState>, c: Customer, Json(n): Json<NewTeam>) -> ApiResult {
+    let name = n.name.trim();
+    if name.is_empty() || name.len() > 40 {
+        return Err(err(StatusCode::BAD_REQUEST, "name 1-40 chars"));
+    }
+    let id = Uuid::new_v4();
+    let token = Uuid::new_v4().simple().to_string()[..10].to_string();
+    let t: TeamRow = sqlx::query_as("insert into teams (id, name, invite_token, created_by) values ($1,$2,$3,$4) returning *").bind(id).bind(name).bind(&token).bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?;
+    sqlx::query("insert into team_members (team_id, customer_id) values ($1,$2)").bind(id).bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(team_json(&s.pool, &t).await.map_err(internal)?))
+}
+
+#[derive(Deserialize)]
+pub struct JoinTeam {
+    pub invite_token: String,
+}
+
+pub async fn join_team(State(s): State<AppState>, c: Customer, Json(j): Json<JoinTeam>) -> ApiResult {
+    let t: Option<TeamRow> = sqlx::query_as("select * from teams where invite_token = $1").bind(j.invite_token.trim()).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(t) = t else { return Err(err(StatusCode::NOT_FOUND, "unknown invite")) };
+    sqlx::query("insert into team_members (team_id, customer_id) values ($1,$2) on conflict do nothing").bind(t.id).bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(team_json(&s.pool, &t).await.map_err(internal)?))
+}
+
+pub async fn leave_team(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
+    sqlx::query("delete from team_members where team_id = $1 and customer_id = $2").bind(id).bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
+    sqlx::query("delete from teams where id = $1 and not exists (select 1 from team_members where team_id = $1)").bind(id).execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "ok": true })))
 }

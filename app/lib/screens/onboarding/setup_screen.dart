@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart';
+import '../../api/models.dart';
+import '../../mock/mock_data.dart' show TicketType, TicketTypeX;
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
@@ -13,15 +15,19 @@ class SetupScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = DemoScope.of(context);
+    final session = RepoScope.of(context);
+    final demo = DemoScope.of(context);
+    final ticket = session.me?.settings.ticket ?? demo.ticket;
+    final ngoId = session.me?.settings.ngoId ?? demo.ngoId;
+    final ngos = session.ngos;
     return VScreen(
       eyebrow: 'Schritt 2 von 2',
       title: 'Dein Ticket, dein Zweck',
       bottom: VPrimaryButton(
         label: 'Fertig',
-        onTap: () {
-          state.completeOnboarding();
-          context.go(Routes.bahnsteig);
+        onTap: () async {
+          await session.completeOnboarding();
+          if (context.mounted) context.go(Routes.bahnsteig);
         },
       ),
       child: Column(
@@ -34,8 +40,8 @@ class SetupScreen extends StatelessWidget {
             VChoiceCard(
               title: t.label,
               subtitle: t.rule,
-              selected: state.ticket == t,
-              onTap: () => state.setTicket(t),
+              selected: ticket == t,
+              onTap: () => session.updateSettings(MePatch(ticket: t)),
             ),
             const VGap.s(),
           ],
@@ -45,10 +51,13 @@ class SetupScreen extends StatelessWidget {
           const VGap.m(),
           Text('Dorthin geht die Entschädigung. Direkt von der Bahn, nicht über uns.', style: VText.bodyS.copyWith(color: VColors.ink2)),
           const VGap.m(),
-          for (final n in Mock.ngos) ...[
-            _NgoCard(ngo: n, selected: state.ngoId == n.id, onTap: () => state.setNgo(n.id)),
-            const VGap.s(),
-          ],
+          if (ngos.isEmpty)
+            Text(session.busy ? 'Vereine werden geladen …' : (session.error ?? 'Keine Vereine geladen.'), style: VText.caption)
+          else
+            for (final n in ngos) ...[
+              _NgoCard(ngo: n, selected: ngoId == n.id, onTap: () => session.updateSettings(MePatch(ngoId: n.id))),
+              const VGap.s(),
+            ],
           const VGap.s(),
           Text('Name, Adresse und Ticketnummer fragen wir erst, wenn dein erster Antrag bereit ist.', style: VText.caption),
         ],
@@ -59,7 +68,7 @@ class SetupScreen extends StatelessWidget {
 
 class _NgoCard extends StatelessWidget {
   const _NgoCard({required this.ngo, required this.selected, required this.onTap});
-  final Ngo ngo;
+  final ApiNgo ngo;
   final bool selected;
   final VoidCallback onTap;
 
@@ -115,7 +124,7 @@ class _NgoCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            Text('Bestätigt über Verspätomat: ${fmtEuroWhole(ngo.confirmedTotal)}', style: VText.caption),
+            Text('Bestätigt über Verspätomat: ${fmtEuroWhole(ngo.confirmedTotalCents / 100)}', style: VText.caption),
           ],
         ),
       ),

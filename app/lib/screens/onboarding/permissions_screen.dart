@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/models.dart';
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
@@ -19,7 +21,9 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = DemoScope.of(context);
+    final session = RepoScope.of(context);
+    final demo = DemoScope.of(context);
+    final locationMode = session.me?.settings.locationMode ?? demo.locationMode;
     return VScreen(
       eyebrow: 'Schritt 1 von 2',
       title: 'Zwei Fragen',
@@ -45,7 +49,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
               label: 'Mitteilungen erlauben',
               icon: Icons.notifications_none,
               onTap: () {
-                state.notificationsGranted = true;
+                session.updateSettings(const MePatch(notifications: true));
                 setState(() => _notifications = true);
               },
             ),
@@ -70,8 +74,8 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
             VChoiceCard(
               title: _title(mode),
               subtitle: _subtitle(mode),
-              selected: state.locationMode == mode,
-              onTap: () => state.setLocationMode(mode),
+              selected: locationMode == mode,
+              onTap: () => session.updateSettings(MePatch(locationMode: mode)),
             ),
             const VGap.s(),
           ],

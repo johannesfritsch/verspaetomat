@@ -1,24 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'repo/repo_scope.dart';
 import 'router.dart';
 import 'state/demo_state.dart';
 import 'theme/app_theme.dart';
 import 'theme/tokens.dart';
 
-void main() {
+/// Backend base URL. `--dart-define=API_URL=http://192.168.0.10:8080` for a phone.
+const apiUrl = String.fromEnvironment('API_URL', defaultValue: 'http://127.0.0.1:8080');
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
     statusBarBrightness: Brightness.light,
   ));
-  runApp(VerspaetomatApp(state: DemoState()));
+  final prefs = await SharedPreferences.getInstance();
+  final demo = DemoState();
+  final session = Session(demo: demo, prefs: prefs, apiUrl: apiUrl);
+  // Do not block the first frame on the network; the session reports its state.
+  session.init();
+  runApp(VerspaetomatApp(state: demo, session: session));
 }
 
 class VerspaetomatApp extends StatefulWidget {
-  const VerspaetomatApp({super.key, required this.state});
+  const VerspaetomatApp({super.key, required this.state, required this.session});
   final DemoState state;
+  final Session session;
 
   @override
   State<VerspaetomatApp> createState() => _VerspaetomatAppState();
@@ -29,14 +40,17 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
 
   @override
   Widget build(BuildContext context) {
-    return DemoScope(
-      state: widget.state,
-      child: MaterialApp.router(
-        title: 'Verspätomat',
-        debugShowCheckedModeBanner: false,
-        theme: buildAppTheme(),
-        routerConfig: router,
-        color: VColors.paper,
+    return RepoScope(
+      session: widget.session,
+      child: DemoScope(
+        state: widget.state,
+        child: MaterialApp.router(
+          title: 'Verspätomat',
+          debugShowCheckedModeBanner: false,
+          theme: buildAppTheme(),
+          routerConfig: router,
+          color: VColors.paper,
+        ),
       ),
     );
   }

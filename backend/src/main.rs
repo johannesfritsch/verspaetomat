@@ -1,95 +1,72 @@
+mod auth;
+mod db;
 mod fixtures;
 mod handlers;
 mod model;
 mod rules;
+mod train;
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Router,
 };
-use chrono::NaiveDate;
+use sqlx::PgPool;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-use crate::fixtures::Fixtures;
-use crate::model::*;
+use crate::train::transitous::TransitousClient;
 
-/// Everything the skeleton holds. In-memory, one customer. Postgres later.
+#[derive(Clone)]
 pub struct AppState {
-    pub today: NaiveDate,
-    pub stations: Vec<Station>,
-    pub departures: Vec<Departure>,
-    pub operators: Vec<Operator>,
-    pub ngos: Vec<Ngo>,
-    pub badges: Vec<Badge>,
-    pub boards: Boards,
-    pub community: Community,
-    pub teams: Vec<Team>,
-    pub me: Customer,
-    pub rides: Vec<Ride>,
-    pub incidents: Vec<Incident>,
-    pub claims: Vec<Claim>,
-    pub mails: Vec<Mail>,
+    pub pool: PgPool,
+    pub train: Arc<TransitousClient>,
 }
-
-impl AppState {
-    pub fn from_fixtures(f: Fixtures) -> Self {
-        let mut s = Self {
-            today: NaiveDate::from_ymd_opt(2026, 9, 9).unwrap(),
-            stations: f.stations,
-            departures: f.departures,
-            operators: f.operators,
-            ngos: f.ngos,
-            badges: f.badges,
-            boards: f.boards,
-            community: f.community,
-            teams: f.teams,
-            me: f.me,
-            rides: f.rides,
-            incidents: f.incidents,
-            claims: Vec::new(),
-            mails: f.mails,
-        };
-        rules::refresh_statuses(&mut s.incidents, s.today);
-        s
-    }
-
-    pub fn desk_for(&self, operator: &str) -> String {
-        self.operators
-            .iter()
-            .find(|o| o.name == operator)
-            .map(|o| o.desk.clone())
-            .unwrap_or_else(|| "Unbekannt".to_string())
-    }
-}
-
-pub type Shared = Arc<RwLock<AppState>>;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,tower_http=info".into()))
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,tower_http=info,sqlx=warn".into()))
         .init();
 
-    let state: Shared = Arc::new(RwLock::new(AppState::from_fixtures(Fixtures::embedded())));
+    let pool = db::connect().await?;
+    db::seed(&pool).await?;
+    let train = Arc::new(TransitousClient::new());
+    let state = AppState { pool: pool.clone(), train: train.clone() };
+
+    // The trip follower finalises rides; we turn finalised rides into incidents.
+    let mut finalised = train::follower::spawn(pool.clone(), train.clone(), Duration::from_secs(45));
+    let pool_for_incidents = pool.clone();
+    tokio::spawn(async move {
+        while let Ok(ev) = finalised.recv().await {
+            if let Err(e) = handlers::on_ride_finalised(&pool_for_incidents, ev.ride_id).await {
+                tracing::error!("incident creation for ride {}: {e}", ev.ride_id);
+            }
+        }
+    });
 
     let app = Router::new()
         .route("/health", get(handlers::health))
+        // identity
+        .route("/v1/devices", post(auth::create_device))
+        .route("/v1/devices/recover", post(auth::recover_device))
         // reference data
         .route("/v1/stations/nearby", get(handlers::stations_nearby))
+        .route("/v1/stations/search", get(handlers::stations_search))
         .route("/v1/stations/{id}/departures", get(handlers::departures))
-        .route("/v1/trips/{id}", get(handlers::trip))
+        .route("/v1/trips", get(handlers::trip))
         .route("/v1/operators", get(handlers::operators))
         .route("/v1/ngos", get(handlers::ngos))
         .route("/v1/badges", get(handlers::badges))
         // customer
-        .route("/v1/me", get(handlers::me).patch(handlers::patch_me))
-        .route("/v1/me/personal-data", axum::routing::put(handlers::put_personal_data))
+        .route("/v1/me", get(handlers::me).patch(handlers::patch_me).delete(handlers::delete_me))
+        .route("/v1/me/personal-data", put(handlers::put_personal_data))
+        .route("/v1/me/recovery-code", get(handlers::recovery_code))
+        .route("/v1/me/export", get(handlers::export_me))
         // rides
         .route("/v1/rides", get(handlers::rides).post(handlers::check_in))
         .route("/v1/rides/current", get(handlers::current_ride))
-        .route("/v1/rides/current/tick", post(handlers::tick_ride))
         .route("/v1/rides/current/arrival", post(handlers::arrival))
         .route("/v1/rides/current/dismiss", post(handlers::dismiss))
         .route("/v1/rides/nachtrag", post(handlers::nachtrag))
@@ -100,18 +77,23 @@ async fn main() {
         .route("/v1/claims/{id}", patch(handlers::claim_patch))
         .route("/v1/claims/{id}/sign", post(handlers::claim_sign))
         .route("/v1/claims/{id}/send", post(handlers::claim_send))
+        .route("/v1/uploads", post(handlers::upload))
         .route("/v1/mails", get(handlers::mails))
+        .route("/v1/mails/{id}/reply", post(handlers::mail_reply))
         .route("/internal/inbound-mail", post(handlers::inbound_mail))
         // community
         .route("/v1/community", get(handlers::community))
         .route("/v1/boards", get(handlers::boards))
-        .route("/v1/teams", get(handlers::teams))
+        .route("/v1/teams", get(handlers::teams).post(handlers::create_team))
+        .route("/v1/teams/join", post(handlers::join_team))
+        .route("/v1/teams/{id}", get(handlers::team).delete(handlers::leave_team))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     let addr = std::env::var("BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
-    let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("verspaetomat-api listening on http://{addr}");
-    axum::serve(listener, app).await.expect("serve");
+    axum::serve(listener, app).await?;
+    Ok(())
 }

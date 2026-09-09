@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/models.dart';
 import '../../mock/mock_data.dart';
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
@@ -24,6 +26,19 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
   @override
   Widget build(BuildContext context) {
     final state = DemoScope.of(context);
+    final session = RepoScope.of(context);
+    final me = session.me;
+    final settings = me?.settings;
+    final ticket = settings?.ticket ?? state.ticket;
+    final ngoId = settings?.ngoId ?? state.ngoId;
+    final ngoName = session.ngos.where((n) => n.id == ngoId).map((n) => n.name).firstOrNull ?? state.ngo.name;
+    final locationMode = settings?.locationMode ?? state.locationMode;
+    final keepCorrespondence = settings?.keepCorrespondence ?? state.keepCorrespondence;
+    final showOnBoards = settings?.showOnBoards ?? state.showOnBoards;
+    final traewellingLinked = settings?.traewellingLinked ?? state.traewellingLinked;
+    final personal = me?.personalData;
+    final relay = me?.relayAddress ?? Mock.relayAddress;
+    final privateMail = personal?.email ?? Mock.userEmail;
 
     return VScreen(
       title: 'Einstellungen',
@@ -35,15 +50,15 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           const VSection('Fahren'),
           VListRow(
             title: 'Ticket',
-            subtitle: state.ticket.label,
+            subtitle: ticket.label,
             chevron: true,
-            onTap: () => _pickTicket(context, state),
+            onTap: () => _pickTicket(context, session, ticket),
           ),
           VListRow(
             title: 'Zweck',
-            subtitle: state.ngo.name,
+            subtitle: ngoName,
             chevron: true,
-            onTap: () => _pickNgo(context, state),
+            onTap: () => _pickNgo(context, session, ngoId),
           ),
           const VGap.xl(),
           const VSection('Bahnsteig-Hinweis'),
@@ -78,16 +93,16 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
                 LocationMode.whileUsing => 'Der Hinweis kommt nur, wenn du die App gerade nutzt',
                 LocationMode.never => 'Manueller Check-in, jederzeit möglich',
               },
-              selected: state.locationMode == m,
-              onTap: () => state.setLocationMode(m),
+              selected: locationMode == m,
+              onTap: () => session.updateSettings(MePatch(locationMode: m)),
             ),
           const VGap.xl(),
           const VSection('Anträge'),
           VListRow(
             title: 'Persönliche Daten für Anträge',
-            subtitle: '${Mock.userName} · ${Mock.ticketNumber}',
+            subtitle: personal == null ? 'Noch nicht hinterlegt. Fragen wir beim ersten Antrag.' : '${personal.name} · ${personal.ticketNumber ?? 'ohne Ticketnummer'}',
             chevron: true,
-            onTap: () => _personalData(context),
+            onTap: () => _personalData(context, session, personal),
           ),
           const VGap.m(),
           Text('Meine Verspätomat-Adresse', style: VText.bodyStrong),
@@ -98,10 +113,10 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(Mock.relayAddress, style: VText.mono),
+                Text(relay, style: VText.mono),
                 const SizedBox(height: 8),
                 Text(
-                  'Deine Anträge gehen von hier raus. Antworten der Bahn landen hier und sofort auch in deinem Postfach (${Mock.userEmail}). Wir lesen Status, Betrag und Aktenzeichen, mehr nicht.',
+                  'Deine Anträge gehen von hier raus. Antworten der Bahn landen hier und sofort auch in deinem Postfach ($privateMail). Wir lesen Status, Betrag und Aktenzeichen, mehr nicht.',
                   style: VText.caption,
                 ),
               ],
@@ -111,30 +126,59 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           SwitchRow(
             title: 'Korrespondenz nach Abschluss behalten',
             subtitle: 'Sonst bleibt nur der Eintrag im Konto',
-            value: state.keepCorrespondence,
-            onChanged: state.setKeepCorrespondence,
+            value: keepCorrespondence,
+            onChanged: (v) => session.updateSettings(MePatch(keepCorrespondence: v)),
           ),
           VListRow(title: 'Alle Mails exportieren', subtitle: 'Gesendet und empfangen, als Archiv', chevron: true, onTap: () => showSnack(context, 'Archiv wird erstellt. Du bekommst einen Link per Mail.')),
           const VGap.xl(),
           const VSection('Konto'),
           VListRow(
-            title: 'Anmelden',
-            subtitle: 'Optional. Für Backup und Teams.',
+            title: 'Wiederherstellungscode',
+            subtitle: 'Kein Konto. Dieser Code holt dein Konto auf ein neues Gerät.',
             chevron: true,
-            onTap: () => showSnack(context, 'In der Vorführung gibt es kein Konto. Alles bleibt auf dem Gerät.'),
+            onTap: () => _recoveryCode(context, session),
           ),
           VListRow(
             title: 'Träwelling verbinden',
-            subtitle: state.traewellingLinked ? 'Verbunden' : 'Check-ins importieren, Punkte behalten',
+            subtitle: traewellingLinked ? 'Verbunden' : 'Check-ins importieren, Punkte behalten',
             chevron: true,
-            onTap: () => _traewelling(context, state),
+            onTap: () => _traewelling(context, session),
           ),
-          SwitchRow(title: 'Mich in Ranglisten zeigen', subtitle: 'Ohne dich bleiben die Listen trotzdem da', value: state.showOnBoards, onChanged: state.setShowOnBoards),
+          SwitchRow(title: 'Mich in Ranglisten zeigen', subtitle: 'Ohne dich bleiben die Listen trotzdem da', value: showOnBoards, onChanged: (v) => session.updateSettings(MePatch(showOnBoards: v))),
           const VGap.xl(),
           const VSection('Deine Daten'),
-          VListRow(title: 'Daten exportieren', subtitle: 'Alles, was wir über dich haben', chevron: true, onTap: () => showSnack(context, 'Export wird erstellt.')),
-          VListRow(title: 'Alles löschen', subtitle: 'Konto, Fahrten, Anträge, Adresse', chevron: true, onTap: () => _deleteAll(context, state)),
+          VListRow(title: 'Daten exportieren', subtitle: 'Alles, was wir über dich haben', chevron: true, onTap: () => _export(context, session)),
+          VListRow(title: 'Alles löschen', subtitle: 'Konto, Fahrten, Anträge, Adresse', chevron: true, onTap: () => _deleteAll(context, state, session)),
           VListRow(title: 'Woher kommen die Daten?', subtitle: 'Jede Zahl und ihre Quelle', chevron: true, onTap: () => context.push(Routes.datenherkunft)),
+          const VGap.xl(),
+          const VSection('Backend'),
+          for (final m in BackendMode.values)
+            ChoiceRow(
+              title: m.label,
+              subtitle: m == BackendMode.demo ? 'Alles auf dem Gerät, erfundene Daten' : session.apiUrl,
+              selected: session.mode == m,
+              onTap: () => session.switchMode(m),
+            ),
+          const VGap.s(),
+          Row(
+            children: [
+              Icon(
+                session.busy ? Icons.sync : (session.healthy == true ? Icons.check_circle_outline : Icons.error_outline),
+                size: 18,
+                color: session.busy ? VColors.ink2 : (session.healthy == true ? VColors.green : VColors.red),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  session.busy
+                      ? 'Verbinde …'
+                      : session.error ?? (session.healthy == true ? '${session.repo.label} erreichbar' + (session.isLocal && session.me != null ? ' · Gerät ${session.me!.id.substring(0, session.me!.id.length < 8 ? session.me!.id.length : 8)}' : '') : 'Nicht erreichbar'),
+                  style: VText.caption,
+                ),
+              ),
+              TextButton(onPressed: session.checkHealth, child: Text('Prüfen', style: VText.bodySStrong)),
+            ],
+          ),
           const VGap.xl(),
           const VSection('Vorführung'),
           SwitchRow(title: 'Offline simulieren', subtitle: 'Screens zeigen den letzten Stand', value: state.offline, onChanged: (_) => state.toggleOffline()),
@@ -146,7 +190,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     );
   }
 
-  void _traewelling(BuildContext context, DemoState state) {
+  void _traewelling(BuildContext context, Session session) {
     showVSheet(
       context,
       builder: (ctx) => Padding(
@@ -166,7 +210,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             VPrimaryButton(
               label: 'Mit Träwelling anmelden',
               onTap: () {
-                state.setTraewellingLinked(true);
+                session.updateSettings(const MePatch(traewellingLinked: true));
                 Navigator.of(ctx).pop();
                 showSnack(context, 'Vorführung: Verbindung folgt.');
               },
@@ -179,7 +223,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     );
   }
 
-  void _pickTicket(BuildContext context, DemoState state) {
+  void _pickTicket(BuildContext context, Session session, TicketType current) {
     showVSheet(
       context,
       builder: (ctx) => Padding(
@@ -197,9 +241,9 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
                     VChoiceCard(
                       title: t.label,
                       subtitle: t.rule,
-                      selected: state.ticket == t,
+                      selected: current == t,
                       onTap: () {
-                        state.setTicket(t);
+                        session.updateSettings(MePatch(ticket: t));
                         Navigator.of(ctx).pop();
                       },
                     ),
@@ -214,7 +258,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     );
   }
 
-  void _pickNgo(BuildContext context, DemoState state) {
+  void _pickNgo(BuildContext context, Session session, String current) {
     showVSheet(
       context,
       builder: (ctx) => Padding(
@@ -228,13 +272,13 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
               padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
               child: Column(
                 children: [
-                  for (final n in Mock.ngos) ...[
+                  for (final n in session.ngos) ...[
                     VChoiceCard(
                       title: n.name,
                       subtitle: n.tagline,
-                      selected: state.ngoId == n.id,
+                      selected: current == n.id,
                       onTap: () {
-                        state.setNgo(n.id);
+                        session.updateSettings(MePatch(ngoId: n.id));
                         Navigator.of(ctx).pop();
                       },
                     ),
@@ -284,7 +328,11 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     );
   }
 
-  void _personalData(BuildContext context) {
+  void _personalData(BuildContext context, Session session, ApiPersonalData? current) {
+    final name = TextEditingController(text: current?.name ?? '');
+    final address = TextEditingController(text: current?.address ?? '');
+    final email = TextEditingController(text: current?.email ?? '');
+    final ticketNo = TextEditingController(text: current?.ticketNumber ?? '');
     showVSheet(
       context,
       builder: (ctx) => Padding(
@@ -299,19 +347,25 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  TextFormField(initialValue: Mock.userName, decoration: const InputDecoration(labelText: 'Name'), style: VText.body),
+                  TextField(controller: name, decoration: const InputDecoration(labelText: 'Name'), style: VText.body),
                   const VGap.s(),
-                  TextFormField(initialValue: Mock.userAddress, maxLines: 2, decoration: const InputDecoration(labelText: 'Anschrift'), style: VText.body),
+                  TextField(controller: address, maxLines: 2, decoration: const InputDecoration(labelText: 'Anschrift'), style: VText.body),
                   const VGap.s(),
-                  TextFormField(initialValue: Mock.userEmail, decoration: const InputDecoration(labelText: 'Privates Postfach'), style: VText.body),
+                  TextField(controller: email, decoration: const InputDecoration(labelText: 'Privates Postfach'), style: VText.body),
                   const VGap.s(),
-                  TextFormField(initialValue: Mock.ticketNumber, decoration: const InputDecoration(labelText: 'Deutschlandticket-Nummer'), style: VText.mono),
+                  TextField(controller: ticketNo, decoration: const InputDecoration(labelText: 'Deutschlandticket-Nummer'), style: VText.mono),
                   const VGap.m(),
                   VPrimaryButton(
                     label: 'Speichern',
-                    onTap: () {
+                    onTap: () async {
                       Navigator.of(ctx).pop();
-                      showSnack(context, 'Gespeichert. Nur auf diesem Gerät.');
+                      await session.savePersonalData(ApiPersonalData(
+                        name: name.text.trim(),
+                        address: address.text.trim(),
+                        email: email.text.trim(),
+                        ticketNumber: ticketNo.text.trim().isEmpty ? null : ticketNo.text.trim(),
+                      ));
+                      if (context.mounted) showSnack(context, session.error ?? 'Gespeichert. Steht nur auf dem Formular.');
                     },
                   ),
                   const SizedBox(height: 4),
@@ -325,7 +379,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     );
   }
 
-  Future<void> _deleteAll(BuildContext context, DemoState state) async {
+  Future<void> _deleteAll(BuildContext context, DemoState state, Session session) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -341,8 +395,49 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
       ),
     );
     if (ok == true && context.mounted) {
-      state.reset();
-      context.go(Routes.showcase);
+      await session.deleteEverything();
+      if (!session.isLocal) state.reset();
+      if (context.mounted) context.go(Routes.showcase);
+    }
+  }
+
+  Future<void> _recoveryCode(BuildContext context, Session session) async {
+    final code = await session.recoveryCode();
+    if (!context.mounted) return;
+    showVSheet(
+      context,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.l),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const VSheetHeader(title: 'Wiederherstellungscode', subtitle: 'Statt eines Kontos'),
+            Text(
+              'Verspätomat hat kein Konto. Dieser Code holt dein Konto, deine Fahrten und deine Verspätomat-Adresse auf ein neues Gerät. Mach einen Screenshot.',
+              style: VText.body,
+            ),
+            const VGap.m(),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(VSpace.m),
+              decoration: BoxDecoration(border: Border.all(color: VColors.ink, width: 1.5), borderRadius: BorderRadius.circular(4)),
+              child: Text(code ?? (session.error ?? 'Kein Code verfügbar.'), style: VText.mono.copyWith(fontSize: 18)),
+            ),
+            const VGap.l(),
+            VPrimaryButton(label: 'Verstanden', onTap: () => Navigator.of(ctx).pop()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _export(BuildContext context, Session session) async {
+    try {
+      final json = await session.repo.exportMe();
+      if (context.mounted) showSnack(context, 'Export: ${json.length} Zeichen. Der Download folgt.');
+    } catch (e) {
+      if (context.mounted) showSnack(context, 'Export fehlgeschlagen: $e');
     }
   }
 }
