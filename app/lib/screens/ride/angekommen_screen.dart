@@ -1,80 +1,170 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart';
+import '../../mock/mock_data.dart' show TicketType;
+import '../../repo/app_repository.dart';
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
-import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'ride_widgets.dart';
 
 /// The reveal. The only screen allowed to feel like a reward.
 ///
-/// `variant` = 68 | 14 | 59 | ausfall | nodata; without it the screen shows
-/// what DemoState says about the last ride.
+/// Fed by an [ApiArrivalResult] (from Unterwegs or the E1 flow), or by the
+/// last arrival the repository knows. `variant` = 68 | 14 | 59 | ausfall | nodata
+/// drives the showcase in demo mode.
 class AngekommenScreen extends StatefulWidget {
-  const AngekommenScreen({super.key, this.variant});
+  const AngekommenScreen({super.key, this.variant, this.result});
   final String? variant;
+  final ApiArrivalResult? result;
 
   @override
   State<AngekommenScreen> createState() => _AngekommenScreenState();
 }
 
 class _AngekommenScreenState extends State<AngekommenScreen> {
+  ApiArrivalResult? _result;
+  ApiIncidents? _incidents;
+  bool _loading = true;
+  String? _error;
   int? _enteredDelay; // E3
 
   @override
-  Widget build(BuildContext context) {
-    final state = DemoScope.of(context);
-    final v = widget.variant;
+  void initState() {
+    super.initState();
+    _result = widget.result;
+    if (widget.variant != 'nodata') WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
 
-    if (v == 'nodata' && _enteredDelay == null) {
-      return _NoDataStep(onDone: (d) => setState(() => _enteredDelay = d));
-    }
-
-    final cancelled = v == 'ausfall' || (v == null && state.finalCancelled);
-    final selfEntered = v == 'nodata' || (v == null && state.finalSelfEntered);
-    final delay = switch (v) {
-      '68' => 68,
-      '14' => 14,
-      '59' => 59,
-      'ausfall' => 60,
-      'nodata' => _enteredDelay ?? 0,
-      _ => state.finalDelay ?? 0,
-    };
-    final line = state.trip?.departure.line ?? 'RE 7';
-    final from = state.trip?.fromStation ?? 'Köln Hbf';
-    final to = state.trip?.exitStop.name ?? 'Münster (Westf) Hbf';
-    final planned = state.trip?.exitStop.planned ?? const TimeOfDay(hour: 9, minute: 38);
-    final actual = addMinutes(planned, delay);
-    final cause = v == null ? state.liveCause : (delay >= 60 ? 'Stellwerksstörung' : null);
-    final ticket = state.ticket;
-    final ngo = state.ngo;
-
-    final badge = v == null
-        ? state.newBadge
-        : (delay >= 60 && !cancelled ? Mock.badges.firstWhere((b) => b.id == 'stunde') : null);
-
-    final hasClaim = delay >= 60 || cancelled;
-    final desk = Mock.deskFor(state.trip?.departure.operator ?? 'National Express');
-    final openCount = (state.openByDesk[desk] ?? []).length;
-    final counted = hasClaim ? openCount.clamp(1, 3) : openCount;
-    final ready = state.bundleReady(desk);
-    final category = state.trip?.departure.category ?? TrainCategory.re;
-    final claimMinutes = cancelled ? 60 : delay;
-    Incident? live;
-    if (v == null && state.lastLiveIncidentId != null) {
-      for (final i in state.incidents) {
-        if (i.id == state.lastLiveIncidentId) live = i;
+  Future<void> _load() async {
+    final session = RepoScope.read(context);
+    final repo = session.repo;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      var result = _result;
+      final v = widget.variant;
+      if (result == null && v != null && !session.isLocal) {
+        result = await _demoVariant(repo, v);
       }
+      if (result == null) {
+        final live = await repo.currentRide();
+        if (live != null && live.ride.status == ApiRideStatus.arrived) {
+          result = ApiArrivalResult(ride: live.ride);
+        } else if (live != null && !session.isLocal) {
+          result = await repo.arrival(const ArrivalRequest());
+        }
+      }
+      final inc = await repo.incidents();
+      if (!mounted) return;
+      setState(() {
+        _result = result;
+        _incidents = inc;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = shortError(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-    final amount = live?.amount ?? claimAmountFor(ticket, category, claimMinutes);
-    final sub = claimSubLabelFor(ticket, category, claimMinutes);
-    final canFile = hasClaim && (ticket == TicketType.einzelfahrkarte || ready);
+  }
+
+  /// Demo mode: make sure a ride exists, then arrive with the variant's delay.
+  Future<ApiArrivalResult> _demoVariant(AppRepository repo, String v) async {
+    final live = await repo.currentRide();
+    if (live == null || live.ride.status != ApiRideStatus.riding) {
+      final stations = await repo.nearbyStations();
+      final deps = await repo.departures(stations.first.id);
+      final d = deps.firstWhere((x) => !x.cancelled, orElse: () => deps.first);
+      final trip = await repo.trip(d.tripId);
+      var exitIdx = trip.stops.indexWhere((s) => s.name.startsWith('Münster'));
+      if (exitIdx < 1) exitIdx = trip.stops.length - 1;
+      final exit = trip.stops[exitIdx];
+      await repo.checkIn(CheckInRequest(
+        tripId: d.tripId,
+        fromStationId: stations.first.id,
+        fromStationName: stations.first.name,
+        exitStationId: exit.stationId ?? exit.name,
+        exitStationName: exit.name,
+      ));
+    }
+    return switch (v) {
+      '68' => repo.arrival(const ArrivalRequest(delayMinutes: 68)),
+      '14' => repo.arrival(const ArrivalRequest(delayMinutes: 14)),
+      '59' => repo.arrival(const ArrivalRequest(delayMinutes: 59)),
+      'ausfall' => repo.arrival(const ArrivalRequest(delayMinutes: 60, cancelled: true)),
+      'nodata' => repo.arrival(ArrivalRequest(delayMinutes: _enteredDelay ?? 0, selfEntered: true)),
+      _ => repo.arrival(const ArrivalRequest()),
+    };
+  }
+
+  Future<void> _finish() async {
+    try {
+      await RepoScope.read(context).repo.dismissRide();
+    } catch (_) {}
+    if (mounted) context.go(Routes.bahnsteig);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = RepoScope.of(context);
+
+    if (widget.variant == 'nodata' && _enteredDelay == null) {
+      return _NoDataStep(
+        onDone: (d) {
+          setState(() => _enteredDelay = d);
+          _load();
+        },
+      );
+    }
+
+    final result = _result;
+    if (result == null) {
+      return VScreen(
+        title: 'Angekommen',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_loading) const LoadingLine(label: 'Ankunft wird geladen …'),
+            if (_error != null) ErrorLine(message: _error!, onRetry: _load),
+            if (!_loading && _error == null) ...[
+              const VGap.xl(),
+              Text('Noch keine Ankunft.', style: VText.h2),
+              const VGap.s(),
+              Text('Check ein, fahr los, komm an. Dann steht hier die Zahl.', style: VText.body.copyWith(color: VColors.ink2)),
+              const VGap.l(),
+              VGhostButton(label: 'Zum Bahnsteig', onTap: () => context.go(Routes.bahnsteig)),
+            ],
+          ],
+        ),
+      );
+    }
+
+    final r = result.ride;
+    final cancelled = r.cancelled;
+    final delay = r.finalDelayMinutes ?? 0;
+    final points = r.points > 0 ? r.points : (cancelled ? 60 : delay);
+    final planned = r.plannedArrival;
+    final actual = planned?.add(Duration(minutes: delay));
+    final incident = result.incident;
+    final ticket = r.ticket;
+    final ngoId = incident?.ngoId ?? session.me?.settings.ngoId;
+    final ngo = session.ngos.where((n) => n.id == ngoId).firstOrNull;
+    final ngoName = ngo?.name ?? 'deinen Zweck';
+    final hasClaim = incident != null || delay >= 60 || cancelled;
+    final desk = incident?.desk ?? '';
+    final deskSummary = _incidents?.summary.desks.where((d) => d.desk == desk).firstOrNull;
+    final openCount = deskSummary?.incidentIds.length ?? (incident == null ? 0 : 1);
+    final ready = deskSummary?.ready ?? result.bundleReady;
+    final counted = hasClaim ? openCount.clamp(1, 3) : openCount;
+    final amountCents = incident?.amountCents;
+    final canFile = hasClaim && incident != null && (ticket == TicketType.einzelfahrkarte || ready);
 
     return VScreen(
       showBack: false,
-      trailing: Text('${Mock.shortDate(Mock.today)} · ${fmtTime(actual)}', style: VText.caption),
+      trailing: Text('${fmtDay(actual ?? DateTime.now())} · ${fmtLocal(actual)}', style: VText.caption),
       eyebrow: 'Angekommen',
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
@@ -86,18 +176,10 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
                 child: VGhostButton(
                   label: 'Teilen',
                   icon: Icons.ios_share,
-                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Karte geteilt: „$line, +$delay, $to“. (Demo)'))),
+                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Karte geteilt: „${r.line}, +$delay, ${r.exitStationName}“. (Demo)'))),
                 ),
               ),
-              Expanded(
-                child: VGhostButton(
-                  label: 'Fertig',
-                  onTap: () {
-                    state.dismissArrival();
-                    context.go(Routes.bahnsteig);
-                  },
-                ),
-              ),
+              Expanded(child: VGhostButton(label: 'Fertig', onTap: _finish)),
             ],
           ),
         ],
@@ -105,28 +187,28 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$line · $from → $to', style: VText.bodyStrong),
+          Text('${r.line} · ${r.fromStationName} → ${r.exitStationName}', style: VText.bodyStrong),
           const VGap.l(),
           CountUpDelay(delay, cancelled: cancelled),
           const VGap.m(),
-          Text(_headline(delay, cancelled), style: VText.h2),
+          Text(_headline(delay, cancelled, points), style: VText.h2),
           const VGap.xs(),
           Text(
             cancelled
                 ? 'Reise nicht angetreten. 60 Minuten angerechnet.'
-                : 'Ankunft ${fmtTime(actual)} statt ${fmtTime(planned)}${cause != null ? ' · $cause' : ''}${selfEntered ? ' · selbst eingetragen' : ''}',
+                : 'Ankunft ${fmtLocal(actual)} statt ${fmtLocal(planned)}${r.cause != null ? ' · ${r.cause}' : ''}${r.selfEntered ? ' · selbst eingetragen' : ''}',
             style: VText.bodyS.copyWith(color: VColors.ink2),
           ),
           const VGap.l(),
           const VRule.red(),
-          if (badge != null) ...[
+          if (result.newBadge != null) ...[
             const VGap.m(),
             Row(
               crossAxisAlignment: CrossAxisAlignment.baseline,
               textBaseline: TextBaseline.alphabetic,
               children: [
                 Expanded(child: Text('Neues Abzeichen', style: VText.bodyS)),
-                Text(badge.name, style: VText.bodyStrong.copyWith(fontWeight: FontWeight.w800)),
+                Text(result.newBadge!.name, style: VText.bodyStrong.copyWith(fontWeight: FontWeight.w800)),
               ],
             ),
             const VGap.m(),
@@ -134,23 +216,23 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
           ],
           const VGap.m(),
           if (hasClaim)
-            _ClaimLine(ticket: ticket, amount: amount, sub: sub, ngo: ngo, counted: counted, ready: ready)
+            _ClaimLine(ticket: ticket, amountCents: amountCents, ngoName: ngoName, counted: counted, ready: ready, pending: incident == null)
           else
-            _NoClaimLine(delay: delay, ngo: ngo, onTrotzdem: () => _trotzdem(context, ngo)),
+            _NoClaimLine(delay: delay, ngoName: ngoName, onTrotzdem: ngo == null ? null : () => _trotzdem(context, ngo)),
         ],
       ),
     );
   }
 
-  String _headline(int delay, bool cancelled) {
-    if (cancelled) return '60 Minuten. 60 Geduldspunkte.';
+  String _headline(int delay, bool cancelled, int points) {
+    if (cancelled) return '60 Minuten. $points Geduldspunkte.';
     if (delay == 59) return '59 Minuten. Um eine Minute.';
     if (delay <= 0) return 'Pünktlich. Auch das gibt es.';
     if (delay == 1) return 'Eine Minute. Ein Geduldspunkt.';
-    return '$delay Minuten. $delay Geduldspunkte.';
+    return '$delay Minuten. $points Geduldspunkte.';
   }
 
-  void _trotzdem(BuildContext context, Ngo ngo) {
+  void _trotzdem(BuildContext context, ApiNgo ngo) {
     showVSheet(
       context,
       builder: (ctx) => Padding(
@@ -178,13 +260,13 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
 }
 
 class _ClaimLine extends StatelessWidget {
-  const _ClaimLine({required this.ticket, required this.amount, required this.sub, required this.ngo, required this.counted, required this.ready});
+  const _ClaimLine({required this.ticket, required this.amountCents, required this.ngoName, required this.counted, required this.ready, required this.pending});
   final TicketType ticket;
-  final double amount;
-  final String? sub;
-  final Ngo ngo;
+  final int? amountCents;
+  final String ngoName;
   final int counted;
   final bool ready;
+  final bool pending;
 
   @override
   Widget build(BuildContext context) {
@@ -195,12 +277,15 @@ class _ClaimLine extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.baseline,
           textBaseline: TextBaseline.alphabetic,
           children: [
-            Expanded(child: Text('Anspruch entstanden', style: VText.bodyS)),
-            Text(ticket == TicketType.einzelfahrkarte ? 'ca. ${fmtEuro(amount)}' : fmtEuro(amount), style: VText.numberM),
+            Expanded(child: Text(pending ? 'Anspruch wird geprüft' : 'Anspruch entstanden', style: VText.bodyS)),
+            Text(
+              amountCents == null ? '–' : (ticket == TicketType.einzelfahrkarte ? 'ca. ${fmtEuro(amountCents! / 100)}' : fmtEuro(amountCents! / 100)),
+              style: VText.numberM,
+            ),
           ],
         ),
         const SizedBox(height: 6),
-        Text('für die ${ngo.name}${sub != null ? ' · $sub' : ''}', style: VText.bodyS.copyWith(color: VColors.ink2)),
+        Text('für $ngoName', style: VText.bodyS.copyWith(color: VColors.ink2)),
         const SizedBox(height: 12),
         if (ticket == TicketType.deutschlandticket)
           Row(
@@ -223,10 +308,10 @@ class _ClaimLine extends StatelessWidget {
 }
 
 class _NoClaimLine extends StatelessWidget {
-  const _NoClaimLine({required this.delay, required this.ngo, required this.onTrotzdem});
+  const _NoClaimLine({required this.delay, required this.ngoName, required this.onTrotzdem});
   final int delay;
-  final Ngo ngo;
-  final VoidCallback onTrotzdem;
+  final String ngoName;
+  final VoidCallback? onTrotzdem;
 
   @override
   Widget build(BuildContext context) {
@@ -240,29 +325,30 @@ class _NoClaimLine extends StatelessWidget {
       children: [
         Text(text, style: VText.bodyStrong),
         const SizedBox(height: 4),
-        Text('Ab 60 Minuten entsteht ein Anspruch. Bis dahin zählen die Punkte, und ${ngo.name} freut sich auch so.', style: VText.caption),
+        Text('Ab 60 Minuten entsteht ein Anspruch. Bis dahin zählen die Punkte, und $ngoName freut sich auch so.', style: VText.caption),
         const SizedBox(height: 8),
-        InkWell(
-          onTap: onTrotzdem,
-          borderRadius: BorderRadius.circular(4),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.open_in_new, size: 18, color: VColors.ink),
-                const SizedBox(width: 8),
-                Text('Trotzdem spenden', style: VText.bodyStrong),
-              ],
+        if (onTrotzdem != null)
+          InkWell(
+            onTap: onTrotzdem,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.open_in_new, size: 18, color: VColors.ink),
+                  const SizedBox(width: 8),
+                  Text('Trotzdem spenden', style: VText.bodyStrong),
+                ],
+              ),
             ),
           ),
-        ),
       ],
     );
   }
 }
 
-/// E3: no data at arrival. Ask for the actual time, preset to the plan.
+/// E3: no data at arrival. Ask for the actual delay, preset to the plan.
 class _NoDataStep extends StatefulWidget {
   const _NoDataStep({required this.onDone});
   final ValueChanged<int> onDone;
@@ -272,12 +358,10 @@ class _NoDataStep extends StatefulWidget {
 }
 
 class _NoDataStepState extends State<_NoDataStep> {
-  static const _planned = TimeOfDay(hour: 9, minute: 38);
   int _minutes = 0;
 
   @override
   Widget build(BuildContext context) {
-    final actual = addMinutes(_planned, _minutes);
     return VScreen(
       eyebrow: 'Keine Daten bei Ankunft',
       title: 'Wann bist du angekommen?',
@@ -286,21 +370,13 @@ class _NoDataStepState extends State<_NoDataStep> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const VGap.m(),
-          Text('Der Live-Feed hat den RE 7 verloren. Geplant war Münster (Westf) Hbf um ${fmtTime(_planned)}.', style: VText.body.copyWith(color: VColors.ink2)),
+          Text('Der Live-Feed hat deinen Zug verloren. Wie viele Minuten nach Plan bist du angekommen?', style: VText.body.copyWith(color: VColors.ink2)),
           const VGap.xl(),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               VIconButton(icon: Icons.remove, onTap: () => setState(() => _minutes = (_minutes - 5).clamp(0, 300))),
-              Expanded(
-                child: Column(
-                  children: [
-                    Text(fmtTime(actual), style: VText.number),
-                    const SizedBox(height: 4),
-                    VDelay(_minutes, size: VDelaySize.small),
-                  ],
-                ),
-              ),
+              Expanded(child: Center(child: VDelay(_minutes, size: VDelaySize.large))),
               VIconButton(icon: Icons.add, onTap: () => setState(() => _minutes = (_minutes + 5).clamp(0, 300))),
             ],
           ),

@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart';
+import '../../mock/mock_data.dart' show Mock;
+import '../../repo/app_repository.dart';
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
-import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'claims_widgets.dart';
@@ -19,85 +20,106 @@ class AntwortScreen extends StatefulWidget {
 }
 
 class _AntwortScreenState extends State<AntwortScreen> {
+  final _loader = LoaderController();
   String? _mailId;
   bool _demoRan = false;
-  bool _nothingSubmitted = false;
+  String? _demoError;
+
+  static const _bodies = {
+    'question':
+        'Sehr geehrte Damen und Herren,\n\nzur Bearbeitung Ihres Antrags benötigen wir noch eine Kopie Ihres Deutschlandtickets für den Monat Juli 2026. Bitte senden Sie diese als Antwort auf diese E-Mail.\n\nMit freundlichen Grüßen\nIhr Servicecenter Fahrgastrechte',
+    'rejected':
+        'Sehr geehrte Damen und Herren,\n\nleider können wir Ihrem Antrag nicht entsprechen. Die Verspätung beruhte auf außergewöhnlichen Umständen (Unwetter), für die nach VO (EU) 2021/782 Art. 19 Abs. 10 keine Entschädigung geleistet wird.\n\nMit freundlichen Grüßen\nIhr Servicecenter Fahrgastrechte',
+  };
 
   @override
   void initState() {
     super.initState();
     _mailId = widget.mailId;
-    if (widget.demo != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _demoRan) return;
-        _demoRan = true;
-        final state = DemoScope.read(context);
-        final outcome = widget.demo == 'rejected' ? MailOutcome.rejected : MailOutcome.question;
-        final mail = state.receiveReply(outcome: outcome);
-        setState(() {
-          _mailId = mail?.id;
-          _nothingSubmitted = mail == null;
-        });
-      });
+  }
+
+  Future<List<ApiMail>> _load(AppRepository repo) async {
+    if (widget.demo != null && !_demoRan) {
+      _demoRan = true;
+      try {
+        final r = await repo.simulateInbound(body: _bodies[widget.demo] ?? _bodies['question']!);
+        _mailId = r.mail.id;
+      } catch (e) {
+        _demoError = e.toString();
+      }
     }
+    return repo.mails();
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = DemoScope.of(context);
-    RailMail? mail;
-    for (final m in state.mails) {
-      if (m.id == _mailId) mail = m;
-    }
-    if (widget.demo == null) {
-      mail ??= state.mails.where((m) => m.direction == MailDirection.inbound).firstOrNull;
-    }
+    final session = RepoScope.of(context);
+    return Loader<List<ApiMail>>(
+      controller: _loader,
+      load: _load,
+      builder: (context, mails, refresh) {
+        ApiMail? mail = mails.where((m) => m.id == _mailId).firstOrNull;
+        if (widget.demo == null) {
+          mail ??= mails.where((m) => m.direction == ApiMailDirection.inbound).firstOrNull;
+        }
+        final ngoName = session.ngos.where((n) => n.id == session.me?.settings.ngoId).map((n) => n.name).firstOrNull ?? 'den Verein';
 
-    return VScreen(
-      eyebrow: 'Post von der Bahn',
-      title: 'Antwort',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (widget.demo != null && _nothingSubmitted)
-            const _NothingSubmitted()
-          else if (mail == null)
-            _NothingYet(state: state)
-          else if (mail.direction == MailDirection.out)
-            _Outgoing(mail: mail)
-          else
-            _Inbound(mail: mail, state: state),
-          const VGap.xl(),
-          VSection('Alle Nachrichten'),
-          if (state.mails.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: VSpace.m),
-              child: Text('Noch keine Nachrichten.', style: VText.caption),
-            ),
-          for (final m in state.mails)
-            VListRow(
-              leading: Icon(
-                m.direction == MailDirection.inbound ? Icons.call_received : Icons.call_made,
-                size: 20,
-                color: m.direction == MailDirection.inbound ? VColors.red : VColors.ink2,
+        return VScreen(
+          eyebrow: 'Post von der Bahn',
+          title: 'Antwort',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (widget.demo != null && _demoError != null)
+                const _NothingSubmitted()
+              else if (mail == null)
+                const _NothingYet()
+              else if (mail.direction == ApiMailDirection.out)
+                _Outgoing(mail: mail)
+              else
+                _Inbound(mail: mail, ngoName: ngoName, onReplied: refresh),
+              const VGap.xl(),
+              const VSection('Alle Nachrichten'),
+              if (mails.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: VSpace.m),
+                  child: Text('Noch keine Nachrichten.', style: VText.caption),
+                ),
+              for (final m in mails)
+                VListRow(
+                  leading: Icon(
+                    m.direction == ApiMailDirection.inbound ? Icons.call_received : Icons.call_made,
+                    size: 20,
+                    color: m.direction == ApiMailDirection.inbound ? VColors.red : VColors.ink2,
+                  ),
+                  title: m.direction == ApiMailDirection.inbound ? _senderName(m.from) : 'Du → ${_recipientName(m.to)}',
+                  subtitle: '${Mock.shortDate(m.date.toLocal())} · ${m.subject}',
+                  trailing: m.amountCents != null ? Text(fmtCents(m.amountCents!), style: VText.bodySStrong) : null,
+                  chevron: true,
+                  onTap: () => setState(() => _mailId = m.id),
+                ),
+              const VGap.m(),
+              Text(
+                'Jede Mail geht von deiner Verspätomat-Adresse raus und kommt dort an. Du bekommst jede in Kopie in dein privates Postfach.',
+                style: VText.caption,
               ),
-              title: m.direction == MailDirection.inbound
-                  ? deskDisplay('Servicecenter Fahrgastrechte')
-                  : 'Du → ${m.to.contains('deutschebahn') ? deskDisplay('Servicecenter Fahrgastrechte') : m.to.split('@').first}',
-              subtitle: '${Mock.shortDate(m.date)} · ${m.subject}',
-              trailing: m.amount != null ? Text(fmtEuro(m.amount!), style: VText.bodySStrong) : null,
-              chevron: true,
-              onTap: () => setState(() => _mailId = m.id),
-            ),
-          const VGap.m(),
-          Text(
-            'Jede Mail geht von deiner Verspätomat-Adresse raus und kommt dort an. Du bekommst jede in Kopie in dein privates Postfach.',
-            style: VText.caption,
+              const VGap.xl(),
+            ],
           ),
-          const VGap.xl(),
-        ],
-      ),
+        );
+      },
     );
+  }
+
+  String _senderName(String from) {
+    final lt = from.indexOf('<');
+    final name = lt > 0 ? from.substring(0, lt).trim() : from;
+    return name.contains('deutschebahn') || name.toLowerCase().contains('servicecenter') ? deskDisplay('Servicecenter Fahrgastrechte') : name;
+  }
+
+  String _recipientName(String to) {
+    if (to.contains('deutschebahn')) return deskDisplay('Servicecenter Fahrgastrechte');
+    return to.split('@').first;
   }
 }
 
@@ -122,8 +144,7 @@ class _NothingSubmitted extends StatelessWidget {
 }
 
 class _NothingYet extends StatelessWidget {
-  const _NothingYet({required this.state});
-  final DemoState state;
+  const _NothingYet();
 
   @override
   Widget build(BuildContext context) {
@@ -135,7 +156,7 @@ class _NothingYet extends StatelessWidget {
         const VGap.s(),
         Text('Die Bahn antwortet meist innerhalb eines Monats. Die Antwort landet hier und in deinem Postfach.', style: VText.body.copyWith(color: VColors.ink2)),
         const VGap.l(),
-        _PostalPath(),
+        const _PostalPath(),
       ],
     );
   }
@@ -143,7 +164,7 @@ class _NothingYet extends StatelessWidget {
 
 class _Outgoing extends StatelessWidget {
   const _Outgoing({required this.mail});
-  final RailMail mail;
+  final ApiMail mail;
 
   @override
   Widget build(BuildContext context) {
@@ -151,11 +172,11 @@ class _Outgoing extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const VGap.s(),
-        Text('Dein Antrag vom ${Mock.longDate(mail.date)}.', style: VText.h2),
+        Text('Dein Antrag vom ${Mock.longDate(mail.date.toLocal())}.', style: VText.h2),
         const VGap.s(),
         Text('Abgeschickt. Noch keine Antwort dazu.', style: VText.body.copyWith(color: VColors.ink2)),
         const VGap.m(),
-        MailView(mail: mail, compact: true, bcc: '${Mock.userEmail} (dein Postfach)'),
+        MailView(mail: mail, compact: true),
         const VGap.s(),
         VGhostButton(label: 'Ganze Mail lesen', icon: Icons.mail_outline, onTap: () => showMailSheet(context, mail)),
       ],
@@ -164,32 +185,25 @@ class _Outgoing extends StatelessWidget {
 }
 
 class _Inbound extends StatelessWidget {
-  const _Inbound({required this.mail, required this.state});
-  final RailMail mail;
-  final DemoState state;
+  const _Inbound({required this.mail, required this.ngoName, required this.onReplied});
+  final ApiMail mail;
+  final String ngoName;
+  final VoidCallback onReplied;
 
   @override
   Widget build(BuildContext context) {
-    final ngo = _ngoFor(mail, state);
     return switch (mail.outcome) {
-      MailOutcome.accepted || null => _Accepted(mail: mail, ngo: ngo),
-      MailOutcome.question => _Question(mail: mail),
-      MailOutcome.rejected => _Rejected(mail: mail),
+      ApiMailOutcome.question => _Question(mail: mail, onReplied: onReplied),
+      ApiMailOutcome.rejected => _Rejected(mail: mail, onReplied: onReplied),
+      _ => _Accepted(mail: mail, ngoName: ngoName),
     };
-  }
-
-  Ngo _ngoFor(RailMail m, DemoState s) {
-    for (final i in s.incidents) {
-      if (m.incidentIds.contains(i.id)) return Mock.ngoById(i.ngoId);
-    }
-    return s.ngo;
   }
 }
 
 class _Accepted extends StatelessWidget {
-  const _Accepted({required this.mail, required this.ngo});
-  final RailMail mail;
-  final Ngo ngo;
+  const _Accepted({required this.mail, required this.ngoName});
+  final ApiMail mail;
+  final String ngoName;
 
   @override
   Widget build(BuildContext context) {
@@ -199,12 +213,12 @@ class _Accepted extends StatelessWidget {
         const VGap.s(),
         Text('Die Bahn hat geantwortet.', style: VText.caption),
         const VGap.s(),
-        Text(mail.amount != null ? fmtEuro(mail.amount!) : '–', style: VText.number),
+        Text(mail.amountCents != null ? fmtCents(mail.amountCents!) : '–', style: VText.number),
         const VGap.s(),
-        Text('an ${ngo.name} überwiesen.', style: VText.h2),
+        Text('an $ngoName überwiesen.', style: VText.h2),
         const VGap.m(),
         const VRule.red(),
-        VKeyValue('Eingegangen', '${Mock.shortDate(mail.date)} ${fmtTime(TimeOfDay.fromDateTime(mail.date))}'),
+        VKeyValue('Eingegangen', fmtStamp(mail.date)),
         const VRule(),
         VKeyValue('Fälle', '${mail.incidentIds.length}'),
         const VRule(),
@@ -219,8 +233,9 @@ class _Accepted extends StatelessWidget {
 }
 
 class _Question extends StatelessWidget {
-  const _Question({required this.mail});
-  final RailMail mail;
+  const _Question({required this.mail, required this.onReplied});
+  final ApiMail mail;
+  final VoidCallback onReplied;
 
   @override
   Widget build(BuildContext context) {
@@ -239,24 +254,22 @@ class _Question extends StatelessWidget {
     );
   }
 
-  Future<void> _reply(BuildContext context) {
-    const templates = [
-      ('Ticketkopie nachreichen', 'Sehr geehrte Damen und Herren,\n\nanbei die gewünschte Kopie meines Deutschlandtickets für Juli 2026.\n\nMit freundlichen Grüßen\n${Mock.userName}'),
-      ('Zug und Zeiten bestätigen', 'Sehr geehrte Damen und Herren,\n\nzu Ihrer Rückfrage: Die Fahrt fand wie im Antrag angegeben statt. Planmäßige und tatsächliche Ankunft habe ich dem Live-Fahrplan entnommen.\n\nMit freundlichen Grüßen\n${Mock.userName}'),
+  Future<void> _reply(BuildContext context) async {
+    final name = RepoScope.read(context).me?.personalData?.name ?? RepoScope.read(context).me?.nickname ?? 'Fahrgast';
+    final templates = [
+      ('Ticketkopie nachreichen', 'Sehr geehrte Damen und Herren,\n\nanbei die gewünschte Kopie meines Deutschlandtickets für den angefragten Monat.\n\nMit freundlichen Grüßen\n$name'),
+      ('Zug und Zeiten bestätigen', 'Sehr geehrte Damen und Herren,\n\nzu Ihrer Rückfrage: Die Fahrt fand wie im Antrag angegeben statt. Planmäßige und tatsächliche Ankunft habe ich dem Live-Fahrplan entnommen.\n\nMit freundlichen Grüßen\n$name'),
       ('Frei schreiben', ''),
     ];
-    return showVSheet(
-      context,
-      expand: true,
-      builder: (ctx) => _ReplyComposer(templates: templates, to: mail.from),
-    );
+    final sent = await showVSheet<bool>(context, expand: true, builder: (ctx) => _ReplyComposer(templates: templates, mail: mail));
+    if (sent == true) onReplied();
   }
 }
 
 class _ReplyComposer extends StatefulWidget {
-  const _ReplyComposer({required this.templates, required this.to});
+  const _ReplyComposer({required this.templates, required this.mail});
   final List<(String, String)> templates;
-  final String to;
+  final ApiMail mail;
 
   @override
   State<_ReplyComposer> createState() => _ReplyComposerState();
@@ -264,6 +277,7 @@ class _ReplyComposer extends StatefulWidget {
 
 class _ReplyComposerState extends State<_ReplyComposer> {
   int _selected = 0;
+  bool _sending = false;
   late final TextEditingController _c = TextEditingController(text: widget.templates.first.$2);
 
   @override
@@ -272,11 +286,27 @@ class _ReplyComposerState extends State<_ReplyComposer> {
     super.dispose();
   }
 
+  Future<void> _send() async {
+    setState(() => _sending = true);
+    final session = RepoScope.read(context);
+    try {
+      await session.repo.replyToMail(widget.mail.id, _c.text);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Abgeschickt. Kopie in deinem Postfach.')));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Senden fehlgeschlagen: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final relay = RepoScope.of(context).me?.relayAddress ?? 'deiner Verspätomat-Adresse';
     return Column(
       children: [
-        VSheetHeader(title: 'Antworten', subtitle: 'von ${Mock.relayAddress}'),
+        VSheetHeader(title: 'Antworten', subtitle: 'von $relay'),
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, VSpace.xl),
@@ -295,7 +325,9 @@ class _ReplyComposerState extends State<_ReplyComposer> {
                         }),
                         borderRadius: BorderRadius.circular(3),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          height: 44,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: _selected == i ? VColors.ink : Colors.transparent,
                             border: Border.all(color: _selected == i ? VColors.ink : VColors.rule),
@@ -307,26 +339,11 @@ class _ReplyComposerState extends State<_ReplyComposer> {
                   ],
                 ),
                 const VGap.m(),
-                Text('An ${widget.to}', style: VText.caption),
+                Text('An ${widget.mail.from}', style: VText.caption),
                 const VGap.s(),
                 TextField(controller: _c, maxLines: 10, minLines: 6, style: VText.bodyS),
-                const VGap.s(),
-                Row(
-                  children: [
-                    const Icon(Icons.attach_file, size: 16, color: VColors.ink2),
-                    const SizedBox(width: 6),
-                    Text('Deutschlandticket_2026-07.png', style: VText.caption),
-                  ],
-                ),
                 const VGap.l(),
-                VPrimaryButton(
-                  label: 'Absenden',
-                  icon: Icons.send_outlined,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Abgeschickt. Kopie in deinem Postfach.')));
-                  },
-                ),
+                VPrimaryButton(label: _sending ? 'Sendet …' : 'Absenden', icon: Icons.send_outlined, onTap: _sending ? null : _send),
                 const VGap.xs(),
                 Text('Geht von deiner Adresse raus. Wir schreiben nie von uns aus an die Bahn.', style: VText.caption),
               ],
@@ -339,8 +356,9 @@ class _ReplyComposerState extends State<_ReplyComposer> {
 }
 
 class _Rejected extends StatelessWidget {
-  const _Rejected({required this.mail});
-  final RailMail mail;
+  const _Rejected({required this.mail, required this.onReplied});
+  final ApiMail mail;
+  final VoidCallback onReplied;
 
   @override
   Widget build(BuildContext context) {
@@ -356,10 +374,7 @@ class _Rejected extends StatelessWidget {
         if (reason != null) ...[
           Container(
             padding: const EdgeInsets.all(VSpace.m),
-            decoration: BoxDecoration(
-              color: VColors.redSoft,
-              borderRadius: BorderRadius.circular(4),
-            ),
+            decoration: BoxDecoration(color: VColors.redSoft, borderRadius: BorderRadius.circular(4)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -389,17 +404,21 @@ class _Rejected extends StatelessWidget {
         VOutlineButton(
           label: 'Vorlage: Widerspruch',
           icon: Icons.reply,
-          onTap: () => showVSheet(
-            context,
-            expand: true,
-            builder: (ctx) => _ReplyComposer(
-              templates: const [
-                ('Widerspruch', 'Sehr geehrte Damen und Herren,\n\nich widerspreche der Ablehnung. Nach meiner Kenntnis lag am 22.07.2026 keine Unwetterwarnung für die Strecke vor. Ich bitte um erneute Prüfung.\n\nMit freundlichen Grüßen\n${Mock.userName}'),
-                ('Frei schreiben', ''),
-              ],
-              to: mail.from,
-            ),
-          ),
+          onTap: () async {
+            final name = RepoScope.read(context).me?.personalData?.name ?? 'Fahrgast';
+            final sent = await showVSheet<bool>(
+              context,
+              expand: true,
+              builder: (ctx) => _ReplyComposer(
+                templates: [
+                  ('Widerspruch', 'Sehr geehrte Damen und Herren,\n\nich widerspreche der Ablehnung. Nach meiner Kenntnis lag am fraglichen Tag keine Unwetterwarnung für die Strecke vor. Ich bitte um erneute Prüfung.\n\nMit freundlichen Grüßen\n$name'),
+                  ('Frei schreiben', ''),
+                ],
+                mail: mail,
+              ),
+            );
+            if (sent == true) onReplied();
+          },
         ),
       ],
     );
@@ -414,6 +433,8 @@ class _Rejected extends StatelessWidget {
 }
 
 class _PostalPath extends StatelessWidget {
+  const _PostalPath();
+
   @override
   Widget build(BuildContext context) {
     return Column(

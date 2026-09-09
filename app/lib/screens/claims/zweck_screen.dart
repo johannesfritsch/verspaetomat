@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../../mock/mock_data.dart';
-import '../../state/demo_state.dart';
+import '../../api/models.dart';
+import '../../mock/mock_data.dart' show Mock;
+import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import 'claims_widgets.dart';
 
 /// Zweck: one NGO, its story, its account, what has reached it.
 class ZweckScreen extends StatelessWidget {
@@ -12,87 +14,93 @@ class ZweckScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = DemoScope.of(context);
-    final ngo = Mock.ngoById(ngoId);
-    final isDefault = state.ngoId == ngo.id;
+    final session = RepoScope.of(context);
+    return Loader<List<ApiNgo>>(
+      load: (repo) => repo.ngos(),
+      builder: (context, ngos, refresh) {
+        final ngo = ngos.where((n) => n.id == ngoId).firstOrNull ?? ngos.firstOrNull;
+        if (ngo == null) {
+          return VScreen(title: 'Zweck', child: Text('Kein Verein gefunden.', style: VText.body));
+        }
+        final isDefault = session.me?.settings.ngoId == ngo.id;
 
-    return VScreen(
-      eyebrow: 'Zweck',
-      title: ngo.name,
-      bottom: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          VPrimaryButton(
-            label: isDefault ? 'Dein Standard' : 'Als Standard wählen',
-            icon: isDefault ? Icons.check : null,
-            onTap: isDefault
-                ? null
-                : () {
-                    state.setNgo(ngo.id);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${ngo.name} ist jetzt dein Zweck.')));
-                  },
+        return VScreen(
+          eyebrow: 'Zweck',
+          title: ngo.name,
+          bottom: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              VPrimaryButton(
+                label: isDefault ? 'Dein Standard' : 'Als Standard wählen',
+                icon: isDefault ? Icons.check : null,
+                onTap: isDefault
+                    ? null
+                    : () async {
+                        await session.updateSettings(MePatch(ngoId: ngo.id));
+                        if (!context.mounted) return;
+                        final msg = session.error == null ? '${ngo.name} ist jetzt dein Zweck.' : 'Nicht gespeichert: ${session.error}';
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+                      },
+              ),
+              const VGap.xs(),
+              VGhostButton(label: 'Trotzdem spenden', icon: Icons.open_in_new, onTap: () => _trotzdem(context, ngo)),
+            ],
           ),
-          const VGap.xs(),
-          VGhostButton(label: 'Trotzdem spenden', icon: Icons.open_in_new, onTap: () => _trotzdem(context, ngo)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            height: 180,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: VColors.paperElevated,
-              border: Border.all(color: VColors.rule),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Stack(
-              children: [
-                Positioned(
-                  left: 20,
-                  bottom: -20,
-                  child: Text(ngo.name.substring(0, 1), style: VText.display.copyWith(color: VColors.ruleSoft)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                height: 180,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: VColors.paperElevated,
+                  border: Border.all(color: VColors.rule),
+                  borderRadius: BorderRadius.circular(4),
                 ),
-                Positioned(
-                  right: 16,
-                  top: 16,
-                  child: Text('Bild folgt', style: VText.caption),
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: 20,
+                      bottom: -20,
+                      child: Text(ngo.name.isNotEmpty ? ngo.name.substring(0, 1) : '?', style: VText.display.copyWith(color: VColors.ruleSoft)),
+                    ),
+                    Positioned(right: 16, top: 16, child: Text('Bild folgt', style: VText.caption)),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              const VGap.m(),
+              Text(ngo.tagline, style: VText.h2),
+              const VGap.m(),
+              for (final p in ngo.story)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: VSpace.m),
+                  child: Text(p, style: VText.body),
+                ),
+              const VGap.s(),
+              const VSection('Transparenz'),
+              VKeyValue('Kontoinhaber', ngo.accountHolder, strong: true),
+              const VRule(),
+              VKeyValue('IBAN', ngo.iban, valueStyle: VText.mono),
+              const VRule(),
+              VKeyValue('Bestätigt über Verspätomat', fmtEuroWhole(ngo.confirmedTotalCents / 100), strong: true),
+              const VRule(),
+              VKeyValue('Eingereicht, unterwegs', fmtEuroWhole(ngo.submittedTotalCents / 100)),
+              const VRule(),
+              VKeyValue('Letzte Meldung', ngo.lastReport != null ? Mock.longDate(ngo.lastReport!) : '–'),
+              const VGap.s(),
+              Text(
+                'Die Entschädigung überweist die Bahn direkt auf dieses Konto. Wir sehen kein Geld, nur die Antwort.',
+                style: VText.caption,
+              ),
+              const VGap.xl(),
+            ],
           ),
-          const VGap.m(),
-          Text(ngo.tagline, style: VText.h2),
-          const VGap.m(),
-          for (final p in ngo.story)
-            Padding(
-              padding: const EdgeInsets.only(bottom: VSpace.m),
-              child: Text(p, style: VText.body),
-            ),
-          const VGap.s(),
-          VSection('Transparenz'),
-          VKeyValue('Kontoinhaber', ngo.accountHolder, strong: true),
-          const VRule(),
-          VKeyValue('IBAN', ngo.iban, valueStyle: VText.mono),
-          const VRule(),
-          VKeyValue('Bestätigt über Verspätomat', fmtEuroWhole(ngo.confirmedTotal), strong: true),
-          const VRule(),
-          VKeyValue('Eingereicht, unterwegs', fmtEuroWhole(ngo.submittedTotal)),
-          const VRule(),
-          VKeyValue('Letzte Meldung', ngo.lastReport),
-          const VGap.s(),
-          Text(
-            'Die Entschädigung überweist die Bahn direkt auf dieses Konto. Wir sehen kein Geld, nur die Antwort.',
-            style: VText.caption,
-          ),
-          const VGap.xl(),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Future<void> _trotzdem(BuildContext context, Ngo ngo) {
+  Future<void> _trotzdem(BuildContext context, ApiNgo ngo) {
     return showVSheet(
       context,
       builder: (ctx) => Padding(

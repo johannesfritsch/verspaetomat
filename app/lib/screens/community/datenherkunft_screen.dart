@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 
@@ -52,6 +53,7 @@ class DatenherkunftScreen extends StatelessWidget {
           const VGap.m(),
           Text('Tippe in der App auf eine Zahl, und sie beantwortet „Woher weißt du das?“. Das hier ist die ganze Liste.', style: VText.body.copyWith(color: VColors.ink2)),
           const VGap.l(),
+          _rowWidget(_Row('Backend', 'Woher die App gerade ihre Daten holt: ${RepoScope.of(context).mode.label}.', fresh: RepoScope.of(context).isLocal ? 'Lokaler Server unter ${RepoScope.of(context).apiUrl}' : 'Eingebaute Vorführdaten, kein Netz', missing: 'Umschalten unter Einstellungen → Backend.')),
           for (final r in _rows) _rowWidget(r),
           const VGap.xl(),
           const VRule.red(),

@@ -1,11 +1,133 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart';
+import '../../mock/mock_data.dart' show TicketType, TicketTypeX;
+import '../../repo/app_repository.dart';
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
-import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// "09:38" in local time, or "–" when unknown.
+String fmtLocal(DateTime? d) => d == null ? '–' : fmtTime(TimeOfDay.fromDateTime(d.toLocal()));
+
+/// "Di 09.09." for a date.
+String fmtDay(DateTime d) {
+  const wd = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  final l = d.toLocal();
+  return '${wd[l.weekday - 1]} ${l.day.toString().padLeft(2, '0')}.${l.month.toString().padLeft(2, '0')}.';
+}
+
+/// Planned arrival at a stop (arrival, or departure for the first stop).
+DateTime? plannedAt(ApiStop s) => s.scheduledArrival ?? s.scheduledDeparture;
+
+/// Live arrival at a stop when known.
+DateTime? liveAt(ApiStop s) => s.arrival ?? s.departure;
+
+/// One-shot position. Null when the platform, the permission or the time budget says no.
+Future<ApiLocation?> currentPosition({Duration timeout = const Duration(seconds: 4)}) async {
+  try {
+    if (!await Geolocator.isLocationServiceEnabled()) return null;
+    var p = await Geolocator.checkPermission();
+    if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
+    if (p == LocationPermission.denied || p == LocationPermission.deniedForever) return null;
+    final pos = await Geolocator.getCurrentPosition(locationSettings: LocationSettings(accuracy: LocationAccuracy.high, timeLimit: timeout));
+    return ApiLocation(lat: pos.latitude, lon: pos.longitude, accuracyM: pos.accuracy);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Index of the customer's station in a trip's stops, by id first, then by name.
+int fromIndex(List<ApiStop> stops, String? stationId, String stationName) {
+  if (stationId != null) {
+    final byId = stops.indexWhere((s) => s.stationId == stationId);
+    if (byId >= 0) return byId;
+  }
+  final n = normaliseStation(stationName);
+  final byName = stops.indexWhere((s) => normaliseStation(s.name) == n);
+  if (byName >= 0) return byName;
+  final loose = stops.indexWhere((s) {
+    final a = normaliseStation(s.name);
+    return a.startsWith(n) || n.startsWith(a);
+  });
+  return loose >= 0 ? loose : 0;
+}
+
+String normaliseStation(String name) => name
+    .toLowerCase()
+    .replaceAll('hauptbahnhof', 'hbf')
+    .replaceAll(RegExp(r'\(.*?\)'), '')
+    .replaceAll(RegExp(r'[,/]'), ' ')
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .trim();
+
+// ---------------------------------------------------------------------------
+// Loading and error lines
+// ---------------------------------------------------------------------------
+
+class LoadingLine extends StatelessWidget {
+  const LoadingLine({super.key, this.label = 'Lädt …'});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: VSpace.m),
+      child: Row(
+        children: [
+          const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.5, color: VColors.ink2)),
+          const SizedBox(width: 10),
+          Text(label, style: VText.caption),
+        ],
+      ),
+    );
+  }
+}
+
+class ErrorLine extends StatelessWidget {
+  const ErrorLine({super.key, required this.message, this.onRetry});
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: VSpace.m),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(message, style: VText.bodyS.copyWith(color: VColors.red)),
+          if (onRetry != null)
+            InkWell(
+              onTap: onRetry,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text('Erneut versuchen', style: VText.bodyStrong),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+String shortError(Object e) {
+  final s = e.toString();
+  return s.length > 140 ? '${s.substring(0, 140)}…' : s;
+}
+
+// ---------------------------------------------------------------------------
+// Line badge, departure row, stop line
+// ---------------------------------------------------------------------------
 
 /// The line label ("RE 7") as a small ink block, the way boards set it.
 class LineBadge extends StatelessWidget {
@@ -37,12 +159,14 @@ class LineBadge extends StatelessWidget {
 /// One departure in board style: line, destination, planned time, platform, delay.
 class DepartureRow extends StatelessWidget {
   const DepartureRow({super.key, required this.departure, required this.onTap});
-  final Departure departure;
+  final ApiDeparture departure;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final d = departure;
+    final delay = d.delayMinutes;
+    final meta = [if (d.platform != null && d.platform!.isNotEmpty) 'Gl. ${d.platform}', d.operator].join(' · ');
     return InkWell(
       onTap: onTap,
       child: Column(
@@ -55,7 +179,7 @@ class DepartureRow extends StatelessWidget {
                 SizedBox(
                   width: 52,
                   child: Text(
-                    fmtTime(d.planned),
+                    fmtLocal(d.scheduledDeparture),
                     style: VText.mono.copyWith(
                       color: d.cancelled ? VColors.ink3 : VColors.ink,
                       decoration: d.cancelled ? TextDecoration.lineThrough : null,
@@ -70,15 +194,15 @@ class DepartureRow extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(d.destination, style: VText.bodyStrong, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      Text('Gl. ${d.platform} · ${d.operator}', style: VText.caption),
+                      Text(meta, style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
                     ],
                   ),
                 ),
                 const SizedBox(width: 10),
                 if (d.cancelled)
                   const VChip('Ausfall', tone: VTone.red)
-                else if (d.delay > 0)
-                  VDelay(d.delay, size: VDelaySize.small)
+                else if (delay > 0)
+                  VDelay(delay, size: VDelaySize.small)
                 else
                   Text('pünktlich', style: VText.caption.copyWith(color: VColors.green)),
               ],
@@ -101,20 +225,20 @@ class StopLine extends StatefulWidget {
     this.exitIndex,
     this.selectedIndex,
     this.onSelect,
-    this.delay = 0,
     this.compact = false,
+    this.firstSelectable = 1,
   });
-  final List<Stop> stops;
+  final List<ApiStop> stops;
 
   /// Index of the last passed stop (-1 = none yet).
   final int passed;
   final int? exitIndex;
   final int? selectedIndex;
   final ValueChanged<int>? onSelect;
-
-  /// Live delay to add to stops after [passed].
-  final int delay;
   final bool compact;
+
+  /// Stops before this index cannot be selected as the exit.
+  final int firstSelectable;
 
   @override
   State<StopLine> createState() => _StopLineState();
@@ -140,7 +264,10 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
       final isSelected = widget.selectedIndex == i;
       final isLast = i == widget.stops.length - 1;
       final afterExit = widget.exitIndex != null && i > widget.exitIndex!;
-      final shownDelay = (!isPassed && widget.delay > 0) ? widget.delay : 0;
+      final planned = plannedAt(s);
+      final live = liveAt(s);
+      final late = planned != null && live != null && live.difference(planned).inMinutes > 0;
+      final shown = (!isPassed && late) ? live : planned;
 
       final dot = AnimatedBuilder(
         animation: _pulse,
@@ -163,7 +290,7 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
 
       rows.add(
         InkWell(
-          onTap: widget.onSelect == null || i == 0 ? null : () => widget.onSelect!(i),
+          onTap: widget.onSelect == null || i < widget.firstSelectable ? null : () => widget.onSelect!(i),
           child: SizedBox(
             height: widget.compact ? 44 : 52,
             child: Row(
@@ -174,18 +301,8 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      Positioned(
-                        top: i == 0 ? null : 0,
-                        bottom: isLast ? null : 0,
-                        child: Container(
-                          width: 2,
-                          height: widget.compact ? 20 : 26,
-                          color: afterExit ? VColors.rule : VColors.ink,
-                        ),
-                      ),
                       if (!isLast && i != 0) Container(width: 2, color: afterExit ? VColors.rule : VColors.ink),
-                      if (i == 0 && !isLast)
-                        Positioned(top: (widget.compact ? 20 : 26), bottom: 0, child: Container(width: 2, color: VColors.ink)),
+                      if (i == 0 && !isLast) Positioned(top: (widget.compact ? 20 : 26), bottom: 0, child: Container(width: 2, color: VColors.ink)),
                       if (isLast && i != 0)
                         Positioned(top: 0, bottom: (widget.compact ? 20 : 26), child: Container(width: 2, color: afterExit ? VColors.rule : VColors.ink)),
                       dot,
@@ -199,7 +316,10 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
                       Expanded(
                         child: Text(
                           s.name,
-                          style: (isExit || isSelected ? VText.bodyStrong : VText.body).copyWith(color: afterExit ? VColors.ink3 : VColors.ink),
+                          style: (isExit || isSelected ? VText.bodyStrong : VText.body).copyWith(
+                            color: afterExit ? VColors.ink3 : (s.cancelled ? VColors.red : VColors.ink),
+                            decoration: s.cancelled ? TextDecoration.lineThrough : null,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -209,9 +329,9 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
                         const SizedBox(width: 10),
                       ],
                       Text(
-                        fmtTime(shownDelay > 0 ? addMinutes(s.planned, shownDelay) : s.planned),
+                        fmtLocal(shown),
                         style: VText.mono.copyWith(
-                          color: afterExit ? VColors.ink3 : (shownDelay > 0 ? VColors.red : VColors.ink),
+                          color: afterExit ? VColors.ink3 : (late && !isPassed ? VColors.red : VColors.ink),
                           fontWeight: isExit ? FontWeight.w700 : FontWeight.w500,
                         ),
                       ),
@@ -227,6 +347,10 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
     return Column(children: rows);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Banners
+// ---------------------------------------------------------------------------
 
 /// The station nudge as an in-app banner (the real one is a notification).
 class NudgeBanner extends StatelessWidget {
@@ -256,7 +380,7 @@ class NudgeBanner extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('$station? Check dich ein.', style: VText.bodyStrong),
-                    Text('Seit 3 Minuten in der Nähe.', style: VText.caption),
+                    Text('Du bist in der Nähe.', style: VText.caption),
                   ],
                 ),
               ),
@@ -279,8 +403,8 @@ class NudgeBanner extends StatelessWidget {
 
 /// E8: the app says how old what it shows is.
 class OfflineBanner extends StatelessWidget {
-  const OfflineBanner({super.key, this.stamp = '08:41'});
-  final String stamp;
+  const OfflineBanner({super.key, this.stamp});
+  final String? stamp;
 
   @override
   Widget build(BuildContext context) {
@@ -291,7 +415,12 @@ class OfflineBanner extends StatelessWidget {
         children: [
           const Icon(Icons.cloud_off_outlined, size: 18, color: VColors.ink2),
           const SizedBox(width: 10),
-          Expanded(child: Text('Offline. Letzter Stand $stamp Uhr. Check-ins werden später abgeglichen.', style: VText.caption)),
+          Expanded(
+            child: Text(
+              stamp == null ? 'Keine Verbindung. Wir zeigen den letzten Stand.' : 'Keine Verbindung. Letzter Stand $stamp Uhr.',
+              style: VText.caption,
+            ),
+          ),
         ],
       ),
     );
@@ -317,48 +446,156 @@ class CountUpDelay extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Sheets and shortcuts
+// ---------------------------------------------------------------------------
+
 /// The sheet that switches the ticket type for the next ride.
 Future<void> showTicketSheet(BuildContext context) {
-  final state = DemoScope.read(context);
+  final session = RepoScope.read(context);
   return showVSheet(
     context,
-    builder: (ctx) => Padding(
-      padding: const EdgeInsets.only(bottom: VSpace.l),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const VSheetHeader(title: 'Welches Ticket?', subtitle: 'Entscheidet, was eine Verspätung wert ist.'),
-          for (final t in TicketType.values)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
-              child: ListenableBuilder(
-                listenable: state,
-                builder: (context, _) => VChoiceCard(
-                  title: t.label,
-                  subtitle: t.rule,
-                  selected: state.ticket == t,
-                  onTap: () {
-                    state.setTicket(t);
-                    Navigator.of(ctx).pop();
-                  },
+    builder: (ctx) => ListenableBuilder(
+      listenable: session,
+      builder: (context, _) {
+        final current = session.me?.settings.ticket ?? TicketType.deutschlandticket;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: VSpace.l),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const VSheetHeader(title: 'Welches Ticket?', subtitle: 'Entscheidet, was eine Verspätung wert ist.'),
+              for (final t in TicketType.values)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
+                  child: VChoiceCard(
+                    title: t.label,
+                    subtitle: t.rule,
+                    selected: current == t,
+                    onTap: () {
+                      session.updateSettings(MePatch(ticket: t));
+                      Navigator.of(ctx).pop();
+                    },
+                  ),
                 ),
-              ),
-            ),
-        ],
-      ),
+            ],
+          ),
+        );
+      },
     ),
   );
 }
 
-/// Finds a departure by id, falling back to the RE 7.
-Departure departureById(String? id) => Mock.departuresKoelnHbf.firstWhere((d) => d.id == id, orElse: () => Mock.departuresKoelnHbf.first);
+/// Station search as a sheet; returns the picked station.
+Future<ApiStation?> showStationSearch(BuildContext context) {
+  return showVSheet<ApiStation>(context, expand: true, builder: (ctx) => const _StationSearchSheet());
+}
 
-/// Demo shortcut: check in to RE 7 → Münster and go to the ride screen.
-void demoCheckInRe7(BuildContext context) {
-  final state = DemoScope.read(context);
-  final re7 = Mock.departuresKoelnHbf.first;
-  final exit = re7.stops.firstWhere((s) => s.name.startsWith('Münster'), orElse: () => re7.stops.last);
-  state.checkIn(departure: re7, exitStop: exit, fromStation: Mock.homeStation);
-  context.go(Routes.unterwegs);
+class _StationSearchSheet extends StatefulWidget {
+  const _StationSearchSheet();
+
+  @override
+  State<_StationSearchSheet> createState() => _StationSearchSheetState();
+}
+
+class _StationSearchSheetState extends State<_StationSearchSheet> {
+  final _ctl = TextEditingController();
+  Timer? _debounce;
+  List<ApiStation> _results = const [];
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String v) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () => _search(v));
+  }
+
+  Future<void> _search(String q) async {
+    if (q.trim().length < 2) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final r = await RepoScope.read(context).repo.searchStations(q.trim());
+      if (mounted) setState(() => _results = r);
+    } catch (e) {
+      if (mounted) setState(() => _error = shortError(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const VSheetHeader(title: 'Bahnhof suchen'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+          child: TextField(
+            controller: _ctl,
+            autofocus: true,
+            onChanged: _onChanged,
+            onSubmitted: _search,
+            decoration: const InputDecoration(hintText: 'Köln Hbf, Münster …', prefixIcon: Icon(Icons.search, size: 20, color: VColors.ink2)),
+          ),
+        ),
+        const VGap.s(),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            children: [
+              if (_loading) const LoadingLine(label: 'Suche …'),
+              if (_error != null) ErrorLine(message: _error!, onRetry: () => _search(_ctl.text)),
+              for (final s in _results)
+                VListRow(
+                  title: s.name,
+                  subtitle: s.distanceM != null ? '${s.distanceM} m' : null,
+                  chevron: true,
+                  onTap: () => Navigator.of(context).pop(s),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Demo shortcut: check in to the first regional train at the nearest station
+/// and go to the ride screen. Works in both modes.
+Future<void> demoCheckIn(BuildContext context) async {
+  final repo = RepoScope.read(context).repo;
+  try {
+    final stations = await repo.nearbyStations();
+    if (stations.isEmpty) throw StateError('Kein Bahnhof gefunden.');
+    final station = stations.first;
+    final deps = await repo.departures(station.id);
+    final d = deps.firstWhere((x) => !x.cancelled && (x.category == ApiCategory.re || x.category == ApiCategory.rb || x.category == ApiCategory.s), orElse: () => deps.first);
+    final trip = await repo.trip(d.tripId);
+    final from = fromIndex(trip.stops, station.id, station.name);
+    var exitIdx = trip.stops.indexWhere((s) => s.name.startsWith('Münster'));
+    if (exitIdx <= from) exitIdx = (from + 2).clamp(from + 1, trip.stops.length - 1);
+    final exit = trip.stops[exitIdx];
+    await repo.checkIn(CheckInRequest(
+      tripId: d.tripId,
+      fromStationId: station.id,
+      fromStationName: station.name,
+      exitStationId: exit.stationId ?? exit.name,
+      exitStationName: exit.name,
+    ));
+    if (context.mounted) context.go(Routes.unterwegs);
+  } catch (e) {
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Check-in nicht möglich: ${shortError(e)}')));
+  }
 }

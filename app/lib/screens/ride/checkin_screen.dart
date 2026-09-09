@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart';
+import '../../mock/mock_data.dart' show TicketTypeX;
+import '../../repo/app_repository.dart';
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
-import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'ride_widgets.dart';
@@ -12,8 +13,9 @@ enum _Filter { alle, regio, sbahn, fern }
 
 /// Departures at a station. One thumb. Tap a train, pick the exit stop.
 class CheckinScreen extends StatefulWidget {
-  const CheckinScreen({super.key, this.stationId});
+  const CheckinScreen({super.key, this.stationId, this.stationName});
   final String? stationId;
+  final String? stationName;
 
   @override
   State<CheckinScreen> createState() => _CheckinScreenState();
@@ -22,25 +24,74 @@ class CheckinScreen extends StatefulWidget {
 class _CheckinScreenState extends State<CheckinScreen> {
   _Filter _filter = _Filter.alle;
   String _query = '';
+  ApiStation? _station;
+  List<ApiDeparture> _departures = const [];
+  bool _loading = true;
+  String? _error;
+  ApiLocation? _position;
 
-  Station get _station => Mock.nearbyStations.firstWhere((s) => s.id == widget.stationId, orElse: () => Mock.nearbyStations.first);
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
 
-  List<Departure> get _departures => Mock.departuresKoelnHbf.where((d) {
+  Future<void> _load() async {
+    final repo = RepoScope.read(context).repo;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      currentPosition(timeout: const Duration(seconds: 3)).then((p) {
+        if (mounted) setState(() => _position = p);
+      });
+      var station = _station;
+      if (station == null) {
+        final nearby = await repo.nearbyStations();
+        final byId = widget.stationId == null ? null : nearby.where((s) => s.id == widget.stationId).firstOrNull;
+        station = byId ??
+            (widget.stationId != null
+                ? ApiStation(id: widget.stationId!, name: widget.stationName ?? widget.stationId!)
+                : (nearby.isNotEmpty ? nearby.first : null));
+        if (station == null) throw StateError('Kein Bahnhof gewählt.');
+      }
+      final deps = await repo.departures(station.id);
+      if (!mounted) return;
+      setState(() {
+        _station = station;
+        _departures = deps;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = shortError(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  List<ApiDeparture> get _filtered => _departures.where((d) {
         final okFilter = switch (_filter) {
           _Filter.alle => true,
-          _Filter.regio => d.category == TrainCategory.re || d.category == TrainCategory.rb,
-          _Filter.sbahn => d.category == TrainCategory.s,
-          _Filter.fern => d.category == TrainCategory.fern,
+          _Filter.regio => d.category == ApiCategory.re || d.category == ApiCategory.rb,
+          _Filter.sbahn => d.category == ApiCategory.s,
+          _Filter.fern => d.category == ApiCategory.fern,
         };
         final q = _query.trim().toLowerCase();
         final okQuery = q.isEmpty || d.line.toLowerCase().contains(q) || d.destination.toLowerCase().contains(q);
         return okFilter && okQuery;
       }).toList();
 
+  void _toExit(ApiDeparture d) {
+    final s = _station!;
+    context.push('${Routes.exitStop}?departure=${Uri.encodeComponent(d.tripId)}&station=${Uri.encodeComponent(s.id)}&name=${Uri.encodeComponent(s.name)}');
+  }
+
   @override
   Widget build(BuildContext context) {
-    final state = DemoScope.of(context);
-    final verified = state.locationMode != LocationMode.never;
+    final session = RepoScope.of(context);
+    final ticket = session.me?.settings.ticket;
+    final verified = _position != null;
+    final name = _station?.name ?? widget.stationName ?? 'Bahnhof';
 
     return VScreen(
       scroll: false,
@@ -53,7 +104,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
             children: [
               const Icon(Icons.confirmation_number_outlined, size: 20, color: VColors.ink2),
               const SizedBox(width: 10),
-              Expanded(child: Text(state.ticket.label, style: VText.bodySStrong)),
+              Expanded(child: Text(ticket?.label ?? 'Ticket wählen', style: VText.bodySStrong)),
               const Icon(Icons.expand_more, size: 20, color: VColors.ink2),
             ],
           ),
@@ -67,11 +118,11 @@ class _CheckinScreenState extends State<CheckinScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_station.name, style: VText.h1),
+                Text(name, style: VText.h1, maxLines: 2, overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Text('${fmtTime(TimeOfDay.fromDateTime(Mock.today))} Uhr', style: VText.caption),
+                    Text('${fmtLocal(DateTime.now())} Uhr', style: VText.caption),
                     Text(' · ', style: VText.caption),
                     Icon(verified ? Icons.check : Icons.location_off_outlined, size: 14, color: verified ? VColors.green : VColors.ink3),
                     const SizedBox(width: 4),
@@ -79,10 +130,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
                   ],
                 ),
                 const VGap.m(),
-                if (state.offline) ...[
-                  const OfflineBanner(),
-                  const VGap.m(),
-                ],
                 TextField(
                   onChanged: (v) => setState(() => _query = v),
                   decoration: const InputDecoration(hintText: 'Zugnummer oder Ziel', prefixIcon: Icon(Icons.search, size: 20, color: VColors.ink2)),
@@ -106,24 +153,27 @@ class _CheckinScreenState extends State<CheckinScreen> {
           ),
           const VRule(),
           Expanded(
-            child: state.offline
-                ? _ManualEntry(station: _station)
-                : ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
-                    children: [
-                      for (final d in _departures)
-                        DepartureRow(
-                          departure: d,
-                          onTap: () => d.cancelled ? _cancelledFlow(context, d) : context.push('${Routes.exitStop}?departure=${d.id}'),
-                        ),
-                      if (_departures.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: VSpace.xl),
-                          child: Text('Kein Zug passt. Versuch es ohne Filter.', style: VText.bodyS.copyWith(color: VColors.ink2)),
-                        ),
-                      const VGap.xl(),
-                    ],
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+              children: [
+                if (_loading) const LoadingLine(label: 'Abfahrten werden geladen …'),
+                if (_error != null) ...[
+                  const VGap.m(),
+                  const OfflineBanner(),
+                  ErrorLine(message: 'Keine Live-Daten für diesen Bahnhof. $_error', onRetry: _load),
+                ],
+                for (final d in _filtered) DepartureRow(departure: d, onTap: () => d.cancelled ? _cancelledFlow(context, d) : _toExit(d)),
+                if (!_loading && _error == null && _filtered.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: VSpace.xl),
+                    child: Text(
+                      _departures.isEmpty ? 'Gerade keine Abfahrten. Zieh nach unten oder versuch es gleich noch mal.' : 'Kein Zug passt. Versuch es ohne Filter.',
+                      style: VText.bodyS.copyWith(color: VColors.ink2),
+                    ),
                   ),
+                const VGap.xl(),
+              ],
+            ),
           ),
         ],
       ),
@@ -131,9 +181,8 @@ class _CheckinScreenState extends State<CheckinScreen> {
   }
 
   /// E1: a cancelled train. Ask what the customer took instead.
-  void _cancelledFlow(BuildContext context, Departure cancelled) {
-    final state = DemoScope.read(context);
-    final later = Mock.departuresKoelnHbf.where((d) => !d.cancelled && (d.planned.hour * 60 + d.planned.minute) >= (cancelled.planned.hour * 60 + cancelled.planned.minute)).take(4).toList();
+  void _cancelledFlow(BuildContext context, ApiDeparture cancelled) {
+    final later = _departures.where((d) => !d.cancelled && !d.scheduledDeparture.isBefore(cancelled.scheduledDeparture)).take(4).toList();
     showVSheet(
       context,
       builder: (ctx) => Padding(
@@ -152,7 +201,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
                       departure: d,
                       onTap: () {
                         Navigator.of(ctx).pop();
-                        context.push('${Routes.exitStop}?departure=${d.id}');
+                        _toExit(d);
                       },
                     ),
                 ],
@@ -166,9 +215,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
                 icon: Icons.cancel_outlined,
                 onTap: () {
                   Navigator.of(ctx).pop();
-                  state.checkIn(departure: cancelled, exitStop: cancelled.stops.last, fromStation: _station.name);
-                  state.simulateArrival(minutes: 60, cancelled: true);
-                  context.go('${Routes.angekommen}?variant=ausfall');
+                  _notTravelling(cancelled);
                 },
               ),
             ),
@@ -180,6 +227,30 @@ class _CheckinScreenState extends State<CheckinScreen> {
         ),
       ),
     );
+  }
+
+  /// Check in to the cancelled trip and close it at once as "not travelled".
+  Future<void> _notTravelling(ApiDeparture cancelled) async {
+    final repo = RepoScope.read(context).repo;
+    final s = _station!;
+    try {
+      final trip = await repo.trip(cancelled.tripId);
+      final from = fromIndex(trip.stops, s.id, s.name);
+      final exit = trip.stops.isEmpty ? null : trip.stops.last;
+      await repo.checkIn(CheckInRequest(
+        tripId: cancelled.tripId,
+        fromStationId: s.id,
+        fromStationName: s.name,
+        exitStationId: exit?.stationId ?? exit?.name ?? cancelled.destination,
+        exitStationName: exit?.name ?? cancelled.destination,
+        location: _position,
+      ));
+      final _ = from;
+      final result = await repo.arrival(const ArrivalRequest(delayMinutes: 60, cancelled: true));
+      if (mounted) context.go(Routes.angekommen, extra: result);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));
+    }
   }
 }
 
@@ -205,73 +276,6 @@ class _FilterChip extends StatelessWidget {
         ),
         child: Text(label, style: VText.bodySStrong.copyWith(color: selected ? VColors.paper : VColors.ink)),
       ),
-    );
-  }
-}
-
-/// No live data: line, destination, planned departure by hand. Earns points,
-/// can be claimed, marked "selbst eingetragen".
-class _ManualEntry extends StatefulWidget {
-  const _ManualEntry({required this.station});
-  final Station station;
-
-  @override
-  State<_ManualEntry> createState() => _ManualEntryState();
-}
-
-class _ManualEntryState extends State<_ManualEntry> {
-  final _line = TextEditingController(text: 'RE 7');
-  final _dest = TextEditingController(text: 'Rheine');
-  final _time = TextEditingController(text: '07:47');
-
-  @override
-  void dispose() {
-    _line.dispose();
-    _dest.dispose();
-    _time.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.l, VSpace.page, VSpace.l),
-      children: [
-        Text('Keine Live-Daten für diesen Bahnhof.', style: VText.h2),
-        const VGap.s(),
-        Text('Trag deinen Zug selbst ein. Die Fahrt zählt Punkte und kann beantragt werden, steht dann aber als „selbst eingetragen“ im Antrag.', style: VText.bodyS.copyWith(color: VColors.ink2)),
-        const VGap.l(),
-        TextField(controller: _line, decoration: const InputDecoration(labelText: 'Linie')),
-        const VGap.m(),
-        TextField(controller: _dest, decoration: const InputDecoration(labelText: 'Ziel')),
-        const VGap.m(),
-        TextField(controller: _time, decoration: const InputDecoration(labelText: 'Abfahrt laut Fahrplan')),
-        const VGap.l(),
-        VPrimaryButton(
-          label: 'Weiter',
-          onTap: () {
-            final parts = _time.text.split(':');
-            final h = int.tryParse(parts.first) ?? 7;
-            final m = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
-            final planned = TimeOfDay(hour: h, minute: m);
-            final manual = Departure(
-              id: 'manual',
-              line: _line.text.trim().isEmpty ? 'RE 7' : _line.text.trim(),
-              destination: _dest.text.trim().isEmpty ? 'Rheine' : _dest.text.trim(),
-              planned: planned,
-              platform: '–',
-              category: TrainCategory.re,
-              operator: 'Unbekannt',
-              stops: [
-                Stop(name: widget.station.name, planned: planned),
-                Stop(name: _dest.text.trim().isEmpty ? 'Rheine' : _dest.text.trim(), planned: addMinutes(planned, 95)),
-              ],
-            );
-            DemoScope.read(context).checkIn(departure: manual, exitStop: manual.stops.last, fromStation: widget.station.name, locationVerified: false);
-            context.go(Routes.unterwegs);
-          },
-        ),
-      ],
     );
   }
 }

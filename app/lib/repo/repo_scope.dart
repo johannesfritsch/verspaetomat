@@ -48,7 +48,8 @@ class Session extends ChangeNotifier {
 
   Future<void> init() async {
     final stored = prefs.getString(_modeKey);
-    mode = stored == 'local' ? BackendMode.local : BackendMode.demo;
+    const forced = String.fromEnvironment('BACKEND', defaultValue: '');
+    mode = forced == 'local' || (forced.isEmpty && stored == 'local') ? BackendMode.local : BackendMode.demo;
     await _bootstrap();
   }
 

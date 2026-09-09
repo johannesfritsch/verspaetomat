@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart';
+import '../../repo/app_repository.dart';
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
-import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'ride_widgets.dart';
 
-/// E4: forgot to check in yesterday. One point, claimable, never ranks.
+/// E4: forgot to check in. One point, claimable if the feed shows a delay, never ranks.
 class NachtragScreen extends StatefulWidget {
   const NachtragScreen({super.key});
 
@@ -18,29 +18,115 @@ class NachtragScreen extends StatefulWidget {
 
 class _NachtragScreenState extends State<NachtragScreen> {
   int _dayOffset = 1;
-  Departure _departure = Mock.departuresKoelnHbf.first;
-  int _exit = 6;
+  ApiStation? _station;
+  List<ApiDeparture> _departures = const [];
+  ApiDeparture? _departure;
+  ApiTrip? _trip;
+  int _from = 0;
+  int _exit = 0;
+  bool _loading = true;
+  bool _sending = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadStation());
+  }
+
+  Future<void> _loadStation() async {
+    final repo = RepoScope.read(context).repo;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      if (_station == null) {
+        final nearby = await repo.nearbyStations();
+        if (nearby.isEmpty) throw StateError('Kein Bahnhof gefunden. Such einen.');
+        _station = nearby.first;
+      }
+      final deps = (await repo.departures(_station!.id)).where((d) => !d.cancelled).toList();
+      if (!mounted) return;
+      setState(() {
+        _departures = deps;
+        _departure = null;
+        _trip = null;
+      });
+      if (deps.isNotEmpty) await _pick(deps.first);
+    } catch (e) {
+      if (mounted) setState(() => _error = shortError(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _pick(ApiDeparture d) async {
+    final repo = RepoScope.read(context).repo;
+    setState(() {
+      _departure = d;
+      _trip = null;
+    });
+    try {
+      final trip = await repo.trip(d.tripId);
+      if (!mounted) return;
+      final from = fromIndex(trip.stops, _station?.id, _station?.name ?? '');
+      setState(() {
+        _trip = trip;
+        _from = from;
+        _exit = trip.stops.length - 1;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = shortError(e));
+    }
+  }
+
+  Future<void> _search() async {
+    final s = await showStationSearch(context);
+    if (s == null || !mounted) return;
+    setState(() => _station = s);
+    _loadStation();
+  }
+
+  Future<void> _submit() async {
+    final t = _trip;
+    final s = _station;
+    if (t == null || s == null || t.stops.isEmpty) return;
+    final exit = t.stops[_exit.clamp(0, t.stops.length - 1)];
+    final date = DateTime.now().subtract(Duration(days: _dayOffset));
+    setState(() => _sending = true);
+    try {
+      final result = await RepoScope.read(context).repo.nachtrag(NachtragRequest(
+        tripId: t.tripId,
+        fromStationId: s.id,
+        fromStationName: s.name,
+        exitStationId: exit.stationId ?? exit.name,
+        exitStationName: exit.name,
+        date: date,
+      ));
+      if (!mounted) return;
+      final d = result.ride.finalDelayMinutes ?? 0;
+      final delayText = result.ride.cancelled ? 'Ausfall' : (d > 0 ? '+$d am ${exit.name}' : 'pünktlich am ${exit.name}');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nachgetragen: ${t.line}, $delayText · 1 Geduldspunkt.')));
+      context.go(Routes.bahnsteig);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _sending = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nachtrag nicht möglich: ${shortError(e)}')));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final date = Mock.today.subtract(Duration(days: _dayOffset));
-    final trains = Mock.departuresKoelnHbf.where((d) => !d.cancelled).toList();
-    final exitIndex = _exit.clamp(1, _departure.stops.length - 1);
+    final date = DateTime.now().subtract(Duration(days: _dayOffset));
+    final t = _trip;
+    final canSubmit = t != null && t.stops.isNotEmpty && !_sending;
+
     return VScreen(
       eyebrow: 'Nachtrag',
       title: 'Gestern vergessen einzuchecken?',
-      bottom: VPrimaryButton(
-        label: 'Nachtragen',
-        onTap: () {
-          final state = DemoScope.read(context);
-          final exit = _departure.stops[exitIndex];
-          state.addNachtrag(departure: _departure, exitStop: exit, date: date);
-          final d = _departure.cancelled ? 60 : _departure.delay;
-          final delayText = d > 0 ? '+$d am ${exit.name}' : 'pünktlich am ${exit.name}';
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nachgetragen: ${_departure.line}, $delayText · 1 Geduldspunkt.')));
-          context.go(Routes.bahnsteig);
-        },
-      ),
+      bottom: VPrimaryButton(label: _sending ? 'Wird nachgetragen …' : 'Nachtragen', onTap: canSubmit ? _submit : null),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -48,7 +134,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
           const VSection('Tag'),
           Row(
             children: [
-              for (final (offset, label) in [(1, 'Gestern'), (2, 'Vorgestern'), (3, Mock.shortDate(Mock.today.subtract(const Duration(days: 3))))]) ...[
+              for (final (offset, label) in [(1, 'Gestern'), (2, 'Vorgestern'), (3, fmtDay(DateTime.now().subtract(const Duration(days: 3))))]) ...[
                 Padding(
                   padding: const EdgeInsets.only(top: 12, right: 8),
                   child: InkWell(
@@ -71,39 +157,38 @@ class _NachtragScreenState extends State<NachtragScreen> {
             ],
           ),
           const VGap.s(),
-          Text(Mock.longDate(date), style: VText.caption),
+          Text(fmtDay(date), style: VText.caption),
           const VGap.l(),
-          const VSection('Bahnhof'),
+          VSection('Bahnhof', trailing: InkWell(onTap: _search, child: Padding(padding: const EdgeInsets.all(8), child: Text('Ändern', style: VText.bodySStrong)))),
           const VGap.s(),
-          Text(Mock.homeStation, style: VText.bodyStrong),
+          Text(_station?.name ?? '–', style: VText.bodyStrong),
           const VGap.l(),
           const VSection('Zug'),
-          for (final d in trains)
+          if (_loading) const LoadingLine(label: 'Züge werden geladen …'),
+          if (_error != null) ErrorLine(message: _error!, onRetry: _loadStation),
+          for (final d in _departures.take(8))
             InkWell(
-              onTap: () => setState(() {
-                _departure = d;
-                _exit = d.stops.length - 1;
-              }),
+              onTap: () => _pick(d),
               child: Column(
                 children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     child: Row(
                       children: [
-                        SizedBox(width: 52, child: Text(fmtTime(d.planned), style: VText.mono)),
+                        SizedBox(width: 52, child: Text(fmtLocal(d.scheduledDeparture), style: VText.mono)),
                         const SizedBox(width: 10),
                         LineBadge(d.line),
                         const SizedBox(width: 12),
-                        Expanded(child: Text(d.destination, style: VText.bodyStrong)),
+                        Expanded(child: Text(d.destination, style: VText.bodyStrong, maxLines: 1, overflow: TextOverflow.ellipsis)),
                         Container(
                           width: 22,
                           height: 22,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: _departure.id == d.id ? VColors.red : Colors.transparent,
-                            border: Border.all(color: _departure.id == d.id ? VColors.red : VColors.rule, width: 1.5),
+                            color: _departure?.tripId == d.tripId ? VColors.red : Colors.transparent,
+                            border: Border.all(color: _departure?.tripId == d.tripId ? VColors.red : VColors.rule, width: 1.5),
                           ),
-                          child: _departure.id == d.id ? const Icon(Icons.check, size: 14, color: VColors.paper) : null,
+                          child: _departure?.tripId == d.tripId ? const Icon(Icons.check, size: 14, color: VColors.paper) : null,
                         ),
                       ],
                     ),
@@ -115,15 +200,18 @@ class _NachtragScreenState extends State<NachtragScreen> {
           const VGap.l(),
           const VSection('Ausstieg'),
           const VGap.s(),
-          StopLine(
-            stops: _departure.stops,
-            passed: 0,
-            selectedIndex: exitIndex,
-            onSelect: (i) => setState(() => _exit = i),
-            compact: true,
-          ),
+          if (_departure != null && t == null) const LoadingLine(label: 'Halte werden geladen …'),
+          if (t != null)
+            StopLine(
+              stops: t.stops,
+              passed: _from - 1,
+              selectedIndex: _exit,
+              firstSelectable: _from + 1,
+              onSelect: (i) => setState(() => _exit = i),
+              compact: true,
+            ),
           const VGap.l(),
-          Text('Ein Nachtrag bringt einen Geduldspunkt, zählt für Anträge, wenn Verspätungsdaten dazu existieren, und taucht nie in Ranglisten auf.', style: VText.caption),
+          Text('Ein Nachtrag bringt einen Geduldspunkt, zählt für Anträge, wenn der Feed eine Verspätung kennt, und taucht nie in Ranglisten auf. Der Fahrplan zeigt die Züge von heute.', style: VText.caption),
         ],
       ),
     );

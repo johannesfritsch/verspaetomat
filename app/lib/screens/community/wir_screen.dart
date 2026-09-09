@@ -3,12 +3,19 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart';
+import '../../api/models.dart';
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
-import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
+
+class _WirData {
+  const _WirData(this.community, this.teams);
+  final ApiCommunity community;
+  final List<ApiTeam> teams;
+}
 
 /// Wir: the community. Minutes waited together, euros submitted and
 /// confirmed, NGOs, boards, teams.
@@ -20,8 +27,9 @@ class WirScreen extends StatefulWidget {
 }
 
 class _WirScreenState extends State<WirScreen> {
-  int _minutes = Mock.communityMinutes;
+  final _loader = LoaderController();
   int _board = 0;
+  int _extraMinutes = 0;
   Timer? _timer;
   int _tick = 0;
 
@@ -30,7 +38,7 @@ class _WirScreenState extends State<WirScreen> {
     super.initState();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       _tick++;
-      setState(() => _minutes += 1 + (_tick * 7) % 3);
+      setState(() => _extraMinutes += 1 + (_tick * 7) % 3);
     });
   }
 
@@ -40,128 +48,133 @@ class _WirScreenState extends State<WirScreen> {
     super.dispose();
   }
 
-  List<BoardEntry> get _entries => switch (_board) {
-        0 => Mock.boardLine,
-        1 => Mock.boardCity,
-        _ => Mock.boardGermany,
-      };
+  String get _scope => switch (_board) { 0 => 'line', 1 => 'city', _ => 'germany' };
 
   @override
   Widget build(BuildContext context) {
-    final state = DemoScope.of(context);
-    final entries = _entries;
-    final top = entries.where((e) => e.rank <= 10).toList();
-    final me = entries.where((e) => e.isMe && e.rank > 10).toList();
-
-    return VScreen(
-      showBack: false,
-      padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.l, VSpace.page, VSpace.xl),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TabHeader(title: 'Wir', caption: '${fmtInt(Mock.communityUsers)} Fahrgäste'),
-          const VGap.xl(),
-          Text('ZUSAMMEN GEWARTET', style: VText.eyebrow),
-          const SizedBox(height: 6),
-          InkWell(
-            onTap: () => showSourceSheet(
-              context,
-              title: 'Minuten zusammen gewartet',
-              origin: 'Die Summe aller endgültigen Verspätungen aller Fahrgäste, Minute für Minute.',
-              freshness: 'Live',
-            ),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
+    final session = RepoScope.of(context);
+    return Loader<_WirData>(
+      controller: _loader,
+      load: (repo) async {
+        final c = await repo.community();
+        List<ApiTeam> teams = const [];
+        try {
+          teams = await repo.teams();
+        } catch (_) {}
+        return _WirData(c, teams);
+      },
+      builder: (context, data, refresh) {
+        final c = data.community;
+        return VScreen(
+          showBack: false,
+          padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.l, VSpace.page, VSpace.xl),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TabHeader(title: 'Wir', caption: '${fmtInt(c.users)} Fahrgäste'),
+              const VGap.xl(),
+              Text('ZUSAMMEN GEWARTET', style: VText.eyebrow),
+              const SizedBox(height: 6),
+              InkWell(
+                onTap: () => showSourceSheet(
+                  context,
+                  title: 'Minuten zusammen gewartet',
+                  origin: 'Die Summe aller endgültigen Verspätungen aller Fahrgäste, Minute für Minute.',
+                  freshness: 'Live',
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(fmtInt(c.minutes + _extraMinutes), style: VText.number),
+                      const SizedBox(width: 10),
+                      Text('Minuten', style: VText.title.copyWith(color: VColors.ink2)),
+                    ],
+                  ),
+                ),
+              ),
+              const VGap.l(),
+              const VRule.red(),
+              const VGap.m(),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(fmtInt(_minutes), style: VText.number),
-                  const SizedBox(width: 10),
-                  Text('Minuten', style: VText.title.copyWith(color: VColors.ink2)),
+                  Expanded(
+                    child: BigFigure(
+                      value: fmtEuroWhole(c.submittedCents / 100),
+                      label: 'Eingereicht',
+                      onTap: () => showSourceSheet(
+                        context,
+                        title: 'Eingereichte Euro',
+                        origin: 'Die Summe aller Anträge, die Fahrgäste über ihre Verspätomat-Adresse abgeschickt haben und die noch keine Antwort haben.',
+                        freshness: 'Live',
+                        fallback: 'Ein Antrag ohne Antwort bleibt hier, bis die Bahn schreibt.',
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: BigFigure(
+                      value: fmtEuroWhole(c.confirmedCents / 100),
+                      label: 'Bestätigt',
+                      style: VText.number.copyWith(fontSize: 40, letterSpacing: -1.2),
+                      onTap: () => showSourceSheet(
+                        context,
+                        title: 'Bestätigte Euro',
+                        origin: 'Nur Geld, für das eine Antwort der Bahn oder eine Monatsmeldung des Vereins vorliegt. Wir raten nie.',
+                        freshness: 'Antworten sofort, Vereinsmeldungen monatlich',
+                        fallback: 'Bleibt bei „eingereicht“, bis ein Beleg da ist.',
+                      ),
+                    ),
+                  ),
                 ],
               ),
-            ),
-          ),
-          const VGap.l(),
-          const VRule.red(),
-          const VGap.m(),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: BigFigure(
-                  value: fmtEuroWhole(Mock.communitySubmitted),
-                  label: 'Eingereicht',
-                  onTap: () => showSourceSheet(
-                    context,
-                    title: 'Eingereichte Euro',
-                    origin: 'Die Summe aller Anträge, die Fahrgäste über ihre Verspätomat-Adresse abgeschickt haben und die noch keine Antwort haben.',
-                    freshness: 'Live',
-                    fallback: 'Ein Antrag ohne Antwort bleibt hier, bis die Bahn schreibt.',
-                  ),
-                ),
+              const VGap.xl(),
+              const VSection('Vereine'),
+              for (final n in c.ngos) _ngoRow(context, n),
+              const VGap.xl(),
+              VSection('Ranglisten', trailing: Text('7 Tage', style: VText.caption)),
+              const VGap.m(),
+              SegmentTabs(labels: const ['Meine Linie', 'Meine Stadt', 'Deutschland'], index: _board, onChanged: (i) => setState(() => _board = i)),
+              const VGap.s(),
+              Text(
+                switch (_board) { 0 => 'Deine häufigste Linie', 1 => session.me?.homeStation.isNotEmpty == true ? session.me!.homeStation : 'Deine Stadt', _ => 'Alle Fahrgäste' },
+                style: VText.caption,
               ),
-              Expanded(
-                child: BigFigure(
-                  value: fmtEuroWhole(Mock.communityConfirmed + state.confirmedTotal - Mock.incidents.where((i) => i.status == IncidentStatus.bestaetigt).fold(0.0, (s, i) => s + i.amount)),
-                  label: 'Bestätigt',
-                  style: VText.number.copyWith(fontSize: 40, letterSpacing: -1.2),
-                  onTap: () => showSourceSheet(
-                    context,
-                    title: 'Bestätigte Euro',
-                    origin: 'Nur Geld, für das eine Antwort der Bahn oder eine Monatsmeldung des Vereins vorliegt. Wir raten nie.',
-                    freshness: 'Antworten sofort, Vereinsmeldungen monatlich',
-                    fallback: 'Bleibt bei „eingereicht“, bis ein Beleg da ist.',
-                  ),
-                ),
+              const VGap.s(),
+              _Board(scope: _scope),
+              const VGap.s(),
+              Text(
+                (session.me?.settings.showOnBoards ?? true) ? 'Nur verifizierte Fahrten zählen.' : 'Nur verifizierte Fahrten zählen. Du bist in den Ranglisten verborgen.',
+                style: VText.caption,
               ),
+              const VGap.xl(),
+              const VSection('Teams'),
+              if (data.teams.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: VSpace.m, bottom: VSpace.s),
+                  child: Text('Noch kein Team. Gründe eins oder tritt mit einem Link bei.', style: VText.caption),
+                ),
+              for (final t in data.teams)
+                VListRow(
+                  title: t.name,
+                  subtitle: '${t.members.length} Mitglieder · ${fmtInt(t.minutes)} Minuten · ${fmtEuroWhole(t.eurosCents / 100)}',
+                  chevron: true,
+                  onTap: () => context.push('${Routes.team}?id=${t.id}').then((_) => refresh()),
+                ),
+              const VGap.s(),
+              VGhostButton(label: 'Team gründen', icon: Icons.add, onTap: () => _foundTeam(context, refresh)),
+              VGhostButton(label: 'Mit Link beitreten', icon: Icons.link, onTap: () => _joinTeam(context, refresh)),
             ],
           ),
-          const VGap.xl(),
-          const VSection('Vereine'),
-          for (final ngo in Mock.ngos) _ngoRow(context, ngo),
-          const VGap.xl(),
-          VSection('Ranglisten', trailing: Text('7 Tage', style: VText.caption)),
-          const VGap.m(),
-          SegmentTabs(labels: const ['Meine Linie', 'Meine Stadt', 'Deutschland'], index: _board, onChanged: (i) => setState(() => _board = i)),
-          const VGap.s(),
-          Text(
-            switch (_board) { 0 => 'RE 7 Köln – Rheine', 1 => 'Köln', _ => 'Alle Fahrgäste' },
-            style: VText.caption,
-          ),
-          const VGap.s(),
-          for (final e in top) BoardRow(entry: e),
-          if (me.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Text('· · ·', style: VText.caption.copyWith(letterSpacing: 4)),
-            ),
-            for (final e in me) BoardRow(entry: e),
-          ],
-          const VGap.s(),
-          Text(
-            state.showOnBoards ? 'Nur verifizierte Fahrten zählen.' : 'Nur verifizierte Fahrten zählen. Du bist in den Ranglisten verborgen.',
-            style: VText.caption,
-          ),
-          const VGap.xl(),
-          const VSection('Teams'),
-          for (final t in Mock.teams)
-            VListRow(
-              title: t.name,
-              subtitle: '${t.members} Mitglieder · ${fmtInt(t.minutes)} Minuten · ${fmtEuroWhole(t.euros)}',
-              chevron: true,
-              onTap: () => context.push('${Routes.team}?id=${t.id}'),
-            ),
-          const VGap.s(),
-          VGhostButton(label: 'Team gründen', icon: Icons.add, onTap: () => _foundTeam(context)),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Widget _ngoRow(BuildContext context, Ngo ngo) {
+  Widget _ngoRow(BuildContext context, ApiNgoTotal ngo) {
     return InkWell(
       onTap: () => context.push('${Routes.zweck}?id=${ngo.id}'),
       child: Column(
@@ -177,12 +190,12 @@ class _WirScreenState extends State<WirScreen> {
                     children: [
                       Text(ngo.name, style: VText.bodyStrong),
                       const SizedBox(height: 2),
-                      Text('eingereicht: ${fmtEuroWhole(ngo.submittedTotal)}', style: VText.caption),
+                      Text('eingereicht: ${fmtEuroWhole(ngo.submittedCents / 100)}', style: VText.caption),
                     ],
                   ),
                 ),
                 const SizedBox(width: 12),
-                Text(fmtEuroWhole(ngo.confirmedTotal), style: VText.numberM),
+                Text(fmtEuroWhole(ngo.confirmedCents / 100), style: VText.numberM),
                 const SizedBox(width: 8),
                 const Icon(Icons.chevron_right, size: 20, color: VColors.ink3),
               ],
@@ -194,7 +207,7 @@ class _WirScreenState extends State<WirScreen> {
     );
   }
 
-  void _foundTeam(BuildContext context) {
+  void _foundTeam(BuildContext context, VoidCallback refresh) {
     final ctrl = TextEditingController();
     showVSheet(
       context,
@@ -212,23 +225,22 @@ class _WirScreenState extends State<WirScreen> {
                 children: [
                   TextField(controller: ctrl, decoration: const InputDecoration(hintText: 'z. B. Büro Nord'), style: VText.body),
                   const VGap.m(),
-                  Container(
-                    padding: const EdgeInsets.all(VSpace.m),
-                    decoration: BoxDecoration(border: Border.all(color: VColors.rule), borderRadius: BorderRadius.circular(4)),
-                    child: Row(
-                      children: [
-                        Expanded(child: Text('verspaetomat.de/t/8f2k1', style: VText.mono)),
-                        const Icon(Icons.link, size: 20, color: VColors.ink2),
-                      ],
-                    ),
-                  ),
-                  const VGap.m(),
                   VPrimaryButton(
-                    label: 'Link teilen',
-                    icon: Icons.ios_share,
-                    onTap: () {
-                      Navigator.of(ctx).pop();
-                      showSnack(context, 'Link kopiert. Wer ihn öffnet, ist im Team.');
+                    label: 'Gründen',
+                    icon: Icons.add,
+                    onTap: () async {
+                      final name = ctrl.text.trim();
+                      if (name.isEmpty) return;
+                      try {
+                        final t = await RepoScope.read(context).repo.createTeam(name);
+                        if (!ctx.mounted) return;
+                        Navigator.of(ctx).pop();
+                        showSnack(context, 'Team „${t.name}“ gegründet. Einladungslink: verspaetomat.de/t/${t.inviteToken ?? t.id}');
+                        refresh();
+                      } catch (e) {
+                        if (!ctx.mounted) return;
+                        showSnack(context, 'Nicht gegründet: $e');
+                      }
                     },
                   ),
                 ],
@@ -237,6 +249,82 @@ class _WirScreenState extends State<WirScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  void _joinTeam(BuildContext context, VoidCallback refresh) {
+    final ctrl = TextEditingController();
+    showVSheet(
+      context,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.only(bottom: VSpace.l),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const VSheetHeader(title: 'Team beitreten', subtitle: 'Den Code aus dem Einladungslink eingeben.'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(controller: ctrl, decoration: const InputDecoration(hintText: 'Einladungscode'), style: VText.mono),
+                  const VGap.m(),
+                  VPrimaryButton(
+                    label: 'Beitreten',
+                    onTap: () async {
+                      final token = ctrl.text.trim();
+                      if (token.isEmpty) return;
+                      try {
+                        final t = await RepoScope.read(context).repo.joinTeam(token);
+                        if (!ctx.mounted) return;
+                        Navigator.of(ctx).pop();
+                        showSnack(context, 'Du bist jetzt bei „${t.name}“.');
+                        refresh();
+                      } catch (e) {
+                        if (!ctx.mounted) return;
+                        showSnack(context, 'Nicht beigetreten: $e');
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The board for one scope, loaded on its own so tab switches are cheap.
+class _Board extends StatelessWidget {
+  const _Board({required this.scope});
+  final String scope;
+
+  @override
+  Widget build(BuildContext context) {
+    return Loader<List<ApiBoardEntry>>(
+      key: ValueKey(scope),
+      load: (repo) => repo.boards(scope),
+      builder: (context, entries, _) {
+        final top = entries.where((e) => e.rank <= 10).toList();
+        final me = entries.where((e) => e.isMe && e.rank > 10).toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (entries.isEmpty) Text('Noch niemand auf dieser Liste.', style: VText.caption),
+            for (final e in top) BoardRow(entry: e),
+            if (me.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text('· · ·', style: VText.caption.copyWith(letterSpacing: 4)),
+              ),
+              for (final e in me) BoardRow(entry: e),
+            ],
+          ],
+        );
+      },
     );
   }
 }

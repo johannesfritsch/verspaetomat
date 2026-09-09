@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../mock/mock_data.dart';
+import '../../api/models.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 
@@ -113,7 +113,7 @@ class FilterChips extends StatelessWidget {
 /// One line of a board: rank, name, points. The customer's row is bold with a red mark.
 class BoardRow extends StatelessWidget {
   const BoardRow({super.key, required this.entry});
-  final BoardEntry entry;
+  final ApiBoardEntry entry;
 
   @override
   Widget build(BuildContext context) {
@@ -206,7 +206,7 @@ void showSourceSheet(BuildContext context, {required String title, required Stri
 /// A badge: a circle in the station-clock spirit, name below.
 class BadgeTile extends StatelessWidget {
   const BadgeTile({super.key, required this.badge, required this.onTap});
-  final VBadge badge;
+  final ApiBadge badge;
   final VoidCallback onTap;
 
   @override

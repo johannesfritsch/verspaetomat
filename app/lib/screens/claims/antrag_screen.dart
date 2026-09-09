@@ -1,44 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart';
+import '../../api/models.dart';
+import '../../mock/mock_data.dart' show Mock, TicketType;
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
-import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'claims_widgets.dart';
 
 /// Antrag: the five-step claim flow. Prüfen · Ticket · Zweck · Unterschrift · Senden.
 class AntragScreen extends StatefulWidget {
-  const AntragScreen({super.key, required this.desk});
+  const AntragScreen({super.key, required this.desk, this.claimId, this.draft});
   final String desk;
+  final String? claimId;
+  final ApiClaimDraft? draft;
 
   @override
   State<AntragScreen> createState() => _AntragScreenState();
 }
 
 class _AntragScreenState extends State<AntragScreen> {
-  int _step = 0;
-  bool _sent = false;
-  bool _showPersonal = false;
-  bool _otherNgo = false;
-  final _unknownAddress = TextEditingController();
-
   static const _steps = ['Prüfen', 'Ticket', 'Zweck', 'Unterschrift', 'Senden'];
 
+  int _step = 0;
+  ApiClaimDraft? _draft;
+  List<ApiIncident> _incidents = const [];
+  List<ApiNgo> _ngos = const [];
+  Object? _error;
+  bool _loading = true;
+  bool _busy = false;
+  bool _showPersonal = false;
+  bool _otherNgo = false;
+  final Map<String, String> _uploads = {}; // month → upload id
+  bool _signed = false;
+  bool _sentDryRun = false;
+  ApiSendResult? _sent;
+  final _unknownAddress = TextEditingController();
+  final _signature = SignatureController();
+
   bool get _unknownDesk => widget.desk == 'Unbekannt';
+  ApiClaim? get _claim => _draft?.claim;
+  bool get _paperOnly => _draft != null && (_draft!.deskEmail == null || _draft!.deskEmail!.isEmpty);
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final s = DemoScope.read(context);
-      if (s.draftDesk == null || s.draftDesk != widget.desk) {
-        s.startClaim(widget.desk);
-      }
-      setState(() => _showPersonal = !s.personalDataEntered);
-    });
+    _draft = widget.draft;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   @override
@@ -47,33 +56,150 @@ class _AntragScreenState extends State<AntragScreen> {
     super.dispose();
   }
 
-  bool _canContinue(DemoState s) => switch (_step) {
-        0 => s.draftIncidentIds.isNotEmpty && (!_unknownDesk || _unknownAddress.text.trim().isNotEmpty),
-        1 => s.draftTicketAttached,
+  Future<void> _load() async {
+    final session = RepoScope.read(context);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      _draft ??= await session.repo.draftClaim(desk: widget.desk);
+      final ledger = await session.repo.incidents();
+      final ids = _draft!.claim.incidentIds.toSet();
+      _incidents = ledger.incidents.where((i) => ids.contains(i.id)).toList()..sort((a, b) => a.date.compareTo(b.date));
+      _ngos = session.ngos.isNotEmpty ? session.ngos : await session.repo.ngos();
+      final me = session.me ?? await session.repo.getMe();
+      _showPersonal = _draft!.personalDataRequired || me.personalData == null;
+      _signed = _draft!.claim.signedBy != null;
+    } catch (e) {
+      _error = e;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  ApiNgo? get _ngo {
+    final id = _claim?.ngoId;
+    return _ngos.where((n) => n.id == id).firstOrNull ?? _ngos.firstOrNull;
+  }
+
+  bool get _canContinue => switch (_step) {
+        0 => _incidents.isNotEmpty && !_showPersonal && (!_unknownDesk || _unknownAddress.text.trim().isNotEmpty),
+        1 => _months.every(_uploads.containsKey),
         2 => true,
-        3 => s.draftSigned,
+        3 => _signed,
         _ => true,
       };
 
+  List<String> get _months {
+    final m = _claim?.ticketMonths ?? const [];
+    if (m.isNotEmpty) return m;
+    return const ['Ticket'];
+  }
+
+  Future<void> _run(Future<void> Function() action, {String? failure}) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${failure ?? 'Das hat nicht geklappt'}: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _attach(String month) => _run(() async {
+        final session = RepoScope.read(context);
+        final me = session.me;
+        final name = me?.personalData?.name ?? me?.nickname ?? 'Fahrgast';
+        final number = me?.personalData?.ticketNumber ?? '–';
+        final png = await renderTicketPng(name: name, ticketNumber: number, month: month == 'Ticket' ? 'Fahrkarte' : monthLabel(month));
+        final up = await session.repo.upload(kind: 'ticket', filename: 'Ticket_$month.png', bytes: png);
+        _uploads[month] = up.uploadId;
+        final claim = await session.repo.patchClaim(_claim!.id, attachmentUploadIds: _uploads.values.toList());
+        _draft = _withClaim(claim);
+      }, failure: 'Anhängen fehlgeschlagen');
+
+  Future<void> _chooseNgo(String id) => _run(() async {
+        final claim = await RepoScope.read(context).repo.patchClaim(_claim!.id, ngoId: id);
+        _draft = _withClaim(claim);
+      });
+
+  Future<void> _sign() => _run(() async {
+        final session = RepoScope.read(context);
+        final name = session.me?.personalData?.name ?? session.me?.nickname ?? 'Fahrgast';
+        String? sigId;
+        final png = await _signature.toPng();
+        if (png != null) {
+          sigId = (await session.repo.upload(kind: 'signature', filename: 'Unterschrift.png', bytes: png)).uploadId;
+        }
+        final claim = await session.repo.signClaim(_claim!.id, typedName: name, signatureUploadId: sigId);
+        _draft = _withClaim(claim);
+        _signed = true;
+      }, failure: 'Unterschrift fehlgeschlagen');
+
+  Future<void> _send() => _run(() async {
+        final r = await RepoScope.read(context).repo.sendClaim(_claim!.id);
+        _sent = r;
+        _sentDryRun = r.mail.subject.isNotEmpty && _looksDryRun(r);
+      }, failure: 'Senden fehlgeschlagen');
+
+  bool _looksDryRun(ApiSendResult r) {
+    // The wire model carries no dry_run flag; the local backend records dry-runs
+    // when SMTP_URL is unset. Treat demo mode as a rehearsal too.
+    return RepoScope.read(context).isLocal == false || true;
+  }
+
+  ApiClaimDraft _withClaim(ApiClaim c) => ApiClaimDraft(
+        claim: c,
+        deskAddress: _draft?.deskAddress,
+        deskEmail: _draft?.deskEmail,
+        personalDataRequired: _draft?.personalDataRequired ?? false,
+        relayAddress: _draft?.relayAddress,
+      );
+
   @override
   Widget build(BuildContext context) {
-    final state = DemoScope.of(context);
-    if (_sent) return _Sent(desk: widget.desk);
+    final session = RepoScope.of(context);
+    if (_sent != null) return _Sent(desk: widget.desk, dryRun: _sentDryRun, mail: _sent!.mail);
+    if (_loading) return const VScreen(title: 'Antrag', child: LoadingLine());
+    if (_error != null || _draft == null) {
+      return VScreen(
+        title: 'Antrag',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const VGap.m(),
+            Text('Noch kein Antrag möglich.', style: VText.h2),
+            const VGap.s(),
+            Text('$_error', style: VText.bodyS.copyWith(color: VColors.ink2)),
+            const VGap.l(),
+            VGhostButton(label: 'Erneut versuchen', icon: Icons.refresh, onTap: _load),
+          ],
+        ),
+      );
+    }
 
+    final me = session.me;
     final content = switch (_step) {
       0 => _Pruefen(
-          state: state,
+          draft: _draft!,
+          incidents: _incidents,
+          me: me,
           desk: widget.desk,
           unknown: _unknownDesk,
           addressCtl: _unknownAddress,
           showPersonal: _showPersonal,
           onChanged: () => setState(() {}),
-          onPersonalSaved: () => setState(() => _showPersonal = false),
+          onPersonalSaved: () async {
+            setState(() => _showPersonal = false);
+            await _maybeShowRecoveryCode();
+          },
         ),
-      1 => _Ticket(state: state),
-      2 => _Zweck(state: state, other: _otherNgo, onToggle: (v) => setState(() => _otherNgo = v)),
-      3 => _Unterschrift(state: state),
-      _ => _Senden(state: state, desk: widget.desk),
+      1 => _Ticket(months: _months, uploads: _uploads, me: me, busy: _busy, onAttach: _attach),
+      2 => _Zweck(ngos: _ngos, selected: _ngo, other: _otherNgo, onToggle: (v) => setState(() => _otherNgo = v), onChoose: _chooseNgo),
+      3 => _Unterschrift(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, signed: _signed, busy: _busy, controller: _signature, onSign: _sign),
+      _ => _Senden(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, paperOnly: _paperOnly),
     };
 
     final last = _step == _steps.length - 1;
@@ -85,32 +211,25 @@ class _AntragScreenState extends State<AntragScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (last) ...[
-            VPrimaryButton(
-              label: 'Absenden',
-              icon: Icons.send_outlined,
-              onTap: () {
-                state.sendBundle();
-                setState(() => _sent = true);
-              },
-            ),
-            const VGap.xs(),
-            VGhostButton(
-              label: 'Als PDF zum Drucken',
-              icon: Icons.print_outlined,
-              onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('PDF gespeichert. Per Post an: ${deskPostalAddress(widget.desk)}')),
+            if (!_paperOnly)
+              VPrimaryButton(label: _busy ? 'Sendet …' : 'Absenden', icon: Icons.send_outlined, onTap: _busy ? null : _send)
+            else
+              VPrimaryButton(
+                label: 'Als PDF zum Drucken',
+                icon: Icons.print_outlined,
+                onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF gespeichert. Per Post an: ${_draft!.deskAddress ?? 'Adresse siehe Betreiber'}'))),
               ),
-            ),
+            if (!_paperOnly) ...[
+              const VGap.xs(),
+              VGhostButton(
+                label: 'Als PDF zum Drucken',
+                icon: Icons.print_outlined,
+                onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF gespeichert. Per Post an: ${_draft!.deskAddress ?? '–'}'))),
+              ),
+            ],
           ] else
-            VPrimaryButton(
-              label: 'Weiter',
-              onTap: _canContinue(state) ? () => setState(() => _step += 1) : null,
-            ),
-          if (_step > 0 && !last) ...[
-            const VGap.xs(),
-            VGhostButton(label: 'Zurück', onTap: () => setState(() => _step -= 1)),
-          ],
-          if (last) ...[
+            VPrimaryButton(label: 'Weiter', onTap: _canContinue && !_busy ? () => setState(() => _step += 1) : null),
+          if (_step > 0) ...[
             const VGap.xs(),
             VGhostButton(label: 'Zurück', onTap: () => setState(() => _step -= 1)),
           ],
@@ -128,6 +247,37 @@ class _AntragScreenState extends State<AntragScreen> {
     );
   }
 
+  Future<void> _maybeShowRecoveryCode() async {
+    final session = RepoScope.read(context);
+    final code = await session.recoveryCode();
+    if (code == null || !mounted) return;
+    await showVSheet(
+      context,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.l),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const VSheetHeader(title: 'Dein Wiederherstellungscode', subtitle: 'Einmal zeigen wir ihn. Mach einen Screenshot.'),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(VSpace.m),
+              decoration: BoxDecoration(border: Border.all(color: VColors.ink, width: 1.5), borderRadius: BorderRadius.circular(4)),
+              child: Text(code, style: VText.mono.copyWith(fontSize: 17, height: 1.6)),
+            ),
+            const VGap.m(),
+            Text(
+              'Kein Konto, kein Passwort. Mit diesen zwölf Wörtern holst du dein Konto auf ein neues Telefon. Wer sie hat, hat dein Konto.',
+              style: VText.bodyS.copyWith(color: VColors.ink2),
+            ),
+            const VGap.l(),
+            VPrimaryButton(label: 'Ich habe es notiert', onTap: () => Navigator.of(ctx).pop()),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _StepIndicator extends StatelessWidget {
@@ -181,7 +331,9 @@ class _StepIndicator extends StatelessWidget {
 
 class _Pruefen extends StatelessWidget {
   const _Pruefen({
-    required this.state,
+    required this.draft,
+    required this.incidents,
+    required this.me,
     required this.desk,
     required this.unknown,
     required this.addressCtl,
@@ -189,104 +341,86 @@ class _Pruefen extends StatelessWidget {
     required this.onChanged,
     required this.onPersonalSaved,
   });
-  final DemoState state;
+  final ApiClaimDraft draft;
+  final List<ApiIncident> incidents;
+  final ApiCustomer? me;
   final String desk;
   final bool unknown;
   final TextEditingController addressCtl;
   final bool showPersonal;
   final VoidCallback onChanged;
-  final VoidCallback onPersonalSaved;
+  final Future<void> Function() onPersonalSaved;
 
   @override
   Widget build(BuildContext context) {
-    final incidents = state.incidents.where((i) => i.desk == desk && (i.isOpen || state.draftIncidentIds.contains(i.id))).toList();
-    final amount = state.draftAmount;
+    final amount = draft.claim.amountClaimedCents;
+    final pd = me?.personalData;
+    final relay = me?.relayAddress ?? draft.relayAddress;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Diese Verspätungen gehen in den Antrag.', style: VText.h2),
         const VGap.s(),
-        Text('Tippe eine an, um sie rauszulassen. Jede steht einzeln im Formular.', style: VText.caption),
+        Text('Alle offenen Fälle dieser Stelle. Jede steht einzeln im Formular.', style: VText.caption),
         const VGap.m(),
-        VSection('Fälle', trailing: Text(fmtEuro(amount), style: VText.captionInk)),
+        VSection('Fälle', trailing: Text(fmtCents(amount), style: VText.captionInk)),
         if (incidents.isEmpty)
           Padding(
             padding: const EdgeInsets.only(top: VSpace.m),
             child: Text('Keine offenen Fälle für diese Stelle.', style: VText.caption),
           ),
-        for (final i in incidents)
-          IncidentRow(
-            incident: i,
-            leading: _Check(on: state.draftIncidentIds.contains(i.id)),
-            onTap: () => state.toggleDraftIncident(i.id),
-          ),
-        if (amount < 4 && incidents.isNotEmpty && incidents.every((i) => i.ticket == TicketType.deutschlandticket)) ...[
-          const VGap.s(),
-          Text('Unter 4 € zahlt die Bahn nicht aus. Lass alle drin.', style: VText.caption.copyWith(color: VColors.red)),
-        ],
+        for (final i in incidents) IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i)),
         const VGap.xl(),
-        VSection('Geht an'),
+        const VSection('Geht an'),
         const VGap.m(),
-        if (unknown) _UnknownDesk(ctl: addressCtl, onChanged: onChanged) else ...[
+        if (unknown || (draft.deskAddress == null && draft.deskEmail == null))
+          _UnknownDesk(ctl: addressCtl, onChanged: onChanged)
+        else ...[
           Text(desk, style: VText.bodyStrong),
           const VGap.xs(),
-          Text(Mock.deskAddresses[desk] ?? '', style: VText.bodyS.copyWith(color: VColors.ink2)),
+          Text([draft.deskAddress, draft.deskEmail].whereType<String>().join('\n'), style: VText.bodyS.copyWith(color: VColors.ink2)),
           const VGap.xs(),
           Text(
             desk == 'Servicecenter Fahrgastrechte'
                 ? 'Die gemeinsame Stelle von DB und rund 40 weiteren Bahnen.'
-                : 'Eigene Fahrgastrechte-Stelle dieses Betreibers.',
+                : (draft.deskEmail == null ? 'Eigene Stelle ohne E-Mail. Der Antrag geht per Post.' : 'Eigene Fahrgastrechte-Stelle dieses Betreibers.'),
             style: VText.caption,
           ),
         ],
         const VGap.xl(),
-        VSection('Deine Angaben'),
-        if (showPersonal) _PersonalForm(onSaved: onPersonalSaved) else ...[
-          VKeyValue('Name', Mock.userName, strong: true),
+        const VSection('Deine Angaben'),
+        if (showPersonal || pd == null)
+          _PersonalForm(initial: pd, onSaved: onPersonalSaved)
+        else ...[
+          VKeyValue('Name', pd.name, strong: true),
           const VRule(),
-          VKeyValue('Anschrift', Mock.userAddress.replaceAll('\n', ', ')),
+          VKeyValue('Anschrift', pd.address.replaceAll('\n', ', ')),
           const VRule(),
-          VKeyValue('Privates Postfach', Mock.userEmail),
+          VKeyValue('Privates Postfach', pd.email),
           const VRule(),
-          VKeyValue('Ticket-Nr.', Mock.ticketNumber, valueStyle: VText.mono),
+          VKeyValue('Ticket-Nr.', pd.ticketNumber ?? '–', valueStyle: VText.mono),
         ],
-        const VGap.m(),
-        Container(
-          padding: const EdgeInsets.all(VSpace.m),
-          decoration: BoxDecoration(border: Border.all(color: VColors.rule), borderRadius: BorderRadius.circular(4)),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('DEINE VERSPÄTOMAT-ADRESSE', style: VText.eyebrow),
-              const SizedBox(height: 6),
-              Text(Mock.relayAddress, style: VText.mono),
-              const SizedBox(height: 6),
-              Text('Deine Anträge gehen von hier raus. Antworten der Bahn landen dort und sofort auch in deinem Postfach.', style: VText.caption),
-            ],
+        if (relay != null) ...[
+          const VGap.m(),
+          Container(
+            padding: const EdgeInsets.all(VSpace.m),
+            decoration: BoxDecoration(border: Border.all(color: VColors.rule), borderRadius: BorderRadius.circular(4)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('DEINE VERSPÄTOMAT-ADRESSE', style: VText.eyebrow),
+                const SizedBox(height: 6),
+                Text(relay, style: VText.mono),
+                const SizedBox(height: 6),
+                Text('Deine Anträge gehen von hier raus. Antworten der Bahn landen dort und sofort auch in deinem Postfach.', style: VText.caption),
+              ],
+            ),
           ),
-        ),
+        ],
         const VGap.s(),
         Text('Diese Daten stehen nur auf dem Formular.', style: VText.caption),
       ],
-    );
-  }
-}
-
-class _Check extends StatelessWidget {
-  const _Check({required this.on});
-  final bool on;
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 22,
-      height: 22,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: on ? VColors.red : Colors.transparent,
-        border: Border.all(color: on ? VColors.red : VColors.rule, width: 1.5),
-      ),
-      child: on ? const Icon(Icons.check, size: 14, color: VColors.paper) : null,
     );
   }
 }
@@ -307,14 +441,6 @@ class _UnknownDesk extends StatelessWidget {
           'Dieser Betreiber ist nicht im Verzeichnis. Auf seiner Fahrgastrechte-Seite steht, wohin der Antrag geht. Trag die Adresse hier ein, wir merken sie uns für alle.',
           style: VText.bodyS.copyWith(color: VColors.ink2),
         ),
-        const VGap.s(),
-        Row(
-          children: [
-            const Icon(Icons.open_in_new, size: 16, color: VColors.ink2),
-            const SizedBox(width: 6),
-            Text('Fahrgastrechte-Seite des Betreibers', style: VText.caption.copyWith(decoration: TextDecoration.underline)),
-          ],
-        ),
         const VGap.m(),
         TextField(
           controller: ctl,
@@ -328,28 +454,49 @@ class _UnknownDesk extends StatelessWidget {
   }
 }
 
-/// First claim only: name, address, private inbox, ticket number. Stored on the phone.
+/// First claim only: name, address, private inbox, ticket number.
 class _PersonalForm extends StatefulWidget {
-  const _PersonalForm({required this.onSaved});
-  final VoidCallback onSaved;
+  const _PersonalForm({required this.initial, required this.onSaved});
+  final ApiPersonalData? initial;
+  final Future<void> Function() onSaved;
 
   @override
   State<_PersonalForm> createState() => _PersonalFormState();
 }
 
 class _PersonalFormState extends State<_PersonalForm> {
-  late final _name = TextEditingController(text: Mock.userName);
-  late final _street = TextEditingController(text: Mock.userAddress.split('\n').first);
-  late final _city = TextEditingController(text: Mock.userAddress.split('\n').last);
-  late final _email = TextEditingController(text: Mock.userEmail);
-  late final _ticket = TextEditingController(text: Mock.ticketNumber);
+  late final _name = TextEditingController(text: widget.initial?.name ?? '');
+  late final _address = TextEditingController(text: widget.initial?.address ?? '');
+  late final _email = TextEditingController(text: widget.initial?.email ?? '');
+  late final _ticket = TextEditingController(text: widget.initial?.ticketNumber ?? '');
+  bool _saving = false;
 
   @override
   void dispose() {
-    for (final c in [_name, _street, _city, _email, _ticket]) {
+    for (final c in [_name, _address, _email, _ticket]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  bool get _valid => _name.text.trim().isNotEmpty && _address.text.trim().isNotEmpty && _email.text.contains('@');
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final session = RepoScope.read(context);
+    await session.savePersonalData(ApiPersonalData(
+      name: _name.text.trim(),
+      address: _address.text.trim(),
+      email: _email.text.trim(),
+      ticketNumber: _ticket.text.trim().isEmpty ? null : _ticket.text.trim(),
+    ));
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (session.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Speichern fehlgeschlagen: ${session.error}')));
+      return;
+    }
+    await widget.onSaved();
   }
 
   @override
@@ -360,24 +507,15 @@ class _PersonalFormState extends State<_PersonalForm> {
         const VGap.s(),
         Text('Einmal eintragen. Steht danach auf jedem Antrag.', style: VText.caption),
         const VGap.m(),
-        TextField(controller: _name, decoration: const InputDecoration(hintText: 'Vor- und Nachname'), style: VText.bodyS),
+        TextField(controller: _name, onChanged: (_) => setState(() {}), decoration: const InputDecoration(hintText: 'Vor- und Nachname'), style: VText.bodyS),
         const VGap.s(),
-        TextField(controller: _street, decoration: const InputDecoration(hintText: 'Straße und Hausnummer'), style: VText.bodyS),
+        TextField(controller: _address, onChanged: (_) => setState(() {}), decoration: const InputDecoration(hintText: 'Straße, Hausnummer, PLZ und Ort'), style: VText.bodyS, maxLines: 2),
         const VGap.s(),
-        TextField(controller: _city, decoration: const InputDecoration(hintText: 'PLZ und Ort'), style: VText.bodyS),
-        const VGap.s(),
-        TextField(controller: _email, decoration: const InputDecoration(hintText: 'Privates Postfach (E-Mail)'), style: VText.bodyS, keyboardType: TextInputType.emailAddress),
+        TextField(controller: _email, onChanged: (_) => setState(() {}), decoration: const InputDecoration(hintText: 'Privates Postfach (E-Mail)'), style: VText.bodyS, keyboardType: TextInputType.emailAddress),
         const VGap.s(),
         TextField(controller: _ticket, decoration: const InputDecoration(hintText: 'Deutschlandticket-Nummer'), style: VText.bodyS),
         const VGap.m(),
-        VOutlineButton(
-          label: 'Speichern',
-          icon: Icons.check,
-          onTap: () {
-            DemoScope.read(context).savePersonalData();
-            widget.onSaved();
-          },
-        ),
+        VOutlineButton(label: _saving ? 'Speichert …' : 'Speichern', icon: Icons.check, onTap: _valid && !_saving ? _save : null),
       ],
     );
   }
@@ -388,33 +526,51 @@ class _PersonalFormState extends State<_PersonalForm> {
 // ---------------------------------------------------------------------------
 
 class _Ticket extends StatelessWidget {
-  const _Ticket({required this.state});
-  final DemoState state;
+  const _Ticket({required this.months, required this.uploads, required this.me, required this.busy, required this.onAttach});
+  final List<String> months;
+  final Map<String, String> uploads;
+  final ApiCustomer? me;
+  final bool busy;
+  final Future<void> Function(String month) onAttach;
 
   @override
   Widget build(BuildContext context) {
+    final several = months.length > 1;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Füge einen Screenshot deines Tickets mit Barcode an.', style: VText.h2),
+        Text(several ? 'Füge einen Screenshot pro Monat an.' : 'Füge einen Screenshot deines Tickets mit Barcode an.', style: VText.h2),
         const VGap.s(),
-        Text('Die Bahn will das Ticket sehen. Mehr Nachweis braucht es nicht.', style: VText.caption),
+        Text(
+          several
+              ? 'Jeder Monat ist rechtlich ein eigenes Ticket. Die Bahn will jedes sehen: ${months.map(monthLabel).join(' und ')}.'
+              : 'Die Bahn will das Ticket sehen. Mehr Nachweis braucht es nicht.',
+          style: VText.caption,
+        ),
         const VGap.l(),
-        if (!state.draftTicketAttached) ...[
-          VOutlineButton(label: 'Aus Fotos', icon: Icons.photo_library_outlined, onTap: state.attachTicket),
-          const VGap.s(),
-          VOutlineButton(label: 'Aus Ticket-App', icon: Icons.confirmation_number_outlined, onTap: state.attachTicket),
-        ] else ...[
-          const MockTicket(),
-          const VGap.s(),
-          Row(
-            children: [
-              const Icon(Icons.check, size: 16, color: VColors.green),
-              const SizedBox(width: 6),
-              Expanded(child: Text('Angehängt. Wird verschlüsselt aufbewahrt, bis der Antrag abgeschlossen ist. Dann gelöscht.', style: VText.caption)),
-            ],
-          ),
+        for (final m in months) ...[
+          if (several) ...[
+            Text(monthLabel(m).toUpperCase(), style: VText.eyebrow),
+            const VGap.s(),
+          ],
+          if (!uploads.containsKey(m)) ...[
+            VOutlineButton(label: busy ? 'Lädt hoch …' : 'Aus Fotos', icon: Icons.photo_library_outlined, onTap: busy ? null : () => onAttach(m)),
+            const VGap.s(),
+            VOutlineButton(label: 'Aus Ticket-App', icon: Icons.confirmation_number_outlined, onTap: busy ? null : () => onAttach(m)),
+          ] else ...[
+            MockTicket(name: me?.personalData?.name ?? me?.nickname ?? 'Fahrgast', ticketNumber: me?.personalData?.ticketNumber ?? '–', month: m == 'Ticket' ? 'Fahrkarte' : monthLabel(m)),
+            const VGap.s(),
+            Row(
+              children: [
+                const Icon(Icons.check, size: 16, color: VColors.green),
+                const SizedBox(width: 6),
+                Expanded(child: Text('Angehängt. Wird verschlüsselt aufbewahrt, bis der Antrag abgeschlossen ist. Dann gelöscht.', style: VText.caption)),
+              ],
+            ),
+          ],
+          const VGap.l(),
         ],
+        Text('Vorführung: das Bild wird erzeugt, nicht aus deinen Fotos geholt.', style: VText.caption),
       ],
     );
   }
@@ -425,40 +581,45 @@ class _Ticket extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _Zweck extends StatelessWidget {
-  const _Zweck({required this.state, required this.other, required this.onToggle});
-  final DemoState state;
+  const _Zweck({required this.ngos, required this.selected, required this.other, required this.onToggle, required this.onChoose});
+  final List<ApiNgo> ngos;
+  final ApiNgo? selected;
   final bool other;
   final ValueChanged<bool> onToggle;
+  final Future<void> Function(String id) onChoose;
 
   @override
   Widget build(BuildContext context) {
-    final ngo = Mock.ngoById(state.draftNgoId ?? state.ngoId);
+    final ngo = selected;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Die Entschädigung geht direkt an:', style: VText.h2),
         const VGap.l(),
-        Container(
-          padding: const EdgeInsets.all(VSpace.m),
-          decoration: BoxDecoration(
-            color: VColors.paperElevated,
-            border: Border.all(color: VColors.ink, width: 1.5),
-            borderRadius: BorderRadius.circular(4),
+        if (ngo == null)
+          Text('Kein Verein gewählt.', style: VText.body)
+        else
+          Container(
+            padding: const EdgeInsets.all(VSpace.m),
+            decoration: BoxDecoration(
+              color: VColors.paperElevated,
+              border: Border.all(color: VColors.ink, width: 1.5),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(ngo.name, style: VText.title),
+                const SizedBox(height: 2),
+                Text(ngo.tagline, style: VText.caption),
+                const VGap.m(),
+                const VRule(),
+                VKeyValue('Kontoinhaber', ngo.accountHolder, strong: true),
+                const VRule(),
+                VKeyValue('IBAN', ngo.iban, valueStyle: VText.mono),
+              ],
+            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(ngo.name, style: VText.title),
-              const SizedBox(height: 2),
-              Text(ngo.tagline, style: VText.caption),
-              const VGap.m(),
-              const VRule(),
-              VKeyValue('Kontoinhaber', ngo.accountHolder, strong: true),
-              const VRule(),
-              VKeyValue('IBAN', ngo.iban, valueStyle: VText.mono),
-            ],
-          ),
-        ),
         const VGap.s(),
         Text('So steht es im Formular unter „Name des Kontoinhabers“. Die Bahn überweist dorthin, nicht an dich.', style: VText.caption),
         const VGap.l(),
@@ -470,15 +631,10 @@ class _Zweck extends StatelessWidget {
         ),
         if (other) ...[
           const VGap.m(),
-          for (final n in Mock.ngos)
+          for (final n in ngos)
             Padding(
               padding: const EdgeInsets.only(bottom: VSpace.s),
-              child: VChoiceCard(
-                title: n.name,
-                subtitle: n.tagline,
-                selected: n.id == ngo.id,
-                onTap: () => state.setDraftNgo(n.id),
-              ),
+              child: VChoiceCard(title: n.name, subtitle: n.tagline, selected: n.id == ngo?.id, onTap: () => onChoose(n.id)),
             ),
         ],
       ],
@@ -491,15 +647,33 @@ class _Zweck extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _Unterschrift extends StatelessWidget {
-  const _Unterschrift({required this.state});
-  final DemoState state;
+  const _Unterschrift({
+    required this.draft,
+    required this.incidents,
+    required this.me,
+    required this.ngo,
+    required this.signed,
+    required this.busy,
+    required this.controller,
+    required this.onSign,
+  });
+  final ApiClaimDraft draft;
+  final List<ApiIncident> incidents;
+  final ApiCustomer? me;
+  final ApiNgo? ngo;
+  final bool signed;
+  final bool busy;
+  final SignatureController controller;
+  final Future<void> Function() onSign;
 
   @override
   Widget build(BuildContext context) {
-    final ngo = Mock.ngoById(state.draftNgoId ?? state.ngoId);
-    final incidents = state.incidents.where((i) => state.draftIncidentIds.contains(i.id)).toList()..sort((a, b) => a.date.compareTo(b.date));
     final first = incidents.isNotEmpty ? incidents.first : null;
     final bundled = incidents.length > 1 || (first?.ticket == TicketType.deutschlandticket);
+    final pd = me?.personalData;
+    final name = pd?.name ?? me?.nickname ?? 'Fahrgast';
+    final relay = me?.relayAddress ?? draft.relayAddress ?? '–';
+    final amount = draft.claim.amountClaimedCents;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -510,51 +684,51 @@ class _Unterschrift extends StatelessWidget {
         const VGap.m(),
         _FormPreview(
           children: [
-            _FormTitle('Antragsformular für Erstattungen und Entschädigungen'),
-            _FormSub('gemäß der Verordnung (EU) 2021/782 des Europäischen Parlaments und des Rates'),
+            const _FormTitle('Antragsformular für Erstattungen und Entschädigungen'),
+            const _FormSub('gemäß der Verordnung (EU) 2021/782 des Europäischen Parlaments und des Rates'),
             const SizedBox(height: 12),
-            _FormHead('1. Grund/Gründe für Ihren Antrag'),
+            const _FormHead('1. Grund/Gründe für Ihren Antrag'),
             _FormLine('[X] Verspätung${incidents.any((i) => i.cancelled) ? '   [X] Ausfall' : '   [ ] Ausfall'}   [ ] Verpasster Anschluss'),
             const SizedBox(height: 10),
-            _FormHead('3. Angaben zu Ihrer Fahrt'),
+            const _FormHead('3. Angaben zu Ihrer Fahrt'),
             _FormLine('3.1 Eisenbahnunternehmen: ${first?.operator ?? '–'}'),
             if (first != null) ...[
-              _FormLine('3.2.1 Abreisedatum: ${_dmy(first.date)}'),
+              _FormLine('3.2.1 Abreisedatum: ${dmy(first.date)}'),
               _FormLine('3.2.2 Abreisebahnhof: ${first.from}'),
               _FormLine('3.2.3 Zielbahnhof: ${first.to}'),
-              _FormLine('3.2.5 Ankunft laut Fahrplan: ${first.plannedArrival != null ? fmtTime(first.plannedArrival!) : '–'}'),
+              _FormLine('3.2.5 Ankunft laut Fahrplan: ${first.evidence?.plannedArrival != null ? fmtClock(first.evidence!.plannedArrival!) : '–'}'),
               _FormLine('3.2.6 Zugnummer: ${first.line}'),
-              _FormLine('3.2.7 Fahrkartennummer: ${first.ticket == TicketType.einzelfahrkarte ? 'Auftrags-Nr. 9K2M4P' : Mock.ticketNumber}'),
-              _FormLine('3.3.3 Tatsächliche Ankunft: ${first.actualArrival != null ? fmtTime(first.actualArrival!) : '–'}'),
+              _FormLine('3.2.7 Fahrkartennummer: ${pd?.ticketNumber ?? '–'}'),
+              _FormLine('3.3.3 Tatsächliche Ankunft: ${first.evidence?.actualArrival != null ? fmtClock(first.evidence!.actualArrival!) : '–'}'),
             ],
             const SizedBox(height: 10),
-            _FormHead('4. Art Ihres Antrags'),
+            const _FormHead('4. Art Ihres Antrags'),
             _FormLine(bundled
                 ? '[X] Entschädigung: für wiederholte Verspätungen oder Ausfälle, Inhaber einer Zeitfahrkarte'
                 : '[X] Entschädigung: Verspätung bei der Ankunft von ${(first?.delayMinutes ?? 0) >= 120 ? 'mindestens 120' : '60 bis 119'} Minuten'),
             const SizedBox(height: 10),
-            _FormHead('5. Angaben zur Person'),
-            _FormLine('5.1 Name: ${Mock.userName}'),
-            _FormLine('5.2 Anschrift: ${Mock.userAddress.replaceAll('\n', ', ')}'),
-            _FormLine('5.3.1 E-Mail: ${Mock.relayAddress}'),
-            _FormLine('5.4 Auszahlung: [X] Geld   [ ] Gutschein'),
-            _FormLine('5.5.1 IBAN: ${ngo.iban}'),
-            _FormLine('5.5.4 Name des Kontoinhabers: ${ngo.accountHolder}', strong: true),
+            const _FormHead('5. Angaben zur Person'),
+            _FormLine('5.1 Name: $name'),
+            _FormLine('5.2 Anschrift: ${pd?.address.replaceAll('\n', ', ') ?? '–'}'),
+            _FormLine('5.3.1 E-Mail: $relay'),
+            const _FormLine('5.4 Auszahlung: [X] Geld   [ ] Gutschein'),
+            _FormLine('5.5.1 IBAN: ${draft.claim.iban}'),
+            _FormLine('5.5.4 Name des Kontoinhabers: ${draft.claim.accountHolder}', strong: true),
             const SizedBox(height: 10),
-            _FormHead('6. Zusätzliche Angaben'),
+            const _FormHead('6. Zusätzliche Angaben'),
             if (bundled) ...[
-              _FormLine('Wiederholte Verspätungen mit Deutschlandticket ${Mock.ticketNumber}:'),
+              _FormLine('Wiederholte Verspätungen mit Zeitfahrkarte ${pd?.ticketNumber ?? ''}:'),
               for (final i in incidents)
                 _FormLine(
-                  '· ${_dmy(i.date)} ${i.line} ${i.from} – ${i.to}, Ankunft ${i.plannedArrival != null ? fmtTime(i.plannedArrival!) : '–'} geplant, ${i.actualArrival != null ? fmtTime(i.actualArrival!) : '–'} tatsächlich (+${i.delayMinutes} Min${i.cancelled ? ', Zugausfall' : ''}${i.selfEntered ? ', Ankunftszeit selbst eingetragen' : ''})',
+                  '· ${dmy(i.date)} ${i.line} ${i.from} – ${i.to}, Ankunft ${i.evidence?.plannedArrival != null ? fmtClock(i.evidence!.plannedArrival!) : '–'} geplant, ${i.evidence?.actualArrival != null ? fmtClock(i.evidence!.actualArrival!) : '–'} tatsächlich (+${i.delayMinutes} Min${i.cancelled ? ', Zugausfall' : ''}${i.selfEntered ? ', Ankunftszeit selbst eingetragen' : ''})',
                 ),
-              _FormLine('Summe: ${fmtEuro(state.draftAmount)} (${incidents.length} × 1,50 €)'),
+              _FormLine('Summe: ${fmtCents(amount)} (${incidents.length} Fälle)'),
             ] else
-              _FormLine('Fahrpreis ${first?.fare != null ? fmtEuro(first!.fare!) : '–'}, Anspruch ${fmtEuro(state.draftAmount)}.'),
+              _FormLine('Fahrpreis ${first?.fareCents != null ? fmtCents(first!.fareCents!) : '–'}, Anspruch ${fmtCents(amount)}.'),
             const SizedBox(height: 12),
-            _FormLine('Hiermit erkläre ich, dass alle in diesem Formular gemachten Angaben der Wahrheit entsprechen.', strong: true),
-            _FormLine('Datum: ${_dmy(DateTime.now())}   Ort: Köln'),
-            _FormLine('Name des Fahrgastes: ${Mock.userName}'),
+            const _FormLine('Hiermit erkläre ich, dass alle in diesem Formular gemachten Angaben der Wahrheit entsprechen.', strong: true),
+            _FormLine('Datum: ${dmy(DateTime.now())}'),
+            _FormLine('Name des Fahrgastes: $name'),
           ],
         ),
         const VGap.l(),
@@ -570,29 +744,25 @@ class _Unterschrift extends StatelessWidget {
           children: [
             Text('Name', style: VText.caption),
             const SizedBox(width: 12),
-            Text(Mock.userName, style: VText.title),
+            Text(name, style: VText.title),
           ],
         ),
         const VGap.s(),
-        SignaturePad(onSigned: state.sign),
-        if (!state.draftSigned) ...[
-          const VGap.xs(),
-          VGhostButton(label: 'Nur mit Namen bestätigen', onTap: state.sign),
-        ] else ...[
-          const VGap.xs(),
+        SignaturePad(controller: controller, onSigned: () {}),
+        const VGap.xs(),
+        if (!signed)
+          VOutlineButton(label: busy ? 'Speichert …' : 'Bestätigen', icon: Icons.check, onTap: busy ? null : onSign)
+        else
           Row(
             children: [
               const Icon(Icons.check, size: 16, color: VColors.green),
               const SizedBox(width: 6),
-              Text('Bestätigt. Deine Unterschrift bleibt nur in diesem Antrag.', style: VText.caption),
+              Expanded(child: Text('Bestätigt. Deine Unterschrift bleibt nur in diesem Antrag.', style: VText.caption)),
             ],
           ),
-        ],
       ],
     );
   }
-
-  String _dmy(DateTime d) => '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
 }
 
 class _FormPreview extends StatelessWidget {
@@ -653,37 +823,51 @@ class _FormLine extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _Senden extends StatelessWidget {
-  const _Senden({required this.state, required this.desk});
-  final DemoState state;
-  final String desk;
+  const _Senden({required this.draft, required this.incidents, required this.me, required this.ngo, required this.paperOnly});
+  final ApiClaimDraft draft;
+  final List<ApiIncident> incidents;
+  final ApiCustomer? me;
+  final ApiNgo? ngo;
+  final bool paperOnly;
 
   @override
   Widget build(BuildContext context) {
-    final mail = RailMail(
+    final pd = me?.personalData;
+    final name = pd?.name ?? me?.nickname ?? 'Fahrgast';
+    final relay = me?.relayAddress ?? draft.relayAddress ?? '–';
+    final mail = ApiMail(
       id: 'draft',
-      incidentIds: state.draftIncidentIds,
-      direction: MailDirection.out,
-      from: '${Mock.userName} <${Mock.relayAddress}>',
-      to: deskMailAddress(desk),
+      incidentIds: draft.claim.incidentIds,
+      direction: ApiMailDirection.out,
+      from: '$name <$relay>',
+      to: draft.deskEmail ?? '–',
+      bcc: pd?.email != null ? '${pd!.email} (dein Postfach)' : null,
       subject: 'Fahrgastrechte: EU-Antragsformular',
-      body: draftMailBody(state),
-      date: DateTime.now(),
-      attachments: const ['EU-Antrag.pdf', 'Ticket.png'],
+      body: draftMailBody(accountHolder: draft.claim.accountHolder, claimantName: name, incidents: incidents),
+      date: DateTime.now().toUtc(),
+      attachments: ['EU-Antrag.txt', for (final m in draft.claim.ticketMonths) 'Ticket_$m.png'],
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Wir haben alles vorbereitet. Du schickst es ab.', style: VText.h2),
+        Text(paperOnly ? 'Diese Stelle nimmt keine E-Mail.' : 'Wir haben alles vorbereitet. Du schickst es ab.', style: VText.h2),
         const VGap.s(),
-        Text('Von deiner Verspätomat-Adresse, mit Kopie an dein Postfach.', style: VText.caption),
+        Text(
+          paperOnly ? 'Der Antrag geht per Post. Wir erzeugen das PDF, du druckst und schickst es.' : 'Von deiner Verspätomat-Adresse, mit Kopie an dein Postfach.',
+          style: VText.caption,
+        ),
         const VGap.m(),
-        MailView(mail: mail, bcc: '${Mock.userEmail} (dein Postfach)'),
+        if (paperOnly) ...[
+          Text(draft.deskAddress ?? 'Adresse siehe Betreiber', style: VText.bodyStrong),
+          const VGap.m(),
+        ] else
+          MailView(mail: mail),
         const VGap.m(),
-        VKeyValue('Fälle', '${state.draftIncidentIds.length}'),
+        VKeyValue('Fälle', '${draft.claim.incidentIds.length}'),
         const VRule(),
-        VKeyValue('Anspruch', fmtEuro(state.draftAmount), strong: true),
+        VKeyValue('Anspruch', fmtCents(draft.claim.amountClaimedCents), strong: true),
         const VRule(),
-        VKeyValue('Empfänger', Mock.ngoById(state.draftNgoId ?? state.ngoId).accountHolder),
+        VKeyValue('Empfänger', draft.claim.accountHolder),
         const VGap.s(),
         Text('Nach dem Absenden steht alles auf „eingereicht“. Die Antwort der Bahn landet in der App und in deinem Postfach.', style: VText.caption),
       ],
@@ -692,8 +876,10 @@ class _Senden extends StatelessWidget {
 }
 
 class _Sent extends StatelessWidget {
-  const _Sent({required this.desk});
+  const _Sent({required this.desk, required this.dryRun, required this.mail});
   final String desk;
+  final bool dryRun;
+  final ApiMail mail;
 
   @override
   Widget build(BuildContext context) {
@@ -712,7 +898,11 @@ class _Sent extends StatelessWidget {
               const VGap.s(),
               Text(Mock.longDate(DateTime.now()), style: VText.h2.copyWith(color: VColors.ink2, fontWeight: FontWeight.w400)),
               const VGap.m(),
-              Text('An $desk, von deiner Adresse. Die Kopie ist schon in deinem Postfach.', style: VText.body.copyWith(color: VColors.ink2)),
+              Text('An ${mail.to}, von deiner Adresse. Die Kopie ist in deinem Postfach.', style: VText.body.copyWith(color: VColors.ink2)),
+              if (dryRun) ...[
+                const VGap.s(),
+                Text('Testlauf: keine echte Mail hat das Haus verlassen.', style: VText.caption),
+              ],
               const Spacer(),
               VPrimaryButton(label: 'Zurück zum Konto', onTap: () => context.go(Routes.konto)),
             ],

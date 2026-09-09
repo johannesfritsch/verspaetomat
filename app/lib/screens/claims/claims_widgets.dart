@@ -1,7 +1,12 @@
-import 'package:flutter/material.dart';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
-import '../../mock/mock_data.dart';
-import '../../state/demo_state.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+
+import '../../mock/mock_data.dart' show Mock, IncidentStatus, IncidentStatusX, TicketType, TicketTypeX;
+import '../../repo/app_repository.dart';
+import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 
@@ -16,11 +21,114 @@ VTone toneFor(IncidentStatus s) => switch (s) {
       _ => VTone.neutral,
     };
 
+/// Euro cents → "4,50 €".
+String fmtCents(int cents) => fmtEuro(cents / 100);
+
+/// UTC timestamp → local "08:52".
+String fmtClock(DateTime d) => fmtTime(TimeOfDay.fromDateTime(d.toLocal()));
+
+/// "9. September 2026 08:52" from a UTC timestamp, local time.
+String fmtStamp(DateTime d) => '${Mock.shortDate(d.toLocal())} ${fmtClock(d)}';
+
+// ---------------------------------------------------------------------------
+// Loading
+// ---------------------------------------------------------------------------
+
+/// Runs one repository call and renders the result, with plain loading and
+/// error lines. Call [refresh] via the returned controller to reload.
+class Loader<T> extends StatefulWidget {
+  const Loader({super.key, required this.load, required this.builder, this.controller});
+  final Future<T> Function(AppRepository repo) load;
+  final Widget Function(BuildContext context, T data, VoidCallback refresh) builder;
+  final LoaderController? controller;
+
+  @override
+  State<Loader<T>> createState() => _LoaderState<T>();
+}
+
+class LoaderController {
+  VoidCallback? _refresh;
+  void refresh() => _refresh?.call();
+}
+
+class _LoaderState<T> extends State<Loader<T>> {
+  Future<T>? _future;
+  AppRepository? _repo;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller?._refresh = _reload;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final repo = RepoScope.of(context).repo;
+    if (!identical(repo, _repo)) {
+      _repo = repo;
+      _future = widget.load(repo);
+    }
+  }
+
+  void _reload() {
+    final repo = _repo;
+    if (repo == null) return;
+    setState(() => _future = widget.load(repo));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<T>(
+      future: _future,
+      builder: (context, snap) {
+        if (snap.hasError) return LoadError(error: snap.error, onRetry: _reload);
+        if (!snap.hasData) return const LoadingLine();
+        return widget.builder(context, snap.data as T, _reload);
+      },
+    );
+  }
+}
+
+class LoadingLine extends StatelessWidget {
+  const LoadingLine({super.key, this.text = 'Lädt …'});
+  final String text;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: VSpace.l),
+        child: Text(text, style: VText.body.copyWith(color: VColors.ink2)),
+      );
+}
+
+class LoadError extends StatelessWidget {
+  const LoadError({super.key, required this.error, required this.onRetry});
+  final Object? error;
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: VSpace.l),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Das hat nicht geklappt.', style: VText.bodyStrong),
+            const VGap.xs(),
+            Text('$error', style: VText.caption, maxLines: 3, overflow: TextOverflow.ellipsis),
+            const VGap.s(),
+            VGhostButton(label: 'Erneut versuchen', icon: Icons.refresh, onTap: onRetry),
+          ],
+        ),
+      );
+}
+
+// ---------------------------------------------------------------------------
+// Incidents
+// ---------------------------------------------------------------------------
+
 /// One incident in the ledger: date, line, route on the left; delay,
 /// amount and status on the right. Hairline below.
 class IncidentRow extends StatelessWidget {
   const IncidentRow({super.key, required this.incident, this.onTap, this.leading, this.note});
-  final Incident incident;
+  final ApiIncident incident;
   final VoidCallback? onTap;
   final Widget? leading;
 
@@ -73,7 +181,7 @@ class IncidentRow extends StatelessWidget {
                   children: [
                     VDelay(i.delayMinutes, size: VDelaySize.small),
                     const SizedBox(height: 2),
-                    Text(fmtEuro(i.amount), style: VText.captionInk.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
+                    Text(fmtCents(i.amountCents), style: VText.captionInk.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
                     const SizedBox(height: 4),
                     VChip(i.status.label, tone: toneFor(i.status)),
                   ],
@@ -89,7 +197,8 @@ class IncidentRow extends StatelessWidget {
 }
 
 /// The evidence sheet behind an incident.
-Future<void> showEvidenceSheet(BuildContext context, Incident i) {
+Future<void> showEvidenceSheet(BuildContext context, ApiIncident i) {
+  final ev = i.evidence;
   return showVSheet(
     context,
     builder: (ctx) => Padding(
@@ -118,24 +227,24 @@ Future<void> showEvidenceSheet(BuildContext context, Incident i) {
                 ),
                 const VGap.m(),
                 const VRule.red(),
-                VKeyValue('Ankunft laut Fahrplan', i.plannedArrival != null ? fmtTime(i.plannedArrival!) : '–'),
+                VKeyValue('Ankunft laut Fahrplan', ev?.plannedArrival != null ? fmtClock(ev!.plannedArrival!) : '–'),
                 const VRule(),
-                VKeyValue('Tatsächliche Ankunft', i.actualArrival != null ? fmtTime(i.actualArrival!) : '–', strong: true),
+                VKeyValue('Tatsächliche Ankunft', ev?.actualArrival != null ? fmtClock(ev!.actualArrival!) : '–', strong: true),
                 const VRule(),
                 VKeyValue('Betreiber', i.operator),
                 const VRule(),
                 VKeyValue('Zuständige Stelle', i.desk),
                 const VRule(),
-                VKeyValue('Quelle', i.selfEntered ? 'Selbst eingetragen' : 'Live-Daten Transitous'),
+                VKeyValue('Quelle', ev?.source ?? (i.selfEntered ? 'Selbst eingetragen' : 'Live-Daten Transitous')),
                 const VRule(),
-                VKeyValue('Erfasst am', '${Mock.shortDate(i.date)} ${i.actualArrival != null ? fmtTime(i.actualArrival!) : ''}'),
+                VKeyValue('Erfasst am', ev?.fetchedAt != null ? fmtStamp(ev!.fetchedAt!) : Mock.shortDate(i.date)),
                 const VRule(),
                 VKeyValue('Ticket', i.ticket.label),
                 const VRule(),
-                VKeyValue('Anspruch', fmtEuro(i.amount), strong: true),
-                if (i.fare != null) ...[
+                VKeyValue('Anspruch', fmtCents(i.amountCents), strong: true),
+                if (i.fareCents != null) ...[
                   const VRule(),
-                  VKeyValue('Fahrpreis', fmtEuro(i.fare!)),
+                  VKeyValue('Fahrpreis', fmtCents(i.fareCents!)),
                 ],
                 const VRule(),
                 VKeyValue('Frist (gesetzlich)', Mock.longDate(i.legalDeadline)),
@@ -157,9 +266,15 @@ Future<void> showEvidenceSheet(BuildContext context, Incident i) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Ticket
+// ---------------------------------------------------------------------------
+
 /// A mocked Deutschlandticket screenshot. No image assets.
 class MockTicket extends StatelessWidget {
-  const MockTicket({super.key, this.month = 'September 2026'});
+  const MockTicket({super.key, required this.name, required this.ticketNumber, this.month = 'September 2026'});
+  final String name;
+  final String ticketNumber;
   final String month;
 
   static const _bars = [3, 1, 4, 2, 1, 5, 2, 3, 1, 2, 4, 1, 3, 2, 5, 1, 2, 3, 1, 4, 2, 1, 3, 5, 1, 2, 4, 1, 3, 2, 2, 1, 4, 3, 1];
@@ -185,8 +300,8 @@ class MockTicket extends StatelessWidget {
           const VGap.s(),
           const VRule(),
           const VGap.s(),
-          Text(Mock.userName, style: VText.bodyStrong),
-          Text('Ticket-Nr. ${Mock.ticketNumber}', style: VText.mono.copyWith(color: VColors.ink2)),
+          Text(name, style: VText.bodyStrong),
+          Text('Ticket-Nr. $ticketNumber', style: VText.mono.copyWith(color: VColors.ink2)),
           const VGap.m(),
           SizedBox(
             height: 46,
@@ -207,11 +322,52 @@ class MockTicket extends StatelessWidget {
   }
 }
 
+/// Renders a plausible ticket image as PNG bytes, without any asset.
+Future<Uint8List> renderTicketPng({required String name, required String ticketNumber, required String month}) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  const w = 720.0, h = 420.0;
+  canvas.drawRect(const Rect.fromLTWH(0, 0, w, h), Paint()..color = const Color(0xFFFFFFFF));
+  canvas.drawRect(const Rect.fromLTWH(0, 0, w, 8), Paint()..color = VColors.red);
+  void text(String s, double x, double y, double size, {FontWeight weight = FontWeight.w400, Color color = const Color(0xFF111111)}) {
+    final p = TextPainter(
+      text: TextSpan(text: s, style: TextStyle(fontSize: size, fontWeight: weight, color: color, fontFamily: 'Helvetica')),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: w - 2 * x);
+    p.paint(canvas, Offset(x, y));
+  }
+  text('Deutschlandticket', 40, 40, 38, weight: FontWeight.w700);
+  text(month, 40, 92, 22, color: const Color(0xFF6B6B66));
+  text(name, 40, 150, 26, weight: FontWeight.w600);
+  text('Ticket-Nr. $ticketNumber', 40, 190, 22);
+  const bars = [3, 1, 4, 2, 1, 5, 2, 3, 1, 2, 4, 1, 3, 2, 5, 1, 2, 3, 1, 4, 2, 1, 3, 5, 1, 2, 4, 1, 3, 2, 2, 1, 4, 3, 1, 2, 5, 1, 3, 2, 4, 1, 2, 3, 1];
+  var x = 40.0;
+  for (final b in bars) {
+    canvas.drawRect(Rect.fromLTWH(x, 250, b * 3.0, 110), Paint()..color = const Color(0xFF111111));
+    x += b * 3.0 + 5;
+  }
+  text('Gültig im Nahverkehr · 2. Klasse · Vorführung', 40, 380, 18, color: const Color(0xFF6B6B66));
+  final img = await recorder.endRecording().toImage(w.toInt(), h.toInt());
+  final data = await img.toByteData(format: ui.ImageByteFormat.png);
+  return data!.buffer.asUint8List();
+}
+
+// ---------------------------------------------------------------------------
+// Signature
+// ---------------------------------------------------------------------------
+
+class SignatureController {
+  _SignaturePadState? _state;
+  bool get hasStrokes => _state?._strokes.isNotEmpty ?? false;
+  Future<Uint8List?> toPng() => _state?._toPng() ?? Future.value(null);
+}
+
 /// A signature pad. Records strokes and calls [onSigned] after the first.
 class SignaturePad extends StatefulWidget {
-  const SignaturePad({super.key, required this.onSigned, this.height = 140});
+  const SignaturePad({super.key, required this.onSigned, this.height = 140, this.controller});
   final VoidCallback onSigned;
   final double height;
+  final SignatureController? controller;
 
   @override
   State<SignaturePad> createState() => _SignaturePadState();
@@ -219,6 +375,22 @@ class SignaturePad extends StatefulWidget {
 
 class _SignaturePadState extends State<SignaturePad> {
   final List<List<Offset>> _strokes = [];
+  final GlobalKey _boundary = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller?._state = this;
+  }
+
+  Future<Uint8List?> _toPng() async {
+    if (_strokes.isEmpty) return null;
+    final rb = _boundary.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (rb == null) return null;
+    final img = await rb.toImage(pixelRatio: 2);
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return data?.buffer.asUint8List();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -231,31 +403,24 @@ class _SignaturePadState extends State<SignaturePad> {
           onPanEnd: (_) {
             if (_strokes.isNotEmpty && _strokes.last.length > 1) widget.onSigned();
           },
-          child: Container(
-            height: widget.height,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: VColors.paperElevated,
-              border: Border.all(color: VColors.rule),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Stack(
-              children: [
-                Positioned(
-                  left: 14,
-                  right: 14,
-                  bottom: 30,
-                  child: Container(height: 1, color: VColors.rule),
-                ),
-                Positioned(
-                  left: 14,
-                  bottom: 10,
-                  child: Text('Unterschrift', style: VText.caption),
-                ),
-                if (_strokes.isEmpty)
-                  Center(child: Text('Hier unterschreiben', style: VText.body.copyWith(color: VColors.ink3))),
-                CustomPaint(size: Size.infinite, painter: _StrokePainter(_strokes)),
-              ],
+          child: RepaintBoundary(
+            key: _boundary,
+            child: Container(
+              height: widget.height,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: VColors.paperElevated,
+                border: Border.all(color: VColors.rule),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Stack(
+                children: [
+                  Positioned(left: 14, right: 14, bottom: 30, child: Container(height: 1, color: VColors.rule)),
+                  Positioned(left: 14, bottom: 10, child: Text('Unterschrift', style: VText.caption)),
+                  if (_strokes.isEmpty) Center(child: Text('Hier unterschreiben', style: VText.body.copyWith(color: VColors.ink3))),
+                  CustomPaint(size: Size.infinite, painter: _StrokePainter(_strokes)),
+                ],
+              ),
             ),
           ),
         ),
@@ -302,17 +467,22 @@ class _StrokePainter extends CustomPainter {
   bool shouldRepaint(covariant _StrokePainter old) => true;
 }
 
+// ---------------------------------------------------------------------------
+// Mail
+// ---------------------------------------------------------------------------
+
 /// A mail rendered as a card: header lines, body, attachments.
 class MailView extends StatelessWidget {
   const MailView({super.key, required this.mail, this.compact = false, this.bcc});
-  final RailMail mail;
+  final ApiMail mail;
   final bool compact;
 
-  /// Shown as a BCC header line for outgoing mails (the customer's own copy).
+  /// Overrides the BCC header line (e.g. "… (dein Postfach)").
   final String? bcc;
 
   @override
   Widget build(BuildContext context) {
+    final bccLine = bcc ?? mail.bcc;
     return Container(
       padding: const EdgeInsets.all(VSpace.m),
       decoration: BoxDecoration(
@@ -325,9 +495,9 @@ class MailView extends StatelessWidget {
         children: [
           _hdr('Von', mail.from),
           _hdr('An', mail.to),
-          if (bcc != null) _hdr('BCC', bcc!),
+          if (bccLine != null && bccLine.isNotEmpty) _hdr('BCC', bccLine),
           _hdr('Betreff', mail.subject),
-          _hdr('Datum', '${Mock.shortDate(mail.date)} ${fmtTime(TimeOfDay.fromDateTime(mail.date))}'),
+          _hdr('Datum', fmtStamp(mail.date)),
           const VGap.s(),
           const VRule(),
           const VGap.s(),
@@ -363,18 +533,17 @@ class MailView extends StatelessWidget {
       );
 }
 
-Future<void> showMailSheet(BuildContext context, RailMail mail) {
-  final bcc = mail.direction == MailDirection.out ? '${Mock.userEmail} (dein Postfach)' : null;
+Future<void> showMailSheet(BuildContext context, ApiMail mail) {
   return showVSheet(
     context,
     expand: true,
     builder: (ctx) => Column(
       children: [
-        VSheetHeader(title: mail.direction == MailDirection.inbound ? 'Antwort der Bahn' : 'Dein Antrag', subtitle: mail.subject),
+        VSheetHeader(title: mail.direction == ApiMailDirection.inbound ? 'Antwort der Bahn' : 'Dein Antrag', subtitle: mail.subject),
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, VSpace.xl),
-            child: MailView(mail: mail, bcc: bcc),
+            child: MailView(mail: mail),
           ),
         ),
       ],
@@ -382,29 +551,24 @@ Future<void> showMailSheet(BuildContext context, RailMail mail) {
   );
 }
 
-/// The body text of the outgoing claim mail, mirrored from DemoState.sendBundle.
-String draftMailBody(DemoState state) {
-  final ngo = Mock.ngoById(state.draftNgoId ?? state.ngoId);
-  final incidents = state.incidents.where((i) => state.draftIncidentIds.contains(i.id)).toList();
+/// The body text of the outgoing claim mail, as the backend composes it.
+String draftMailBody({required String accountHolder, required String claimantName, required List<ApiIncident> incidents}) {
   final single = incidents.length == 1 && incidents.first.ticket == TicketType.einzelfahrkarte;
   if (single) {
     final i = incidents.first;
-    return 'Sehr geehrte Damen und Herren,\n\nanbei mein Antrag auf Entschädigung nach VO (EU) 2021/782 für die Fahrt mit ${i.line} am ${_dmy(i.date)} (${i.from} – ${i.to}), Ankunft ${i.delayMinutes} Minuten verspätet.\n\nDie Entschädigung bitte ich auf das im Formular angegebene Konto zu überweisen (Kontoinhaber: ${ngo.accountHolder}).\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist ${Mock.userName}.\n\nMit freundlichen Grüßen\n${Mock.userName}';
+    return 'Sehr geehrte Damen und Herren,\n\nanbei mein Antrag auf Entschädigung nach VO (EU) 2021/782 für die Fahrt mit ${i.line} am ${dmy(i.date)} (${i.from} – ${i.to}), Ankunft ${i.delayMinutes} Minuten verspätet.\n\nDie Entschädigung bitte ich auf das im Formular angegebene Konto zu überweisen (Kontoinhaber: $accountHolder).\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist $claimantName.\n\nMit freundlichen Grüßen\n$claimantName';
   }
-  return 'Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte Deutschlandticket). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: ${ngo.accountHolder}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist ${Mock.userName}.\n\nMit freundlichen Grüßen\n${Mock.userName}';
+  return 'Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: $accountHolder\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist $claimantName.\n\nMit freundlichen Grüßen\n$claimantName';
 }
 
-String _dmy(DateTime d) => '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+String dmy(DateTime d) => '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
 
-String deskMailAddress(String? desk) {
-  final a = Mock.deskAddresses[desk ?? ''];
-  if (a == null) return '–';
-  final lines = a.split('\n');
-  return lines.length > 1 ? lines[1].replaceAll(' (Beispiel)', '') : lines.first;
-}
-
-String deskPostalAddress(String? desk) {
-  final a = Mock.deskAddresses[desk ?? ''];
-  if (a == null) return 'Adresse unbekannt';
-  return a.split('\n').first;
+/// "2026-08" → "August 2026"
+String monthLabel(String ym) {
+  const months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+  final parts = ym.split('-');
+  if (parts.length != 2) return ym;
+  final m = int.tryParse(parts[1]);
+  if (m == null || m < 1 || m > 12) return ym;
+  return '${months[m - 1]} ${parts[0]}';
 }
