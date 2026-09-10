@@ -44,6 +44,7 @@ The skeleton lives in `backend/` (see `backend/README.md`, `backend/openapi.yaml
 | [30-tonight-plan.md](30-tonight-plan.md) | The build plan and what shipped, day by day |
 | [40-store-listing.md](40-store-listing.md) | App Store privacy label, review notes, Play Data safety form, derived from the in-app Datenschutz text |
 | [41-launch-checklist.md](41-launch-checklist.md) | Launch checklist: what only Johannes can do (domain, mail provider, NGO, Apple, Google, server), ordered by lead time |
+| [42-runbook-vps-testflight.md](42-runbook-vps-testflight.md) | Step-by-step: Hetzner VPS with Docker and Caddy, then the iOS build into TestFlight, then APNs |
 
 [sources.md](sources.md) lists the URLs behind the research.
 

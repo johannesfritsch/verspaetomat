@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../api/events.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -59,9 +60,17 @@ class Session extends ChangeNotifier {
   Future<void> init() async {
     final stored = prefs.getString(_modeKey);
     const forced = String.fromEnvironment('BACKEND', defaultValue: '');
-    mode = forced == 'local' || (forced.isEmpty && stored == 'local') ? BackendMode.local : BackendMode.demo;
+    // A release build talks to the real backend unless the person switched to Demo in
+    // Einstellungen; debug builds keep Demo as the default so the showcase runs without a server.
+    final local = forced == 'local' || (forced.isEmpty && stored == 'local') || (forced.isEmpty && stored == null && kReleaseMode);
+    mode = local ? BackendMode.local : BackendMode.demo;
     await _bootstrap();
+    if (me?.settings.onboardingDone == true) await prefs.setBool(onboardingDoneKey, true);
   }
+
+  /// Local mirror of `me.settings.onboardingDone`, so the first frame can pick the
+  /// start screen before the network answers.
+  static const onboardingDoneKey = 'onboarding_done';
 
   Future<void> _restartEvents() async {
     _events?.dispose();
@@ -153,7 +162,10 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> completeOnboarding() => updateSettings(const MePatch(onboardingDone: true));
+  Future<void> completeOnboarding() async {
+    await prefs.setBool(onboardingDoneKey, true);
+    await updateSettings(const MePatch(onboardingDone: true));
+  }
 
   /// Stumme Bahnhöfe live on the account. Full replacement each time.
   List<ApiMutedStation> get mutedStations => me?.settings.mutedStations ?? const [];

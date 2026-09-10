@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -38,9 +39,19 @@ class Routes {
   static const showcase = '/showcase';
 }
 
-GoRouter buildRouter(DemoState state) {
+/// Where the app opens. `INITIAL_ROUTE` wins (tests, showcase runs). Otherwise a release
+/// build starts at Willkommen until onboarding is done, then at the Bahnsteig; a debug
+/// build starts at the Showcase.
+String initialLocationFor({required bool onboardingDone}) {
+  const forced = String.fromEnvironment('INITIAL_ROUTE', defaultValue: '');
+  if (forced.isNotEmpty) return forced;
+  if (!kReleaseMode) return Routes.showcase;
+  return onboardingDone ? Routes.bahnsteig : Routes.welcome;
+}
+
+GoRouter buildRouter(DemoState state, {required String initialLocation}) {
   return GoRouter(
-    initialLocation: const String.fromEnvironment('INITIAL_ROUTE', defaultValue: Routes.showcase),
+    initialLocation: initialLocation,
     routes: [
       GoRoute(path: '/', redirect: (_, __) => Routes.showcase),
       GoRoute(path: Routes.showcase, builder: (_, __) => const ShowcaseScreen()),

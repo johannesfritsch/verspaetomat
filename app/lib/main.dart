@@ -37,7 +37,7 @@ class VerspaetomatApp extends StatefulWidget {
 }
 
 class _VerspaetomatAppState extends State<VerspaetomatApp> {
-  late final router = buildRouter(widget.state);
+  late final router = buildRouter(widget.state, initialLocation: initialLocationFor(onboardingDone: widget.session.prefs.getBool(Session.onboardingDoneKey) ?? false));
   late final GeofenceSync _geofence;
 
   @override
