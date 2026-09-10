@@ -130,11 +130,11 @@ Future<void> tapIcon(WidgetTester tester, IconData icon) async {
 
 Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? knownCustomer}) async {
   // Bahnsteig, idle. A leftover arrival card from an earlier run is dismissed first.
-  await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'Kein Zug. Gut so.' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 40));
+  await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 40));
   if (find.text('ANGEKOMMEN').evaluate().isNotEmpty) {
     await tapText(tester, 'Fertig');
   }
-  await pumpUntilFound(tester, find.text('Kein Zug. Gut so.'), timeout: const Duration(seconds: 40));
+  await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 40));
   final chip = find.byType(ActionChip);
   await pumpUntilFound(tester, chip, timeout: const Duration(seconds: 40));
   expect(find.textContaining('Köln', findRichText: true), findsWidgets);
@@ -198,7 +198,7 @@ Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? known
   });
   await pumpUntilFound(tester, minutesLine, timeout: const Duration(seconds: 20));
   await tapText(tester, 'Fertig');
-  await pumpUntilFound(tester, find.text('Kein Zug. Gut so.'), timeout: const Duration(seconds: 40));
+  await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 40));
   return customer;
 }
 
@@ -219,11 +219,11 @@ void main() {
     try {
       // 0. The app has booted and called /v1/me, so its customer is the most recently seen one.
       //    Start from a clean slate: earlier runs may have left claims (5 sends per day) and rides.
-      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'Kein Zug. Gut so.' || w.data == 'ANGEKOMMEN' || w.data == 'UNTERWEGS')), timeout: const Duration(seconds: 40));
+      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'ANGEKOMMEN' || w.data == 'UNTERWEGS')), timeout: const Duration(seconds: 40));
       customer = (await sw.customers()).first['id'] as String;
       await sw.reset(customer);
       // The reset arrives over the event stream; the platform is empty again.
-      await pumpUntilFound(tester, find.text('Kein Zug. Gut so.'), timeout: const Duration(seconds: 20));
+      await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 20));
       // The test phone has no GPS (NO_LOCATION): Stellwerk puts the customer at Köln Hbf.
       await sw.locate(customer, 'Köln Hbf');
       // ignore: avoid_print

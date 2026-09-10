@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/main.dart';
+import 'package:verspaetomat/mock/mock_data.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
@@ -69,6 +70,33 @@ void main() {
       print('SHOT $name');
       await wait(tester, 1500);
     }
+    // The Bahnsteig in its other three states (docs/16): away from a station, riding, arrived.
+    Future<void> shot(String name) async {
+      await wait(tester, 1800);
+      // ignore: avoid_print
+      print('SHOT $name');
+      await wait(tester, 1500);
+    }
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+    await wait(tester, 600);
+    demo.reset(); // an arrival left over from the Angekommen routes would hide the idle state
+    demo.awayFromStation = true;
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    await shot('bahnsteig-away');
+    demo.awayFromStation = false;
+    final dep = Mock.departuresKoelnHbf.firstWhere((d) => !d.cancelled);
+    demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+    await wait(tester, 600);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    await shot('bahnsteig-riding');
+    demo.simulateArrival(minutes: 68);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+    await wait(tester, 600);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    await shot('bahnsteig-arrived');
+    demo.reset();
+
     // One pushed sub-screen, so the header with the back arrow is in the set too.
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
     await wait(tester, 800);

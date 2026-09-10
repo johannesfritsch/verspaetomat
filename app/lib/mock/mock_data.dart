@@ -243,7 +243,7 @@ class Mock {
 
   // Stations near the customer (Köln)
   static const nearbyStations = [
-    Station(id: 'koeln-hbf', name: 'Köln Hbf', distanceM: 380, evaNr: '8000207', lat: 50.9432, lon: 6.9586),
+    Station(id: 'koeln-hbf', name: 'Köln Hbf', distanceM: 120, evaNr: '8000207', lat: 50.9432, lon: 6.9586),
     Station(id: 'koeln-deutz', name: 'Köln Messe/Deutz', distanceM: 1200, evaNr: '8003368', lat: 50.9410, lon: 6.9750),
     Station(id: 'koeln-hansaring', name: 'Köln Hansaring', distanceM: 1700, evaNr: '8003367', lat: 50.9563, lon: 6.9431),
   ];

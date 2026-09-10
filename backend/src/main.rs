@@ -84,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
         // customer
         .route("/v1/events", get(events::stream))
         .route("/v1/me", get(handlers::me).patch(handlers::patch_me).delete(handlers::delete_me))
+        .route("/v1/me/standing", get(handlers::standing))
         .route("/v1/me/personal-data", put(handlers::put_personal_data))
         .route("/v1/me/recovery-code", get(handlers::recovery_code))
         .route("/v1/me/export", get(handlers::export_me))

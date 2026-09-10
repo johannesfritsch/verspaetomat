@@ -978,3 +978,125 @@ List<String> _labels(dynamic v) => (v as List? ?? const [])
     .map((e) => e is Map ? (e['label'] ?? e['name'] ?? e['upload_id'] ?? '').toString() : e.toString())
     .where((e) => e.isNotEmpty)
     .toList();
+
+// ---------------------------------------------------------------------------
+// Standing: everything the Bahnsteig shows below the action block (docs/16).
+// ---------------------------------------------------------------------------
+
+class ApiStanding {
+  const ApiStanding({
+    this.pointsThisWeek = 0,
+    this.pointsLastWeek = 0,
+    this.ridesThisWeek = 0,
+    this.level,
+    this.money,
+    this.board,
+    this.community,
+    this.next,
+  });
+  final int pointsThisWeek;
+  final int pointsLastWeek;
+  final int ridesThisWeek;
+  final ApiStandingLevel? level;
+  final ApiStandingMoney? money;
+  final ApiStandingBoard? board;
+  final ApiStandingCommunity? community;
+  final ApiStandingNext? next;
+
+  /// What an older backend without the endpoint amounts to: nothing to show.
+  static const empty = ApiStanding();
+
+  factory ApiStanding.fromJson(Map<String, dynamic> j) => ApiStanding(
+        pointsThisWeek: _i(j['points_this_week']),
+        pointsLastWeek: _i(j['points_last_week']),
+        ridesThisWeek: _i(j['rides_this_week']),
+        level: _m(j['level']) == null ? null : ApiStandingLevel.fromJson(_m(j['level'])!),
+        money: _m(j['money']) == null ? null : ApiStandingMoney.fromJson(_m(j['money'])!),
+        board: _m(j['board']) == null ? null : ApiStandingBoard.fromJson(_m(j['board'])!),
+        community: _m(j['community']) == null ? null : ApiStandingCommunity.fromJson(_m(j['community'])!),
+        next: _m(j['next']) == null ? null : ApiStandingNext.fromJson(_m(j['next'])!),
+      );
+}
+
+class ApiStandingLevel {
+  const ApiStandingLevel({required this.name, required this.nextName, required this.pointsToNext, required this.progress});
+  final String name;
+  final String nextName;
+  final int pointsToNext;
+  final double progress; // 0..1
+  factory ApiStandingLevel.fromJson(Map<String, dynamic> j) => ApiStandingLevel(
+        name: _s(j['name']),
+        nextName: _s(j['next_name']),
+        pointsToNext: _i(j['points_to_next']),
+        progress: ((j['progress'] as num?)?.toDouble() ?? 0).clamp(0, 1),
+      );
+}
+
+class ApiStandingMoney {
+  const ApiStandingMoney({required this.openCents, required this.missingCents, required this.ready, this.readyDesk, required this.ngoName});
+  final int openCents;
+  final int missingCents;
+  final bool ready;
+  final String? readyDesk;
+  final String ngoName;
+  factory ApiStandingMoney.fromJson(Map<String, dynamic> j) => ApiStandingMoney(
+        openCents: _i(j['open_cents']),
+        missingCents: _i(j['missing_cents']),
+        ready: _b(j['ready']),
+        readyDesk: _sn(j['ready_desk']),
+        ngoName: _s(j['ngo_name']),
+      );
+}
+
+class ApiStandingBoard {
+  const ApiStandingBoard({required this.scope, required this.key, required this.rank, required this.size, required this.points, this.gapToNext});
+  final String scope; // line | city
+  final String key;
+  final int rank;
+  final int size;
+  final int points;
+  final int? gapToNext;
+  factory ApiStandingBoard.fromJson(Map<String, dynamic> j) => ApiStandingBoard(
+        scope: _s(j['scope']),
+        key: _s(j['key']),
+        rank: _i(j['rank']),
+        size: _i(j['size']),
+        points: _i(j['points']),
+        gapToNext: j['gap_to_next'] == null ? null : _i(j['gap_to_next']),
+      );
+}
+
+class ApiStandingCommunity {
+  const ApiStandingCommunity({required this.minutesTotal, required this.myMinutes, required this.confirmedCents, required this.myConfirmedCents});
+  final int minutesTotal;
+  final int myMinutes;
+  final int confirmedCents;
+  final int myConfirmedCents;
+  factory ApiStandingCommunity.fromJson(Map<String, dynamic> j) => ApiStandingCommunity(
+        minutesTotal: _i(j['minutes_total']),
+        myMinutes: _i(j['my_minutes']),
+        confirmedCents: _i(j['confirmed_cents']),
+        myConfirmedCents: _i(j['my_confirmed_cents']),
+      );
+}
+
+/// The one thing the Bahnsteig suggests next: mail | deadline | nachtrag | badge.
+class ApiStandingNext {
+  const ApiStandingNext({required this.kind, required this.title, required this.body, this.claimId, this.incidentId, this.badgeId, this.daysLeft});
+  final String kind;
+  final String title;
+  final String body;
+  final String? claimId;
+  final String? incidentId;
+  final String? badgeId;
+  final int? daysLeft;
+  factory ApiStandingNext.fromJson(Map<String, dynamic> j) => ApiStandingNext(
+        kind: _s(j['kind']),
+        title: _s(j['title']),
+        body: _s(j['body']),
+        claimId: _sn(j['claim_id']),
+        incidentId: _sn(j['incident_id']),
+        badgeId: _sn(j['badge_id']),
+        daysLeft: j['days_left'] == null ? null : _i(j['days_left']),
+      );
+}

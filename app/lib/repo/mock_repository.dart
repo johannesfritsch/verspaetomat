@@ -277,7 +277,9 @@ class MockRepository implements AppRepository {
 
   @override
   Future<ApiNearby> nearbyStations({double? lat, double? lon}) async => ApiNearby(
-        stations: Mock.nearbyStations.map((s) => ApiStation(id: s.id, name: s.name, distanceM: s.distanceM, eva: s.evaNr, lat: s.lat, lon: s.lon)).toList(),
+        stations: Mock.nearbyStations
+            .map((s) => ApiStation(id: s.id, name: s.name, distanceM: state.awayFromStation ? s.distanceM + 2400 : s.distanceM, eva: s.evaNr, lat: s.lat, lon: s.lon))
+            .toList(),
         source: 'demo',
       );
 
@@ -339,7 +341,15 @@ class MockRepository implements AppRepository {
   @override
   Future<ApiRideLive?> currentRide() async {
     final t = state.trip;
-    if (t == null || state.phase != TripPhase.riding) return null;
+    if (t == null) return null;
+    // Like the backend: the arrived ride stays current until it is dismissed.
+    if (state.phase == TripPhase.arrived) {
+      return ApiRideLive(
+        ride: _ride(t, status: ApiRideStatus.arrived, finalDelay: state.finalDelay, cancelled: state.finalCancelled, selfEntered: state.finalSelfEntered, points: state.finalDelay ?? 0),
+        stops: t.departure.stops.map((s) => _stop(s, delay: state.finalDelay ?? 0)).toList(),
+      );
+    }
+    if (state.phase != TripPhase.riding) return null;
     return ApiRideLive(
       ride: _ride(t, status: ApiRideStatus.riding),
       stops: t.departure.stops.map((s) => _stop(s, delay: state.liveDelay)).toList(),
@@ -546,6 +556,59 @@ class MockRepository implements AppRepository {
       confirmedCents: _cents(Mock.communityConfirmed + state.confirmedTotal - seededConfirmed),
       users: Mock.communityUsers,
       ngos: Mock.ngos.map((n) => ApiNgoTotal(id: n.id, name: n.name, confirmedCents: _cents(n.confirmedTotal), submittedCents: _cents(n.submittedTotal))).toList(),
+    );
+  }
+
+  /// Demo: the same shape the backend computes, from the mock and the demo state.
+  @override
+  Future<ApiStanding> standing() async {
+    final pointsTotal = Mock.pointsTotal + state.bonusPoints;
+    final open = state.openIncidents;
+    final openCents = _cents(open.fold(0.0, (s, i) => s + i.amount));
+    final readyDesk = state.readyDesk;
+    final missing = readyDesk != null
+        ? 0
+        : state.openByDesk.entries.map((e) => (400 - _cents(e.value.fold(0.0, (s, i) => s + i.amount))).clamp(0, 400)).fold(400, (m, v) => v < m ? v : m);
+    final me = Mock.boardLine.where((e) => e.isMe).firstOrNull;
+    final above = me == null ? null : Mock.boardLine.where((e) => e.rank == me.rank - 1).firstOrNull;
+    ApiStandingNext? next;
+    final inbound = state.mails.where((m) => m.direction == MailDirection.inbound).toList();
+    final oldest = state.oldestOpen;
+    final days = state.daysUntilOldestExpires;
+    if (inbound.isNotEmpty && inbound.first.outcome != null) {
+      final m = inbound.first;
+      final body = switch (m.outcome!) {
+        MailOutcome.accepted => '${(m.amount ?? 0).toStringAsFixed(2).replaceAll('.', ',')} € bestätigt',
+        MailOutcome.question => 'Rückfrage zum Antrag',
+        MailOutcome.rejected => 'Antrag abgelehnt',
+      };
+      next = ApiStandingNext(kind: 'mail', title: 'Post von der Bahn', body: body, claimId: m.id);
+    } else if (oldest != null && days != null && days <= 21) {
+      next = ApiStandingNext(kind: 'deadline', title: 'Läuft bald ab', body: '${oldest.line} vom ${Mock.shortDate(oldest.date)} verfällt in $days Tagen', incidentId: oldest.id, daysLeft: days);
+    } else if (state.newBadge != null) {
+      next = ApiStandingNext(kind: 'badge', title: 'Neues Abzeichen', body: state.newBadge!.name, badgeId: state.newBadge!.id);
+    }
+    return ApiStanding(
+      pointsThisWeek: Mock.pointsThisWeek + state.bonusPoints,
+      pointsLastWeek: 41,
+      ridesThisWeek: 3,
+      level: ApiStandingLevel(
+        name: Mock.levelName,
+        nextName: Mock.nextLevelName,
+        pointsToNext: (Mock.nextLevelAt - pointsTotal).clamp(0, Mock.nextLevelAt),
+        progress: (pointsTotal / Mock.nextLevelAt).clamp(0, 1),
+      ),
+      money: ApiStandingMoney(openCents: openCents, missingCents: open.isEmpty ? 400 : missing, ready: readyDesk != null, readyDesk: readyDesk, ngoName: state.ngo.name),
+      board: me == null || !state.showOnBoards
+          ? null
+          : ApiStandingBoard(scope: 'line', key: 'RE 7', rank: me.rank, size: Mock.boardLine.length, points: me.points, gapToNext: above == null ? null : above.points - me.points + 1),
+      community: ApiStandingCommunity(
+        minutesTotal: Mock.communityMinutes,
+        myMinutes: pointsTotal,
+        confirmedCents: _cents(Mock.communityConfirmed + state.confirmedTotal - Mock.incidents.where((i) => i.status == IncidentStatus.bestaetigt).fold(0.0, (s, i) => s + i.amount)),
+        myConfirmedCents: _cents(state.confirmedTotal),
+      ),
+      next: next,
     );
   }
 

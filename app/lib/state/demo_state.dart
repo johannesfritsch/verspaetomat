@@ -71,6 +71,8 @@ class DemoState extends ChangeNotifier {
 
   /// Station nudge and quiet hours (docs/15). Demo keeps a fixed 22:00–06:00 window.
   bool nudgeEnabled = true;
+  /// Demo: pretend the phone is away from every station (the Bahnsteig shows the compact row).
+  bool awayFromStation = false;
   bool quietHours = true;
 
   void setNudgeEnabled(bool v) {

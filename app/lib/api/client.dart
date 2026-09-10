@@ -228,6 +228,7 @@ class ApiClient {
   // -- community ------------------------------------------------------------
 
   Future<ApiCommunity> community() async => ApiCommunity.fromJson(_map(await _get('/v1/community')));
+  Future<ApiStanding> standing() async => ApiStanding.fromJson(_map(await _get('/v1/me/standing')));
 
   Future<List<ApiBoardEntry>> boards(String scope) async => _list(await _get('/v1/boards', {'scope': scope})).map(ApiBoardEntry.fromJson).toList();
 

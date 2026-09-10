@@ -47,16 +47,25 @@ Personal details and the ticket number are **not** asked here. They are asked th
 
 ## 4. Bahnsteig (home)
 
-The screen the customer sees a hundred times. Three stacked blocks, no cards within cards.
+The screen the customer sees a hundred times. Second version, decided 10 September 2026 (docs/16): six blocks, everything above the fold, and the top block adapts to the moment. The clock hero, the date line, "Kein Zug. Gut so.", the standalone search field and the separate nudge and Nachtrag widgets are gone; the small clock stays in the header corner, with the "Standort: Stellwerk · …" caption on its left when a simulated position is active.
 
-**Top: state of now.**
-- Idle: "Kein Zug. Gut so." with the nearest stations as tappable chips ("Hbf · 400 m", "Deutz · 1,2 km") and a search field. Tapping a chip opens the check-in sheet (screen 6).
-- Riding: the ride card, tap to open screen 8.
-- Just arrived: the arrival summary until dismissed.
+**1 · Einchecken (action).**
+- Idle away from a station: a compact row of chips: the home station ("Köln Hbf · Stammbahnhof"), up to two more frequent stations, nearby ones with distance if the phone has a fix, and a "Suchen" chip that opens the station search. Each chip opens Einchecken (screen 6). Without a position, one caption offers "Standort erlauben".
+- At a station (≤ 300 m): one card "Köln Hbf · Du bist hier · 120 m" with the next three rail departures inline; tapping a row goes straight to "Wo steigst du aus?" (screen 7). "Alle Abfahrten" in the card's header opens the full board; a long press on the header offers "Diesen Bahnhof nie" (mute).
+- Riding: the ride card (line, destination, live delay, next stop, exit, ETA) with "Zur Fahrt" and "Zug wechseln".
+- Just arrived: the arrival summary with "Ansehen" and "Fertig", until dismissed.
 
-**Middle: your numbers.** Two figures side by side in board type: Geduldspunkte this week, and the ledger's state in one line: "3 Verspätungen gesammelt · 4,50 € bereit". Tapping goes to Konto.
+**2 · Momentum.** "+96" in board type, "Geduldspunkte diese Woche · letzte Woche 41", the level bar underneath with "Gleis 7 · 128 bis „Bahnhofsmission“". A quiet week reads "Diese Woche noch keine Fahrt", never a zero. Tap for Ich.
 
-**Bottom: the community line.** One sentence, ticking: "Wir haben zusammen 1.208.311 Minuten gewartet und 48.320 € bestätigt." Tap for Wir.
+**3 · Money countdown.** "1,50 €" board type, "bis zum Antrag · 4,50 € gesammelt für Bahnhofsmission Köln"; before the first incident: "4,00 € bis zum ersten Antrag · jede Verspätung ab 60 Minuten zählt". When a bundle is ready the block becomes the primary button "6,00 € beantragen" with "Bündel bereit · geht an Bahnhofsmission Köln" and starts the claim flow (screen 11) directly. Tap for Konto otherwise.
+
+**4 · Standing.** "Platz 5" board type, "auf der RE 7 diese Woche · 38 Punkte bis Platz 4"; at rank 1 "ganz oben, von 23". The city board when the line board has fewer than five riders; hidden when the customer is on neither. Tap for Wir.
+
+**5 · Community with my share.** "1.208.316 Minuten haben wir gewartet · 1.372 davon deine." ticking, and "48.320 € an Vereine bestätigt · 4,50 € durch dich". Tap for Wir.
+
+**6 · The one next thing.** At most one card: "Post von der Bahn · 4,50 € bestätigt" (→ Antwort), "Läuft bald ab · RE 10 vom 21.08. verfällt in 10 Tagen" (→ Konto, red when 7 days or fewer), "Gestern vergessen?" (→ Nachtrag, only for people who ride most days), "Neues Abzeichen · Volle Stunde" (→ Ich). Nothing otherwise.
+
+Data: `GET /v1/me/standing` computes blocks 2 to 6 server-side (docs/16); the station context comes from nearby stations, the geofence station set and the current ride.
 
 
 ---

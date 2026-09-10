@@ -1438,6 +1438,14 @@ pub async fn boards(State(s): State<AppState>, c: Customer, Query(q): Query<Boar
         Some("germany") => "germany",
         _ => "line",
     };
+    let entries = board_entries(&s.pool, &c.0, scope).await.map_err(internal)?;
+    let out: Vec<Value> = entries.into_iter().enumerate().map(|(k, (name, points, is_me, seed))| json!({ "rank": k + 1, "name": name, "points": points, "is_me": is_me, "seed": seed })).collect();
+    Ok(Json(json!(out)))
+}
+
+/// The seven-day board for a scope, sorted: (name, points, is_me, seeded). The customer is always on it;
+/// real customers first, seeded rows fill up to ten. `scope` is "line", "city" or "germany".
+pub async fn board_entries(pool: &PgPool, c: &CustomerRow, scope: &str) -> anyhow::Result<Vec<(String, i64, bool, bool)>> {
     let now = crate::clock::now();
     let week_ago = now - Duration::days(7);
     let ride_filter = "r.location_verified and r.finalised_at > $1";
@@ -1452,43 +1460,297 @@ pub async fn boards(State(s): State<AppState>, c: Customer, Query(q): Query<Boar
     let mut real: Vec<(Uuid, String, i64)> = Vec::new();
     match scope {
         "line" => {
-            let line: Option<String> = sqlx::query_scalar(
-                "select line from rides where customer_id = $1 and finalised_at > $2 group by line order by count(*) desc, max(finalised_at) desc limit 1",
-            )
-            .bind(c.0.id)
-            .bind(now - Duration::days(30))
-            .fetch_optional(&s.pool)
-            .await
-            .map_err(internal)?;
-            if let Some(line) = line {
-                real = sqlx::query_as(&base("and r.line = $2")).bind(week_ago).bind(line).fetch_all(&s.pool).await.map_err(internal)?;
+            if let Some(line) = most_ridden_line(pool, c.id, now).await? {
+                real = sqlx::query_as(&base("and r.line = $2")).bind(week_ago).bind(line).fetch_all(pool).await?;
             }
         }
         "city" => {
-            let city = c.0.home_station_name.as_deref().and_then(|n| n.split_whitespace().next()).map(|w| w.to_string());
+            let city = c.home_station_name.as_deref().and_then(|n| n.split_whitespace().next()).map(|w| w.to_string());
             if let Some(city) = city {
-                real = sqlx::query_as(&base("and split_part(r.from_station_name, ' ', 1) = $2")).bind(week_ago).bind(city).fetch_all(&s.pool).await.map_err(internal)?;
+                real = sqlx::query_as(&base("and split_part(r.from_station_name, ' ', 1) = $2")).bind(week_ago).bind(city).fetch_all(pool).await?;
             }
         }
         _ => {}
     }
     if real.is_empty() {
-        real = sqlx::query_as(&base("")).bind(week_ago).fetch_all(&s.pool).await.map_err(internal)?;
+        real = sqlx::query_as(&base("")).bind(week_ago).fetch_all(pool).await?;
     }
-    if !real.iter().any(|(id, _, _)| *id == c.0.id) {
-        let my_points: i64 = sqlx::query_scalar("select coalesce(sum(points),0)::bigint from rides r where r.customer_id = $2 and r.location_verified and r.finalised_at > $1").bind(week_ago).bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?;
-        real.push((c.0.id, c.0.nickname.clone(), my_points));
+    if !real.iter().any(|(id, _, _)| *id == c.id) {
+        let my_points: i64 = sqlx::query_scalar("select coalesce(sum(points),0)::bigint from rides r where r.customer_id = $2 and r.location_verified and r.finalised_at > $1").bind(week_ago).bind(c.id).fetch_one(pool).await?;
+        real.push((c.id, c.nickname.clone(), my_points));
     }
-    let mut entries: Vec<(String, i64, bool, bool)> = real.into_iter().map(|(id, name, points)| (name, points, id == c.0.id, false)).collect();
+    let mut entries: Vec<(String, i64, bool, bool)> = real.into_iter().map(|(id, name, points)| (name, points, id == c.id, false)).collect();
     if entries.len() < 10 {
-        let seed: Vec<BoardSeedRow> = sqlx::query_as("select * from board_seed where scope = $1 order by rank").bind(scope).fetch_all(&s.pool).await.map_err(internal)?;
+        let seed: Vec<BoardSeedRow> = sqlx::query_as("select * from board_seed where scope = $1 order by rank").bind(scope).fetch_all(pool).await?;
         for e in seed.iter().take(10 - entries.len()) {
             entries.push((e.name.clone(), e.points as i64, false, true));
         }
     }
     entries.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)));
-    let out: Vec<Value> = entries.into_iter().enumerate().map(|(k, (name, points, is_me, seed))| json!({ "rank": k + 1, "name": name, "points": points, "is_me": is_me, "seed": seed })).collect();
-    Ok(Json(json!(out)))
+    Ok(entries)
+}
+
+/// The line the customer rode most in the last 30 days.
+async fn most_ridden_line(pool: &PgPool, customer_id: Uuid, now: DateTime<Utc>) -> anyhow::Result<Option<String>> {
+    Ok(sqlx::query_scalar(
+        "select line from rides where customer_id = $1 and finalised_at > $2 group by line order by count(*) desc, max(finalised_at) desc limit 1",
+    )
+    .bind(customer_id)
+    .bind(now - Duration::days(30))
+    .fetch_optional(pool)
+    .await?)
+}
+
+// ---------------------------------------------------------------------------
+// Standing: everything the Bahnsteig shows above the fold, in one call (docs/16)
+// ---------------------------------------------------------------------------
+
+/// Monday 00:00 Europe/Berlin of the week containing `now`, and the same for the following week.
+pub fn week_bounds(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
+    use chrono::{Datelike, TimeZone};
+    let local = now.with_timezone(&chrono_tz::Europe::Berlin);
+    let monday = local.date_naive() - Duration::days(local.weekday().num_days_from_monday() as i64);
+    let start = chrono_tz::Europe::Berlin.from_local_datetime(&monday.and_hms_opt(0, 0, 0).unwrap()).single().unwrap_or_else(|| chrono_tz::Europe::Berlin.from_utc_datetime(&monday.and_hms_opt(0, 0, 0).unwrap()));
+    let next = chrono_tz::Europe::Berlin.from_local_datetime(&(monday + Duration::days(7)).and_hms_opt(0, 0, 0).unwrap()).single().unwrap_or_else(|| chrono_tz::Europe::Berlin.from_utc_datetime(&(monday + Duration::days(7)).and_hms_opt(0, 0, 0).unwrap()));
+    (start.with_timezone(&Utc), next.with_timezone(&Utc))
+}
+
+/// Level name, next level, points still missing, and progress 0..1 within the current band.
+pub fn level_progress(points: i64) -> (&'static str, &'static str, i64, f64) {
+    const LEVELS: [(&str, i64); 6] = [
+        ("Frischer Fahrgast", 0),
+        ("Bahnsteigkante", 60),
+        ("Wartehäuschen", 240),
+        ("Gleis 7", 600),
+        ("Bahnhofsmission", 1500),
+        ("Bahnsteig-Buddha", 4000),
+    ];
+    let idx = LEVELS.iter().rposition(|(_, at)| points >= *at).unwrap_or(0);
+    let (name, at) = LEVELS[idx];
+    match LEVELS.get(idx + 1) {
+        Some((next, next_at)) => {
+            let band = (next_at - at).max(1) as f64;
+            (name, next, (next_at - points).max(0), ((points - at) as f64 / band).clamp(0.0, 1.0))
+        }
+        None => (name, name, 0, 1.0),
+    }
+}
+
+/// One thing the Bahnsteig may point at. Priority: mail, deadline, nachtrag, badge.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NextThing {
+    Mail { claim_id: Option<Uuid>, body: String },
+    Deadline { incident_id: Uuid, days_left: i64, body: String },
+    Nachtrag,
+    Badge { badge_id: String, name: String },
+}
+
+impl NextThing {
+    fn priority(&self) -> u8 {
+        match self {
+            NextThing::Mail { .. } => 0,
+            NextThing::Deadline { .. } => 1,
+            NextThing::Nachtrag => 2,
+            NextThing::Badge { .. } => 3,
+        }
+    }
+    pub fn pick(candidates: Vec<NextThing>) -> Option<NextThing> {
+        candidates.into_iter().min_by_key(NextThing::priority)
+    }
+    fn to_json(&self) -> Value {
+        match self {
+            NextThing::Mail { claim_id, body } => json!({ "kind": "mail", "title": "Post von der Bahn", "body": body, "claim_id": claim_id }),
+            NextThing::Deadline { incident_id, days_left, body } => json!({ "kind": "deadline", "title": "Verfällt bald", "body": body, "incident_id": incident_id, "days_left": days_left }),
+            NextThing::Nachtrag => json!({ "kind": "nachtrag", "title": "Gestern vergessen einzuchecken?", "body": "Fahrt nachtragen, Punkte gibt es trotzdem." }),
+            NextThing::Badge { badge_id, name } => json!({ "kind": "badge", "title": "Neues Abzeichen", "body": name, "badge_id": badge_id }),
+        }
+    }
+}
+
+fn euro_short(cents: i64) -> String {
+    format!("{},{:02} €", cents / 100, cents % 100)
+}
+
+pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let pool = &s.pool;
+    let now = crate::clock::now();
+    let today = today();
+    let (week_start, next_week) = week_bounds(now);
+    let last_week_start = week_start - Duration::days(7);
+
+    // Momentum.
+    let (points_total, points_this_week, points_last_week, rides_this_week): (i64, i64, i64, i64) = sqlx::query_as(
+        "select coalesce(sum(points),0)::bigint,
+                coalesce(sum(points) filter (where finalised_at >= $2 and finalised_at < $3),0)::bigint,
+                coalesce(sum(points) filter (where finalised_at >= $4 and finalised_at < $2),0)::bigint,
+                count(*) filter (where finalised_at >= $2 and finalised_at < $3)::bigint
+         from rides where customer_id = $1 and status = 'arrived'",
+    )
+    .bind(c.0.id)
+    .bind(week_start)
+    .bind(next_week)
+    .bind(last_week_start)
+    .fetch_one(pool)
+    .await
+    .map_err(internal)?;
+    let (level_name, next_name, points_to_next, progress) = level_progress(points_total);
+
+    // Money: the desk that is ready, else the one closest to the minimum payout.
+    let rows = rules::refresh_statuses(pool, c.0.id, today).await.map_err(internal)?;
+    let mut by_desk: BTreeMap<String, Vec<&IncidentRow>> = BTreeMap::new();
+    for i in rows.iter().filter(|i| i.status.is_open()) {
+        by_desk.entry(i.desk.clone()).or_default().push(i);
+    }
+    let desks: Vec<(String, Cents, bool)> = by_desk.iter().map(|(d, l)| (d.clone(), l.iter().map(|i| i.amount_cents).sum(), rules::bundle_ready(l))).collect();
+    let chosen = desks.iter().find(|(_, _, ready)| *ready).or_else(|| desks.iter().max_by_key(|(_, open, _)| *open));
+    let (open_cents, ready, ready_desk) = match chosen {
+        Some((d, open, ready)) => (*open, *ready, if *ready { Some(d.clone()) } else { None }),
+        None => (0, false, None),
+    };
+    let missing_cents = if ready { 0 } else { (rules::MIN_PAYOUT_CENTS - open_cents).max(0) };
+    let ngo_name: Option<String> = sqlx::query_scalar("select name from ngos where id = $1").bind(&c.0.ngo_id).fetch_optional(pool).await.map_err(internal)?;
+
+    // Standing: line board if it has at least five real riders and me on it, else city, else none.
+    let mut board = Value::Null;
+    for scope in ["line", "city"] {
+        let entries = board_entries(pool, &c.0, scope).await.map_err(internal)?;
+        let real = entries.iter().filter(|e| !e.3).count();
+        let me = entries.iter().position(|e| e.2);
+        if let (true, Some(pos)) = (real >= 5, me) {
+            let key = match scope {
+                "line" => most_ridden_line(pool, c.0.id, now).await.map_err(internal)?.unwrap_or_default(),
+                _ => c.0.home_station_name.as_deref().and_then(|n| n.split_whitespace().next()).unwrap_or("").to_string(),
+            };
+            let gap = if pos == 0 { None } else { Some(entries[pos - 1].1 - entries[pos].1) };
+            board = json!({ "scope": scope, "key": key, "rank": pos + 1, "size": entries.len(), "points": entries[pos].1, "gap_to_next": gap });
+            break;
+        }
+    }
+
+    // Community with my share.
+    let (minutes, my_confirmed): (i64, i64) = sqlx::query_as(
+        "select (select coalesce(sum(final_delay_min),0)::bigint from rides where status = 'arrived'),
+                (select coalesce(sum(amount_cents),0)::bigint from incidents where customer_id = $1 and status = 'bestaetigt')",
+    )
+    .bind(c.0.id)
+    .fetch_one(pool)
+    .await
+    .map_err(internal)?;
+    let confirmed_all: i64 = sqlx::query_scalar("select coalesce(sum(amount_cents),0)::bigint from incidents where status = 'bestaetigt'").fetch_one(pool).await.map_err(internal)?;
+    let seed = crate::fixtures::Fixtures::embedded().community;
+
+    // Next thing.
+    let mut candidates = Vec::new();
+    let mail: Option<(Option<Uuid>, Option<String>, Option<i64>)> = sqlx::query_as(
+        "select claim_id, outcome::text, amount_cents from mails where customer_id = $1 and direction = 'inbound' and occurred_at >= $2 order by occurred_at desc limit 1",
+    )
+    .bind(c.0.id)
+    .bind(now - Duration::days(7))
+    .fetch_optional(pool)
+    .await
+    .map_err(internal)?;
+    let question_claim: Option<Uuid> = sqlx::query_scalar("select id from claims where customer_id = $1 and status = 'question' order by sent_at desc nulls last limit 1").bind(c.0.id).fetch_optional(pool).await.map_err(internal)?;
+    if let Some((claim_id, outcome, amount)) = mail {
+        let body = match (outcome.as_deref(), amount) {
+            (Some("accepted"), Some(cents)) => format!("{} bestätigt", euro_short(cents)),
+            (Some("accepted"), None) => "Antrag bestätigt".to_string(),
+            (Some("question"), _) => "Rückfrage zum Antrag".to_string(),
+            (Some("rejected"), _) => "Antrag abgelehnt".to_string(),
+            (Some("bounce"), _) => "Die Mail kam zurück".to_string(),
+            _ => "Neue Nachricht an deine Verspätomat-Adresse".to_string(),
+        };
+        candidates.push(NextThing::Mail { claim_id: claim_id.or(question_claim), body });
+    } else if let Some(id) = question_claim {
+        candidates.push(NextThing::Mail { claim_id: Some(id), body: "Rückfrage zum Antrag".to_string() });
+    }
+    if let Some(i) = rows.iter().filter(|i| i.status.is_open()).min_by_key(|i| i.ride_date) {
+        let days_left = rules::days_until(i.legal_deadline, today);
+        if days_left <= rules::WARN_DAYS_BEFORE_DEADLINE {
+            candidates.push(NextThing::Deadline { incident_id: i.id, days_left, body: format!("{} vom {} · noch {} Tage", i.line, i.ride_date.format("%d.%m."), days_left.max(0)) });
+        }
+    }
+    let (days_with_rides, rode_yesterday): (i64, bool) = sqlx::query_as(
+        "select count(distinct (checked_in_at at time zone 'Europe/Berlin')::date)::bigint,
+                bool_or((checked_in_at at time zone 'Europe/Berlin')::date = $3)
+         from rides where customer_id = $1 and checked_in_at >= $2",
+    )
+    .bind(c.0.id)
+    .bind(now - Duration::days(14))
+    .bind(now.with_timezone(&chrono_tz::Europe::Berlin).date_naive() - Duration::days(1))
+    .fetch_one(pool)
+    .await
+    .map(|(d, y): (i64, Option<bool>)| (d, y.unwrap_or(false)))
+    .map_err(internal)?;
+    if days_with_rides >= 3 && !rode_yesterday {
+        candidates.push(NextThing::Nachtrag);
+    }
+    let badge: Option<(String, String)> = sqlx::query_as(
+        "select b.id, b.name from badge_awards a join badges b on b.id = a.badge_id where a.customer_id = $1 and a.awarded_at >= $2 order by a.awarded_at desc limit 1",
+    )
+    .bind(c.0.id)
+    .bind(now - Duration::days(3))
+    .fetch_optional(pool)
+    .await
+    .map_err(internal)?;
+    if let Some((id, name)) = badge {
+        candidates.push(NextThing::Badge { badge_id: id, name });
+    }
+    let next = NextThing::pick(candidates).map(|n| n.to_json()).unwrap_or(Value::Null);
+
+    Ok(Json(json!({
+        "points_this_week": points_this_week,
+        "points_last_week": points_last_week,
+        "rides_this_week": rides_this_week,
+        "level": { "name": level_name, "next_name": next_name, "points_to_next": points_to_next, "progress": progress },
+        "money": { "open_cents": open_cents, "missing_cents": missing_cents, "ready": ready, "ready_desk": ready_desk, "ngo_name": ngo_name },
+        "board": board,
+        "community": { "minutes_total": seed.minutes + minutes, "my_minutes": points_total, "confirmed_cents": seed.confirmed_cents + confirmed_all, "my_confirmed_cents": my_confirmed },
+        "next": next,
+    })))
+}
+
+#[cfg(test)]
+mod standing_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn week_is_monday_to_monday_in_berlin() {
+        // Thursday 10 September 2026 12:00 Berlin (CEST, UTC+2).
+        let now = Utc.with_ymd_and_hms(2026, 9, 10, 10, 0, 0).unwrap();
+        let (start, next) = week_bounds(now);
+        assert_eq!(start, Utc.with_ymd_and_hms(2026, 9, 6, 22, 0, 0).unwrap()); // Mon 7 Sept 00:00 CEST
+        assert_eq!(next, Utc.with_ymd_and_hms(2026, 9, 13, 22, 0, 0).unwrap());
+        // Sunday 23:30 Berlin still belongs to the same week; Monday 00:30 to the next.
+        let (s2, _) = week_bounds(Utc.with_ymd_and_hms(2026, 9, 13, 21, 30, 0).unwrap());
+        assert_eq!(s2, start);
+        let (s3, _) = week_bounds(Utc.with_ymd_and_hms(2026, 9, 13, 22, 30, 0).unwrap());
+        assert_eq!(s3, next);
+    }
+
+    #[test]
+    fn level_progress_bands() {
+        assert_eq!(level_progress(0), ("Frischer Fahrgast", "Bahnsteigkante", 60, 0.0));
+        let (name, next, missing, p) = level_progress(1372);
+        assert_eq!((name, next, missing), ("Gleis 7", "Bahnhofsmission", 128));
+        assert!((p - (772.0 / 900.0)).abs() < 1e-9);
+        assert_eq!(level_progress(4000), ("Bahnsteig-Buddha", "Bahnsteig-Buddha", 0, 1.0));
+    }
+
+    #[test]
+    fn next_thing_priority() {
+        let id = Uuid::nil();
+        let picked = NextThing::pick(vec![
+            NextThing::Badge { badge_id: "x".into(), name: "X".into() },
+            NextThing::Nachtrag,
+            NextThing::Deadline { incident_id: id, days_left: 3, body: String::new() },
+            NextThing::Mail { claim_id: None, body: String::new() },
+        ]);
+        assert!(matches!(picked, Some(NextThing::Mail { .. })));
+        let picked = NextThing::pick(vec![NextThing::Badge { badge_id: "x".into(), name: "X".into() }, NextThing::Nachtrag]);
+        assert_eq!(picked, Some(NextThing::Nachtrag));
+        assert_eq!(NextThing::pick(vec![]), None);
+    }
 }
 
 #[cfg(test)]

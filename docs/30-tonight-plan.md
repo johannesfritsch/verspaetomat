@@ -175,3 +175,5 @@ Shipped later on 10 September 2026 (station geofencing, docs/15):
 - Native iOS and Android layers: see their own entries.
 
 10 September 2026, evening: production on a VPS (docs/42), TestFlight builds 3 and 4 via `app/tools/release.sh`, Stellwerk `--prod`, station geofencing (docs/15). Push verified end to end on a real iPhone with build 4; builds 1–3 never registered with APNs.
+
+10 September 2026, later: `GET /v1/me/standing` for the second Bahnsteig (docs/16): one call with momentum, level, money countdown, board rank, community share and the next thing; week boundaries Monday–Sunday in Europe/Berlin on the simulated clock; boards refactored into `board_entries`. Verified on a scratch instance: fresh device all zeros, a +68 ride moves points/level/money and yields the badge, an inbound question mail becomes `next.kind = mail`.

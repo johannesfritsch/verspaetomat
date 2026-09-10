@@ -62,6 +62,24 @@ paths:
     get: { summary: Issue a new recovery code (twelve words). Shown once; the previous code stops working., responses: { "200": { description: "{recovery_code}" } } }
   /v1/me/export:
     get: { summary: Everything about this customer as JSON, responses: { "200": { description: export } } }
+  /v1/me/standing:
+    get:
+      summary: Everything the Bahnsteig shows above the fold, computed server-side (docs/16). Points this week and last week (Monday–Sunday, Europe/Berlin, simulated clock), rides this week, level progress, the money countdown for the desk closest to (or at) the 4 € minimum, the customer's rank on the line board (city fallback; null when neither has at least five real riders and the customer), community totals with the customer's share, and at most one "next thing" (mail > deadline ≤ 21 days > nachtrag for habitual riders > badge in the last 3 days).
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: Standing
+          content:
+            application/json:
+              example:
+                points_this_week: 109
+                points_last_week: 0
+                rides_this_week: 1
+                level: { name: Bahnsteigkante, next_name: Wartehäuschen, points_to_next: 131, progress: 0.27 }
+                money: { open_cents: 150, missing_cents: 250, ready: false, ready_desk: null, ngo_name: Bahnhofsmission Köln }
+                board: { scope: line, key: RE 7, rank: 7, size: 23, points: 96, gap_to_next: 12 }
+                community: { minutes_total: 1208420, my_minutes: 109, confirmed_cents: 4832000, my_confirmed_cents: 0 }
+                next: { kind: mail, title: Post von der Bahn, body: Rückfrage zum Antrag, claim_id: null }
   /v1/me/geofence:
     get:
       summary: "The stations the phone should watch in the background (docs/15): frequent check-in stations of the last 30 days (home station always, muted excluded, at most 15) with coordinates stored at check-in; enabled = location_mode == always && nudge_enabled."

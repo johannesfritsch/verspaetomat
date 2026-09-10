@@ -121,6 +121,17 @@ class HttpRepository implements AppRepository {
 
   @override
   Future<ApiCommunity> community() => client.community();
+
+  /// An older backend without the endpoint answers 404: nothing to show, no error.
+  @override
+  Future<ApiStanding> standing() async {
+    try {
+      return await client.standing();
+    } on ApiException catch (e) {
+      if (e.status == 404) return ApiStanding.empty;
+      rethrow;
+    }
+  }
   @override
   Future<List<ApiBoardEntry>> boards(String scope) => client.boards(scope);
 }

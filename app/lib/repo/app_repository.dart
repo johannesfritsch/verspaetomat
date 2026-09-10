@@ -56,5 +56,7 @@ abstract class AppRepository {
 
   // -- community ------------------------------------------------------------
   Future<ApiCommunity> community();
+  /// Everything the Bahnsteig shows below the action block (docs/16), computed server-side.
+  Future<ApiStanding> standing();
   Future<List<ApiBoardEntry>> boards(String scope);
 }

@@ -69,7 +69,7 @@ Everything the showcase app reads from `Mock` or from `DemoState`, turned into w
 |---|---|---|
 | Willkommen, Berechtigungen | nothing | device creation, permission states |
 | Setup | ticket types, NGO list with confirmed totals | ticket, default NGO |
-| Bahnsteig | nearby stations, current ride, points this week, ledger summary, community line, offline flag | nudge dismissals, muted stations |
+| Bahnsteig | `GET /v1/me/standing` (points this and last week, level progress, money countdown, board rank, community share, the one next thing), nearby stations, frequent stations (geofence), current ride, departures of the station within 300 m | nudge dismissals, muted stations |
 | Einchecken | departures at a station with live delays, ticket type | check-in (ride) with optional location fix |
 | Wo steigst du aus? | trip stops | exit stop |
 | Unterwegs | current ride live state (delay, passed stops, cause, ETA) | change train |
