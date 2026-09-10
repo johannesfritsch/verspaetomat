@@ -24,7 +24,10 @@ extension BackendModeX on BackendMode {
 /// The session: which backend is active, who the customer is, and the
 /// small amount of shared state screens need (NGOs, health).
 class Session extends ChangeNotifier {
-  Session({required this.demo, required this.prefs, required this.apiUrl, TokenStore? tokens}) : tokens = tokens ?? TokenStore() {
+  Session({required this.demo, required this.prefs, required this.apiUrl, TokenStore? tokens})
+      // One keychain slot per API host: a build pointed at the local backend and one pointed at
+      // the server keep separate device tokens instead of invalidating each other.
+      : tokens = tokens ?? TokenStore(namespace: _namespaceFor(apiUrl)) {
     _mock = MockRepository(demo);
     _http = HttpRepository(client: ApiClient(baseUrl: apiUrl, tokens: this.tokens), tokens: this.tokens);
     demo.addListener(_onDemoChanged);
@@ -66,6 +69,13 @@ class Session extends ChangeNotifier {
     mode = local ? BackendMode.local : BackendMode.demo;
     await _bootstrap();
     if (me?.settings.onboardingDone == true) await prefs.setBool(onboardingDoneKey, true);
+  }
+
+  /// The local dev backend keeps the original, unprefixed slot so existing dev accounts survive.
+  static String _namespaceFor(String apiUrl) {
+    final host = Uri.tryParse(apiUrl)?.host ?? '';
+    if (host.isEmpty || host == '127.0.0.1' || host == 'localhost') return '';
+    return '$host.';
   }
 
   /// Local mirror of `me.settings.onboardingDone`, so the first frame can pick the
@@ -115,7 +125,16 @@ class Session extends ChangeNotifier {
         healthy = true;
       }
       if (healthy == true) {
-        me = await repo.getMe();
+        try {
+          me = await repo.getMe();
+        } on ApiException catch (e) {
+          // The server does not know this token (its database was reset, or the token is
+          // from another server): start over as a fresh device rather than stay stuck.
+          if (e.status != 401 || !isLocal) rethrow;
+          await tokens.clear();
+          await _http.ensureDevice();
+          me = await repo.getMe();
+        }
         ngos = await repo.ngos();
       }
       await _restartEvents();
