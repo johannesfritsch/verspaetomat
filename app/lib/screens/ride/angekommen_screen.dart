@@ -15,9 +15,13 @@ import 'ride_widgets.dart';
 /// last arrival the repository knows. `variant` = 68 | 14 | 59 | ausfall | nodata
 /// drives the showcase in demo mode.
 class AngekommenScreen extends StatefulWidget {
-  const AngekommenScreen({super.key, this.variant, this.result});
+  const AngekommenScreen({super.key, this.variant, this.result, this.embedded = false, this.onDone});
   final String? variant;
   final ApiArrivalResult? result;
+
+  /// Inside the ride sheet (docs/19): the body without its own Scaffold; "Fertig" calls [onDone].
+  final bool embedded;
+  final VoidCallback? onDone;
 
   @override
   State<AngekommenScreen> createState() => _AngekommenScreenState();
@@ -111,6 +115,10 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
   }
 
   Future<void> _finish() async {
+    if (widget.embedded) {
+      widget.onDone?.call();
+      return;
+    }
     try {
       await RepoScope.read(context).repo.dismissRide();
     } catch (_) {}
@@ -132,24 +140,24 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
 
     final result = _result;
     if (result == null) {
-      return VScreen(
-        title: 'Angekommen',
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_loading) const LoadingLine(label: 'Ankunft wird geladen …'),
-            if (_error != null) ErrorLine(message: _error!, onRetry: _load),
-            if (!_loading && _error == null) ...[
-              const VGap.xl(),
-              Text('Noch keine Ankunft.', style: VText.h2),
-              const VGap.s(),
-              Text('Check ein, fahr los, komm an. Dann steht hier die Zahl.', style: VText.body.copyWith(color: VColors.ink2)),
-              const VGap.l(),
-              VGhostButton(label: 'Zum Bahnsteig', onTap: () => context.go(Routes.bahnsteig)),
-            ],
+      final empty = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_loading) const LoadingLine(label: 'Ankunft wird geladen …'),
+          if (_error != null) ErrorLine(message: _error!, onRetry: _load),
+          if (!_loading && _error == null) ...[
+            const VGap.xl(),
+            Text('Noch keine Ankunft.', style: VText.h2),
+            const VGap.s(),
+            Text('Check ein, fahr los, komm an. Dann steht hier die Zahl.', style: VText.body.copyWith(color: VColors.ink2)),
+            const VGap.l(),
+            VGhostButton(label: 'Zum Bahnsteig', onTap: () => context.go(Routes.bahnsteig)),
           ],
-        ),
+        ],
       );
+      // Inside the ride sheet there is no screen to fill: the lines, nothing else.
+      if (widget.embedded) return Padding(padding: const EdgeInsets.symmetric(horizontal: VSpace.page), child: empty);
+      return VScreen(title: 'Angekommen', child: empty);
     }
 
     final r = result.ride;
@@ -178,29 +186,70 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     final amountCents = incident?.amountCents;
     final canFile = hasClaim && incident != null && (ticket == TicketType.einzelfahrkarte || ready);
 
+    final actions = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (canFile) VPrimaryButton(label: 'Jetzt einreichen', onTap: () => context.push('${Routes.antrag}?desk=${Uri.encodeComponent(desk)}')),
+        Row(
+          children: [
+            Expanded(
+              child: VGhostButton(
+                label: 'Teilen',
+                icon: Icons.ios_share,
+                onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Karte geteilt: „$lineLabel, +$delay, $where“. (Demo)'))),
+              ),
+            ),
+            Expanded(child: VGhostButton(label: 'Fertig', onTap: _finish)),
+          ],
+        ),
+      ],
+    );
+    if (widget.embedded) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.m),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _arrivalBody(context, result: result, lineLabel: lineLabel, origin: origin, where: where, delay: delay, cancelled: cancelled, points: points, planned: planned, actual: actual, j: j, r: r, hasClaim: hasClaim, ticket: ticket, amountCents: amountCents, ngoName: ngoName, counted: counted, ready: ready, incident: incident, ngo: ngo),
+            const VGap.l(),
+            actions,
+          ],
+        ),
+      );
+    }
+
     return VScreen(
       showBack: false,
       trailing: Text('${fmtDay(actual ?? DateTime.now())} · ${fmtLocal(actual)}', style: VText.caption),
       eyebrow: 'Angekommen',
-      bottom: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (canFile) VPrimaryButton(label: 'Jetzt einreichen', onTap: () => context.push('${Routes.antrag}?desk=${Uri.encodeComponent(desk)}')),
-          Row(
-            children: [
-              Expanded(
-                child: VGhostButton(
-                  label: 'Teilen',
-                  icon: Icons.ios_share,
-                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Karte geteilt: „$lineLabel, +$delay, $where“. (Demo)'))),
-                ),
-              ),
-              Expanded(child: VGhostButton(label: 'Fertig', onTap: _finish)),
-            ],
-          ),
-        ],
-      ),
-      child: Column(
+      bottom: actions,
+      child: _arrivalBody(context, result: result, lineLabel: lineLabel, origin: origin, where: where, delay: delay, cancelled: cancelled, points: points, planned: planned, actual: actual, j: j, r: r, hasClaim: hasClaim, ticket: ticket, amountCents: amountCents, ngoName: ngoName, counted: counted, ready: ready, incident: incident, ngo: ngo),
+    );
+  }
+
+  Widget _arrivalBody(
+    BuildContext context, {
+    required ApiArrivalResult result,
+    required String lineLabel,
+    required String origin,
+    required String where,
+    required int delay,
+    required bool cancelled,
+    required int points,
+    required DateTime? planned,
+    required DateTime? actual,
+    required ApiJourney? j,
+    required ApiRide r,
+    required bool hasClaim,
+    required TicketType ticket,
+    required int? amountCents,
+    required String ngoName,
+    required int counted,
+    required bool ready,
+    required ApiIncident? incident,
+    required ApiNgo? ngo,
+  }) {
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('$lineLabel · $origin → $where', style: VText.bodyStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -243,8 +292,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
           else
             _NoClaimLine(delay: delay, ngoName: ngoName, onTrotzdem: ngo == null ? null : () => _trotzdem(context, ngo)),
         ],
-      ),
-    );
+      );
   }
 
   String _headline(int delay, bool cancelled, int points) {

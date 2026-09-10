@@ -2,6 +2,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../repo/app_repository.dart' show ApiArrivalResult;
 import '../../router.dart';
+import '../../state/ride_monitor.dart';
 import '../onboarding/permissions_screen.dart';
 import '../onboarding/setup_screen.dart';
 import '../onboarding/welcome_screen.dart';
@@ -10,7 +11,6 @@ import 'bahnsteig_screen.dart';
 import 'checkin_screen.dart';
 import 'exit_stop_screen.dart';
 import 'nachtrag_screen.dart';
-import 'unterwegs_screen.dart';
 import 'welcher_zug_screen.dart';
 import 'wohin_screen.dart';
 
@@ -66,7 +66,14 @@ final rideRoutes = <RouteBase>[
       firstTripId: s.uri.queryParameters['departure'],
     ),
   ),
-  GoRoute(path: Routes.unterwegs, builder: (_, __) => const UnterwegsScreen()),
+  // The ride lives in the sheet over Home (docs/19); the route stays for pushes and deep links.
+  GoRoute(
+    path: Routes.unterwegs,
+    redirect: (_, __) {
+      requestRideSheet();
+      return Routes.bahnsteigWithSheet;
+    },
+  ),
   GoRoute(
     path: Routes.angekommen,
     builder: (_, s) => AngekommenScreen(variant: s.uri.queryParameters['variant'], result: s.extra is ApiArrivalResult ? s.extra as ApiArrivalResult : null),

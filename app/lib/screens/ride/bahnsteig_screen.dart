@@ -3,14 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart' show Mock;
 import '../../repo/app_repository.dart';
 import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
+import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
-import '../claims/claims_widgets.dart' show fmtCents;
 import 'ride_widgets.dart';
 import 'wohin_screen.dart';
 
@@ -29,15 +28,10 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   ApiLocation? _position;
   ApiNearby _nearby = const ApiNearby(stations: [], source: 'none');
   ApiGeofence _frequent = ApiGeofence.empty;
-  ApiRideLive? _live;
-  ApiJourneyLive? _journey;
   ApiDestinations _destinations = ApiDestinations.empty;
-  List<ApiClaim> _claims = const [];
   ApiStanding _standing = ApiStanding.empty;
   bool _loading = true;
-  bool _busy = false;
   String? _error;
-  Timer? _poll;
   Timer? _ticker;
   int _minuteTick = 0;
   AppRepository? _lastRepo;
@@ -75,7 +69,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   @override
   void dispose() {
     _eventSub?.cancel();
-    _poll?.cancel();
     _ticker?.cancel();
     _session.removeListener(_onSession);
     super.dispose();
@@ -113,11 +106,8 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
       _position ??= await currentPosition(timeout: const Duration(seconds: 3));
       final results = await Future.wait<dynamic>([
         repo.nearbyStations(lat: _position?.lat, lon: _position?.lon),
-        repo.currentRide(),
         _session.loadStanding().catchError((_) => ApiStanding.empty),
         repo.geofence().catchError((_) => ApiGeofence.empty),
-        repo.currentJourney().catchError((_) => null),
-        repo.claims().catchError((_) => const <ApiClaim>[]),
       ]);
       if (!mounted) return;
       final nearby = results[0] as ApiNearby;
@@ -133,79 +123,16 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
       setState(() {
         _nearby = nearby;
         _destinations = dest;
-        _live = results[1] as ApiRideLive?;
-        _journey = results[4] as ApiJourneyLive?;
-        _standing = results[2] as ApiStanding;
-        _frequent = results[3] as ApiGeofence;
-        _claims = results[5] as List<ApiClaim>;
+        _standing = results[1] as ApiStanding;
+        _frequent = results[2] as ApiGeofence;
         _minuteTick = 0;
         _error = null;
       });
-      _schedulePoll();
     } catch (e) {
       if (mounted) setState(() => _error = shortError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  void _schedulePoll() {
-    _poll?.cancel();
-    if (_live?.ride.status == ApiRideStatus.riding ||
-        _journey?.journey.inTransfer == true) {
-      _poll = Timer(const Duration(seconds: 20), _refreshRide);
-    }
-  }
-
-  Future<void> _refreshRide() async {
-    try {
-      final repo = RepoScope.read(context).repo;
-      final live = await repo.currentRide();
-      final journey = await repo.currentJourney().catchError((_) => null);
-      if (!mounted) return;
-      final wasRiding = _live?.ride.status == ApiRideStatus.riding;
-      setState(() {
-        _live = live;
-        _journey = journey;
-      });
-      // The journey ended while the customer was on the Bahnsteig: the reveal, once.
-      final journeyArrived =
-          journey?.journey.arrived ??
-          (live != null && live.ride.status == ApiRideStatus.arrived);
-      if (wasRiding && journeyArrived && journey?.journey.inTransfer != true) {
-        context.push(Routes.angekommen);
-      }
-    } catch (_) {
-      // keep the last state
-    }
-    if (mounted) _schedulePoll();
-  }
-
-  /// "Ich bin drin": the proposed next leg becomes the ride.
-  Future<void> _confirmLeg(ApiJourneyLive j, ApiLeg leg) async {
-    setState(() => _busy = true);
-    try {
-      await RepoScope.read(context).repo.confirmLeg(j.journey.id, leg.tripId);
-      if (mounted) context.push(Routes.unterwegs);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Das ging nicht: ${shortError(e)}')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _busy = false);
-        _load();
-      }
-    }
-  }
-
-  Future<void> _dismiss() async {
-    try {
-      await RepoScope.read(context).repo.dismissRide();
-    } catch (_) {}
-    if (mounted) _load();
   }
 
   static ApiStation? _nearestWithin(ApiNearby nearby, int metres) {
@@ -227,28 +154,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         content: Text('${s.name} bleibt still. Ändern in den Einstellungen.'),
       ),
     );
-  }
-
-  /// The same path Konto takes: draft for the ready desk, then the five steps.
-  Future<void> _prepareClaim(String desk) async {
-    final session = RepoScope.read(context);
-    setState(() => _busy = true);
-    try {
-      final draft = await session.repo.draftClaim(desk: desk);
-      if (!mounted) return;
-      await context.push(
-        '${Routes.antrag}?id=${draft.claim.id}&desk=${Uri.encodeComponent(desk)}',
-        extra: draft,
-      );
-      if (mounted) _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Antrag nicht möglich: $e')));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
   }
 
   void _openStation(ApiStation s) {
@@ -283,17 +188,11 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   Widget build(BuildContext context) {
     final session = RepoScope.of(context);
     final me = session.me;
-    final journey = _journey;
-    final transfer = journey?.journey.inTransfer == true;
-    final riding =
-        !transfer &&
-        (journey?.journey.riding == true ||
-            _live?.ride.status == ApiRideStatus.riding);
-    final arrived =
-        !transfer &&
-        !riding &&
-        (journey?.journey.arrived == true ||
-            (_live != null && _live!.ride.status == ApiRideStatus.arrived));
+    // The ride lives in the shell's monitor (docs/19): the bar and the sheet show it while
+    // under way; Home only shows the arrival card once it is over.
+    final ride = RideScope.of(context);
+    final underWay = ride.active;
+    final arrived = ride.arrived && ride.rideLive != null;
     final near = _nearStation;
     final st = _standing;
 
@@ -340,28 +239,20 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             ],
             const VGap.s(),
 
-            // 1 · Action, sized by the moment.
-            if (_loading && _live == null && journey == null)
+            // 1 · Action, sized by the moment. Under way, the bar above the nav is the ride's
+            // only presence here; the check-in card waits until the journey is over.
+            if (_loading && ride.loading)
               const LoadingLine(label: 'Bahnsteig wird geladen …')
-            else if (transfer)
-              _TransferBlock(
-                live: journey!,
-                busy: _busy,
-                onConfirm: (leg) => _confirmLeg(journey, leg),
-              )
-            else if (riding && (_live != null || journey?.asRideLive != null))
-              _RidingBlock(
-                live: _live ?? journey!.asRideLive!,
-                journey: journey?.journey,
-              )
-            else if (arrived && (_live != null || journey?.asRideLive != null))
+            else if (underWay)
+              const SizedBox.shrink()
+            else if (arrived)
               _ArrivedBlock(
-                live: _live ?? journey!.asRideLive!,
-                journey: journey?.journey,
-                onDismiss: _dismiss,
+                live: ride.rideLive!,
+                journey: ride.journey?.journey,
+                onDismiss: () => ride.dismiss().then((_) => _load()),
               )
             else ...[
-              const VSection('Einchecken'),
+              VSection(near != null ? 'Einchecken' : 'Startbahnhof'),
               const VGap.m(),
               if (near != null)
                 _StationCard(
@@ -398,25 +289,15 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                 ),
               ),
             ],
-            const VGap.l(),
+            if (!underWay) const VGap.l(),
 
-            // Three things, nothing else (docs/18): the week, the claims, us.
+            // Two things, nothing else (docs/19): the week, us.
             const VSection('Deine Woche'),
             _Momentum(standing: st, onTap: () => context.go(Routes.ich)),
             const VGap.l(),
-            const VSection('Deine Anträge'),
-            _CycleStrip(
-              standing: st,
-              claims: _claims,
-              busy: _busy,
-              onOpen: () => context.go(Routes.antraege),
-              onClaim: st.money?.readyDesk == null
-                  ? null
-                  : () => _prepareClaim(st.money!.readyDesk!),
-            ),
-            const VGap.l(),
             const VSection('Wir'),
-            _Community(
+            const VGap.m(),
+            _WirBlock(
               standing: st,
               tick: _minuteTick,
               onTap: () => context.go(Routes.wir),
@@ -473,14 +354,15 @@ class _StationRow extends StatelessWidget {
     }
     // The same box as the station card, so the idle state reads as "no station yet" rather
     // than as loose chips: one line of context, then the ways in.
+    // The box answers one question: where does the journey start? (docs/19 §3)
     final title = !hasPosition
-        ? 'Wo bist du?'
+        ? 'Von wo fährst du los?'
         : nearby.stations.isEmpty
-        ? 'Kein Bahnhof in der Nähe'
-        : 'Nicht am Bahnhof';
+        ? 'Kein Bahnhof in der Nähe · von wo fährst du los?'
+        : 'Von wo fährst du los?';
     final caption = !hasPosition
-        ? 'Ohne Standort wissen wir nicht, ob du an einem Bahnhof stehst.'
-        : 'Stehst du an einem Bahnhof, zeigen wir hier die Abfahrten. Bis dahin:';
+        ? 'Wo bist du? Ohne Standort wissen wir nicht, ob du an einem Bahnhof stehst.'
+        : 'Stehst du an einem Bahnhof, fragen wir hier direkt nach dem Ziel. Bis dahin:';
     return Container(
       padding: const EdgeInsets.all(VSpace.m),
       decoration: BoxDecoration(
@@ -510,7 +392,7 @@ class _StationRow extends StatelessWidget {
                     text: TextSpan(
                       style: VText.bodySStrong,
                       children: [
-                        TextSpan(text: s.name),
+                        TextSpan(text: 'Ab ${s.name}'),
                         if (suffix != null)
                           TextSpan(text: ' · $suffix', style: VText.caption),
                       ],
@@ -589,8 +471,10 @@ class _StationCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text('STARTBAHNHOF', style: VText.eyebrow),
+                const SizedBox(height: 2),
                 Text(
-                  station.name,
+                  'Ab ${station.name}',
                   style: VText.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -667,93 +551,6 @@ class _StationCard extends StatelessWidget {
   }
 }
 
-class _RidingBlock extends StatelessWidget {
-  const _RidingBlock({required this.live, this.journey});
-  final ApiRideLive live;
-  final ApiJourney? journey;
-
-  @override
-  Widget build(BuildContext context) {
-    final r = live.ride;
-    final stops = live.stops;
-    final nextName = stops.isEmpty
-        ? null
-        : stops[(r.passedStops + 1).clamp(0, stops.length - 1)].name;
-    final j = journey;
-    final dest = j?.destinationStationName ?? r.exitStationName;
-    final transferAhead = j != null && j.currentLeg < j.legs.length
-        ? j.legs[(j.currentLeg - 1).clamp(0, j.legs.length - 1)].toStationName
-        : null;
-    return InkWell(
-      onTap: () => context.push(Routes.unterwegs),
-      borderRadius: BorderRadius.circular(4),
-      child: Container(
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(
-          border: Border.all(color: VColors.ink, width: 1.5),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('UNTERWEGS', style: VText.eyebrow),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                LineBadge(r.line, large: true),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'nach $dest',
-                    style: VText.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                VDelay(
-                  r.liveDelayMinutes,
-                  size: VDelaySize.medium,
-                  cancelled: r.cancelled,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              [
-                if (nextName != null) 'Nächster Halt $nextName',
-                if (transferAhead != null)
-                  'Umstieg $transferAhead'
-                else
-                  'Ausstieg ${r.exitStationName}',
-                if (live.eta != null) 'an ${fmtLocal(live.eta)}',
-              ].join(' · '),
-              style: VText.caption,
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: VOutlineButton(
-                    label: 'Zur Fahrt',
-                    onTap: () => context.push(Routes.unterwegs),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: VGhostButton(
-                    label: 'Zug wechseln',
-                    onTap: () => context.push(Routes.unterwegs),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _ArrivedBlock extends StatelessWidget {
   const _ArrivedBlock({
     required this.live,
@@ -812,102 +609,6 @@ class _ArrivedBlock extends StatelessWidget {
                 child: VGhostButton(label: 'Fertig', onTap: onDismiss),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Between two legs: the connection to confirm with one tap ("Ich bin drin").
-class _TransferBlock extends StatelessWidget {
-  const _TransferBlock({
-    required this.live,
-    required this.busy,
-    required this.onConfirm,
-  });
-  final ApiJourneyLive live;
-  final bool busy;
-  final ValueChanged<ApiLeg> onConfirm;
-
-  @override
-  Widget build(BuildContext context) {
-    final j = live.journey;
-    final next = live.nextLeg ?? j.nextLeg;
-    final missed = j.missedConnection || next?.replanned == true;
-    return Container(
-      padding: const EdgeInsets.all(VSpace.m),
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: missed ? VColors.red : VColors.ink,
-          width: 1.5,
-        ),
-        borderRadius: BorderRadius.circular(4),
-        color: missed ? VColors.redSoft : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            missed ? 'ANSCHLUSS VERPASST' : 'UMSTEIGEN',
-            style: VText.eyebrow.copyWith(
-              color: missed ? VColors.red : VColors.ink2,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '${j.transferStationName ?? next?.fromStationName ?? ''} · weiter nach ${j.destinationStationName}',
-            style: VText.caption,
-          ),
-          const SizedBox(height: 10),
-          if (next == null)
-            Text(
-              'Keine Verbindung gefunden. Sag uns, wenn du da bist.',
-              style: VText.bodyS,
-            )
-          else ...[
-            Row(
-              children: [
-                LineBadge(next.line, large: true, cancelled: next.cancelled),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'nach ${next.headsign.isNotEmpty ? next.headsign : next.toStationName}',
-                        style: VText.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        [
-                          fmtLocal(next.liveDeparture ?? next.plannedDeparture),
-                          if (next.platform != null &&
-                              next.platform!.isNotEmpty)
-                            'Gl. ${next.platform}',
-                          if (missed) 'nächste Möglichkeit',
-                        ].join(' · '),
-                        style: VText.caption,
-                      ),
-                    ],
-                  ),
-                ),
-                if (next.delayMin > 0)
-                  VDelay(next.delayMin, size: VDelaySize.small),
-              ],
-            ),
-            const SizedBox(height: 12),
-            VPrimaryButton(
-              label: busy ? 'Einen Moment …' : 'Ich bin drin',
-              icon: Icons.check,
-              onTap: busy ? null : () => onConfirm(next),
-            ),
-          ],
-          const SizedBox(height: 8),
-          VGhostButton(
-            label: 'Zur Fahrt',
-            onTap: () => context.push(Routes.unterwegs),
           ),
         ],
       ),
@@ -983,242 +684,11 @@ class _Momentum extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 3 · The claim cycle (decided 10 September 2026)
+// 3 · Wir: the community's minutes, big and ticking, with the customer's share as a bar
 // ---------------------------------------------------------------------------
 
-enum _Stage { collecting, ready, submitted, answered }
-
-/// Four steps, the current one in ink, one line beneath it. A ready bundle keeps
-/// its button even while another claim is out or was just answered.
-class _CycleStrip extends StatelessWidget {
-  const _CycleStrip({
-    required this.standing,
-    required this.claims,
-    required this.busy,
-    required this.onOpen,
-    this.onClaim,
-  });
-  final ApiStanding standing;
-  final List<ApiClaim> claims;
-  final bool busy;
-  final VoidCallback onOpen;
-  final VoidCallback? onClaim;
-
-  static const _labels = [
-    'Sammeln',
-    'Antrag bereit',
-    'Eingereicht',
-    'Bestätigt',
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final m = standing.money;
-    final now = DateTime.now();
-    final out =
-        claims
-            .where(
-              (c) =>
-                  c.status == ApiClaimStatus.sent ||
-                  c.status == ApiClaimStatus.question,
-            )
-            .toList()
-          ..sort(
-            (a, b) =>
-                (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)),
-          );
-    final closed =
-        claims
-            .where(
-              (c) =>
-                  (c.status == ApiClaimStatus.accepted ||
-                      c.status == ApiClaimStatus.rejected) &&
-                  c.sentAt != null &&
-                  now.difference(c.sentAt!).inDays <= 60,
-            )
-            .toList()
-          ..sort(
-            (a, b) =>
-                (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)),
-          );
-    final recentClosed = closed
-        .where(
-          (c) =>
-              _closedAt(c) != null &&
-              now.difference(_closedAt(c)!).inDays <= 14,
-        )
-        .firstOrNull;
-    final ready = m != null && m.ready && onClaim != null;
-
-    final _Stage stage;
-    if (out.isNotEmpty) {
-      stage = _Stage.submitted;
-    } else if (recentClosed != null) {
-      stage = _Stage.answered;
-    } else if (ready) {
-      stage = _Stage.ready;
-    } else {
-      stage = _Stage.collecting;
-    }
-    final active = stage.index;
-    final answeredLabel = recentClosed?.status == ApiClaimStatus.rejected
-        ? 'Abgelehnt'
-        : 'Bestätigt';
-
-    String line;
-    switch (stage) {
-      case _Stage.collecting:
-        line = m == null || m.openCents == 0
-            ? 'Noch keine Verspätung ab 60 Minuten. Die erste zählt 1,50 €.'
-            : 'Noch ${fmtEuro(m.missingCents / 100)} bis zum Antrag · ${fmtEuro(m.openCents / 100)} gesammelt für ${m.ngoName}';
-      case _Stage.ready:
-        line = 'Bündel bereit · geht an ${m!.ngoName}';
-      case _Stage.submitted:
-        final c = out.first;
-        line = c.status == ApiClaimStatus.question
-            ? 'Rückfrage der Bahn · bitte antworten'
-            : c.expectedReplyBy != null
-            ? 'Antwort bis ${Mock.shortDate(c.expectedReplyBy!.toLocal())} · ${fmtCents(c.amountClaimedCents)} unterwegs'
-            : '${fmtCents(c.amountClaimedCents)} unterwegs · Antwort in etwa 4 Wochen';
-      case _Stage.answered:
-        final c = recentClosed!;
-        line = c.status == ApiClaimStatus.rejected
-            ? 'Abgelehnt · Widerspruch möglich'
-            : '${fmtCents(c.amountConfirmedCents ?? c.amountClaimedCents)} bestätigt · geht an ${m?.ngoName ?? 'deinen Verein'}';
-    }
-
-    return InkWell(
-      onTap: onOpen,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: VSpace.m),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                for (var i = 0; i < 4; i++) ...[
-                  if (i > 0)
-                    Expanded(
-                      child: Container(
-                        height: 1,
-                        color: i <= active ? VColors.ink : VColors.rule,
-                      ),
-                    ),
-                  _Step(
-                    label: i == 3 ? answeredLabel : _labels[i],
-                    state: i < active
-                        ? _StepState.done
-                        : i == active
-                        ? _StepState.active
-                        : _StepState.ahead,
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 10),
-            if (ready && stage == _Stage.ready)
-              VPrimaryButton(
-                label: busy
-                    ? 'Einen Moment …'
-                    : '${fmtEuro(m.openCents / 100)} beantragen',
-                icon: Icons.edit_outlined,
-                onTap: busy ? null : onClaim,
-              )
-            else
-              Text(
-                line,
-                style: VText.bodyS.copyWith(color: VColors.ink2),
-                maxLines: 2,
-              ),
-            if (ready && stage != _Stage.ready) ...[
-              const SizedBox(height: 10),
-              VOutlineButton(
-                label: busy
-                    ? 'Einen Moment …'
-                    : 'Nächstes Bündel · ${fmtEuro(m.openCents / 100)}',
-                icon: Icons.edit_outlined,
-                onTap: busy ? null : onClaim,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// When the railway answered: the reply date is not on the claim, so the sent date
-  /// plus the usual four weeks stands in unless the claim is younger than that.
-  static DateTime? _closedAt(ApiClaim c) {
-    final sent = c.sentAt;
-    if (sent == null) return null;
-    final replied = c.expectedReplyBy ?? sent.add(const Duration(days: 28));
-    return replied.isBefore(DateTime.now()) ? replied : DateTime.now();
-  }
-}
-
-enum _StepState { done, active, ahead }
-
-class _Step extends StatelessWidget {
-  const _Step({required this.label, required this.state});
-  final String label;
-  final _StepState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (state) {
-      _StepState.active => VColors.ink,
-      _StepState.done => VColors.ink2,
-      _StepState.ahead => VColors.ink3,
-    };
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: state == _StepState.ahead ? Colors.transparent : color,
-            border: Border.all(color: color, width: 1.5),
-          ),
-          child: state == _StepState.active
-              ? Center(
-                  child: Container(
-                    width: 4,
-                    height: 4,
-                    decoration: const BoxDecoration(
-                      color: VColors.red,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                )
-              : null,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: VText.tab.copyWith(
-            color: color,
-            fontWeight: state == _StepState.active
-                ? FontWeight.w700
-                : FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 5 · Community with my share
-// ---------------------------------------------------------------------------
-
-class _Community extends StatelessWidget {
-  const _Community({
-    required this.standing,
-    required this.tick,
-    required this.onTap,
-  });
+class _WirBlock extends StatelessWidget {
+  const _WirBlock({required this.standing, required this.tick, required this.onTap});
   final ApiStanding standing;
   final int tick;
   final VoidCallback onTap;
@@ -1228,34 +698,48 @@ class _Community extends StatelessWidget {
     final c = standing.community;
     return InkWell(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: VSpace.m),
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.all(VSpace.m),
+        decoration: BoxDecoration(
+          color: VColors.paperElevated,
+          border: Border.all(color: VColors.rule),
+          borderRadius: BorderRadius.circular(4),
+        ),
         child: c == null
-            ? Text(
-                'Wir haben zusammen gewartet. Zahlen folgen.',
-                style: VText.caption,
-              )
+            ? Text('Wir haben zusammen gewartet. Zahlen folgen.', style: VText.caption)
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  RichText(
-                    text: TextSpan(
-                      style: VText.body.copyWith(color: VColors.ink2),
-                      children: [
-                        TextSpan(
-                          text: '${fmtInt(c.minutesTotal + tick)} Minuten',
-                          style: VText.bodyStrong.copyWith(
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                        const TextSpan(text: ' haben wir gewartet'),
-                        if (c.myMinutes > 0)
-                          TextSpan(
-                            text: ' · ${fmtInt(c.myMinutes)} davon deine',
-                          ),
-                        const TextSpan(text: '.'),
-                      ],
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      fmtInt(c.minutesTotal + tick),
+                      style: VText.display.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
                     ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text('Minuten haben wir gewartet', style: VText.caption),
+                  const SizedBox(height: 12),
+                  // The share is tiny; the filled part keeps a visible minimum.
+                  LayoutBuilder(
+                    builder: (context, box) {
+                      final total = c.minutesTotal <= 0 ? 1 : c.minutesTotal;
+                      final share = (c.myMinutes / total).clamp(0.0, 1.0);
+                      final filled = (box.maxWidth * share).clamp(c.myMinutes > 0 ? 6.0 : 0.0, box.maxWidth);
+                      return Stack(
+                        children: [
+                          Container(height: 6, decoration: BoxDecoration(color: VColors.ruleSoft, borderRadius: BorderRadius.circular(3))),
+                          Container(height: 6, width: filled, decoration: BoxDecoration(color: VColors.red, borderRadius: BorderRadius.circular(3))),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    c.myMinutes > 0 ? '${fmtInt(c.myMinutes)} davon deine' : 'Deine ersten Minuten kommen mit der ersten Fahrt.',
+                    style: VText.caption,
                   ),
                 ],
               ),

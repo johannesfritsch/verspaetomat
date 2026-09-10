@@ -137,6 +137,42 @@ Future<void> tapText(WidgetTester tester, String text, {Duration timeout = const
   await settle(tester);
 }
 
+/// Home in one of its idle states: the card ('EINCHECKEN'), the away box ('STARTBAHNHOF'),
+/// the arrival card ('ANGEKOMMEN'); or the ride under way as the bar above the nav (docs/19).
+final Finder homeOrRide = find.byWidgetPredicate(
+  (w) => (w is Text && (w.data == 'EINCHECKEN' || w.data == 'STARTBAHNHOF' || w.data == 'ANGEKOMMEN')) || w.key == const Key('ride-bar'),
+);
+
+/// Home idle without a position: the away box, or the card once Stellwerk located us.
+final Finder homeIdle = find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'STARTBAHNHOF'));
+
+final Finder rideBar = find.byKey(const Key('ride-bar'));
+final Finder rideSheet = find.byKey(const Key('ride-sheet-handle'));
+
+/// Taps [text] inside the open ride sheet (Home behind it may show the same word, e.g. the
+/// arrival card's "Fertig"); scrolls the sheet until the widget is on screen first.
+Future<void> tapInSheet(WidgetTester tester, String text) async {
+  final sheet = find.byKey(const Key('ride-sheet'));
+  final f = find.descendant(of: sheet, matching: find.text(text));
+  await pumpUntilFound(tester, f, timeout: const Duration(seconds: 30));
+  final scrollable = find.descendant(of: sheet, matching: find.byType(Scrollable)).first;
+  await tester.scrollUntilVisible(f.first, 200, scrollable: scrollable);
+  await tester.pump(const Duration(milliseconds: 100));
+  await tester.tap(f.first, warnIfMissed: false);
+  await settle(tester);
+}
+
+/// Pulls the ride sheet down (the header's chevron) so the bar shows, then taps the bar to
+/// open it again: the docs/19 path the test exercises after every check-in.
+Future<void> reopenSheetFromBar(WidgetTester tester) async {
+  await pumpUntilFound(tester, rideSheet, timeout: const Duration(seconds: 20));
+  await tapIcon(tester, Icons.expand_more);
+  await pumpUntilFound(tester, rideBar, timeout: const Duration(seconds: 20));
+  await pumpUntilFound(tester, find.textContaining('nach '), timeout: const Duration(seconds: 20));
+  await tester.tap(rideBar);
+  await pumpUntilFound(tester, rideSheet, timeout: const Duration(seconds: 20));
+}
+
 Future<void> tapIcon(WidgetTester tester, IconData icon) async {
   final f = find.byIcon(icon);
   await pumpUntilFound(tester, f, timeout: const Duration(seconds: 20));
@@ -155,7 +191,7 @@ Future<void> tapIcon(WidgetTester tester, IconData icon) async {
 /// (the backend spells "Düsseldorf Hauptbahnhof", the predicted button keeps that name).
 Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {required String match, bool connecting = false}) async {
   // Bahnsteig, idle. A leftover arrival card from an earlier run is dismissed first.
-  await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 40));
+  await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'STARTBAHNHOF' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 40));
   if (find.text('ANGEKOMMEN').evaluate().isNotEmpty) {
     await tapText(tester, 'Fertig');
   }
@@ -218,16 +254,18 @@ Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? known
   final picked = (await chooseJourney(tester, 'Düsseldorf Hbf', match: 'Düsseldorf H'))!;
   final line = picked.first.line;
 
-  // Unterwegs shows the line; no simulate buttons in local mode.
+  // The check-in opens the ride sheet on Home (docs/19); it shows the line, no simulate
+  // buttons in local mode. Pull it down, find the bar, tap the bar: the sheet is back.
   await pumpUntilFound(tester, find.textContaining(line, findRichText: true), timeout: const Duration(seconds: 40));
   expect(find.textContaining('Demo:'), findsNothing);
+  await reopenSheetFromBar(tester);
 
   // Stellwerk: who is riding? Then +68 and fast-forward to the exit stop.
   final customer = knownCustomer ?? await sw.ridingCustomer(line: line);
   await sw.delay(customer, 68);
   await sw.fastForward(customer);
 
-  // The app polls every 20 s and routes to the reveal on its own.
+  // The app polls every 20 s; the open sheet switches to the reveal on its own.
   await pumpUntilFound(
     tester,
     find.byWidgetPredicate((w) => w is Text && (w.data == 'Fertig' || w.data == 'ANGEKOMMEN')),
@@ -243,7 +281,7 @@ Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? known
     return m != null && int.parse(m.group(1)!) >= 68;
   });
   await pumpUntilFound(tester, minutesLine, timeout: const Duration(seconds: 20));
-  await tapText(tester, 'Fertig');
+  await tapInSheet(tester, 'Fertig');
   await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 40));
   return customer;
 }
@@ -265,11 +303,11 @@ void main() {
     try {
       // 0. The app has booted and called /v1/me, so its customer is the most recently seen one.
       //    Start from a clean slate: earlier runs may have left claims (5 sends per day) and rides.
-      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'ANGEKOMMEN' || w.data == 'UNTERWEGS')), timeout: const Duration(seconds: 40));
+      await pumpUntilFound(tester, homeOrRide, timeout: const Duration(seconds: 40));
       customer = (await sw.customers()).first['id'] as String;
       await sw.reset(customer);
       // The reset arrives over the event stream; the platform is empty again.
-      await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 20));
+      await pumpUntilFound(tester, homeIdle, timeout: const Duration(seconds: 20));
       // The test phone has no GPS (NO_LOCATION): Stellwerk puts the customer at Köln Hbf.
       await sw.locate(customer, 'Köln Hbf');
       // ignore: avoid_print
@@ -375,10 +413,10 @@ void main() {
     final sw = Stellwerk(apiUrl);
     String? customer;
     try {
-      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'ANGEKOMMEN' || w.data == 'UNTERWEGS')), timeout: const Duration(seconds: 40));
+      await pumpUntilFound(tester, homeOrRide, timeout: const Duration(seconds: 40));
       customer = (await sw.customers()).first['id'] as String;
       await sw.reset(customer);
-      await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 20));
+      await pumpUntilFound(tester, homeIdle, timeout: const Duration(seconds: 20));
       await sw.locate(customer, 'Köln Hbf');
 
       // Köln → Arnsberg always needs a change (Dortmund or Schwerte). No connecting itinerary right now: nothing to test.
@@ -390,17 +428,26 @@ void main() {
       }
       final leg1 = picked.legs.first.line;
       await pumpUntilFound(tester, find.textContaining(leg1, findRichText: true), timeout: const Duration(seconds: 40));
+      // The sheet opened with the check-in; pull it down so the bar carries the ride (docs/19).
+      await pumpUntilFound(tester, rideSheet, timeout: const Duration(seconds: 20));
+      await tapIcon(tester, Icons.expand_more);
+      await pumpUntilFound(tester, rideBar, timeout: const Duration(seconds: 20));
 
-      // Leg 1 ends: the journey goes into transfer, the confirmation card appears.
+      // Leg 1 ends: the journey goes into transfer; the bar (or the sheet's card) offers "Ich bin drin".
       await sw.fastForward(customer);
       await pumpUntilFound(tester, find.text('Ich bin drin'), timeout: const Duration(seconds: 60));
       final j1 = await sw.journey(customer);
       expect(j1['status'] ?? j1['journey']?['status'], 'transfer');
 
-      // Stellwerk confirms the proposed next leg as the phone would; the app follows.
-      await sw.confirm(customer);
-      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'UNTERWEGS' || (w.data ?? '').startsWith('Stand '))), timeout: const Duration(seconds: 60));
+      // Confirm through the app, whichever "Ich bin drin" is on screen; the journey rides again.
+      await tapText(tester, 'Ich bin drin');
       await pumpUntilGone(tester, find.text('Ich bin drin'), timeout: const Duration(seconds: 30));
+      await pumpUntilFound(tester, find.textContaining('nach '), timeout: const Duration(seconds: 60));
+      final j1b = await sw.journey(customer);
+      expect(j1b['status'] ?? j1b['journey']?['status'], 'riding');
+      // Open the sheet from the bar: the riding view with its "Stand" line.
+      await tester.tap(rideBar);
+      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data ?? '').startsWith('Stand ')), timeout: const Duration(seconds: 30));
 
       // Leg 2 ends at the destination: the arrival with the journey delay.
       await sw.delay(customer, 68);
@@ -415,7 +462,8 @@ void main() {
       final j2 = await sw.journey(customer);
       final status = j2['status'] ?? j2['journey']?['status'];
       expect(status, 'arrived');
-      await tapText(tester, 'Fertig');
+      await tapInSheet(tester, 'Fertig');
+      await pumpUntilFound(tester, homeIdle, timeout: const Duration(seconds: 40));
     } finally {
       if (customer != null) {
         try {

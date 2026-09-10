@@ -1,6 +1,6 @@
 # 11 — Every screen
 
-Navigation (decided 10 September 2026): a bottom bar with four tabs and one action: **Home · Anträge · [Einchecken] · Wir · Ich**. The middle slot is a raised black square with the train icon; it is not a tab but opens the check-in directly (at a station: "Wohin?" for that station, predictions first; elsewhere: the station search, then "Wohin?"). Home is the Bahnsteig. Anträge answers "what is happening with my claims?", Wir "what did it all add up to?". The settings gear sits top right on every tab. Nothing is ever called "Spendenkonto": most of what the ledger holds is not a donation yet, and some of it never will be. The ride view and the claim flow are full-screen moments that sit on top of the tabs.
+Navigation (decided 10 September 2026): a bottom bar with four tabs and one action: **Home · Anträge · [Einchecken] · Wir · Ich**. The middle slot is a raised black square with the train icon; it is not a tab but opens the check-in directly (at a station: "Wohin?" for that station, predictions first; elsewhere: the station search, then "Wohin?"). Home is the Bahnsteig. Anträge answers "what is happening with my claims?", Wir "what did it all add up to?". The settings gear sits top right on every tab. Nothing is ever called "Spendenkonto": most of what the ledger holds is not a donation yet, and some of it never will be. The claim flow is a full-screen moment that sits on top of the tabs. The ride is not: while a journey is under way, a 56 px **ride bar** sits directly above the bottom nav on every tab (line badge, "nach Rheine", the live delay, the next stop with its time; in transfer the next train, "Umsteigen in Hagen Hbf" and a small ink button "Ich bin drin"), and tapping it opens the **ride sheet** (screen 8) over the active tab. The bar and the sheet belong to the tab shell (`RideMonitor`, one poll for all tabs); the bar is hidden while the sheet is open. The shell docks the bar above the nav, so tab content is never covered by it (docs/19).
 
 All copy below is German because that is what the customer reads. Explanations are in English.
 
@@ -47,26 +47,23 @@ Personal details and the ticket number are **not** asked here. They are asked th
 
 ## 4. Bahnsteig (home)
 
-The screen the customer sees a hundred times. Third version, decided 10 September 2026 (docs/16, then docs/18): the check-in card, then three things and nothing else. The small clock and the gear sit in the header corner, with the "Standort: Stellwerk · …" caption on their left when a simulated position is active.
+The screen the customer sees a hundred times. Fourth version, decided 10 September 2026 (docs/16, docs/18, then docs/19): the check-in card, then two things and nothing else. The small clock and the gear sit in the header corner, with the "Standort: Stellwerk · …" caption on their left when a simulated position is active.
 
-**1 · Einchecken (action).**
-- Idle away from a station: a box titled by the situation ("Wo bist du?" without a position, "Kein Bahnhof in der Nähe" or "Nicht am Bahnhof" with one), one line of context, then chips: the home station ("Köln Hbf · Stammbahnhof"), up to two more frequent stations, nearby ones with distance, and "Suchen" (the station search). Each chip opens Einchecken (screen 6). Without a position the box offers "Standort erlauben".
-- At a station (≤ 300 m): one card "Köln Hbf · Du bist hier · 120 m". Underneath, the destinations from this person's previous journeys as one-tap rows (most frequent first, the home station labelled "Nach Hause" when away from it, at most four), then always a "Wohin?" field that suggests stations as you type; a fresh account sees the station name and the field only. Tapping a destination or a suggestion goes straight to "Welcher Zug?" (screen 5b). No departures list. A long press on the station name offers "Diesen Bahnhof nie" (mute).
-- Riding: the ride card (line, the journey's destination, live delay, next stop, the transfer or the exit, ETA) with "Zur Fahrt" and "Zug wechseln".
-- In transfer: the confirmation card "UMSTEIGEN · Hagen Hbf · RB 52 nach Lüdenscheid · 08:55 · Gl. 6 · Ich bin drin"; after a missed connection the card turns red ("ANSCHLUSS VERPASST") and shows the next possibility.
-- Just arrived: the arrival summary with the journey delay, "Anschluss verpasst" when it applies, "Ansehen" and "Fertig", until dismissed.
+**1 · The action.** The first station the customer picks is where the journey starts, and the card says so (docs/19 §3).
+- Idle away from a station: the section is labelled "Startbahnhof". The box is titled "Von wo fährst du los?" (with a position but no station near: "Kein Bahnhof in der Nähe · von wo fährst du los?"), one line of context (without a position it starts with "Wo bist du?"), then chips, each reading "Ab <name>": the home station ("Ab Köln Hbf · Stammbahnhof"), up to two more frequent stations, nearby ones with distance, and "Suchen" (the station search). Each chip opens Einchecken (screen 6). Without a position the box offers "Standort erlauben".
+- At a station (≤ 300 m): the section is labelled "Einchecken"; one card with the eyebrow "STARTBAHNHOF", the title "Ab Köln Hbf" and "Du bist hier · 120 m". Underneath, the destinations from this person's previous journeys as one-tap rows (most frequent first, the home station labelled "Nach Hause" when away from it, at most four), then always a "Wohin?" field that suggests stations as you type; a fresh account sees the station name and the field only. Tapping a destination or a suggestion goes straight to "Welcher Zug?" (screen 5b). No departures list. A long press on the station name offers "Diesen Bahnhof nie" (mute).
+- Riding or in transfer: block 1 is not shown. The ride bar above the nav is the ride's only presence on Home; the sheet (screen 8) has the details and the "Ich bin drin" card.
+- Just arrived (sheet closed): the arrival summary with the journey delay, "Anschluss verpasst" when it applies, "Ansehen" and "Fertig", until dismissed.
 
 Under the card, only when the person rides most days and skipped yesterday: the caption link "Gestern vergessen einzuchecken?" (→ Nachtrag).
 
 **2 · Deine Woche.** "+96" in board type, "Geduldspunkte diese Woche · letzte Woche 41", the level bar underneath with "Gleis 7 · 128 bis „Bahnhofsmission“". A quiet week reads "Diese Woche noch keine Fahrt", never a zero. Tap for Ich.
 
-**3 · Deine Anträge.** A four-step strip, Sammeln → Antrag bereit → Eingereicht → Bestätigt, the current step in ink with a red dot, the others grey, joined by a hairline. One line beneath the active step: collecting "4,50 von 4,00 € · für Bahnhofsmission Köln" (or "Noch keine Verspätung ab 60 Minuten. Die erste zählt 1,50 €."); ready: the primary button "6,00 € beantragen" with "Bündel bereit · geht an …"; submitted: "Antwort bis 8. Okt. · 4,50 € unterwegs" or "Rückfrage der Bahn · bitte antworten"; answered (a claim closed in the last 14 days): "4,50 € bestätigt · geht an …" or "Abgelehnt · Widerspruch möglich", and the last step is labelled accordingly. Priority: a claim awaiting a reply shows Eingereicht, else a recently closed one, else ready or collecting; a ready bundle keeps an outline button "Nächstes Bündel: 6,00 € beantragen" underneath in the other stages. Tap for Anträge.
+**3 · Wir.** A block on elevated paper with a hairline border: the community's minutes as a large ticking figure in the display style ("1.208.316", caption "Minuten haben wir gewartet"), beneath it a thin bar whose filled part is this customer's share (drawn at least 6 px wide, so it is visible) with the caption "1.372 davon deine". The whole block taps through to Wir.
 
-**4 · Wir.** One line: "1.208.316 Minuten haben wir gewartet · 1.372 davon deine.", ticking. Tap for Wir.
+Gone since docs/18: the standing line (now above the boards on Wir), the "next thing" card (railway mail shows as a red count on the Anträge tab icon; deadlines live on Anträge; new badges on Ich), the community euro line. Gone since docs/19: the claim cycle strip (it lives on Anträge; the tab badge carries the news).
 
-Gone since docs/18: the standing line (now above the boards on Wir), the "next thing" card (railway mail shows as a red count on the Anträge tab icon; deadlines live on Anträge; new badges on Ich), the community euro line.
-
-Data: `GET /v1/me/standing` computes blocks 2 to 4 and the unread count server-side (docs/16, docs/18); the station context comes from nearby stations, the geofence station set, the current ride and `GET /v1/me/destinations` (history only).
+Data: `GET /v1/me/standing` computes blocks 2 and 3 and the unread count server-side (docs/16, docs/18); the station context comes from nearby stations, the geofence station set and `GET /v1/me/destinations` (history only); the ride comes from the shell's monitor (`GET /v1/journeys/current`, `GET /v1/rides/current`), polled every 20 s while under way and refreshed on ride events and app resume.
 
 
 ---
@@ -86,14 +83,14 @@ Any pick opens 5b. Data: `GET /v1/me/destinations?from=<station>`.
 
 ## 5b. Welcher Zug? (itineraries)
 
-Eyebrow "Köln Hbf → Lüdenscheid", title "Welcher Zug?". The itineraries from `GET /v1/journeys/plan` (rail only), the preferred one first, each as a board row plus a chip line:
+Eyebrow "Köln Hbf → Lüdenscheid", title "Welcher Zug?". The instruction above the list is one sentence in `bodyStrong`, "Tipp auf den Zug, in dem du sitzt.", with the caption "Umstiege folgen später von selbst." (docs/19 §4). The itineraries from `GET /v1/journeys/plan` (rail only), the preferred one first, each as a board row plus a chip line:
 
-- The first leg as a departure row: planned time, line badge, headsign, platform and operator, "+3" or "pünktlich".
-- Chips: "direkt" (green) or "1× umsteigen in Hagen Hbf" (ink), "nächste" on the preferred one, "an 09:38 · 111 min" (red when the live arrival is later).
+- The first leg as a departure row: planned time, line badge, headsign, platform and operator, "+3" or "pünktlich", then a chevron (ink2) at the end of the row; the whole row is one tap target with a pressed state.
+- Chips: "direkt" (green) or "1× umsteigen in Hagen Hbf" (ink), "nächste Verbindung" on the preferred one, "an 09:38 · 111 min" (red when the live arrival is later).
 - For connections a caption line: "RB 52 ab Hagen Hbf 08:55".
 - The ticket toggle at the bottom, as on Einchecken.
 
-One tap creates the journey (`POST /v1/journeys` with the itinerary's legs, the one-shot location fix and the station's coordinates) and opens Unterwegs. When the customer came from a departure row, the list is filtered to itineraries starting with that train.
+One tap creates the journey (`POST /v1/journeys` with the itinerary's legs, the one-shot location fix and the station's coordinates) and returns to Home with the ride sheet open (screen 8). When the customer came from a departure row, the list is filtered to itineraries starting with that train.
 
 ---
 
@@ -127,16 +124,16 @@ Replaced by 5a/5b on 10 September 2026 (docs/17): the exit stop of every leg fol
 
 ---
 
-## 8. Unterwegs (the journey)
+## 8. Unterwegs (the ride sheet)
 
-Full screen, same paper as everywhere. Designed to be glanced at, not read. Shows the journey (docs/17), not just the train.
+Since docs/19 not a screen but a draggable bottom sheet over the active tab, like the player in a music app: it opens at 0.92 of the screen, snaps at 0.92 and 0.5, and closes when dragged below 0.3 (the bar above the nav then carries the ride; tapping the bar opens the sheet again). A grab handle at the top, then the header pattern ("Unterwegs" caption, "RE 7 nach Rheine" title, a chevron to close) and the body below. It opens on a tap on the bar, when a check-in completes (Welcher Zug? → Home with the sheet), and for the `/unterwegs` route (pushes, the geofence nudge: the route opens Home with the sheet, so deep links keep working). Pulling it down returns to whatever tab was active. Same paper as everywhere; designed to be glanced at, not read. Shows the journey (docs/17), not just the train.
 
 - **Top:** line and headsign of the current leg, then "National Express · Leg 1 von 2 · Ziel Lüdenscheid".
 - **Centre:** the delay in very large digits, "+14", or "pünktlich" in green. Under it: "Umstieg Hagen Hbf 09:06 statt 08:38" on a leg with a transfer ahead, "Ankunft Lüdenscheid …" on the last one.
 - **Stop line:** stops as dots, passed ones filled, next one pulsing, the exit stop marked.
 - **DANACH:** the next leg with its live status ("RB 52 nach Lüdenscheid · ab Hagen Hbf 08:55 · Gl. 6"), a red "knapp" chip when the ETA is later than its departure, and the line "Am Umstieg fragen wir einmal: bist du drin?"; then "Ziel Lüdenscheid · an 09:38".
 - **Quiet footer:** "Stand 08:41 · Wir folgen dem Zug, nicht dir."
-- **Buttons:** "Falscher Zug?" (edge state E2) and "Abbrechen" (the journey is abandoned, no incident). No sharing here; the reveal is at arrival.
+- **Buttons:** "Falscher Zug?" (edge state E2) and "Abbrechen" (the journey is abandoned, no incident). No sharing here; the reveal is at arrival. In demo mode the controls "Nächster Halt" and "Ankunft +68" sit at the bottom of the sheet body.
 
 **In transfer** (leg done, journey not): "Umsteigen · Hagen Hbf", "RE 7 war +5. Weiter nach Lüdenscheid.", the confirmation card with the next leg (line, headsign, big departure time, platform, arrival at the destination) and the primary button "Ich bin drin". After a missed connection the eyebrow reads "Anschluss verpasst", the card is red-bordered "NÄCHSTE MÖGLICHKEIT" with the re-planned train, and the caption says the delay counts at the destination. Below: "Ich bin da" (ends the journey here, with the delay so far) and "Abbrechen". The same card is what a tap on the transfer push opens.
 
@@ -144,11 +141,13 @@ If the delay passes 60 minutes the footer changes once: "Ab hier entsteht ein An
 
 If data stops: "Letzter Stand 08:41" and the digits dim. If the data never resumes, arrival asks for the actual time (E3).
 
+**Arrival while the sheet is open:** the body switches to the reveal (screen 9's body, with "Jetzt einreichen", "Teilen", "Fertig") in place; the bar disappears. Arrival while the sheet is closed: the bar goes and the arrival card appears on Home as before.
+
 ---
 
 ## 9. Angekommen (arrival)
 
-The reveal, and the only screen allowed to feel like a reward. Appears as a notification and as a full screen when the app is opened.
+The reveal, and the only screen allowed to feel like a reward. Appears as a notification, as a full screen when the app is opened or "Ansehen" is tapped on Home's arrival card, and as the ride sheet's body when the journey arrives while the sheet is open (screen 8).
 
 1. Above the number: the lines of the journey and "Köln Hbf → Lüdenscheid".
 2. The final delay at the destination ticks in: "+68". "Ankunft Lüdenscheid 10:46 statt 09:38". After a missed connection, in red: "Anschluss verpasst in Hagen Hbf. Zählt am Ziel, nicht pro Zug." A journey ended early via "Ich bin da" says so: "Beendet unterwegs: die Verspätung bis Hagen Hbf zählt."

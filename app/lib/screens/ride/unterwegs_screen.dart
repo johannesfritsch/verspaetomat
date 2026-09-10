@@ -1,169 +1,49 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../repo/app_repository.dart';
-import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
+import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import 'angekommen_screen.dart';
 import 'ride_widgets.dart';
 
-/// The journey (docs/17). Glanced at, not read. The number is the whole screen.
+/// The journey (docs/17), shown inside the ride sheet (docs/19). Glanced at, not read.
 ///
 /// Riding: the current leg with its live delay, the transfer ahead with the
 /// connection's live status, then the destination with its planned arrival.
 /// Transfer: the confirmation card "RE 5 nach Kleve 10:41 · Gleis 3 · Ich bin drin",
 /// with the alternative when the connection was missed.
-class UnterwegsScreen extends StatefulWidget {
-  const UnterwegsScreen({super.key});
-
-  @override
-  State<UnterwegsScreen> createState() => _UnterwegsScreenState();
-}
-
-class _UnterwegsScreenState extends State<UnterwegsScreen> {
-  StreamSubscription<AppEvent>? _eventSub;
-  ApiJourneyLive? _journey;
-  ApiRideLive? _live;
-  bool _loading = true;
-  bool _busy = false;
-  bool _stale = false;
-  DateTime? _stamp;
-  String? _error;
-  Timer? _poll;
-
-  @override
-  void initState() {
-    super.initState();
-    _eventSub = RepoScope.read(context).events.listen((e) {
-      if (mounted && e.touchesRide) _load(quiet: true);
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-  }
-
-  @override
-  void dispose() {
-    _eventSub?.cancel();
-    _poll?.cancel();
-    super.dispose();
-  }
-
-  bool get _riding => _journey?.journey.riding == true || (_journey == null && _live?.ride.status == ApiRideStatus.riding);
-  bool get _transfer => _journey?.journey.inTransfer == true;
-
-  Future<void> _load({bool quiet = false}) async {
-    final repo = RepoScope.read(context).repo;
-    if (!quiet) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
-    try {
-      final journey = await repo.currentJourney().catchError((_) => null);
-      // Older backends and legacy single-leg rides: the ride view still works.
-      final live = journey?.asRideLive ?? await repo.currentRide();
-      if (!mounted) return;
-      final wasOpen = _riding || _transfer;
-      setState(() {
-        _journey = journey;
-        _live = live;
-        _stale = false;
-        _stamp = DateTime.now();
-        _error = null;
-      });
-      // The journey ended while we were watching: the reveal, once.
-      final arrivedNow = journey?.journey.arrived ?? (live != null && live.ride.status == ApiRideStatus.arrived);
-      if (wasOpen && arrivedNow && !_transfer && mounted) {
-        context.go(Routes.angekommen);
-        return;
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _stale = true;
-          if (_live == null && _journey == null) _error = shortError(e);
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
-      _poll?.cancel();
-      if (mounted && (_riding || _transfer)) {
-        _poll = Timer(const Duration(seconds: 20), () => _load(quiet: true));
-      }
-    }
-  }
-
-  Future<void> _confirm(ApiLeg leg) async {
-    final j = _journey;
-    if (j == null) return;
-    setState(() => _busy = true);
-    try {
-      await RepoScope.read(context).repo.confirmLeg(j.journey.id, leg.tripId);
-      await _load(quiet: true);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  /// "Ich bin da" / "Abbrechen" on a journey; the plain arrival call on a legacy ride.
-  Future<void> _finish({required bool arrived}) async {
-    final repo = RepoScope.read(context).repo;
-    setState(() => _busy = true);
-    try {
-      final j = _journey;
-      if (j != null) {
-        await repo.finishJourney(j.journey.id, arrived: arrived);
-        if (!mounted) return;
-        if (arrived) {
-          context.go(Routes.angekommen);
-        } else {
-          context.go(Routes.bahnsteig);
-        }
-      } else {
-        final result = await repo.arrival(const ArrivalRequest());
-        if (mounted) context.go(Routes.angekommen, extra: result);
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _simulateArrival() async {
-    final repo = RepoScope.read(context).repo;
-    try {
-      final result = await repo.arrival(const ArrivalRequest(delayMinutes: 68));
-      await _load(quiet: true);
-      if (!mounted) return;
-      if (_transfer) return; // the transfer card is the next thing to see
-      context.go(Routes.angekommen, extra: result);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ankunft nicht möglich: ${shortError(e)}')));
-    }
-  }
+/// Arrived while the sheet is open: the reveal (the Angekommen body).
+///
+/// Data comes from the shell's [RideMonitor]; this widget only renders and acts.
+class RideSheetBody extends StatelessWidget {
+  const RideSheetBody({super.key, required this.monitor});
+  final RideMonitor monitor;
 
   @override
   Widget build(BuildContext context) {
     final session = RepoScope.of(context);
-    final journey = _journey?.journey;
-    final live = _live;
+    final m = monitor;
+    final journey = m.journey?.journey;
+    final live = m.rideLive;
 
-    if (!_loading && !_riding && !_transfer) {
-      final arrived = journey?.arrived ?? (live?.ride.status == ApiRideStatus.arrived);
-      return _NotRiding(error: _error, onRetry: _load, arrived: arrived);
+    if (m.arrived) {
+      // The journey ended while the sheet was open: the reveal, in place.
+      return AngekommenScreen(embedded: true, onDone: () => m.dismiss());
+    }
+    if (!m.active) {
+      return Padding(
+        padding: const EdgeInsets.all(VSpace.page),
+        child: Text(m.error ?? 'Gerade kein Zug.', style: VText.body.copyWith(color: VColors.ink2)),
+      );
     }
     if (live == null && journey == null) {
-      return VScreen(title: 'Unterwegs', child: const LoadingLine(label: 'Fahrt wird geladen …'));
+      return const Padding(padding: EdgeInsets.all(VSpace.page), child: LoadingLine(label: 'Fahrt wird geladen …'));
     }
 
-    final stamp = fmtLocal(_stamp);
     final demoControls = session.isLocal
         ? null
         : Row(
@@ -174,25 +54,74 @@ class _UnterwegsScreenState extends State<UnterwegsScreen> {
                   icon: Icons.skip_next_outlined,
                   onTap: () {
                     session.demo.tickRide();
-                    _load(quiet: true);
+                    m.refresh(quiet: true);
                   },
                 ),
               ),
               const SizedBox(width: 8),
-              Expanded(child: VDemoControl(label: 'Ankunft +68', icon: Icons.flag_outlined, onTap: _simulateArrival)),
+              Expanded(child: VDemoControl(label: 'Ankunft +68', icon: Icons.flag_outlined, onTap: () => _simulateArrival(context))),
             ],
           );
 
-    return VScreen(
-      scroll: true,
-      trailing: VIconButton(icon: Icons.close, onTap: () => context.go(Routes.bahnsteig)),
-      showBack: false,
-      // Demo mode fakes the world from here. In local mode the Stellwerk on the backend does.
-      bottom: _transfer ? null : demoControls,
-      child: _transfer
-          ? _TransferView(live: _journey!, busy: _busy, onConfirm: _confirm, onArrived: () => _finish(arrived: true), onAbort: () => _finish(arrived: false))
-          : _RidingView(journey: journey, live: live!, stale: _stale, stamp: stamp, onWrongTrain: () => _wrongTrain(context, live.ride), onAbort: journey == null ? null : () => _finish(arrived: false)),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.l),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (m.transfer)
+            _TransferView(
+              live: m.journey!,
+              busy: m.busy,
+              onConfirm: (leg) => _confirm(context, leg),
+              onArrived: () => _finish(context, arrived: true),
+              onAbort: () => _finish(context, arrived: false),
+            )
+          else
+            _RidingView(
+              journey: journey,
+              live: live!,
+              stale: m.stale,
+              stamp: fmtLocal(m.stamp),
+              onWrongTrain: () => _wrongTrain(context, live.ride),
+              onAbort: journey == null ? null : () => _finish(context, arrived: false),
+            ),
+          if (demoControls != null && !m.transfer) ...[const VGap.l(), demoControls],
+        ],
+      ),
     );
+  }
+
+  Future<void> _confirm(BuildContext context, ApiLeg leg) async {
+    try {
+      await monitor.confirmLeg(leg);
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));
+    }
+  }
+
+  /// "Ich bin da" / "Abbrechen". A legacy ride's arrival result opens the full reveal.
+  Future<void> _finish(BuildContext context, {required bool arrived}) async {
+    try {
+      final result = await monitor.finish(arrived: arrived);
+      if (!context.mounted) return;
+      if (result != null) {
+        monitor.closeSheet();
+        context.push(Routes.angekommen, extra: result);
+      }
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));
+    }
+  }
+
+  Future<void> _simulateArrival(BuildContext context) async {
+    final repo = RepoScope.read(context).repo;
+    try {
+      await repo.arrival(const ArrivalRequest(delayMinutes: 68));
+      await monitor.refresh(quiet: true);
+      // A transfer keeps the sheet on the connection; an arrival switches the body to the reveal.
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ankunft nicht möglich: ${shortError(e)}')));
+    }
   }
 
   /// E2: pick another departure from the same station.
@@ -225,7 +154,7 @@ class _UnterwegsScreenState extends State<UnterwegsScreen> {
                       departure: d,
                       onTap: () async {
                         Navigator.of(ctx).pop();
-                        await _changeTrain(r, d);
+                        await _changeTrain(context, r, d);
                       },
                     ),
                 ],
@@ -237,7 +166,7 @@ class _UnterwegsScreenState extends State<UnterwegsScreen> {
     );
   }
 
-  Future<void> _changeTrain(ApiRide r, ApiDeparture d) async {
+  Future<void> _changeTrain(BuildContext context, ApiRide r, ApiDeparture d) async {
     final repo = RepoScope.read(context).repo;
     try {
       final trip = await repo.trip(d.tripId);
@@ -250,14 +179,31 @@ class _UnterwegsScreenState extends State<UnterwegsScreen> {
         exitStationId: exit?.stationId ?? r.exitStationId,
         exitStationName: exit?.name ?? r.exitStationName,
       ));
-      await _load();
+      await monitor.refresh();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Umbuchen nicht möglich: ${shortError(e)}')));
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Umbuchen nicht möglich: ${shortError(e)}')));
     }
   }
 }
 
+/// The sheet's title line: caption + h2, per state.
+(String, String) rideSheetTitle(RideMonitor m) {
+  if (m.arrived) {
+    return ('Angekommen', m.journey?.journey.destinationStationName ?? m.rideLive?.ride.exitStationName ?? '');
+  }
+  if (m.transfer) {
+    final j = m.journey!.journey;
+    final missed = j.missedConnection || (m.journey!.nextLeg ?? j.nextLeg)?.replanned == true;
+    return (missed ? 'Anschluss verpasst' : 'Umsteigen', j.transferStationName ?? (m.journey!.nextLeg ?? j.nextLeg)?.fromStationName ?? '');
+  }
+  final r = m.rideLive?.ride;
+  final stops = m.rideLive?.stops ?? const [];
+  final headsign = stops.isEmpty ? (r?.exitStationName ?? '') : stops.last.name;
+  return ('Unterwegs', r == null ? '' : '${r.line} nach $headsign');
+}
+
 /// The current leg, live. With a journey: the transfer ahead and the destination underneath.
+/// The line and headsign are the sheet's header, so the body starts with the context line.
 class _RidingView extends StatelessWidget {
   const _RidingView({required this.journey, required this.live, required this.stale, required this.stamp, required this.onWrongTrain, this.onAbort});
   final ApiJourney? journey;
@@ -276,7 +222,6 @@ class _RidingView extends StatelessWidget {
     final delay = r.liveDelayMinutes;
     final planned = r.plannedArrival ?? (exitIndex >= 0 ? plannedAt(stops[exitIndex]) : null);
     final eta = live.eta ?? planned?.add(Duration(minutes: delay));
-    final headsign = stops.isEmpty ? r.exitStationName : stops.last.name;
     final legsAhead = j == null ? const <ApiLeg>[] : j.legs.where((l) => (l.legNo ?? 0) > j.currentLeg).toList();
     final transferName = legsAhead.isEmpty ? null : r.exitStationName;
     final nextLeg = legsAhead.isEmpty ? null : legsAhead.first;
@@ -285,21 +230,13 @@ class _RidingView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            LineBadge(r.line, large: true),
-            const SizedBox(width: 12),
-            Expanded(child: Text('nach $headsign', style: VText.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ],
-        ),
-        const SizedBox(height: 4),
         Text(
           j == null ? r.operator : '${r.operator} · Zug ${j.currentLeg} von ${j.legs.length} · Ziel ${j.destinationStationName}',
           style: VText.caption,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        const VGap.xl(),
+        const VGap.l(),
         Opacity(
           opacity: stale ? 0.45 : 1,
           child: VDelay(delay, size: VDelaySize.display, cancelled: r.cancelled),
@@ -395,6 +332,7 @@ class _RidingView extends StatelessWidget {
 }
 
 /// Between two legs: confirm the connection with one tap, or the alternative after a miss.
+/// The station is the sheet's header; the body starts with the context line.
 class _TransferView extends StatelessWidget {
   const _TransferView({required this.live, required this.busy, required this.onConfirm, required this.onArrived, required this.onAbort});
   final ApiJourneyLive live;
@@ -415,10 +353,6 @@ class _TransferView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(missed ? 'Anschluss verpasst' : 'Umsteigen', style: VText.eyebrow.copyWith(color: missed ? VColors.red : VColors.ink2)),
-        const SizedBox(height: 4),
-        Text(where, style: VText.h2),
-        const SizedBox(height: 4),
         Text(
           done == null
               ? 'Weiter nach ${j.destinationStationName}.'
@@ -496,44 +430,6 @@ class _TransferView extends StatelessWidget {
         const VGap.xs(),
         Text('„Ich bin da“ beendet die Fahrt hier, mit der Verspätung bis ${where.isEmpty ? 'hierher' : where}.', style: VText.caption),
       ],
-    );
-  }
-}
-
-/// Calm empty state so the screen is always demonstrable.
-class _NotRiding extends StatelessWidget {
-  const _NotRiding({this.error, required this.onRetry, this.arrived = false});
-  final String? error;
-  final VoidCallback onRetry;
-  final bool arrived;
-
-  @override
-  Widget build(BuildContext context) {
-    final isLocal = RepoScope.of(context).isLocal;
-    return VScreen(
-      title: 'Unterwegs',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const VGap.xl(),
-          const Center(child: VStationClock(size: 96, animated: true)),
-          const VGap.l(),
-          Text(arrived ? 'Angekommen.' : 'Gerade kein Zug.', style: VText.h2),
-          const VGap.s(),
-          Text(
-            arrived ? 'Die letzte Fahrt ist abgeschlossen. Schau sie dir an.' : 'Sag am Bahnsteig, wohin du willst, dann siehst du hier die Fahrt.',
-            style: VText.body.copyWith(color: VColors.ink2),
-          ),
-          if (error != null) ErrorLine(message: error!, onRetry: onRetry),
-          const VGap.xl(),
-          if (arrived)
-            VPrimaryButton(label: 'Ankunft ansehen', onTap: () => context.go(Routes.angekommen))
-          else if (isLocal)
-            VGhostButton(label: 'Zum Bahnsteig', onTap: () => context.go(Routes.bahnsteig))
-          else
-            VDemoControl(label: 'Nächsten Regio einchecken', icon: Icons.train_outlined, onTap: () => demoCheckIn(context)),
-        ],
-      ),
     );
   }
 }

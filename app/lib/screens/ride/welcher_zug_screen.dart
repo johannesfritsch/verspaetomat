@@ -126,8 +126,12 @@ class _WelcherZugScreenState extends State<WelcherZugScreen> {
               padding: const EdgeInsets.symmetric(vertical: VSpace.l),
               child: Text('Gerade keine Verbindung in Sicht. Versuch es gleich noch mal oder nimm ein anderes Ziel.', style: VText.bodyS.copyWith(color: VColors.ink2)),
             ),
-          if (_itineraries.isNotEmpty) Text('Tipp auf die Verbindung, in der du sitzt. Der Rest folgt dem Zug.', style: VText.caption),
-          const VGap.s(),
+          if (_itineraries.isNotEmpty) ...[
+            Text('Tipp auf den Zug, in dem du sitzt.', style: VText.bodyStrong),
+            const SizedBox(height: 2),
+            Text('Umstiege folgen später von selbst.', style: VText.caption),
+          ],
+          const VGap.m(),
           for (final it in _itineraries) ItineraryRow(itinerary: it, onTap: _sending ? null : () => _start(it)),
           if (_sending) const LoadingLine(label: 'Einchecken …'),
           const VGap.xl(),
@@ -185,6 +189,9 @@ class ItineraryRow extends StatelessWidget {
                       VDelay(delay, size: VDelaySize.small)
                     else
                       Text('pünktlich', style: VText.caption.copyWith(color: VColors.green)),
+                    const SizedBox(width: 4),
+                    // One row, one tap: the chevron says so.
+                    const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -199,7 +206,7 @@ class ItineraryRow extends StatelessWidget {
                         const VChip('direkt', tone: VTone.green)
                       else
                         VChip('${it.transfers}× umsteigen in ${it.transferStations.join(', ')}', tone: VTone.ink),
-                      if (it.preferred) const VChip('nächste', tone: VTone.neutral),
+                      if (it.preferred) const VChip('nächste Verbindung', tone: VTone.neutral),
                       Text(
                         'an ${fmtLocal(arrival)}${it.durationMin != null ? ' · ${it.durationMin} min' : ''}',
                         style: VText.caption.copyWith(color: late ? VColors.red : VColors.ink2),

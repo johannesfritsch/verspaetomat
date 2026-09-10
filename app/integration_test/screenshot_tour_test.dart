@@ -13,6 +13,7 @@ import 'package:verspaetomat/mock/mock_data.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
+import 'package:verspaetomat/state/ride_monitor.dart';
 import 'package:verspaetomat/widgets/kit.dart' show VPrimaryButton;
 
 const tour = <(String, String)>[
@@ -73,13 +74,14 @@ void main() {
       print('SHOT $name');
       await wait(tester, 1500);
     }
-    // The Bahnsteig in its other three states (docs/16): away from a station, riding, arrived.
+    // The Bahnsteig in its other states: away from a station, riding (the bar, the sheet), arrived.
     Future<void> shot(String name) async {
       await wait(tester, 1800);
       // ignore: avoid_print
       print('SHOT $name');
       await wait(tester, 1500);
     }
+    RideMonitor monitor() => RideScope.read(tester.element(find.byType(Scaffold).first))!;
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
     await wait(tester, 600);
     demo.reset(); // an arrival left over from the Angekommen routes would hide the idle state
@@ -92,30 +94,39 @@ void main() {
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
     await wait(tester, 600);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
-    await shot('bahnsteig-riding');
+    // The ride under way (docs/19): the bar on Home and on another tab, the sheet full and half.
+    await shot('bar-home');
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.antraege);
+    await shot('bar-antraege');
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    await wait(tester, 600);
+    monitor().openSheet();
+    await shot('sheet-riding');
+    // Not awaited: frames come from the test pumps, so the future would wait forever.
+    monitor().sheetController.animateTo(0.5, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    await shot('sheet-half');
+    // The arrival while the sheet is open: the reveal in place.
+    demo.simulateArrival(minutes: 68);
+    await shot('sheet-arrived');
+    monitor().closeSheet();
+    await wait(tester, 400);
+    demo.reset();
+    demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
+    await wait(tester, 800);
     demo.simulateArrival(minutes: 68);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
     await wait(tester, 600);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
     await shot('bahnsteig-arrived');
     demo.reset();
-    // The claim cycle on Home in its four states (decided 10 September 2026).
     Future<void> home(String name) async {
       GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
       await wait(tester, 600);
       GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
       await shot(name);
     }
-    demo.awayFromStation = true; // the compact station box keeps the cycle strip above the fold
-    await home('bahnsteig-cycle-submitted'); // the demo ledger has two bundles out
-    demo.receiveReply();
-    demo.receiveReply();
-    await home('bahnsteig-cycle-answered');
-    demo.reset();
-    demo.incidents.removeWhere((i) => i.status == IncidentStatus.eingereicht);
-    await home('bahnsteig-cycle-ready'); // 3 × 1,50 € collected, nothing out
-    demo.incidents.removeWhere((i) => i.id == 'i-0909');
-    await home('bahnsteig-cycle-collecting'); // 3,00 € of 4,00 €
+    demo.awayFromStation = true;
+    await home('bahnsteig-away-wir'); // the away box and the Wir block above the fold
     demo.awayFromStation = false;
     demo.reset();
     // Anträge (docs/18): the cards. Collecting only, then sent + question + accepted.
@@ -163,8 +174,8 @@ void main() {
     await wait(tester, 600);
     go(Routes.unterwegs);
     await shot('unterwegs-transfer');
-    go(Routes.bahnsteig);
-    await shot('bahnsteig-transfer');
+    monitor().closeSheet();
+    await shot('bar-transfer');
     demo.confirmLeg(Mock.allDepartures.firstWhere((x) => x.id == 'rb52-0855'));
     demo.simulateArrival(minutes: 12);
     go(Routes.angekommen);
