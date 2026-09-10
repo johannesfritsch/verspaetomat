@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Build, sign, export and upload an iOS build to TestFlight without an Xcode login.
 #
-#   app/tools/release.sh            # version from pubspec, build number = commit count
+#   app/tools/release.sh            # version from pubspec, build number = last uploaded build + 1
 #   BUILD=42 app/tools/release.sh   # explicit build number
+# Uploaded builds are tagged ios-<version>-<build>; the next build number comes from the highest
+# such tag (any version), so numbers stay sequential across versions, as App Store Connect wants.
 #   DRY=1 app/tools/release.sh      # everything except the upload
 #
 # Needs an App Store Connect API key (App Store Connect → Users and Access → Integrations →
@@ -24,7 +26,8 @@ KEY="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
 
 API_URL="${API_URL:-https://api.verspaetomat.de}"
 VERSION="$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' pubspec.yaml)"
-BUILD="${BUILD:-$(git rev-list --count HEAD)}"
+LAST="$(git tag -l 'ios-*' | sed -n 's/^ios-.*-\([0-9]*\)$/\1/p' | sort -n | tail -1)"
+BUILD="${BUILD:-$(( ${LAST:-0} + 1 ))}"
 ARCHIVE="build/ios/archive/Runner.xcarchive"
 AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
 
