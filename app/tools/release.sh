@@ -51,6 +51,12 @@ ls -la "$IPA" | awk '{print "   " $5 " bytes  " $9}'
 if [[ "${DRY:-0}" == "1" ]]; then echo "== dry run, not uploading"; exit 0; fi
 
 echo "== upload"
-xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1 | grep -vE "^\s*$" | tail -3
+UPLOAD_LOG="$(mktemp)"
+if ! xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" >"$UPLOAD_LOG" 2>&1; then
+  grep -vE "^\s*$" "$UPLOAD_LOG" | tail -8
+  echo "== UPLOAD FAILED: build $BUILD not tagged"
+  exit 1
+fi
+grep -E "Transferred|No errors|UPLOAD" "$UPLOAD_LOG" | tail -2
 git tag -f "ios-$VERSION-$BUILD" >/dev/null && git push -q --force origin "ios-$VERSION-$BUILD"
-echo "== done: build $BUILD is processing in App Store Connect (10 to 30 min), then appears in TestFlight"
+echo "== done: build $BUILD uploaded and tagged; App Store Connect processes it in 10 to 30 min, then TestFlight"
