@@ -31,7 +31,10 @@ impl FromRequestParts<AppState> for Admin {
     async fn from_request_parts(parts: &mut Parts, _s: &AppState) -> Result<Self, Self::Rejection> {
         let expected = std::env::var("ADMIN_TOKEN").unwrap_or_else(|_| "stellwerk".into());
         let given = parts.headers.get("x-admin-token").and_then(|v| v.to_str().ok()).unwrap_or("");
-        if given == expected {
+        // The admin API is reachable from the internet in production; compare digests so the
+        // comparison time does not depend on how many leading characters match.
+        use sha2::{Digest, Sha256};
+        if Sha256::digest(given.as_bytes()) == Sha256::digest(expected.as_bytes()) {
             Ok(Admin)
         } else {
             Err(err(StatusCode::UNAUTHORIZED, "bad admin token"))

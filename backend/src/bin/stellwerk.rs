@@ -16,28 +16,212 @@
 //!   stellwerk ngo-report bahnhofsmission statement.csv   (or .json)
 //!   stellwerk scan
 //!
-//! Env: STELLWERK_URL (default http://127.0.0.1:8080), ADMIN_TOKEN (default stellwerk).
+//! Targets: `--dev` (default) talks to http://127.0.0.1:8080 with token `stellwerk`; `--prod`
+//! (or `--target NAME`) reads ~/.config/verspaetomat/stellwerk.toml: a URL and the admin token
+//! per target. `stellwerk config init --ssh verspaetomat` writes that file and fetches the
+//! server's ADMIN_TOKEN over SSH once.
+//!
+//! Env overrides: STELLWERK_TARGET, STELLWERK_URL, ADMIN_TOKEN, STELLWERK_CONFIG (file path).
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::process::Command;
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 #[derive(Parser)]
 #[command(name = "stellwerk", about = "Verspätomat Stellwerk: simulate delays, arrivals, replies and time for one customer.")]
 struct Cli {
-    /// Backend base URL
-    #[arg(long, env = "STELLWERK_URL", default_value = "http://127.0.0.1:8080")]
-    url: String,
-    /// Admin token
-    #[arg(long, env = "ADMIN_TOKEN", default_value = "stellwerk")]
-    token: String,
+    /// Use the "prod" target from the config file
+    #[arg(long, global = true, conflicts_with_all = ["dev", "target"])]
+    prod: bool,
+    /// Use the "dev" target (the default: local backend on 8080)
+    #[arg(long, global = true, conflicts_with = "target")]
+    dev: bool,
+    /// Use a named target from the config file
+    #[arg(long, global = true, env = "STELLWERK_TARGET")]
+    target: Option<String>,
+    /// Backend base URL (overrides the target)
+    #[arg(long, global = true, env = "STELLWERK_URL")]
+    url: Option<String>,
+    /// Admin token (overrides the target)
+    #[arg(long, global = true, env = "ADMIN_TOKEN")]
+    token: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
 
+// ---------------------------------------------------------------------------
+// Targets and the config file
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct Target {
+    /// Base URL of the backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    /// x-admin-token of that backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct ConfigFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default: Option<String>,
+    #[serde(default)]
+    targets: BTreeMap<String, Target>,
+}
+
+fn config_path() -> PathBuf {
+    if let Ok(p) = std::env::var("STELLWERK_CONFIG") {
+        return PathBuf::from(p);
+    }
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".config").join("verspaetomat").join("stellwerk.toml")
+}
+
+fn load_config() -> anyhow::Result<ConfigFile> {
+    let p = config_path();
+    if !p.exists() {
+        return Ok(ConfigFile::default());
+    }
+    Ok(toml::from_str(&std::fs::read_to_string(&p)?)?)
+}
+
+fn save_config(c: &ConfigFile) -> anyhow::Result<PathBuf> {
+    let p = config_path();
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&p, toml::to_string_pretty(c)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(p)
+}
+
+fn builtin_dev() -> Target {
+    Target { url: Some("http://127.0.0.1:8080".into()), token: Some("stellwerk".into()) }
+}
+
+/// Which target this invocation uses, and its settings after flags and env.
+fn resolve(cli: &Cli, cfg: &ConfigFile) -> anyhow::Result<(String, Target)> {
+    let name = if cli.prod {
+        "prod".to_string()
+    } else if cli.dev {
+        "dev".to_string()
+    } else if let Some(t) = &cli.target {
+        t.clone()
+    } else {
+        cfg.default.clone().unwrap_or_else(|| "dev".into())
+    };
+    let mut t = match cfg.targets.get(&name) {
+        Some(t) => t.clone(),
+        None if name == "dev" => builtin_dev(),
+        None => anyhow::bail!("no target \"{name}\" in {} (run: stellwerk config init --ssh <host> --name {name})", config_path().display()),
+    };
+    if let Some(u) = &cli.url {
+        t.url = Some(u.clone());
+    }
+    if let Some(tok) = &cli.token {
+        t.token = Some(tok.clone());
+    }
+    if t.token.is_none() && name == "dev" {
+        t.token = Some("stellwerk".into());
+    }
+    Ok((name, t))
+}
+
+#[derive(Subcommand)]
+enum ConfigCmd {
+    /// Write the config file; with --ssh, fetch the server's ADMIN_TOKEN over SSH
+    Init(ConfigInit),
+    /// Print the config file (tokens masked)
+    Show,
+    /// Print the path of the config file
+    Path,
+}
+
+#[derive(Args)]
+struct ConfigInit {
+    /// SSH host or alias of the server; used once to read ADMIN_TOKEN from deploy/.env
+    #[arg(long)]
+    ssh: Option<String>,
+    /// Target name to write
+    #[arg(long, default_value = "prod")]
+    name: String,
+    /// Public URL of the API; the target talks to /admin there with the token
+    #[arg(long, default_value = "https://api.verspaetomat.de")]
+    url: String,
+    /// Admin token (default: read from the SSH host's /opt/verspaetomat/deploy/.env)
+    #[arg(long)]
+    token: Option<String>,
+}
+
+fn config_command(c: ConfigCmd) -> anyhow::Result<()> {
+    match c {
+        ConfigCmd::Path => println!("{}", config_path().display()),
+        ConfigCmd::Show => {
+            let cfg = load_config()?;
+            println!("# {}", config_path().display());
+            println!("default = \"{}\"", cfg.default.clone().unwrap_or_else(|| "dev".into()));
+            for (name, t) in &cfg.targets {
+                println!("[targets.{name}]");
+                if let Some(u) = &t.url {
+                    println!("url = \"{u}\"");
+                }
+                if let Some(tok) = &t.token {
+                    println!("token = \"{}…\"", tok.chars().take(4).collect::<String>());
+                }
+            }
+            if cfg.targets.is_empty() {
+                println!("# no targets yet: stellwerk config init --ssh verspaetomat");
+            }
+        }
+        ConfigCmd::Init(i) => {
+            let mut cfg = load_config()?;
+            let mut t = Target { url: Some(i.url.trim_end_matches('/').to_string()), token: None };
+            t.token = match (i.token, &i.ssh) {
+                (Some(tok), _) => Some(tok),
+                (None, Some(h)) => {
+                    eprintln!("reading ADMIN_TOKEN from {h}:/opt/verspaetomat/deploy/.env …");
+                    let out = Command::new("ssh").args(["-o", "BatchMode=yes", h, "grep -m1 '^ADMIN_TOKEN=' /opt/verspaetomat/deploy/.env"]).output()?;
+                    if !out.status.success() {
+                        anyhow::bail!("ssh {h} failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+                    }
+                    let line = String::from_utf8_lossy(&out.stdout);
+                    let tok = line.trim().trim_start_matches("ADMIN_TOKEN=").split_whitespace().next().unwrap_or("").to_string();
+                    if tok.is_empty() {
+                        anyhow::bail!("no ADMIN_TOKEN= line in the server's deploy/.env");
+                    }
+                    Some(tok)
+                }
+                (None, None) => anyhow::bail!("give --token, or --ssh <host> to read it from the server"),
+            };
+            cfg.targets.entry("dev".into()).or_insert_with(builtin_dev);
+            cfg.targets.insert(i.name.clone(), t);
+            if cfg.default.is_none() {
+                cfg.default = Some("dev".into());
+            }
+            let p = save_config(&cfg)?;
+            println!("wrote {} (mode 600): target \"{}\" ready. Try: stellwerk --{} customers", p.display(), i.name, i.name);
+        }
+    }
+    Ok(())
+}
+
 #[derive(Subcommand)]
 enum Cmd {
+    /// Targets: init the config file for --prod, show it, print its path
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCmd,
+    },
     /// List customers and who is riding
     Customers,
     /// Show a customer's current ride with stops and live state
@@ -181,9 +365,20 @@ fn print_ride(v: &Value) {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let api = Api { http: reqwest::Client::builder().timeout(Duration::from_secs(30)).build()?, url: cli.url.trim_end_matches('/').to_string(), token: cli.token };
+    if let Cmd::Config { cmd } = cli.cmd {
+        return config_command(cmd);
+    }
+    let cfg = load_config()?;
+    let (name, target) = resolve(&cli, &cfg)?;
+    let url = target.url.clone().ok_or_else(|| anyhow::anyhow!("target \"{name}\" has no url"))?.trim_end_matches('/').to_string();
+    if name != "dev" {
+        eprintln!("[{name}] {url}");
+    }
+    let token = target.token.ok_or_else(|| anyhow::anyhow!("target \"{name}\" has no token"))?;
+    let api = Api { http: reqwest::Client::builder().timeout(Duration::from_secs(30)).build()?, url, token };
 
     match cli.cmd {
+        Cmd::Config { .. } => unreachable!(),
         Cmd::Customers => {
             let v = api.get("/admin/customers").await?;
             println!("{:<10} {:<36} {:<34} {:<8} {:<14} Fahrt", "Name", "ID", "Relay", "offen", "Standort");

@@ -133,6 +133,9 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = std::env::var("BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
+    if std::env::var("ADMIN_TOKEN").map(|t| t == "stellwerk").unwrap_or(true) && !addr.starts_with("127.0.0.1") && !addr.starts_with("localhost") {
+        tracing::warn!("ADMIN_TOKEN is the dev default while listening on {addr}: set a long random ADMIN_TOKEN before exposing /admin");
+    }
     tracing::info!("verspaetomat-api listening on http://{addr}");
     axum::serve(listener, app).await?;
     Ok(())
