@@ -191,7 +191,9 @@ class _TabShellState extends State<_TabShell> {
                     VBottomNav(
                       index: index.clamp(0, 3),
                       onTap: (i) => context.go(_TabShell._tabs[i]),
-                      onCheckin: () => startCheckin(context),
+                      // Under way, the square points at the journey you are on (docs/20 §1).
+                      onCheckin: () => monitor.active ? monitor.openSheet() : startCheckin(context),
+                      checkinEnabled: !monitor.active,
                       badges: {1: session.unreadMails},
                     ),
                   ],

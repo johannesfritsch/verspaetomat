@@ -54,7 +54,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             title: 'Zweck',
             subtitle: ngoName,
             chevron: true,
-            onTap: () => _pickNgo(context, session, ngoId),
+            onTap: () => pickNgo(context, session, ngoId),
           ),
           const VGap.xl(),
           const VSection('Bahnsteig-Hinweis'),
@@ -275,41 +275,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
                       selected: current == t,
                       onTap: () {
                         session.updateSettings(MePatch(ticket: t));
-                        Navigator.of(ctx).pop();
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _pickNgo(BuildContext context, Session session, String current) {
-    showVSheet(
-      context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.only(bottom: VSpace.l),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const VSheetHeader(title: 'Dein Zweck', subtitle: 'Wohin die Bahn überweist'),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
-              child: Column(
-                children: [
-                  for (final n in session.ngos) ...[
-                    VChoiceCard(
-                      title: n.name,
-                      subtitle: n.tagline,
-                      selected: current == n.id,
-                      onTap: () {
-                        session.updateSettings(MePatch(ngoId: n.id));
                         Navigator.of(ctx).pop();
                       },
                     ),

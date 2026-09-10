@@ -74,6 +74,12 @@ class Stellwerk {
   Future<void> poll() => _post('/admin/poll');
   Future<void> reply(String id, String outcome) => _post('/admin/customers/$id/reply', {'outcome': outcome});
   Future<void> reset(String id) => _post('/admin/customers/$id/reset');
+  /// Every ride of a run uses the same trip; the shift a fast-forward leaves on it would make
+  /// the next check-in arrive on the spot. Cleared before each check-in.
+  Future<void> clearOverrides() async {
+    final r = await http.delete(Uri.parse('$base/admin/overrides'), headers: _h);
+    if (r.statusCode >= 300) throw StateError('DELETE /admin/overrides → ${r.statusCode} ${r.body}');
+  }
   Future<void> locate(String id, String station) => _post('/admin/customers/$id/locate', {'station': station});
   /// Confirms the proposed next leg of the customer's journey, as the phone would (docs/17).
   Future<dynamic> confirm(String id) => _post('/admin/customers/$id/confirm');
@@ -251,6 +257,7 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
 
 /// One direct journey: check in through the UI, then let the Stellwerk run the world.
 Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? knownCustomer}) async {
+  await sw.clearOverrides();
   final picked = (await chooseJourney(tester, 'Düsseldorf Hbf', match: 'Düsseldorf H'))!;
   final line = picked.first.line;
 
@@ -390,7 +397,8 @@ void main() {
       }
       await pumpUntilFound(tester, find.textContaining('Bestätigt ·'), timeout: const Duration(seconds: 40));
 
-      await tapIcon(tester, Icons.groups_outlined);
+      // The confirmed euros belong to Ich (docs/20 §5).
+      await tapIcon(tester, Icons.person_outline);
       await pumpUntilFound(tester, find.textContaining('Bestätigt, durch dich'), timeout: const Duration(seconds: 40));
     } finally {
       // Leave the customer clean for the next run.
@@ -418,6 +426,7 @@ void main() {
       await sw.reset(customer);
       await pumpUntilFound(tester, homeIdle, timeout: const Duration(seconds: 20));
       await sw.locate(customer, 'Köln Hbf');
+      await sw.clearOverrides();
 
       // Köln → Arnsberg always needs a change (Dortmund or Schwerte). No connecting itinerary right now: nothing to test.
       final picked = await chooseJourney(tester, 'Arnsberg', match: 'Arnsberg, Bahnhof', connecting: true);

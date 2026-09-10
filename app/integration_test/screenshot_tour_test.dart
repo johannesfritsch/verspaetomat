@@ -94,10 +94,13 @@ void main() {
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
     await wait(tester, 600);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
-    // The ride under way (docs/19): the bar on Home and on another tab, the sheet full and half.
+    // The ride under way (docs/19, docs/20): the ride card and the bar on Home, the bar and
+    // the disabled square on another tab, the sheet full and half.
     await shot('bar-home');
+    await shot('home-riding-card');
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.antraege);
     await shot('bar-antraege');
+    await shot('nav-disabled');
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
     await wait(tester, 600);
     monitor().openSheet();
@@ -176,6 +179,8 @@ void main() {
     await shot('unterwegs-transfer');
     monitor().closeSheet();
     await shot('bar-transfer');
+    go(Routes.bahnsteig);
+    await shot('home-transfer-card');
     demo.confirmLeg(Mock.allDepartures.firstWhere((x) => x.id == 'rb52-0855'));
     demo.simulateArrival(minutes: 12);
     go(Routes.angekommen);

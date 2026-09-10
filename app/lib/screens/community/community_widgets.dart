@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
@@ -376,4 +377,41 @@ void showSnack(BuildContext context, String text) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(text)));
+}
+
+/// The Zweck picker (docs/20 §4): shared by Einstellungen and the collecting card on
+/// Anträge. Choosing updates the customer's setting; every future claim goes there.
+void pickNgo(BuildContext context, Session session, String? current) {
+  showVSheet(
+    context,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.l),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const VSheetHeader(title: 'Dein Zweck', subtitle: 'Wohin die Bahn überweist'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
+            child: Column(
+              children: [
+                for (final n in session.ngos) ...[
+                  VChoiceCard(
+                    title: n.name,
+                    subtitle: n.tagline,
+                    selected: current == n.id,
+                    onTap: () {
+                      session.updateSettings(MePatch(ngoId: n.id));
+                      Navigator.of(ctx).pop();
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

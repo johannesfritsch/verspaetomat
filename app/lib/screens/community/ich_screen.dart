@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
 import '../../mock/mock_data.dart' show Mock;
+import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
@@ -10,10 +11,12 @@ import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
 
 class _IchData {
-  const _IchData(this.me, this.badges, this.rides);
+  const _IchData(this.me, this.badges, this.rides, this.standing, this.ledger);
   final ApiCustomer me;
   final List<ApiBadge> badges;
   final List<ApiRide> rides;
+  final ApiStanding standing;
+  final ApiIncidents? ledger;
 }
 
 /// Ich: level, badges, statistics.
@@ -30,7 +33,12 @@ class IchScreen extends StatelessWidget {
         try {
           rides = await repo.rides();
         } catch (_) {}
-        return _IchData(me, badges, rides);
+        final standing = await repo.standing().catchError((_) => ApiStanding.empty);
+        ApiIncidents? ledger;
+        try {
+          ledger = await repo.incidents();
+        } catch (_) {}
+        return _IchData(me, badges, rides, standing, ledger);
       },
       builder: (context, data, refresh) {
         final me = data.me;
@@ -50,6 +58,13 @@ class IchScreen extends StatelessWidget {
         final recent = rides.where((r) => DateTime.now().difference(r.date).inDays <= 14).length;
         final earned = data.badges.where((b) => b.earned).length;
         final name = displayName(me) ?? 'Fahrgast';
+        final lvl = data.standing.level;
+        final my = data.standing.community;
+        final confirmedCents = my?.myConfirmedCents ?? data.ledger?.summary.confirmedCents ?? 0;
+        final submittedCents = data.ledger?.summary.submittedCents ?? 0;
+        final session = RepoScope.of(context);
+        final ngoId = me.settings.ngoId;
+        final ngoName = session.ngos.where((n) => n.id == ngoId).map((n) => n.name).firstOrNull;
 
         return VScreen(
           showBack: false,
@@ -74,6 +89,32 @@ class IchScreen extends StatelessWidget {
               ),
               const VGap.m(),
               const VRule.red(),
+              // The level (docs/20 §5): the same line Home shows under "Deine Woche".
+              if (lvl != null) ...[
+                const VGap.m(),
+                VProgress(confirmed: lvl.progress),
+                const SizedBox(height: 6),
+                Text(
+                  lvl.pointsToNext > 0 ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“' : '${lvl.name} · höchste Stufe erreicht',
+                  style: VText.caption,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const VGap.m(),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: BigFigure(
+                      value: fmtEuro(confirmedCents / 100),
+                      label: 'Bestätigt, durch dich',
+                      onTap: () => context.go(Routes.antraege),
+                    ),
+                  ),
+                  Expanded(child: BigFigure(value: fmtEuro(submittedCents / 100), label: 'Eingereicht, unterwegs')),
+                ],
+              ),
               const VGap.m(),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -109,6 +150,13 @@ class IchScreen extends StatelessWidget {
               VKeyValue('Fahrten dieses Jahr', fmtInt(thisYear.length), strong: true),
               const VGap.xl(),
               const VSection('Mehr'),
+              VListRow(
+                title: 'Dein Zweck',
+                subtitle: ngoName ?? 'Noch nicht gewählt',
+                chevron: true,
+                onTap: ngoId.isEmpty ? () => pickNgo(context, session, null) : () => context.push('${Routes.zweck}?id=$ngoId'),
+              ),
+              const VRule.soft(),
               VListRow(title: 'Alle Fahrten', subtitle: '${rides.length} zuletzt', chevron: true, onTap: () => context.push(Routes.historie)),
             ],
           ),

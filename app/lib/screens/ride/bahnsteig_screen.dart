@@ -223,8 +223,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                         )
                       : const SizedBox.shrink(),
                 ),
-                const VStationClock(size: 32),
-                const SizedBox(width: 4),
                 VIconButton(
                   icon: Icons.settings_outlined,
                   onTap: () =>
@@ -239,12 +237,12 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             ],
             const VGap.s(),
 
-            // 1 · Action, sized by the moment. Under way, the bar above the nav is the ride's
-            // only presence here; the check-in card waits until the journey is over.
+            // 1 · Action, sized by the moment. Under way, the ride card (docs/20 §2) opens the
+            // sheet; the check-in card waits until the journey is over.
             if (_loading && ride.loading)
               const LoadingLine(label: 'Bahnsteig wird geladen …')
             else if (underWay)
-              const SizedBox.shrink()
+              _RideCard(monitor: ride)
             else if (arrived)
               _ArrivedBlock(
                 live: ride.rideLive!,
@@ -289,7 +287,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                 ),
               ),
             ],
-            if (!underWay) const VGap.l(),
+            const VGap.l(),
 
             // Two things, nothing else (docs/19): the week, us.
             const VSection('Deine Woche'),
@@ -312,6 +310,134 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
 // ---------------------------------------------------------------------------
 // 1 · Action
 // ---------------------------------------------------------------------------
+
+/// Under way (docs/20 §2): the train you are on, the next stop, the destination; in a
+/// transfer the next train with "Ich bin drin". Tapping the card opens the ride sheet.
+class _RideCard extends StatelessWidget {
+  const _RideCard({required this.monitor});
+  final RideMonitor monitor;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = monitor;
+    return InkWell(
+      key: const Key('home-ride-card'),
+      onTap: m.openSheet,
+      child: Container(
+        padding: const EdgeInsets.all(VSpace.m),
+        decoration: BoxDecoration(
+          color: VColors.paperElevated,
+          border: Border.all(color: VColors.rule),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: m.transfer ? _transfer(context) : _riding(context),
+      ),
+    );
+  }
+
+  Widget _riding(BuildContext context) {
+    final live = monitor.rideLive;
+    final r = live?.ride;
+    if (r == null) return const SizedBox.shrink();
+    final stops = live!.stops;
+    final j = monitor.journey?.journey;
+    final headsign = stops.isEmpty ? r.exitStationName : stops.last.name;
+    final nextIdx = (r.passedStops + fromIndex(stops, r.fromStationId, r.fromStationName)).clamp(0, stops.isEmpty ? 0 : stops.length - 1);
+    final next = stops.isEmpty ? null : stops[nextIdx];
+    final delay = r.liveDelayMinutes;
+    final dest = j?.destinationStationName ?? r.exitStationName;
+    final destAt = j?.plannedArrival ?? r.plannedArrival;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('UNTERWEGS', style: VText.eyebrow),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            LineBadge(r.line, large: true, cancelled: r.cancelled),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text('${r.line} nach $headsign', style: VText.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            const SizedBox(width: 8),
+            if (r.cancelled)
+              const VChip('Ausfall', tone: VTone.red)
+            else if (delay > 0)
+              VDelay(delay, size: VDelaySize.medium)
+            else
+              Text('pünktlich', style: VText.bodySStrong.copyWith(color: VColors.green)),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (next != null) VKeyValue('Nächster Halt', '${next.name} ${fmtLocal(plannedAt(next)?.add(Duration(minutes: delay)))}', strong: true),
+        if (next != null) const VRule.soft(),
+        VKeyValue('Ziel', '$dest an ${fmtLocal(destAt?.add(Duration(minutes: delay)))}', strong: true),
+        const SizedBox(height: 8),
+        Text('Tippen für Details', style: VText.caption),
+      ],
+    );
+  }
+
+  Widget _transfer(BuildContext context) {
+    final jl = monitor.journey!;
+    final j = jl.journey;
+    final next = jl.nextLeg ?? j.nextLeg;
+    final missed = j.missedConnection || next?.replanned == true;
+    final where = j.transferStationName ?? next?.fromStationName ?? '';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('UMSTEIGEN', style: VText.eyebrow),
+        const SizedBox(height: 6),
+        Text(where, style: VText.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        const SizedBox(height: 10),
+        if (next == null)
+          Text('Keine Verbindung gefunden.', style: VText.bodyStrong)
+        else ...[
+          Row(
+            children: [
+              LineBadge(next.line, cancelled: next.cancelled),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${next.line} nach ${next.headsign.isNotEmpty ? next.headsign : next.toStationName}',
+                      style: VText.bodyStrong,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        fmtLocal(next.liveDeparture ?? next.plannedDeparture),
+                        if (next.platform != null && next.platform!.isNotEmpty) 'Gleis ${next.platform}',
+                      ].join(' · '),
+                      style: VText.caption,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (missed) ...[
+            const SizedBox(height: 4),
+            Text('Anschluss verpasst · nächste Möglichkeit', style: VText.caption.copyWith(color: VColors.red)),
+          ],
+          const SizedBox(height: 12),
+          VPrimaryButton(
+            label: monitor.busy ? 'Einen Moment …' : 'Ich bin drin',
+            icon: Icons.check,
+            onTap: monitor.busy ? null : () => monitor.confirmLeg(next),
+          ),
+        ],
+        const SizedBox(height: 8),
+        Text('Tippen für Details', style: VText.caption),
+      ],
+    );
+  }
+}
 
 /// Away from a station: the home station, the frequent ones, nearby ones if any, search.
 class _StationRow extends StatelessWidget {

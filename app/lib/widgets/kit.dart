@@ -580,10 +580,14 @@ class VChoiceCard extends StatelessWidget {
 /// raised "Einchecken" square in the middle (decided 10 September 2026). The
 /// square is not a tab: it opens the check-in directly.
 class VBottomNav extends StatelessWidget {
-  const VBottomNav({super.key, required this.index, required this.onTap, required this.onCheckin, this.badges = const {}});
+  const VBottomNav({super.key, required this.index, required this.onTap, required this.onCheckin, this.badges = const {}, this.checkinEnabled = true});
   final int index;
   final ValueChanged<int> onTap;
   final VoidCallback onCheckin;
+
+  /// False while a journey is under way (docs/20 §1): the square is drawn disabled and
+  /// [onCheckin] then opens the ride instead of a new check-in.
+  final bool checkinEnabled;
 
   /// Small red count on a tab's icon, by tab index (Anträge shows unread railway mail).
   final Map<int, int> badges;
@@ -653,17 +657,18 @@ class VBottomNav extends StatelessWidget {
                         child: Container(
                           width: 46,
                           height: 46,
+                          key: const Key('nav-checkin'),
                           decoration: BoxDecoration(
-                            color: VColors.ink,
+                            color: checkinEnabled ? VColors.ink : VColors.rule,
                             borderRadius: BorderRadius.circular(14),
-                            boxShadow: const [BoxShadow(color: Color(0x33111111), blurRadius: 8, offset: Offset(0, 3))],
+                            boxShadow: checkinEnabled ? const [BoxShadow(color: Color(0x33111111), blurRadius: 8, offset: Offset(0, 3))] : null,
                           ),
-                          child: const Icon(Icons.train, size: 26, color: VColors.paper),
+                          child: Icon(Icons.train, size: 26, color: checkinEnabled ? VColors.paper : VColors.ink2),
                         ),
                       ),
                       Transform.translate(
                         offset: const Offset(0, -8),
-                        child: Text('Einchecken', style: VText.tab.copyWith(color: VColors.ink)),
+                        child: Text('Einchecken', style: VText.tab.copyWith(color: checkinEnabled ? VColors.ink : VColors.ink2)),
                       ),
                     ],
                   ),

@@ -9,7 +9,7 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
-import '../community/community_widgets.dart' show TabHeader;
+import '../community/community_widgets.dart' show TabHeader, pickNgo;
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
 
@@ -140,6 +140,8 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
             for (final d in desks)
               _CollectingCard(
                 desk: d,
+                ngoName: ngoName(session.me?.settings.ngoId ?? ''),
+                onChangeNgo: () => pickNgo(context, session, session.me?.settings.ngoId),
                 incidents: d.incidentIds.map((id) => byId[id]).whereType<ApiIncident>().toList(),
                 showDesk: desks.length > 1,
                 minPayoutCents: summary.minPayoutCents,
@@ -254,6 +256,11 @@ class _ClaimCard extends StatelessWidget {
             Text(status, style: VText.bodySStrong.copyWith(color: color), maxLines: 2),
             const SizedBox(height: 2),
             Text(deskDisplay(c.desk), style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+            // The payee is in the status line once confirmed; until then it is a line of its own (docs/20 §4).
+            if (c.status != ApiClaimStatus.accepted && ngoName != null) ...[
+              const SizedBox(height: 2),
+              Text('Für $ngoName', style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
             if (incidents.isNotEmpty) ...[
               const VGap.s(),
               for (final i in incidents) IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i)),
@@ -302,6 +309,8 @@ class _ClaimCard extends StatelessWidget {
 class _CollectingCard extends StatelessWidget {
   const _CollectingCard({
     required this.desk,
+    required this.ngoName,
+    required this.onChangeNgo,
     required this.incidents,
     required this.showDesk,
     required this.minPayoutCents,
@@ -310,6 +319,8 @@ class _CollectingCard extends StatelessWidget {
     required this.onPrepare,
   });
   final ApiDeskSummary desk;
+  final String? ngoName;
+  final VoidCallback onChangeNgo;
   final List<ApiIncident> incidents;
   final bool showDesk;
   final int minPayoutCents;
@@ -345,6 +356,23 @@ class _CollectingCard extends StatelessWidget {
               const SizedBox(height: 2),
               Text('Eigene Stelle. Geht als eigener Antrag raus.', style: VText.caption),
             ],
+            // Where the money goes, before there is an Antrag (docs/20 §4).
+            const SizedBox(height: 4),
+            InkWell(
+              onTap: onChangeNgo,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(ngoName != null ? 'Für $ngoName' : 'Noch kein Zweck gewählt', style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('ändern', style: VText.caption.copyWith(color: VColors.ink2, decoration: TextDecoration.underline)),
+                  ],
+                ),
+              ),
+            ),
             const VGap.s(),
             for (final i in incidents) IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i)),
             if (oldest != null && incidents.any((i) => i.id == oldest!.id)) ...[
