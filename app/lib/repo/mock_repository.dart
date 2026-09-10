@@ -119,6 +119,7 @@ class MockRepository implements AppRepository {
 
   @override
   Future<ApiDestinations> destinations({String? from}) async {
+    if (state.noHistory) return ApiDestinations.empty;
     final atHome = from != null && _norm(from).contains('bonn');
     return ApiDestinations(
       home: const ApiDestination(stationId: 'mock:bonn-hbf', stationName: 'Bonn Hbf'),
@@ -704,9 +705,13 @@ class MockRepository implements AppRepository {
         expectedReplyBy: mail?.date.add(const Duration(days: 28)),
         amountClaimedCents: _cents(e.value.fold(0.0, (s, i) => s + i.amount)),
         amountConfirmedCents: status == ApiClaimStatus.accepted ? _cents(e.value.fold(0.0, (s, i) => s + i.amount)) : null,
+        replyAddress: 'antrag-${e.key.replaceAll(RegExp('[^a-z0-9]'), '').padRight(8, '0').substring(0, 8)}@users.verspaetomat.de',
       );
     }).toList();
   }
+
+  @override
+  Future<void> markClaimSeen(String claimId) async => state.markClaimSeen(claimId);
 
   @override
   Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds}) async {
@@ -782,7 +787,10 @@ class MockRepository implements AppRepository {
   Future<List<ApiMail>> mails() async => state.mails.map(_mail).toList();
 
   @override
-  Future<ApiMail> replyToMail(String id, String body) async {
+  Future<ApiMail> replyToMail(String id, String body, {bool attachTicket = false, List<String> uploadIds = const []}) async {
+    // Demo only records what a real send would carry (docs/18).
+    state.lastReplyAttachTicket = attachTicket;
+    state.lastReplyUploadIds = List.of(uploadIds);
     final original = state.mails.where((m) => m.id == id).firstOrNull;
     final m = RailMail(
       id: 'm-reply-${DateTime.now().millisecondsSinceEpoch}',
@@ -875,6 +883,7 @@ class MockRepository implements AppRepository {
         myConfirmedCents: _cents(state.confirmedTotal),
       ),
       next: next,
+      unreadMails: state.unreadMails,
     );
   }
 

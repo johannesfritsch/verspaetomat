@@ -108,6 +108,19 @@ class DemoState extends ChangeNotifier {
   bool nudgeEnabled = true;
   /// Demo: pretend the phone is away from every station (the Bahnsteig shows the compact row).
   bool awayFromStation = false;
+  /// Demo: an account without journey history (the Einchecken card shows only the Wohin? field).
+  bool noHistory = false;
+  /// Demo: railway mails nobody opened yet; the Anträge tab badge (docs/18).
+  int unreadMails = 2;
+  /// Demo: what the last reply would have attached (docs/18 §5).
+  bool lastReplyAttachTicket = false;
+  List<String> lastReplyUploadIds = const [];
+
+  void markClaimSeen(String claimId) {
+    if (unreadMails == 0) return;
+    unreadMails = 0;
+    notifyListeners();
+  }
   bool quietHours = true;
 
   void setNudgeEnabled(bool v) {
@@ -607,6 +620,8 @@ class DemoState extends ChangeNotifier {
     onboardingDone = false;
     personalDataEntered = false;
     bonusPoints = 0;
+    unreadMails = 2;
+    noHistory = false;
     rides
       ..clear()
       ..addAll(Mock.rides);

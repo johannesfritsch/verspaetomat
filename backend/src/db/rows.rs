@@ -288,6 +288,8 @@ pub struct ClaimRow {
     pub amount_confirmed_cents: Option<i64>,
     pub closed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    /// `antrag-<8 hex>@RELAY_DOMAIN`, assigned at send time (docs/18 §4).
+    pub reply_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -309,6 +311,8 @@ pub struct MailRow {
     pub dry_run: bool,
     pub forwarded_at: Option<DateTime<Utc>>,
     pub occurred_at: DateTime<Utc>,
+    /// Null = unread (inbound only; outbound mail is written by the customer).
+    pub seen_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

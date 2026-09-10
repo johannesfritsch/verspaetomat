@@ -20,6 +20,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/models.dart';
 import 'package:verspaetomat/main.dart';
+import 'package:verspaetomat/mock/mock_data.dart' show Mock;
 import 'package:verspaetomat/api/token_store.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart';
@@ -159,30 +160,26 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
     await tapText(tester, 'Fertig');
   }
   await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 40));
-  // At a station: the card with the destination buttons and "Anderes Ziel …" / "Wohin? Ziel wählen …".
-  await pumpUntilFound(tester, find.byType(OutlinedButton), timeout: const Duration(seconds: 40));
+  // At a station: the card with the destinations from history (if any) and the Wohin? field (docs/18).
+  await pumpUntilFound(tester, find.byType(TextField), timeout: const Duration(seconds: 40));
   expect(find.textContaining('Köln', findRichText: true), findsWidgets);
   await settle(tester, 600);
   final predicted = find.byWidgetPredicate((w) => w is DestinationButton && w.destination.stationName.contains(match));
   if (predicted.evaluate().isNotEmpty) {
     // ignore: avoid_print
-    print('destination $match: predicted');
+    print('destination $match: from history');
     await tester.ensureVisible(predicted.first);
     await tester.tap(predicted.first, warnIfMissed: false);
     await settle(tester);
   } else {
-    final other = find.byType(OutlinedButton);
-    await tester.ensureVisible(other.first);
-    await tester.tap(other.first, warnIfMissed: false);
-    await settle(tester);
-    // Wohin?: search.
-    await pumpUntilFound(tester, find.text('Wohin?'), timeout: const Duration(seconds: 20));
-    await tapText(tester, 'Bahnhof suchen');
-    await pumpUntilFound(tester, find.byType(TextField), timeout: const Duration(seconds: 20));
-    await tester.enterText(find.byType(TextField).first, search);
-    // A Text widget only: find.text would also hit the search field's own contents.
+    // No history yet (a fresh E2E customer): type into the card's Wohin? field and pick the suggestion.
+    final field = find.byType(TextField).first;
+    await tester.ensureVisible(field);
+    await tester.enterText(field, search);
+    // A Text widget only: find.text would also hit the field's own contents.
     final hit = find.byWidgetPredicate((w) => w is Text && (w.data ?? '').contains(match));
     await pumpUntilFound(tester, hit, timeout: const Duration(seconds: 40));
+    await tester.ensureVisible(hit.first);
     await tester.tap(hit.first, warnIfMissed: false);
     await settle(tester);
   }
@@ -192,13 +189,16 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
   await settle(tester, 800);
   final rows = find.byType(ItineraryRow);
   Finder? pick;
-  for (var i = 0; i < rows.evaluate().length; i++) {
-    final it = tester.widget<ItineraryRow>(rows.at(i)).itinerary;
-    final ok = connecting ? it.transfers >= 1 : it.direct;
-    if (ok && !it.first.cancelled) {
-      pick = rows.at(i);
-      break;
+  // Prefer trains whose operator the claims directory knows: an unknown operator becomes its
+  // own desk ("Unbekannt") whose claim flow has no ticket step, which the test relies on.
+  for (final knownOnly in [true, false]) {
+    for (var i = 0; i < rows.evaluate().length && pick == null; i++) {
+      final it = tester.widget<ItineraryRow>(rows.at(i)).itinerary;
+      final ok = connecting ? it.transfers >= 1 : it.direct;
+      final known = it.legs.every((l) => Mock.desks.containsKey(l.operator) || l.operator.startsWith('DB '));
+      if (ok && !it.first.cancelled && (known || !knownOnly)) pick = rows.at(i);
     }
+    if (pick != null) break;
   }
   if (pick == null) {
     if (connecting) return null;
@@ -282,7 +282,7 @@ void main() {
 
       // 3. Anträge → Antrag (the receipt icon is the Anträge tab).
       await tapIcon(tester, Icons.receipt_long_outlined);
-      await pumpUntilFound(tester, find.text('bereit'), timeout: const Duration(seconds: 40));
+      await pumpUntilFound(tester, find.textContaining('Bereit ·'), timeout: const Duration(seconds: 40));
       await tapText(tester, 'Antrag vorbereiten');
 
       // Step 1: personal data and the recovery code appear on the first claim only.
@@ -338,8 +338,8 @@ void main() {
       await tapText(tester, 'Zu den Anträgen');
 
       // 4. eingereicht → the railway answers (Stellwerk) → bestätigt → Wir.
-      // Rows no longer carry a status chip; the section label does (uppercased by VSection).
-      await pumpUntilFound(tester, find.text('EINGEREICHT'), timeout: const Duration(seconds: 40));
+      // The claim card says its status in words (docs/18).
+      await pumpUntilFound(tester, find.textContaining('Eingereicht ·'), timeout: const Duration(seconds: 40));
       expect(find.textContaining('Demo:'), findsNothing);
       await sw.reply(customer!, 'accepted');
 
@@ -350,10 +350,10 @@ void main() {
         await tapIcon(tester, Icons.groups_outlined);
         await tapIcon(tester, Icons.receipt_long_outlined);
       }
-      await pumpUntilFound(tester, find.text('BESTÄTIGT'), timeout: const Duration(seconds: 40));
+      await pumpUntilFound(tester, find.textContaining('Bestätigt ·'), timeout: const Duration(seconds: 40));
 
       await tapIcon(tester, Icons.groups_outlined);
-      await pumpUntilFound(tester, find.text('Bestätigt'), timeout: const Duration(seconds: 40));
+      await pumpUntilFound(tester, find.textContaining('Bestätigt, durch dich'), timeout: const Duration(seconds: 40));
     } finally {
       // Leave the customer clean for the next run.
       if (customer != null) {

@@ -52,6 +52,8 @@ Backend only, no mock equivalent yet: a journey holds customer, origin and desti
 
 ### Mail
 
+Since docs/18 §4 every claim has its own address `antrag-<8 hex>@RELAY_DOMAIN` (`claims.reply_address`, assigned at send time); inbound mail is routed by it first, by the customer's old `relay_address` second. `mails.seen_at` marks read state; `POST /v1/claims/{id}/seen` sets it; `standing.unread_mails` counts the rest.
+
 `Mock.mails` / `state.mails`: id, incident ids, direction, from, to, subject, body, date, attachments, amount, outcome. Backend: mail id, claim id, direction, message id, in-reply-to, from, to, bcc, subject, body text, attachments (object keys), received/sent at, classification (`accepted`, `question`, `rejected`, `bounce`, `other`) with confidence, extracted amount and reference, forwarded-to-customer at. `GET /v1/mails`, `GET /v1/mails/{id}`, `POST /v1/mails/{id}/reply`, internal `POST /internal/inbound-mail`.
 
 ### NGO
@@ -73,7 +75,7 @@ Backend only, no mock equivalent yet: a journey holds customer, origin and desti
 |---|---|---|
 | Willkommen, Berechtigungen | nothing | device creation, permission states |
 | Setup | ticket types, NGO list with confirmed totals | ticket, default NGO |
-| Bahnsteig | `GET /v1/me/standing` (points this and last week, level progress, money countdown, board rank, community share, the one next thing), nearby stations, frequent stations (geofence), current ride, departures of the station within 300 m | nudge dismissals, muted stations |
+| Bahnsteig | `GET /v1/me/standing` (points this and last week, level progress, money countdown, board rank, community share, the one next thing, `unread_mails` for the Anträge badge), nearby stations, frequent stations (geofence), current ride, departures of the station within 300 m | nudge dismissals, muted stations |
 | Einchecken | departures at a station with live delays, ticket type | check-in (ride) with optional location fix |
 | Wo steigst du aus? | trip stops | exit stop |
 | Unterwegs | current ride live state (delay, passed stops, cause, ETA) | change train |

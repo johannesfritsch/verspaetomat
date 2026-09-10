@@ -122,6 +122,8 @@ class HttpRepository implements AppRepository {
   @override
   Future<List<ApiClaim>> claims() => client.claims();
   @override
+  Future<void> markClaimSeen(String claimId) => client.markClaimSeen(claimId);
+  @override
   Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds}) => client.draftClaim(desk: desk, incidentIds: incidentIds);
   @override
   Future<ApiClaim> patchClaim(String id, {String? ngoId, List<String>? attachmentUploadIds}) =>
@@ -140,7 +142,8 @@ class HttpRepository implements AppRepository {
   @override
   Future<List<ApiMail>> mails() => client.mails();
   @override
-  Future<ApiMail> replyToMail(String id, String body) => client.replyToMail(id, body);
+  Future<ApiMail> replyToMail(String id, String body, {bool attachTicket = false, List<String> uploadIds = const []}) =>
+      client.replyToMail(id, body, attachTicket: attachTicket, uploadIds: uploadIds);
   @override
   Future<ApiInboundResult> simulateInbound({required String body, String? claimId}) async {
     String? relay;

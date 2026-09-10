@@ -6,6 +6,7 @@ import 'screens/claims/claims_routes.dart';
 import 'screens/community/community_routes.dart';
 import 'screens/ride/checkin_launcher.dart';
 import 'screens/ride/ride_routes.dart';
+import 'repo/repo_scope.dart';
 import 'screens/showcase_screen.dart';
 import 'state/demo_state.dart';
 import 'widgets/kit.dart';
@@ -91,9 +92,18 @@ class _TabShell extends StatelessWidget {
   Widget build(BuildContext context) {
     var index = _tabs.indexWhere((t) => location.startsWith(t));
     if (location.startsWith(Routes.konto)) index = 1;
+    final session = RepoScope.of(context);
     return Scaffold(
       body: child,
-      bottomNavigationBar: VBottomNav(index: index.clamp(0, 3), onTap: (i) => context.go(_tabs[i]), onCheckin: () => startCheckin(context)),
+      bottomNavigationBar: AnimatedBuilder(
+        animation: session,
+        builder: (context, _) => VBottomNav(
+          index: index.clamp(0, 3),
+          onTap: (i) => context.go(_tabs[i]),
+          onCheckin: () => startCheckin(context),
+          badges: {1: session.unreadMails},
+        ),
+      ),
     );
   }
 }

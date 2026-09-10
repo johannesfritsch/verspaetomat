@@ -816,6 +816,7 @@ class ApiClaim {
     this.amountClaimedCents = 0,
     this.amountConfirmedCents,
     this.pdfUrl,
+    this.replyAddress,
   });
   final String id;
   final String desk;
@@ -833,6 +834,9 @@ class ApiClaim {
   final int? amountConfirmedCents;
   final String? pdfUrl;
 
+  /// The claim's own mail address (`antrag-…@users.…`), assigned at send time (docs/18).
+  final String? replyAddress;
+
   factory ApiClaim.fromJson(Map<String, dynamic> j) => ApiClaim(
         id: _s(j['id']),
         desk: _s(j['desk']),
@@ -849,6 +853,7 @@ class ApiClaim {
         amountClaimedCents: _i(j['amount_claimed_cents']),
         amountConfirmedCents: _in(j['amount_confirmed_cents']),
         pdfUrl: _sn(j['pdf_url']),
+        replyAddress: _sn(j['reply_address']),
       );
 }
 
@@ -996,6 +1001,7 @@ class ApiStanding {
     this.board,
     this.community,
     this.next,
+    this.unreadMails = 0,
   });
   final int pointsThisWeek;
   final int pointsLastWeek;
@@ -1005,6 +1011,9 @@ class ApiStanding {
   final ApiStandingBoard? board;
   final ApiStandingCommunity? community;
   final ApiStandingNext? next;
+
+  /// Inbound railway mails nobody has opened yet, all claims (docs/18). The Anträge tab badge.
+  final int unreadMails;
 
   /// What an older backend without the endpoint amounts to: nothing to show.
   static const empty = ApiStanding();
@@ -1018,6 +1027,7 @@ class ApiStanding {
         board: _m(j['board']) == null ? null : ApiStandingBoard.fromJson(_m(j['board'])!),
         community: _m(j['community']) == null ? null : ApiStandingCommunity.fromJson(_m(j['community'])!),
         next: _m(j['next']) == null ? null : ApiStandingNext.fromJson(_m(j['next'])!),
+        unreadMails: _i(j['unread_mails']),
       );
 }
 

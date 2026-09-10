@@ -55,6 +55,8 @@ abstract class AppRepository {
   // -- ledger and claims ----------------------------------------------------
   Future<ApiIncidents> incidents();
   Future<List<ApiClaim>> claims();
+  /// The claim card's thread was opened: its inbound mails count as seen (docs/18).
+  Future<void> markClaimSeen(String claimId);
   Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds});
   Future<ApiClaim> patchClaim(String id, {String? ngoId, List<String>? attachmentUploadIds});
   Future<ApiUpload> upload({required String kind, required String filename, required List<int> bytes});
@@ -62,7 +64,8 @@ abstract class AppRepository {
   Future<ApiSendResult> sendClaim(String id);
   Future<Uint8List> claimPdf(String id);
   Future<List<ApiMail>> mails();
-  Future<ApiMail> replyToMail(String id, String body);
+  /// [attachTicket]: the claim's existing ticket uploads go along; [uploadIds]: extra photos (docs/18).
+  Future<ApiMail> replyToMail(String id, String body, {bool attachTicket = false, List<String> uploadIds = const []});
 
   /// Demo control: the railway answers the most recent sent claim.
   Future<ApiInboundResult> simulateInbound({required String body, String? claimId});

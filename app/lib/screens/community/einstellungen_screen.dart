@@ -35,10 +35,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     final showOnBoards = settings?.showOnBoards ?? state.showOnBoards;
     final traewellingLinked = settings?.traewellingLinked ?? state.traewellingLinked;
     final personal = me?.personalData;
-    // Demo mode shows the mock's addresses. A real account has neither until its first
-    // claim: the relay address is assigned then, the private e-mail is asked for then.
-    final relay = session.isLocal ? me?.relayAddress : (me?.relayAddress ?? Mock.relayAddress);
-    final privateMail = session.isLocal ? personal?.email : (personal?.email ?? Mock.userEmail);
 
     return VScreen(
       title: 'Einstellungen',
@@ -108,25 +104,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             onTap: () => _personalData(context, session, personal),
           ),
           const VGap.m(),
-          Text('Meine Verspätomat-Adresse', style: VText.bodyStrong),
-          const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.all(VSpace.m),
-            decoration: BoxDecoration(border: Border.all(color: VColors.rule), borderRadius: BorderRadius.circular(4)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(relay ?? 'Wird beim ersten Antrag vergeben.', style: relay == null ? VText.bodyS.copyWith(color: VColors.ink2) : VText.mono),
-                const SizedBox(height: 8),
-                Text(
-                  privateMail == null
-                      ? 'Deine Anträge gehen von hier raus. Antworten der Bahn landen hier und sofort auch in deinem Postfach. Deine E-Mail-Adresse fragen wir beim ersten Antrag ab. Wir lesen Status, Betrag und Aktenzeichen, mehr nicht.'
-                      : 'Deine Anträge gehen von hier raus. Antworten der Bahn landen hier und sofort auch in deinem Postfach ($privateMail). Wir lesen Status, Betrag und Aktenzeichen, mehr nicht.',
-                  style: VText.caption,
-                ),
-              ],
-            ),
-          ),
           const VGap.s(),
           SwitchRow(
             title: 'Korrespondenz nach Abschluss behalten',

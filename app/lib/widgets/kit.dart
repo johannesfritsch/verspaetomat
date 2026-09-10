@@ -580,10 +580,13 @@ class VChoiceCard extends StatelessWidget {
 /// raised "Einchecken" square in the middle (decided 10 September 2026). The
 /// square is not a tab: it opens the check-in directly.
 class VBottomNav extends StatelessWidget {
-  const VBottomNav({super.key, required this.index, required this.onTap, required this.onCheckin});
+  const VBottomNav({super.key, required this.index, required this.onTap, required this.onCheckin, this.badges = const {}});
   final int index;
   final ValueChanged<int> onTap;
   final VoidCallback onCheckin;
+
+  /// Small red count on a tab's icon, by tab index (Anträge shows unread railway mail).
+  final Map<int, int> badges;
 
   /// The four tabs, in order. Index 1 (Anträge) keeps the receipt icon the E2E taps.
   static const items = [
@@ -601,7 +604,25 @@ class VBottomNav extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(i == index ? items[i].$2 : items[i].$1, size: 24, color: i == index ? VColors.ink : VColors.ink3),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Icon(i == index ? items[i].$2 : items[i].$1, size: 24, color: i == index ? VColors.ink : VColors.ink3),
+                    if ((badges[i] ?? 0) > 0)
+                      Positioned(
+                        top: -5,
+                        right: -9,
+                        child: Container(
+                          constraints: const BoxConstraints(minWidth: 17),
+                          height: 17,
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(color: VColors.red, borderRadius: BorderRadius.circular(9), border: Border.all(color: VColors.paper, width: 1.5)),
+                          child: Text('${badges[i]! > 9 ? '9+' : badges[i]}', style: VText.tab.copyWith(color: VColors.paper, fontSize: 10, height: 1)),
+                        ),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 4),
                 Text(items[i].$3, style: VText.tab.copyWith(color: i == index ? VColors.ink : VColors.ink3)),
               ],
@@ -634,7 +655,7 @@ class VBottomNav extends StatelessWidget {
                           height: 46,
                           decoration: BoxDecoration(
                             color: VColors.ink,
-                            borderRadius: BorderRadius.circular(4),
+                            borderRadius: BorderRadius.circular(14),
                             boxShadow: const [BoxShadow(color: Color(0x33111111), blurRadius: 8, offset: Offset(0, 3))],
                           ),
                           child: const Icon(Icons.train, size: 26, color: VColors.paper),

@@ -80,6 +80,7 @@ paths:
                 board: { scope: line, key: RE 7, rank: 7, size: 23, points: 96, gap_to_next: 12 }
                 community: { minutes_total: 1208420, my_minutes: 109, confirmed_cents: 4832000, my_confirmed_cents: 0 }
                 next: { kind: mail, title: Post von der Bahn, body: Rückfrage zum Antrag, claim_id: null }
+                unread_mails: 1
   /v1/me/geofence:
     get:
       summary: "The stations the phone should watch in the background (docs/15): frequent check-in stations of the last 30 days (home station always, muted excluded, at most 15) with coordinates stored at check-in; enabled = location_mode == always && nudge_enabled."
@@ -93,9 +94,9 @@ paths:
 
   /v1/me/destinations:
     get:
-      summary: Predicted destinations for the check-in (docs/17)
+      summary: Destinations from the customer's own journeys, by frequency; the home station first when away (docs/18 §2). Nothing seeded, nothing time-of-day.
       parameters: [{ name: from, in: query, schema: { type: string }, description: stop id of the current station }]
-      responses: { '200': { description: '{home, predicted[≤3], recent[≤5]}' } }
+      responses: { '200': { description: '{home, predicted[≤4], recent[≤5]}' } }
   /v1/journeys/plan:
     get:
       summary: Rail itineraries from one stop to another (Transitous plan), preferred = next departure
@@ -194,9 +195,15 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
       requestBody: { content: { application/json: { schema: { type: object, required: [typed_name], properties: { typed_name: { type: string }, signature_upload_id: { type: string, format: uuid } } } } } }
       responses: { "200": { description: claim } }
+  /v1/claims/{id}/seen:
+    post:
+      summary: The customer opened this claim's thread; every inbound mail of the claim is marked seen (docs/18 §4)
+      security: [{ deviceToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: '{seen, unread_mails}' } }
   /v1/claims/{id}/send:
     post:
-      summary: The relay. Refused unless signed and personal data present; max 5 per day. Real SMTP when SMTP_URL is set, else dry-run. BCC to the customer. Incidents become eingereicht.
+      summary: The relay. Refused unless signed and personal data present; max 5 per day. Real SMTP when SMTP_URL is set, else dry-run. BCC to the customer. Incidents become eingereicht. The mail leaves from the claim's own address antrag-<8 hex>@RELAY_DOMAIN (claims.reply_address, assigned here); the railway's reply is routed back by that address.
       parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
       responses: { "200": { description: "{claim, mail}" }, "412": { description: not signed / no personal data / desk takes no e-mail }, "429": { description: daily limit } }
 
@@ -204,9 +211,18 @@ paths:
     get: { summary: All mails in and out (newest first), responses: { "200": { description: "[Mail]" } } }
   /v1/mails/{id}/reply:
     post:
-      summary: Answer a railway's question through the customer's relay address.
+      summary: Answer a railway's question from the claim's own address (the customer's relay address for mail without a claim). Optional attachments; recorded on the outbound mail like the claim mail's.
       parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
-      requestBody: { content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string } } } } } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+                attach_ticket: { type: boolean, description: Attach the claim's ticket uploads (the same images the claim mail carried) }
+                upload_ids: { type: array, items: { type: string, format: uuid }, description: Any of this customer's uploads, e.g. a fresh photo from POST /v1/uploads }
       responses: { "200": { description: Mail } }
   /internal/inbound-mail:
     post:

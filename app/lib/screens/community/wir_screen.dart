@@ -86,7 +86,35 @@ class _WirScreenState extends State<WirScreen> {
               TabHeader(title: 'Wir', caption: '${fmtInt(c.users)} Fahrgäste', onSettings: () => context.push(Routes.einstellungen).then((_) => refresh())),
               const VGap.xl(),
 
-              // My part first: what my delays added up to (decided 10 September 2026).
+              // The community's big number first (docs/18); no community euro totals here.
+              Text('ZUSAMMEN GEWARTET', style: VText.eyebrow),
+              const SizedBox(height: 6),
+              InkWell(
+                onTap: () => showSourceSheet(
+                  context,
+                  title: 'Minuten zusammen gewartet',
+                  origin: 'Die Summe aller endgültigen Verspätungen aller Fahrgäste, Minute für Minute.',
+                  freshness: 'Live',
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(fmtInt(c.minutes + _extraMinutes), style: VText.number),
+                      const SizedBox(width: 10),
+                      Text('Minuten', style: VText.title.copyWith(color: VColors.ink2)),
+                    ],
+                  ),
+                ),
+              ),
+              const VGap.l(),
+              const VRule.red(),
+              const VGap.l(),
+
+              // My part: what my delays added up to.
               const VSection('Dein Teil'),
               const VGap.m(),
               Row(
@@ -128,69 +156,15 @@ class _WirScreenState extends State<WirScreen> {
                 child: VKeyValue('Zweck', ngoName),
               ),
               const VGap.xl(),
-              Text('ZUSAMMEN GEWARTET', style: VText.eyebrow),
-              const SizedBox(height: 6),
-              InkWell(
-                onTap: () => showSourceSheet(
-                  context,
-                  title: 'Minuten zusammen gewartet',
-                  origin: 'Die Summe aller endgültigen Verspätungen aller Fahrgäste, Minute für Minute.',
-                  freshness: 'Live',
-                ),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(fmtInt(c.minutes + _extraMinutes), style: VText.number),
-                      const SizedBox(width: 10),
-                      Text('Minuten', style: VText.title.copyWith(color: VColors.ink2)),
-                    ],
-                  ),
-                ),
-              ),
-              const VGap.l(),
-              const VRule.red(),
-              const VGap.m(),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: BigFigure(
-                      value: fmtEuroWhole(c.submittedCents / 100),
-                      label: 'Eingereicht',
-                      onTap: () => showSourceSheet(
-                        context,
-                        title: 'Eingereichte Euro',
-                        origin: 'Die Summe aller Anträge, die Fahrgäste über ihre Verspätomat-Adresse abgeschickt haben und die noch keine Antwort haben.',
-                        freshness: 'Live',
-                        fallback: 'Ein Antrag ohne Antwort bleibt hier, bis die Bahn schreibt.',
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: BigFigure(
-                      value: fmtEuroWhole(c.confirmedCents / 100),
-                      label: 'Bestätigt',
-                      onTap: () => showSourceSheet(
-                        context,
-                        title: 'Bestätigte Euro',
-                        origin: 'Nur Geld, für das eine Antwort der Bahn oder eine Monatsmeldung des Vereins vorliegt. Wir raten nie.',
-                        freshness: 'Antworten sofort, Vereinsmeldungen monatlich',
-                        fallback: 'Bleibt bei „eingereicht“, bis ein Beleg da ist.',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const VGap.xl(),
               const VSection('Vereine'),
               for (final n in c.ngos) _ngoRow(context, n),
               const VGap.xl(),
               VSection('Ranglisten', trailing: Text('7 Tage', style: VText.caption)),
               const VGap.m(),
+              if (st.board != null) ...[
+                _RankLine(board: st.board!),
+                const VGap.m(),
+              ],
               SegmentTabs(labels: const ['Meine Linie', 'Meine Stadt', 'Deutschland'], index: _board, onChanged: (i) => setState(() => _board = i)),
               const VGap.s(),
               Text(
@@ -227,7 +201,7 @@ class _WirScreenState extends State<WirScreen> {
                     children: [
                       Text(ngo.name, style: VText.bodyStrong),
                       const SizedBox(height: 2),
-                      Text('eingereicht: ${fmtEuroWhole(ngo.submittedCents / 100)}', style: VText.caption),
+                      Text('Geschichte und Zweck', style: VText.caption),
                     ],
                   ),
                 ),
@@ -273,6 +247,29 @@ class _Board extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// The customer's own place, above the boards: "Platz 5 auf der RE 7 diese Woche · 38 Punkte bis Platz 4".
+class _RankLine extends StatelessWidget {
+  const _RankLine({required this.board});
+  final ApiStandingBoard board;
+
+  @override
+  Widget build(BuildContext context) {
+    final where = board.scope == 'city' ? 'in ${board.key}' : 'auf der ${board.key}';
+    final gap = board.gapToNext == null
+        ? 'ganz oben'
+        : '${fmtInt(board.gapToNext!)} ${board.gapToNext == 1 ? 'Punkt' : 'Punkte'} bis Platz ${board.rank - 1}';
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text('Platz ${board.rank}', style: VText.numberM),
+        const SizedBox(width: 10),
+        Expanded(child: Text('$where diese Woche · $gap', style: VText.caption, maxLines: 2)),
+      ],
     );
   }
 }

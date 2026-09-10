@@ -9,7 +9,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
@@ -58,8 +58,6 @@ pub fn journey_delay_min(actual: DateTime<Utc>, planned: DateTime<Utc>, cancelle
 pub struct DestHistory {
     pub station_id: String,
     pub station_name: String,
-    pub origin_id: String,
-    pub hour: u32,
     pub at: DateTime<Utc>,
 }
 
@@ -71,29 +69,30 @@ pub struct Predicted {
     pub score: f64,
 }
 
-/// Rank destinations by frequency, doubled for the same hour (±2 h) and doubled again for the
-/// same origin. The current station is never a destination.
-pub fn rank_destinations(history: &[DestHistory], from: Option<&str>, hour: u32) -> Vec<Predicted> {
-    let mut acc: std::collections::HashMap<&str, Predicted> = std::collections::HashMap::new();
+/// Rank destinations by frequency over the customer's own journeys, nothing else (docs/18 §2).
+/// The home station comes first when `home` is set and differs from `from`. The current station
+/// is never a destination. Ties: more recent first, then by name.
+pub fn rank_destinations(history: &[DestHistory], from: Option<&str>, home: Option<&str>) -> Vec<Predicted> {
+    let mut acc: std::collections::HashMap<&str, (Predicted, DateTime<Utc>)> = std::collections::HashMap::new();
     for h in history {
         if Some(h.station_id.as_str()) == from {
             continue;
         }
-        let dh = (h.hour as i64 - hour as i64).rem_euclid(24).min(24 - (h.hour as i64 - hour as i64).rem_euclid(24));
-        let mut w = 1.0;
-        if dh <= 2 {
-            w *= 2.0;
+        let e = acc.entry(h.station_id.as_str()).or_insert((Predicted { station_id: h.station_id.clone(), station_name: h.station_name.clone(), count: 0, score: 0.0 }, h.at));
+        e.0.count += 1;
+        e.0.score += 1.0;
+        if h.at > e.1 {
+            e.1 = h.at;
         }
-        if from.is_some() && Some(h.origin_id.as_str()) == from {
-            w *= 2.0;
-        }
-        let e = acc.entry(h.station_id.as_str()).or_insert(Predicted { station_id: h.station_id.clone(), station_name: h.station_name.clone(), count: 0, score: 0.0 });
-        e.count += 1;
-        e.score += w;
     }
-    let mut out: Vec<Predicted> = acc.into_values().collect();
-    out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal).then(b.count.cmp(&a.count)).then(a.station_name.cmp(&b.station_name)));
-    out
+    let away = matches!((home, from), (Some(h), Some(f)) if h != f) || (home.is_some() && from.is_none());
+    let mut out: Vec<(Predicted, DateTime<Utc>)> = acc.into_values().collect();
+    out.sort_by(|a, b| {
+        let ah = away && Some(a.0.station_id.as_str()) == home;
+        let bh = away && Some(b.0.station_id.as_str()) == home;
+        bh.cmp(&ah).then(b.0.count.cmp(&a.0.count)).then(b.1.cmp(&a.1)).then(a.0.station_name.cmp(&b.0.station_name))
+    });
+    out.into_iter().map(|(p, _)| p).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -549,11 +548,10 @@ pub async fn destinations(State(s): State<AppState>, c: Customer, Query(q): Quer
     .map_err(internal)?;
     let history: Vec<DestHistory> = rows
         .iter()
-        .map(|(id, name, origin, at)| DestHistory { station_id: id.clone(), station_name: name.clone(), origin_id: origin.clone(), hour: at.with_timezone(&chrono_tz::Europe::Berlin).hour(), at: *at })
+        .map(|(id, name, _origin, at)| DestHistory { station_id: id.clone(), station_name: name.clone(), at: *at })
         .collect();
-    let now_hour = crate::clock::now().with_timezone(&chrono_tz::Europe::Berlin).hour();
-    let ranked = rank_destinations(&history, q.from.as_deref(), now_hour);
     let home = c.0.home_station_id.clone().zip(c.0.home_station_name.clone());
+    let ranked = rank_destinations(&history, q.from.as_deref(), home.as_ref().map(|(id, _)| id.as_str()));
     let away_from_home = match (&home, &q.from) {
         (Some((hid, _)), Some(from)) => hid != from,
         (Some(_), None) => true,
@@ -561,7 +559,7 @@ pub async fn destinations(State(s): State<AppState>, c: Customer, Query(q): Quer
     };
     let predicted: Vec<Value> = ranked
         .iter()
-        .take(3)
+        .take(4)
         .map(|p| {
             let label = if away_from_home && home.as_ref().map(|(hid, _)| hid == &p.station_id).unwrap_or(false) { Some("Nach Hause") } else { None };
             json!({ "station_id": p.station_id, "station_name": p.station_name, "label": label, "count": p.count })
@@ -994,20 +992,24 @@ mod tests {
 
     #[test]
     fn destination_ranking() {
-        let h = |id: &str, origin: &str, hour: u32| DestHistory { station_id: id.into(), station_name: id.to_uppercase(), origin_id: origin.into(), hour, at: Utc::now() };
+        let t0 = Utc::now();
+        let h = |id: &str, _origin: &str, age_h: i64| DestHistory { station_id: id.into(), station_name: id.to_uppercase(), at: t0 - Duration::hours(age_h) };
         let history = vec![
-            h("bonn", "koeln", 17), h("bonn", "koeln", 18), h("bonn", "koeln", 17),
-            h("ddorf", "koeln", 8), h("ddorf", "koeln", 8), h("ddorf", "koeln", 9), h("ddorf", "bonn", 8),
-            h("koeln", "bonn", 7),
+            h("bonn", "koeln", 1), h("bonn", "koeln", 30), h("bonn", "koeln", 60),
+            h("ddorf", "koeln", 2), h("ddorf", "koeln", 3), h("ddorf", "koeln", 4), h("ddorf", "bonn", 5),
+            h("koeln", "bonn", 6),
         ];
-        // Evening from Köln: Bonn wins although Düsseldorf is more frequent overall.
-        let r = rank_destinations(&history, Some("koeln"), 17);
-        assert_eq!(r[0].station_id, "bonn");
-        assert_eq!(r[0].count, 3);
-        // Morning from Köln: Düsseldorf wins.
-        let r = rank_destinations(&history, Some("koeln"), 8);
+        // Frequency only: Düsseldorf (4) beats Bonn (3), whatever the hour.
+        let r = rank_destinations(&history, Some("koeln"), None);
         assert_eq!(r[0].station_id, "ddorf");
+        assert_eq!(r[0].count, 4);
+        assert_eq!(r[1].station_id, "bonn");
+        // Away from home, the home station comes first even with fewer journeys.
+        let r = rank_destinations(&history, Some("ddorf"), Some("koeln"));
+        assert_eq!(r[0].station_id, "koeln");
+        // At home, home is not offered (it is the current station).
+        assert!(rank_destinations(&history, Some("koeln"), Some("koeln")).iter().all(|p| p.station_id != "koeln"));
         // The current station never predicts itself.
-        assert!(rank_destinations(&history, Some("bonn"), 17).iter().all(|p| p.station_id != "bonn"));
+        assert!(rank_destinations(&history, Some("bonn"), None).iter().all(|p| p.station_id != "bonn"));
     }
 }

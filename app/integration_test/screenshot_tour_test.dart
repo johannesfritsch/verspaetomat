@@ -13,6 +13,7 @@ import 'package:verspaetomat/mock/mock_data.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
+import 'package:verspaetomat/widgets/kit.dart' show VPrimaryButton;
 
 const tour = <(String, String)>[
   ('showcase', Routes.showcase),
@@ -116,6 +117,36 @@ void main() {
     demo.incidents.removeWhere((i) => i.id == 'i-0909');
     await home('bahnsteig-cycle-collecting'); // 3,00 € of 4,00 €
     demo.awayFromStation = false;
+    demo.reset();
+    // Anträge (docs/18): the cards. Collecting only, then sent + question + accepted.
+    Future<void> tab(String route, String name) async {
+      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+      await wait(tester, 600);
+      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(route);
+      await shot(name);
+    }
+    demo.incidents.removeWhere((i) => i.status == IncidentStatus.eingereicht);
+    demo.mails.clear();
+    await tab(Routes.antraege, 'antraege-collecting');
+    demo.reset();
+    demo.receiveReply(outcome: MailOutcome.question);
+    demo.receiveReply(outcome: MailOutcome.accepted);
+    await tab(Routes.antraege, 'antraege-mixed');
+    demo.incidents.removeWhere((i) => i.isOpen); // only the claim cards, so they sit above the fold
+    await tab(Routes.antraege, 'antraege-claims-only');
+    demo.reset();
+    // The Einchecken card without any journey history: only the Wohin? field.
+    demo.noHistory = true;
+    await tab(Routes.bahnsteig, 'bahnsteig-no-history');
+    demo.noHistory = false;
+    demo.reset();
+    // The reply composer (docs/18): Ticketkopie toggle, Foto hinzufügen, chips.
+    final question = demo.receiveReply(outcome: MailOutcome.question)!;
+    await tab('${Routes.antwort}?mail=${question.id}', 'antwort-rueckfrage');
+    await tester.tap(find.widgetWithText(VPrimaryButton, 'Antworten').first);
+    await shot('antwort-composer');
+    Navigator.of(tester.element(find.byType(Scaffold).last)).pop();
+    await wait(tester, 600);
     demo.reset();
 
     // Journeys with a connection (docs/17): transfer, missed connection, arrival with the journey delay.

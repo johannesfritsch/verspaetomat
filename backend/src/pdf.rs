@@ -221,6 +221,7 @@ mod tests {
             amount_confirmed_cents: None,
             closed_at: None,
             created_at: Utc::now(),
+            reply_address: Some("antrag-3d09a883@users.verspaetomat.de".into()),
         };
         let incident = |d: u32, delay: i32| IncidentRow {
             id: Uuid::new_v4(),

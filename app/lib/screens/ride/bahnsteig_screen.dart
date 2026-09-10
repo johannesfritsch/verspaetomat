@@ -28,7 +28,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   StreamSubscription<AppEvent>? _eventSub;
   ApiLocation? _position;
   ApiNearby _nearby = const ApiNearby(stations: [], source: 'none');
-  List<ApiDeparture> _nearDepartures = const [];
   ApiGeofence _frequent = ApiGeofence.empty;
   ApiRideLive? _live;
   ApiJourneyLive? _journey;
@@ -97,7 +96,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
 
   Future<void> _loadStanding() async {
     try {
-      final st = await RepoScope.read(context).repo.standing();
+      final st = await _session.loadStanding();
       if (mounted) setState(() => _standing = st);
     } catch (_) {
       // keep the last numbers
@@ -115,31 +114,24 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
       final results = await Future.wait<dynamic>([
         repo.nearbyStations(lat: _position?.lat, lon: _position?.lon),
         repo.currentRide(),
-        repo.standing().catchError((_) => ApiStanding.empty),
+        _session.loadStanding().catchError((_) => ApiStanding.empty),
         repo.geofence().catchError((_) => ApiGeofence.empty),
         repo.currentJourney().catchError((_) => null),
         repo.claims().catchError((_) => const <ApiClaim>[]),
       ]);
       if (!mounted) return;
       final nearby = results[0] as ApiNearby;
-      // At a station: the next departures and the predicted destinations come with the screen.
+      // At a station: the destinations from this person's history come with the screen (docs/18).
       final near = _nearestWithin(nearby, 300);
-      List<ApiDeparture> deps = const [];
       var dest = ApiDestinations.empty;
       if (near != null) {
-        final more = await Future.wait<dynamic>([
-          repo.departures(near.id).catchError((_) => const <ApiDeparture>[]),
-          repo
-              .destinations(from: near.id)
-              .catchError((_) => ApiDestinations.empty),
-        ]);
-        deps = more[0] as List<ApiDeparture>;
-        dest = more[1] as ApiDestinations;
+        dest = await repo
+            .destinations(from: near.id)
+            .catchError((_) => ApiDestinations.empty);
       }
       if (!mounted) return;
       setState(() {
         _nearby = nearby;
-        _nearDepartures = deps;
         _destinations = dest;
         _live = results[1] as ApiRideLive?;
         _journey = results[4] as ApiJourneyLive?;
@@ -265,10 +257,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     );
   }
 
-  /// A train first: "Wohin?" then plans with that train as leg 1 (docs/17).
-  void _toWohin(ApiStation s, ApiDeparture d) =>
-      context.push(wohinRoute(from: s, departure: d));
-
   /// A destination first: straight to "Welcher Zug?".
   void _toWelcherZug(ApiStation s, ApiDestination d) => context.push(
     welcherZugRoute(
@@ -280,8 +268,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     ),
   );
 
-  void _toAnderesZiel(ApiStation s) => context.push(wohinRoute(from: s));
-
   /// "Standort erlauben": ask the phone once, then reload. Never a guess.
   Future<void> _locate() async {
     _position = await currentPosition(timeout: const Duration(seconds: 5));
@@ -291,21 +277,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   Future<void> _search() async {
     final s = await showStationSearch(context);
     if (s != null && mounted) _openStation(s);
-  }
-
-  void _openNext(ApiStandingNext n) {
-    switch (n.kind) {
-      case 'mail':
-        context.go(n.claimId == null ? Routes.antraege : '${Routes.antraege}?claim=${Uri.encodeComponent(n.claimId!)}');
-      case 'deadline':
-        context.go(Routes.antraege);
-      case 'nachtrag':
-        context.push(Routes.nachtrag);
-      case 'badge':
-        context.go(Routes.ich);
-      default:
-        context.go(Routes.konto);
-    }
   }
 
   @override
@@ -355,7 +326,11 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                 ),
                 const VStationClock(size: 32),
                 const SizedBox(width: 4),
-                VIconButton(icon: Icons.settings_outlined, onTap: () => context.push(Routes.einstellungen).then((_) => _load())),
+                VIconButton(
+                  icon: Icons.settings_outlined,
+                  onTap: () =>
+                      context.push(Routes.einstellungen).then((_) => _load()),
+                ),
               ],
             ),
             if (_error != null) ...[
@@ -391,12 +366,9 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
               if (near != null)
                 _StationCard(
                   station: near,
-                  departures: _nearDepartures,
                   destinations: _destinations,
+                  search: RepoScope.read(context).repo.searchStations,
                   onDestination: (d) => _toWelcherZug(near, d),
-                  onOther: () => _toAnderesZiel(near),
-                  onDeparture: (d) => _toWohin(near, d),
-                  onAll: () => _openStation(near),
                   onMute: () => _muteStation(near),
                 )
               else
@@ -410,13 +382,29 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                   onLocate: _locate,
                 ),
             ],
-            const VGap.m(),
+            // Under the card: yesterday's forgotten check-in, only for people who ride most days.
+            if (st.next?.kind == 'nachtrag') ...[
+              const VGap.s(),
+              InkWell(
+                onTap: () => context.push(Routes.nachtrag),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    'Gestern vergessen einzuchecken?',
+                    style: VText.caption.copyWith(
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            const VGap.l(),
 
-            // 2 · Momentum.
+            // Three things, nothing else (docs/18): the week, the claims, us.
+            const VSection('Deine Woche'),
             _Momentum(standing: st, onTap: () => context.go(Routes.ich)),
-            const VRule(),
-
-            // 3 · The claim cycle: Sammeln → Antrag bereit → Eingereicht → Bestätigt.
+            const VGap.l(),
+            const VSection('Deine Anträge'),
             _CycleStrip(
               standing: st,
               claims: _claims,
@@ -426,26 +414,13 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                   ? null
                   : () => _prepareClaim(st.money!.readyDesk!),
             ),
-            const VRule(),
-
-            // 4 · Standing.
-            if (st.board != null) ...[
-              _Standing(board: st.board!, onTap: () => context.go(Routes.wir)),
-              const VRule(),
-            ],
-
-            // 5 · Community with my share.
+            const VGap.l(),
+            const VSection('Wir'),
             _Community(
               standing: st,
               tick: _minuteTick,
               onTap: () => context.go(Routes.wir),
             ),
-
-            // 6 · The one next thing.
-            if (st.next != null) ...[
-              const VGap.l(),
-              _NextThing(next: st.next!, onTap: () => _openNext(st.next!)),
-            ],
           ],
         ),
       ),
@@ -582,36 +557,26 @@ class _StationRow extends StatelessWidget {
 class _StationCard extends StatelessWidget {
   const _StationCard({
     required this.station,
-    required this.departures,
     required this.destinations,
+    required this.search,
     required this.onDestination,
-    required this.onOther,
-    required this.onDeparture,
-    required this.onAll,
     required this.onMute,
   });
   final ApiStation station;
-  final List<ApiDeparture> departures;
   final ApiDestinations destinations;
+  final Future<List<ApiStation>> Function(String query) search;
   final ValueChanged<ApiDestination> onDestination;
-  final VoidCallback onOther;
-  final ValueChanged<ApiDeparture> onDeparture;
-  final VoidCallback onAll;
   final VoidCallback onMute;
 
   @override
   Widget build(BuildContext context) {
-    final next = departures
-        .where(
-          (d) =>
-              !d.cancelled &&
-              d.category != ApiCategory.other &&
-              d.category != ApiCategory.bus,
-        )
-        .take(3)
+    // Only places this person has been to before (docs/18); the home station comes first when away.
+    final history = destinations.predicted
+        .where((p) => p.stationId != station.id)
+        .take(4)
         .toList();
     return Container(
-      padding: const EdgeInsets.fromLTRB(VSpace.m, VSpace.m, VSpace.m, 0),
+      padding: const EdgeInsets.all(VSpace.m),
       decoration: BoxDecoration(
         border: Border.all(color: VColors.ink, width: 1.5),
         borderRadius: BorderRadius.circular(4),
@@ -621,85 +586,40 @@ class _StationCard extends StatelessWidget {
         children: [
           GestureDetector(
             onLongPress: () => _muteSheet(context),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        station.name,
-                        style: VText.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        station.distanceM == null
-                            ? 'Du bist hier · halten: nie hier erinnern'
-                            : 'Du bist hier · ${station.distanceM} m',
-                        style: VText.caption,
-                      ),
-                    ],
-                  ),
+                Text(
+                  station.name,
+                  style: VText.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                ActionChip(
-                  onPressed: onAll,
-                  backgroundColor: VColors.paperElevated,
-                  side: const BorderSide(color: VColors.rule),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  label: Text('Alle Abfahrten', style: VText.bodySStrong),
+                Text(
+                  station.distanceM == null
+                      ? 'Du bist hier'
+                      : 'Du bist hier · ${station.distanceM} m',
+                  style: VText.caption,
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          // Destination first: the places this person goes, one tap each.
-          for (final d
-              in destinations.predicted
-                  .where((p) => p.stationId != station.id)
-                  .take(2)) ...[
+          const SizedBox(height: 12),
+          for (final d in history) ...[
             DestinationButton(
               destination: d,
-              primary: identical(d, destinations.predicted.first),
+              primary: identical(d, history.first),
               onTap: () => onDestination(d),
             ),
             const SizedBox(height: 8),
           ],
-          OutlinedButton.icon(
-            onPressed: onOther,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: VColors.ink,
-              side: const BorderSide(color: VColors.rule),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(4),
-              ),
-              minimumSize: const Size.fromHeight(44),
-              alignment: Alignment.centerLeft,
-            ),
-            icon: const Icon(Icons.search, size: 20),
-            label: Text(
-              destinations.predicted.isEmpty
-                  ? 'Wohin? Ziel wählen …'
-                  : 'Anderes Ziel …',
-              style: VText.bodySStrong,
+          _WohinField(
+            search: search,
+            exclude: station.id,
+            onPick: (s) => onDestination(
+              ApiDestination(stationId: s.id, stationName: s.name),
             ),
           ),
-          const SizedBox(height: 6),
-          Text('Oder erst der Zug:', style: VText.caption),
-          if (next.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                'Gerade keine Abfahrt in Sicht. Alle Abfahrten zeigen auch Busse und Bahnen.',
-                style: VText.caption,
-              ),
-            )
-          else
-            for (final d in next)
-              DepartureRow(departure: d, onTap: () => onDeparture(d)),
         ],
       ),
     );
@@ -1084,19 +1004,50 @@ class _CycleStrip extends StatelessWidget {
   final VoidCallback onOpen;
   final VoidCallback? onClaim;
 
-  static const _labels = ['Sammeln', 'Antrag bereit', 'Eingereicht', 'Bestätigt'];
+  static const _labels = [
+    'Sammeln',
+    'Antrag bereit',
+    'Eingereicht',
+    'Bestätigt',
+  ];
 
   @override
   Widget build(BuildContext context) {
     final m = standing.money;
     final now = DateTime.now();
-    final out = claims.where((c) => c.status == ApiClaimStatus.sent || c.status == ApiClaimStatus.question).toList()
-      ..sort((a, b) => (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)));
-    final closed = claims
-        .where((c) => (c.status == ApiClaimStatus.accepted || c.status == ApiClaimStatus.rejected) && c.sentAt != null && now.difference(c.sentAt!).inDays <= 60)
-        .toList()
-      ..sort((a, b) => (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)));
-    final recentClosed = closed.where((c) => _closedAt(c) != null && now.difference(_closedAt(c)!).inDays <= 14).firstOrNull;
+    final out =
+        claims
+            .where(
+              (c) =>
+                  c.status == ApiClaimStatus.sent ||
+                  c.status == ApiClaimStatus.question,
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)),
+          );
+    final closed =
+        claims
+            .where(
+              (c) =>
+                  (c.status == ApiClaimStatus.accepted ||
+                      c.status == ApiClaimStatus.rejected) &&
+                  c.sentAt != null &&
+                  now.difference(c.sentAt!).inDays <= 60,
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)),
+          );
+    final recentClosed = closed
+        .where(
+          (c) =>
+              _closedAt(c) != null &&
+              now.difference(_closedAt(c)!).inDays <= 14,
+        )
+        .firstOrNull;
     final ready = m != null && m.ready && onClaim != null;
 
     final _Stage stage;
@@ -1110,7 +1061,9 @@ class _CycleStrip extends StatelessWidget {
       stage = _Stage.collecting;
     }
     final active = stage.index;
-    final answeredLabel = recentClosed?.status == ApiClaimStatus.rejected ? 'Abgelehnt' : 'Bestätigt';
+    final answeredLabel = recentClosed?.status == ApiClaimStatus.rejected
+        ? 'Abgelehnt'
+        : 'Bestätigt';
 
     String line;
     switch (stage) {
@@ -1125,11 +1078,13 @@ class _CycleStrip extends StatelessWidget {
         line = c.status == ApiClaimStatus.question
             ? 'Rückfrage der Bahn · bitte antworten'
             : c.expectedReplyBy != null
-                ? 'Antwort bis ${Mock.shortDate(c.expectedReplyBy!.toLocal())} · ${fmtCents(c.amountClaimedCents)} unterwegs'
-                : '${fmtCents(c.amountClaimedCents)} unterwegs · Antwort in etwa 4 Wochen';
+            ? 'Antwort bis ${Mock.shortDate(c.expectedReplyBy!.toLocal())} · ${fmtCents(c.amountClaimedCents)} unterwegs'
+            : '${fmtCents(c.amountClaimedCents)} unterwegs · Antwort in etwa 4 Wochen';
       case _Stage.answered:
         final c = recentClosed!;
-        line = c.status == ApiClaimStatus.rejected ? 'Abgelehnt · Widerspruch möglich' : '${fmtCents(c.amountConfirmedCents ?? c.amountClaimedCents)} bestätigt · geht an ${m?.ngoName ?? 'deinen Verein'}';
+        line = c.status == ApiClaimStatus.rejected
+            ? 'Abgelehnt · Widerspruch möglich'
+            : '${fmtCents(c.amountConfirmedCents ?? c.amountClaimedCents)} bestätigt · geht an ${m?.ngoName ?? 'deinen Verein'}';
     }
 
     return InkWell(
@@ -1144,25 +1099,43 @@ class _CycleStrip extends StatelessWidget {
                 for (var i = 0; i < 4; i++) ...[
                   if (i > 0)
                     Expanded(
-                      child: Container(height: 1, color: i <= active ? VColors.ink : VColors.rule),
+                      child: Container(
+                        height: 1,
+                        color: i <= active ? VColors.ink : VColors.rule,
+                      ),
                     ),
-                  _Step(label: i == 3 ? answeredLabel : _labels[i], state: i < active ? _StepState.done : i == active ? _StepState.active : _StepState.ahead),
+                  _Step(
+                    label: i == 3 ? answeredLabel : _labels[i],
+                    state: i < active
+                        ? _StepState.done
+                        : i == active
+                        ? _StepState.active
+                        : _StepState.ahead,
+                  ),
                 ],
               ],
             ),
             const SizedBox(height: 10),
             if (ready && stage == _Stage.ready)
               VPrimaryButton(
-                label: busy ? 'Einen Moment …' : '${fmtEuro(m.openCents / 100)} beantragen',
+                label: busy
+                    ? 'Einen Moment …'
+                    : '${fmtEuro(m.openCents / 100)} beantragen',
                 icon: Icons.edit_outlined,
                 onTap: busy ? null : onClaim,
               )
             else
-              Text(line, style: VText.bodyS.copyWith(color: VColors.ink2), maxLines: 2),
+              Text(
+                line,
+                style: VText.bodyS.copyWith(color: VColors.ink2),
+                maxLines: 2,
+              ),
             if (ready && stage != _Stage.ready) ...[
               const SizedBox(height: 10),
               VOutlineButton(
-                label: busy ? 'Einen Moment …' : 'Nächstes Bündel · ${fmtEuro(m.openCents / 100)}',
+                label: busy
+                    ? 'Einen Moment …'
+                    : 'Nächstes Bündel · ${fmtEuro(m.openCents / 100)}',
                 icon: Icons.edit_outlined,
                 onTap: busy ? null : onClaim,
               ),
@@ -1192,7 +1165,11 @@ class _Step extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (state) { _StepState.active => VColors.ink, _StepState.done => VColors.ink2, _StepState.ahead => VColors.ink3 };
+    final color = switch (state) {
+      _StepState.active => VColors.ink,
+      _StepState.done => VColors.ink2,
+      _StepState.ahead => VColors.ink3,
+    };
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1204,51 +1181,30 @@ class _Step extends StatelessWidget {
             color: state == _StepState.ahead ? Colors.transparent : color,
             border: Border.all(color: color, width: 1.5),
           ),
-          child: state == _StepState.active ? Center(child: Container(width: 4, height: 4, decoration: const BoxDecoration(color: VColors.red, shape: BoxShape.circle))) : null,
+          child: state == _StepState.active
+              ? Center(
+                  child: Container(
+                    width: 4,
+                    height: 4,
+                    decoration: const BoxDecoration(
+                      color: VColors.red,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                )
+              : null,
         ),
         const SizedBox(height: 6),
-        Text(label, style: VText.tab.copyWith(color: color, fontWeight: state == _StepState.active ? FontWeight.w700 : FontWeight.w600)),
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 4 · Standing
-// ---------------------------------------------------------------------------
-
-class _Standing extends StatelessWidget {
-  const _Standing({required this.board, required this.onTap});
-  final ApiStandingBoard board;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final b = board;
-    final where = b.scope == 'city' ? 'in ${b.key}' : 'auf der ${b.key}';
-    final gap = b.gapToNext;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: VSpace.m),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text('Platz ${b.rank}', style: VText.numberM),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                gap == null || b.rank <= 1
-                    ? '$where diese Woche · ganz oben, von ${b.size}'
-                    : '$where diese Woche · ${fmtInt(gap)} ${gap == 1 ? 'Punkt' : 'Punkte'} bis Platz ${b.rank - 1}',
-                style: VText.caption,
-                maxLines: 2,
-              ),
-            ),
-          ],
+        Text(
+          label,
+          style: VText.tab.copyWith(
+            color: color,
+            fontWeight: state == _StepState.active
+                ? FontWeight.w700
+                : FontWeight.w600,
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -1301,13 +1257,6 @@ class _Community extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    c.myConfirmedCents > 0
-                        ? '${fmtEuroWhole(c.confirmedCents / 100)} an Vereine bestätigt · ${fmtEuro(c.myConfirmedCents / 100)} durch dich'
-                        : '${fmtEuroWhole(c.confirmedCents / 100)} an Vereine bestätigt',
-                    style: VText.caption,
-                  ),
                 ],
               ),
       ),
@@ -1315,63 +1264,123 @@ class _Community extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 6 · The one next thing
-// ---------------------------------------------------------------------------
+/// "Wohin?": types a station name, suggests up to four, one tap picks. Always present on
+/// the card, the only way in when there is no history yet (docs/18).
+class _WohinField extends StatefulWidget {
+  const _WohinField({
+    required this.search,
+    required this.exclude,
+    required this.onPick,
+  });
+  final Future<List<ApiStation>> Function(String query) search;
+  final String exclude;
+  final ValueChanged<ApiStation> onPick;
 
-class _NextThing extends StatelessWidget {
-  const _NextThing({required this.next, required this.onTap});
-  final ApiStandingNext next;
-  final VoidCallback onTap;
+  @override
+  State<_WohinField> createState() => _WohinFieldState();
+}
+
+class _WohinFieldState extends State<_WohinField> {
+  final _controller = TextEditingController();
+  Timer? _debounce;
+  List<ApiStation> _hits = const [];
+  bool _searching = false;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String q) {
+    _debounce?.cancel();
+    if (q.trim().length < 2) {
+      setState(() => _hits = const []);
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 250), () => _run(q.trim()));
+  }
+
+  Future<void> _run(String q) async {
+    setState(() => _searching = true);
+    try {
+      final hits = await widget.search(q);
+      if (!mounted || _controller.text.trim() != q) return;
+      setState(
+        () =>
+            _hits = hits.where((s) => s.id != widget.exclude).take(4).toList(),
+      );
+    } catch (_) {
+      if (mounted) setState(() => _hits = const []);
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final icon = switch (next.kind) {
-      'mail' => Icons.mail_outline,
-      'deadline' => Icons.schedule,
-      'nachtrag' => Icons.history,
-      'badge' => Icons.workspace_premium_outlined,
-      _ => Icons.arrow_forward,
-    };
-    final urgent = next.kind == 'deadline' && (next.daysLeft ?? 99) <= 7;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Container(
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(
-          color: urgent ? VColors.redSoft : VColors.paperElevated,
-          border: Border.all(color: urgent ? VColors.red : VColors.rule),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 22, color: urgent ? VColors.red : VColors.ink),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    next.title.toUpperCase(),
-                    style: VText.eyebrow.copyWith(
-                      color: urgent ? VColors.red : VColors.ink2,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _controller,
+          onChanged: _onChanged,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: 'Wohin?',
+            prefixIcon: const Icon(Icons.search, size: 20, color: VColors.ink2),
+            suffixIcon: _searching
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: VColors.ink2,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    next.body,
-                    style: VText.bodySStrong,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, size: 20, color: VColors.ink3),
-          ],
+                  )
+                : null,
+          ),
         ),
-      ),
+        for (final s in _hits)
+          InkWell(
+            onTap: () => widget.onPick(s),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.place_outlined,
+                        size: 20,
+                        color: VColors.ink2,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          s.name,
+                          style: VText.bodySStrong,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const Icon(
+                        Icons.arrow_forward,
+                        size: 18,
+                        color: VColors.ink,
+                      ),
+                    ],
+                  ),
+                ),
+                const VRule.soft(),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

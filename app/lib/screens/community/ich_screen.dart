@@ -110,7 +110,6 @@ class IchScreen extends StatelessWidget {
               const VGap.xl(),
               const VSection('Mehr'),
               VListRow(title: 'Alle Fahrten', subtitle: '${rides.length} zuletzt', chevron: true, onTap: () => context.push(Routes.historie)),
-              VListRow(title: 'Einstellungen', subtitle: 'Ticket, Zweck, Standort, Datenschutz', chevron: true, onTap: () => context.push(Routes.einstellungen).then((_) => refresh())),
             ],
           ),
         );

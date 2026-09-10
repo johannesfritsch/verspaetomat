@@ -9,6 +9,7 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../community/community_widgets.dart' show SwitchRow;
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
 
@@ -316,6 +317,11 @@ class _ReplyComposer extends StatefulWidget {
 class _ReplyComposerState extends State<_ReplyComposer> {
   int _selected = 0;
   bool _sending = false;
+  bool _uploading = false;
+  // Attachments (docs/18 §5): the claim's own ticket uploads, on by default for the
+  // "Ticketkopie nachreichen" template; extra photos go through the upload route first.
+  late bool _attachTicket = widget.templates.first.$1.startsWith('Ticketkopie');
+  final List<String> _uploadIds = [];
   late final TextEditingController _c = TextEditingController(text: widget.templates.first.$2);
 
   @override
@@ -324,11 +330,29 @@ class _ReplyComposerState extends State<_ReplyComposer> {
     super.dispose();
   }
 
+  Future<void> _addPhoto() async {
+    setState(() => _uploading = true);
+    final session = RepoScope.read(context);
+    try {
+      // Same path as the claim flow: no photo picker in the app yet, the image is rendered.
+      final me = session.me;
+      final png = await renderTicketPng(name: me?.personalData?.name ?? me?.nickname ?? 'Fahrgast', ticketNumber: me?.personalData?.ticketNumber ?? '–', month: 'Nachweis');
+      final up = await session.repo.upload(kind: 'ticket', filename: 'Foto_${_uploadIds.length + 1}.png', bytes: png);
+      if (!mounted) return;
+      setState(() => _uploadIds.add(up.uploadId));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Foto nicht angehängt: $e')));
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
   Future<void> _send() async {
     setState(() => _sending = true);
     final session = RepoScope.read(context);
     try {
-      await session.repo.replyToMail(widget.mail.id, _c.text);
+      await session.repo.replyToMail(widget.mail.id, _c.text, attachTicket: _attachTicket, uploadIds: _uploadIds);
       if (!mounted) return;
       Navigator.of(context).pop(true);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Abgeschickt. Kopie in deinem Postfach.')));
@@ -341,10 +365,9 @@ class _ReplyComposerState extends State<_ReplyComposer> {
 
   @override
   Widget build(BuildContext context) {
-    final relay = RepoScope.of(context).me?.relayAddress ?? 'deiner Verspätomat-Adresse';
     return Column(
       children: [
-        VSheetHeader(title: 'Antworten', subtitle: 'von $relay'),
+        const VSheetHeader(title: 'Antworten', subtitle: 'von der Adresse dieses Antrags'),
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, VSpace.xl),
@@ -360,6 +383,7 @@ class _ReplyComposerState extends State<_ReplyComposer> {
                         onTap: () => setState(() {
                           _selected = i;
                           _c.text = widget.templates[i].$2;
+                          _attachTicket = widget.templates[i].$1.startsWith('Ticketkopie');
                         }),
                         borderRadius: BorderRadius.circular(3),
                         child: Container(
@@ -380,6 +404,27 @@ class _ReplyComposerState extends State<_ReplyComposer> {
                 Text('An ${widget.mail.from}', style: VText.caption),
                 const VGap.s(),
                 TextField(controller: _c, maxLines: 10, minLines: 6, style: VText.bodyS),
+                const VGap.m(),
+                // Attachments: the ticket copy from the claim, extra photos, shown as chips.
+                SwitchRow(
+                  title: 'Ticketkopie anhängen',
+                  subtitle: 'Die Ticketbilder aus dem Antrag, kein neuer Upload',
+                  value: _attachTicket,
+                  onChanged: (v) => setState(() => _attachTicket = v),
+                ),
+                const VGap.s(),
+                VOutlineButton(label: _uploading ? 'Lädt hoch …' : 'Foto hinzufügen', icon: Icons.photo_library_outlined, onTap: _uploading || _sending ? null : _addPhoto),
+                if (_attachTicket || _uploadIds.isNotEmpty) ...[
+                  const VGap.s(),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (_attachTicket) const VChip('Ticketkopie', tone: VTone.ink),
+                      for (var i = 0; i < _uploadIds.length; i++) VChip('Foto ${i + 1}', tone: VTone.ink),
+                    ],
+                  ),
+                ],
                 const VGap.l(),
                 VPrimaryButton(label: _sending ? 'Sendet …' : 'Absenden', icon: Icons.send_outlined, onTap: _sending ? null : _send),
                 const VGap.xs(),

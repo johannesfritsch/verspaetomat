@@ -94,6 +94,8 @@ fn transport() -> anyhow::Result<AsyncSmtpTransport<Tokio1Executor>> {
 
 pub async fn send(mail: OutgoingMail<'_>) -> anyhow::Result<SendResult> {
     if !configured() {
+        let names: Vec<String> = mail.attachments.iter().map(|(n, _, b)| format!("{n} ({} B)", b.len())).collect();
+        tracing::info!(from = %mail.from, to = %mail.to, subject = %mail.subject, attachments = %names.join(", "), "mail (dry-run): no POSTMARK_TOKEN/SMTP_URL, nothing sent");
         return Ok(SendResult::DryRun);
     }
     if let Ok(token) = std::env::var("POSTMARK_TOKEN") {

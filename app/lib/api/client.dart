@@ -209,6 +209,15 @@ class ApiClient {
 
   Future<List<ApiClaim>> claims() async => _list(await _get('/v1/claims')).map(ApiClaim.fromJson).toList();
 
+  /// Marks every inbound mail of the claim as seen (docs/18). An older backend answers 404: ignored.
+  Future<void> markClaimSeen(String claimId) async {
+    try {
+      await _post('/v1/claims/$claimId/seen');
+    } on ApiException catch (e) {
+      if (e.status != 404) rethrow;
+    }
+  }
+
   Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds}) async =>
       ApiClaimDraft.fromJson(_map(await _post('/v1/claims/draft', {'desk': desk, if (incidentIds != null) 'incident_ids': incidentIds})));
 
@@ -244,7 +253,10 @@ class ApiClient {
 
   Future<List<ApiMail>> mails() async => _list(await _get('/v1/mails')).map(ApiMail.fromJson).toList();
 
-  Future<ApiMail> replyToMail(String id, String body) async => ApiMail.fromJson(_map(await _post('/v1/mails/${Uri.encodeComponent(id)}/reply', {'body': body})));
+  Future<ApiMail> replyToMail(String id, String body, {bool attachTicket = false, List<String> uploadIds = const []}) async => ApiMail.fromJson(_map(await _post(
+        '/v1/mails/${Uri.encodeComponent(id)}/reply',
+        {'body': body, 'attach_ticket': attachTicket, 'upload_ids': uploadIds},
+      )));
 
   /// Demo only: pretend the railway answered.
   Future<ApiInboundResult> simulateInbound({required String body, String? claimId, String? relayAddress}) async =>

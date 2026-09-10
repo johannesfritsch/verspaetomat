@@ -182,9 +182,14 @@ pub struct ReplyBody {
 
 pub async fn reply(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<ReplyBody>) -> ApiResult {
     let c = resolve(&s, &key).await?;
-    let Some(relay) = c.relay_address.clone() else { return Err(err(StatusCode::CONFLICT, "customer has no relay address yet")) };
     let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and status in ('sent','question') order by sent_at desc limit 1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let Some(claim) = claim else { return Err(err(StatusCode::CONFLICT, "no sent claim to answer")) };
+    // The railway answers to the address the claim went out from (docs/18 §4); old claims without
+    // one fall back to the customer's relay address.
+    let relay = match claim.reply_address.clone().or_else(|| c.relay_address.clone()) {
+        Some(r) => r,
+        None => return Err(err(StatusCode::CONFLICT, "customer has no relay address yet")),
+    };
     let name = c.full_name.clone().unwrap_or(c.nickname.clone());
     let amount = b.amount_cents.unwrap_or(claim.amount_claimed_cents);
     let eur = format!("{},{:02} EUR", amount / 100, amount % 100);
@@ -737,6 +742,9 @@ mod ngo_tests {
 #[derive(Deserialize)]
 pub struct MailTestBody {
     pub to: String,
+    /// Claim id or id prefix: send from that claim's `antrag-…` address instead of the customer's.
+    #[serde(default)]
+    pub claim: Option<String>,
 }
 
 /// `POST /admin/customers/{key}/mail-test {to}`: assigns the relay address if the customer has none yet,
@@ -747,13 +755,24 @@ pub async fn mail_test(State(s): State<AppState>, _a: Admin, Path(key): Path<Str
     if !to.contains('@') {
         return Err(err(StatusCode::BAD_REQUEST, "to must be an e-mail address"));
     }
-    let relay = match c.relay_address.clone() {
-        Some(r) => r,
-        None => {
-            let r = handlers::relay_address_for(c.id);
-            sqlx::query("update customers set relay_address = $2 where id = $1").bind(c.id).bind(&r).execute(&s.pool).await.map_err(internal)?;
-            r
+    let claim: Option<ClaimRow> = match b.claim.as_deref().map(str::trim).filter(|x| !x.is_empty()) {
+        Some(key) => {
+            let cl: Option<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and (id::text = $2 or id::text like $2 || '%') order by created_at desc limit 1")
+                .bind(c.id).bind(key.to_lowercase()).fetch_optional(&s.pool).await.map_err(internal)?;
+            Some(cl.ok_or_else(|| err(StatusCode::NOT_FOUND, "no such claim for this customer"))?)
         }
+        None => None,
+    };
+    let relay = match &claim {
+        Some(cl) => handlers::ensure_claim_address(&s.pool, cl).await.map_err(internal)?,
+        None => match c.relay_address.clone() {
+            Some(r) => r,
+            None => {
+                let r = handlers::relay_address_for(c.id);
+                sqlx::query("update customers set relay_address = $2 where id = $1").bind(c.id).bind(&r).execute(&s.pool).await.map_err(internal)?;
+                r
+            }
+        },
     };
     let message_id = handlers::new_message_id();
     let subject = "Verspätomat: Testmail";
@@ -775,9 +794,9 @@ pub async fn mail_test(State(s): State<AppState>, _a: Admin, Path(key): Path<Str
     let dry_run = matches!(result, crate::mail::SendResult::DryRun);
     sqlx::query(
         "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, bcc_addr, subject, body, dry_run)
-         values ($1,$2,null,'out',$3,null,$4,$5,null,$6,$7,$8)",
+         values ($1,$2,$3,'out',$4,null,$5,$6,null,$7,$8,$9)",
     )
-    .bind(Uuid::new_v4()).bind(c.id).bind(&message_id).bind(&relay).bind(&to).bind(subject).bind(&body).bind(dry_run)
+    .bind(Uuid::new_v4()).bind(c.id).bind(claim.as_ref().map(|cl| cl.id)).bind(&message_id).bind(&relay).bind(&to).bind(subject).bind(&body).bind(dry_run)
     .execute(&s.pool).await.map_err(internal)?;
-    Ok(Json(json!({ "from": relay, "to": to, "message_id": message_id, "dry_run": dry_run })))
+    Ok(Json(json!({ "from": relay, "to": to, "message_id": message_id, "dry_run": dry_run, "claim_id": claim.map(|cl| cl.id) })))
 }

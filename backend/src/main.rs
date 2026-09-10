@@ -124,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/claims/{id}/pdf", get(handlers::claim_pdf))
         .route("/v1/claims/{id}/sign", post(handlers::claim_sign))
         .route("/v1/claims/{id}/send", post(handlers::claim_send))
+        .route("/v1/claims/{id}/seen", post(handlers::claim_seen))
         .route("/v1/uploads", post(handlers::upload))
         .route("/v1/mails", get(handlers::mails))
         .route("/v1/mails/{id}/reply", post(handlers::mail_reply))

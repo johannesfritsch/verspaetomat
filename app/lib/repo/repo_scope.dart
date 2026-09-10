@@ -58,6 +58,30 @@ class Session extends ChangeNotifier {
   String? error;
   bool busy = false;
 
+  /// Railway mails nobody opened yet (docs/18): the Anträge tab badge. Refreshed with every
+  /// standing load and on every mail event.
+  int unreadMails = 0;
+
+  /// `GET /v1/me/standing`, and the badge follows. Screens call this instead of `repo.standing()`.
+  Future<ApiStanding> loadStanding() async {
+    final st = await repo.standing();
+    if (st.unreadMails != unreadMails) {
+      unreadMails = st.unreadMails;
+      notifyListeners();
+    }
+    return st;
+  }
+
+  /// The claim's thread was opened: mark seen, then let the badge follow.
+  Future<void> markClaimSeen(String claimId) async {
+    try {
+      await repo.markClaimSeen(claimId);
+    } catch (_) {}
+    try {
+      await loadStanding();
+    } catch (_) {}
+  }
+
   EventStream? _events;
   final _eventsOut = StreamController<AppEvent>.broadcast();
 
@@ -99,6 +123,11 @@ class Session extends ChangeNotifier {
     final es = EventStream(baseUrl: apiUrl, token: () => t);
     es.events.listen((e) async {
       _eventsOut.add(e);
+      if (e.kind == 'mail') {
+        try {
+          await loadStanding();
+        } catch (_) {}
+      }
       if (e.kind == 'reset' || e.kind == 'clock') {
         try {
           me = await repo.getMe();

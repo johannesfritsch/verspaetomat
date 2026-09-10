@@ -391,6 +391,23 @@ pub fn relay_address_for(customer_id: Uuid) -> String {
     format!("fahrgast-{}@{}", &short[..8], relay_domain())
 }
 
+/// Every claim answers on its own address (docs/18 §4): `antrag-<8 hex of the claim id>@RELAY_DOMAIN`.
+/// The word is "Antrag", not "Fahrgast": it identifies the case, not the person.
+pub fn claim_address_for(claim_id: Uuid) -> String {
+    let short = claim_id.simple().to_string();
+    format!("antrag-{}@{}", &short[..8], relay_domain())
+}
+
+/// The claim's reply address, assigned on first use and persisted.
+pub async fn ensure_claim_address(pool: &PgPool, claim: &ClaimRow) -> anyhow::Result<String> {
+    if let Some(a) = &claim.reply_address {
+        return Ok(a.clone());
+    }
+    let a = claim_address_for(claim.id);
+    sqlx::query("update claims set reply_address = $2 where id = $1 and reply_address is null").bind(claim.id).bind(&a).execute(pool).await?;
+    Ok(a)
+}
+
 pub fn new_message_id() -> String {
     format!("<{}@{}>", Uuid::new_v4(), relay_domain())
 }
@@ -1028,9 +1045,11 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     if claim.signed_by.is_none() {
         return Err(err(StatusCode::PRECONDITION_FAILED, "claim not signed"));
     }
-    let (Some(name), Some(email), Some(relay)) = (c.0.full_name.clone(), c.0.email.clone(), c.0.relay_address.clone()) else {
+    let (Some(name), Some(email)) = (c.0.full_name.clone(), c.0.email.clone()) else {
         return Err(err(StatusCode::PRECONDITION_FAILED, "personal data required"));
     };
+    // The mail leaves from the claim's own address; the railway's reply comes back to it.
+    let relay = ensure_claim_address(&s.pool, &claim).await.map_err(internal)?;
     let sent_today: i64 = sqlx::query_scalar("select count(*) from claims where customer_id = $1 and sent_at > now() - interval '1 day'").bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?;
     if sent_today >= 5 {
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "max 5 claims per day"));
@@ -1116,15 +1135,78 @@ pub async fn mails(State(s): State<AppState>, c: Customer) -> ApiResult {
 #[derive(Deserialize)]
 pub struct Reply {
     pub body: String,
+    /// Attach the claim's ticket uploads (the same images the claim mail carried).
+    #[serde(default)]
+    pub attach_ticket: bool,
+    /// Any of this customer's uploads (e.g. a fresh photo via POST /v1/uploads).
+    #[serde(default)]
+    pub upload_ids: Vec<Uuid>,
+}
+
+/// File name for an upload: the claim's label when it has one, else the kind, plus the extension.
+fn attachment_filename(label: &str, content_type: &str) -> String {
+    let ext = match content_type {
+        ct if ct.starts_with("image/png") => ".png",
+        ct if ct.starts_with("image/jpeg") => ".jpg",
+        ct if ct.starts_with("image/heic") => ".heic",
+        ct if ct.starts_with("application/pdf") => ".pdf",
+        _ => "",
+    };
+    let stem: String = label.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    format!("{}{}", if stem.is_empty() { "Anhang" } else { &stem }, ext)
 }
 
 /// The customer answers a railway's question, through their own relay address.
 pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(r): Json<Reply>) -> ApiResult {
     let original: Option<MailRow> = sqlx::query_as("select * from mails where id = $1 and customer_id = $2 and direction = 'inbound'").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let Some(orig) = original else { return Err(err(StatusCode::NOT_FOUND, "inbound mail not found")) };
-    let (Some(name), Some(email), Some(relay)) = (c.0.full_name.clone(), c.0.email.clone(), c.0.relay_address.clone()) else {
+    let (Some(name), Some(email)) = (c.0.full_name.clone(), c.0.email.clone()) else {
         return Err(err(StatusCode::PRECONDITION_FAILED, "personal data required"));
     };
+    // Answer from the address the thread belongs to: the claim's, or the customer's for old mail.
+    let relay = match orig.claim_id {
+        Some(cid) => {
+            let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1").bind(cid).fetch_optional(&s.pool).await.map_err(internal)?;
+            match claim {
+                Some(cl) => ensure_claim_address(&s.pool, &cl).await.map_err(internal)?,
+                None => c.0.relay_address.clone().unwrap_or_else(|| relay_address_for(c.0.id)),
+            }
+        }
+        None => c.0.relay_address.clone().unwrap_or_else(|| relay_address_for(c.0.id)),
+    };
+    // Attachments: the claim's ticket uploads on request, plus any of the customer's own uploads.
+    let mut files: Vec<(String, String, Vec<u8>, Uuid)> = Vec::new();
+    if r.attach_ticket {
+        if let Some(cid) = orig.claim_id {
+            let rows: Vec<(Uuid, String, String, Vec<u8>)> = sqlx::query_as(
+                "select u.id, ca.label, u.content_type, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1 and u.customer_id = $2 and u.kind = 'ticket' and length(u.bytes) > 0 order by ca.label",
+            )
+            .bind(cid)
+            .bind(c.0.id)
+            .fetch_all(&s.pool)
+            .await
+            .map_err(internal)?;
+            for (uid, label, ct, bytes) in rows {
+                files.push((attachment_filename(&label, &ct), ct, bytes, uid));
+            }
+        }
+    }
+    for uid in &r.upload_ids {
+        if files.iter().any(|f| &f.3 == uid) {
+            continue;
+        }
+        let row: Option<(String, String, Vec<u8>)> = sqlx::query_as("select kind, content_type, bytes from uploads where id = $1 and customer_id = $2").bind(uid).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+        let Some((kind, ct, bytes)) = row else { return Err(err(StatusCode::NOT_FOUND, &format!("upload {uid} not found"))) };
+        if bytes.is_empty() {
+            return Err(err(StatusCode::GONE, &format!("upload {uid} was deleted by retention")));
+        }
+        files.push((attachment_filename(&kind, &ct), ct, bytes, *uid));
+    }
+    let total: usize = files.iter().map(|f| f.2.len()).sum();
+    if total > 20 * 1024 * 1024 {
+        return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "attachments exceed 20 MB"));
+    }
+    let attachments_json = json!(files.iter().map(|(name, ct, bytes, uid)| json!({ "name": name, "content_type": ct, "size": bytes.len(), "upload_id": uid })).collect::<Vec<_>>());
     let message_id = new_message_id();
     let sent = crate::mail::send(crate::mail::OutgoingMail {
         from: &format!("{name} <{relay}>"),
@@ -1134,14 +1216,14 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
         body: &r.body,
         message_id: &message_id,
         in_reply_to: orig.message_id.as_deref(),
-        attachments: vec![],
+        attachments: files.iter().map(|(name, ct, bytes, _)| (name.clone(), ct.clone(), bytes.clone())).collect(),
     })
     .await
     .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?;
     let dry_run = matches!(sent, crate::mail::SendResult::DryRun);
     let mail: MailRow = sqlx::query_as(
-        "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, bcc_addr, subject, body, dry_run)
-         values ($1,$2,$3,'out',$4,$5,$6,$7,$8,$9,$10,$11) returning *",
+        "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, bcc_addr, subject, body, attachments, dry_run)
+         values ($1,$2,$3,'out',$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *",
     )
     .bind(Uuid::new_v4())
     .bind(c.0.id)
@@ -1153,6 +1235,7 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     .bind(&email)
     .bind(format!("Re: {}", orig.subject))
     .bind(r.body)
+    .bind(attachments_json)
     .bind(dry_run)
     .fetch_one(&s.pool)
     .await
@@ -1299,16 +1382,55 @@ fn strip_html(h: &str) -> String {
 }
 
 /// Shared by the provider webhook and the Stellwerk.
+/// The bare, lower-cased address out of a To header value ("Name <x@y>" or "x@y").
+pub fn inbound_address(to: &str) -> String {
+    let t = to.trim();
+    let inner = match (t.rfind('<'), t.rfind('>')) {
+        (Some(a), Some(b)) if b > a => &t[a + 1..b],
+        _ => t,
+    };
+    inner.trim().to_lowercase()
+}
+
+/// `POST /v1/claims/{id}/seen`: the customer opened the claim's thread; its inbound mail is read now.
+pub async fn claim_seen(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
+    let n = sqlx::query("update mails set seen_at = now() where claim_id = $1 and customer_id = $2 and direction = 'inbound' and seen_at is null")
+        .bind(id)
+        .bind(c.0.id)
+        .execute(&s.pool)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+    let unread: i64 = unread_mails(&s.pool, c.0.id).await.map_err(internal)?;
+    Ok(Json(json!({ "seen": n, "unread_mails": unread })))
+}
+
+pub async fn unread_mails(pool: &PgPool, customer_id: Uuid) -> anyhow::Result<i64> {
+    Ok(sqlx::query_scalar("select count(*) from mails where customer_id = $1 and direction = 'inbound' and seen_at is null").bind(customer_id).fetch_one(pool).await?)
+}
+
 pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (StatusCode, Json<Value>)> {
-    let relay = m.to.trim().trim_matches(|ch| ch == '<' || ch == '>').to_lowercase();
-    let cust: Option<CustomerRow> = sqlx::query_as("select * from customers where lower(relay_address) = $1").bind(&relay).fetch_optional(&s.pool).await.map_err(internal)?;
-    let Some(cust) = cust else { return Err(err(StatusCode::NOT_FOUND, "no customer for this relay address")) };
-    let claim: Option<ClaimRow> = match m.claim_id {
-        Some(id) => sqlx::query_as("select * from claims where id = $1 and customer_id = $2").bind(id).bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
-        None => match &m.in_reply_to {
-            Some(mid) => sqlx::query_as("select c.* from claims c join mails ml on ml.claim_id = c.id where ml.message_id = $1 and c.customer_id = $2").bind(mid).bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
-            None => sqlx::query_as("select * from claims where customer_id = $1 and status in ('sent','question') order by sent_at desc limit 1").bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
-        },
+    let relay = inbound_address(&m.to);
+    // Routing order (docs/18 §4): the claim's own address names customer and claim in one step;
+    // the customer's old per-customer address falls back to threading and "newest open claim".
+    let by_claim: Option<ClaimRow> = sqlx::query_as("select * from claims where lower(reply_address) = $1").bind(&relay).fetch_optional(&s.pool).await.map_err(internal)?;
+    let (cust, claim): (CustomerRow, Option<ClaimRow>) = match by_claim {
+        Some(cl) => {
+            let cust: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(cl.customer_id).fetch_one(&s.pool).await.map_err(internal)?;
+            (cust, Some(cl))
+        }
+        None => {
+            let cust: Option<CustomerRow> = sqlx::query_as("select * from customers where lower(relay_address) = $1").bind(&relay).fetch_optional(&s.pool).await.map_err(internal)?;
+            let Some(cust) = cust else { return Err(err(StatusCode::NOT_FOUND, "no claim or customer for this address")) };
+            let claim: Option<ClaimRow> = match m.claim_id {
+                Some(id) => sqlx::query_as("select * from claims where id = $1 and customer_id = $2").bind(id).bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
+                None => match &m.in_reply_to {
+                    Some(mid) => sqlx::query_as("select c.* from claims c join mails ml on ml.claim_id = c.id where ml.message_id = $1 and c.customer_id = $2").bind(mid).bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
+                    None => sqlx::query_as("select * from claims where customer_id = $1 and status in ('sent','question') order by sent_at desc limit 1").bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
+                },
+            };
+            (cust, claim)
+        }
     };
     let lower = m.body.to_lowercase();
     let outcome = if lower.contains("nicht entsprechen") || lower.contains("abgelehnt") || lower.contains("keine entschädigung") {
@@ -1728,6 +1850,7 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     Ok(Json(json!({
         "points_this_week": points_this_week,
         "points_last_week": points_last_week,
+        "unread_mails": unread_mails(pool, c.0.id).await.map_err(internal)?,
         "rides_this_week": rides_this_week,
         "level": { "name": level_name, "next_name": next_name, "points_to_next": points_to_next, "progress": progress },
         "money": { "open_cents": open_cents, "missing_cents": missing_cents, "ready": ready, "ready_desk": ready_desk, "ngo_name": ngo_name },
@@ -1838,5 +1961,49 @@ mod inbound_tests {
         assert_eq!(m.to, "fahrgast-2@users.verspaetomat.de");
         assert_eq!(m.subject, "Hallo");
         assert!(inbound_from_json(json!({ "unrelated": 1 })).is_none());
+    }
+}
+
+#[cfg(test)]
+mod claim_address_tests {
+    use super::*;
+
+    #[test]
+    fn address_names_the_claim_not_the_person() {
+        let id = Uuid::parse_str("3d09a883-1111-2222-3333-444444444444").unwrap();
+        let a = claim_address_for(id);
+        assert!(a.starts_with("antrag-3d09a883@"), "{a}");
+        assert!(a.ends_with(&format!("@{}", relay_domain())));
+        assert!(!a.contains("fahrgast"));
+        assert_ne!(a, relay_address_for(id), "the claim address must not look like a customer address");
+    }
+
+    #[test]
+    fn inbound_address_is_bare_and_lowercase() {
+        assert_eq!(inbound_address("Antrag <Antrag-3D09A883@users.verspaetomat.de>"), "antrag-3d09a883@users.verspaetomat.de");
+        assert_eq!(inbound_address("  antrag-1@x.de "), "antrag-1@x.de");
+        assert_eq!(inbound_address("<a@b.de>"), "a@b.de");
+    }
+
+    /// The routing order of `process_inbound`, as a pure decision: a claim address wins, the
+    /// customer address only routes when no claim owns the address.
+    fn route(to: &str, claim_addresses: &[&str], customer_addresses: &[&str]) -> &'static str {
+        let a = inbound_address(to);
+        if claim_addresses.iter().any(|c| c.to_lowercase() == a) {
+            "claim"
+        } else if customer_addresses.iter().any(|c| c.to_lowercase() == a) {
+            "customer"
+        } else {
+            "unknown"
+        }
+    }
+
+    #[test]
+    fn routing_prefers_the_claim_address() {
+        let claims = ["antrag-3d09a883@users.verspaetomat.de"];
+        let customers = ["fahrgast-264c454b@users.verspaetomat.de"];
+        assert_eq!(route("Antrag <antrag-3d09a883@users.verspaetomat.de>", &claims, &customers), "claim");
+        assert_eq!(route("fahrgast-264c454b@users.verspaetomat.de", &claims, &customers), "customer");
+        assert_eq!(route("someone@else.de", &claims, &customers), "unknown");
     }
 }
