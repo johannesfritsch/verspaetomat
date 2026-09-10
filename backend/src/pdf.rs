@@ -158,7 +158,7 @@ mod tests {
         let customer = CustomerRow {
             id: cid,
             nickname: "Test".into(),
-            relay_address: Some("fahrgast-0000@verspaetomat.de".into()),
+            relay_address: Some("fahrgast-0000@users.verspaetomat.de".into()),
             full_name: Some("Erika Mustermann".into()),
             postal_address: Some("Musterstraße 1\n50667 Köln".into()),
             email: Some("erika@example.org".into()),

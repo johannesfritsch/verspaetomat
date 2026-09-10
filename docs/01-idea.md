@@ -13,7 +13,7 @@ Slogan candidates: *"Du bist spät, du spendest."* / *"Verspätung mit Sinn."*
 - Every delay earns "Geduldspunkte" (patience points). Every delay is visible, shareable, funny rather than enraging.
 - A delay of 60 minutes or more at the destination creates a statutory compensation claim.
 - The app fills in the official claim form with the customer's details, the journey data it already holds, and a partner NGO as the payee (account holder).
-- The customer signs in the app and presses send. The claim leaves through the customer's own Verspätomat address (e.g. `fahrgast-4711@verspaetomat.de`), with a copy to the customer's private inbox. The railway's reply arrives at that address, is forwarded to the customer unchanged, and updates the ledger. We relay; we never write to the railway on our own initiative.
+- The customer signs in the app and presses send. The claim leaves through the customer's own Verspätomat address (e.g. `fahrgast-4711@users.verspaetomat.de`), with a copy to the customer's private inbox. The railway's reply arrives at that address, is forwarded to the customer unchanged, and updates the ledger. We relay; we never write to the railway on our own initiative.
 - Deutsche Bahn (or the operator that ran the late train) pays the NGO directly.
 - The app shows a community total: minutes waited, euros submitted, euros confirmed.
 

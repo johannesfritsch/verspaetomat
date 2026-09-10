@@ -27,7 +27,7 @@ Everything in the code that can be built without an account is built (see 30 for
 | # | Item | Notes |
 |---|---|---|
 | C1 | DNS: SPF, DKIM, DMARC for `verspaetomat.de`; MX for the relay namespace | Exact records in `deploy/README.md` |
-| C2 | Postmark inbound: route `fahrgast-*@verspaetomat.de` to `https://api.verspaetomat.de/internal/inbound-mail/raw` with the secret | The parser is verified against real MIME |
+| C2 | Postmark inbound: route `fahrgast-*@users.verspaetomat.de` to `https://api.verspaetomat.de/internal/inbound-mail/raw` with the secret | The parser is verified against real MIME |
 | C3 | **First real claim**: your own D-Ticket incidents once the bundle reaches 4 €, payee the NGO from A3 | This single round trip validates form, relay address, classifier. The Servicecenter answers in about four weeks |
 
 ## D. App stores (after A4 and A5)

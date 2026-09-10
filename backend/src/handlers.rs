@@ -380,12 +380,24 @@ pub struct PersonalData {
     pub first_class: bool,
 }
 
+/// Domain of the per-customer relay addresses (`fahrgast-XXXX@…`). A subdomain, so the apex keeps
+/// its own mail. Set `RELAY_DOMAIN` to change it.
+pub fn relay_domain() -> String {
+    std::env::var("RELAY_DOMAIN").unwrap_or_else(|_| "users.verspaetomat.de".to_string())
+}
+
+pub fn relay_address_for(customer_id: Uuid) -> String {
+    let short = customer_id.simple().to_string();
+    format!("fahrgast-{}@{}", &short[..8], relay_domain())
+}
+
+pub fn new_message_id() -> String {
+    format!("<{}@{}>", Uuid::new_v4(), relay_domain())
+}
+
 /// Asked at the first claim. Assigns the relay address the first time.
 pub async fn put_personal_data(State(s): State<AppState>, c: Customer, Json(p): Json<PersonalData>) -> ApiResult {
-    let relay = c.0.relay_address.clone().unwrap_or_else(|| {
-        let short = c.0.id.simple().to_string();
-        format!("fahrgast-{}@verspaetomat.de", &short[..8])
-    });
+    let relay = c.0.relay_address.clone().unwrap_or_else(|| relay_address_for(c.0.id));
     let row: CustomerRow = sqlx::query_as(
         "update customers set full_name = $2, postal_address = $3, email = $4, ticket_number = $5, first_class = $6, relay_address = $7 where id = $1 returning *",
     )
@@ -1008,7 +1020,7 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         { "name": "EU-Antrag.pdf", "content_type": "application/pdf", "url": format!("/v1/claims/{}/pdf", claim.id) },
         { "name": "EU-Antrag.txt", "content_type": "text/plain", "text": claim_summary_text(&claim, &incidents, &name) },
     ]);
-    let message_id = format!("<{}@verspaetomat.de>", Uuid::new_v4());
+    let message_id = new_message_id();
     let summary = claim_summary_text(&claim, &incidents, &name);
     let mut uploads: Vec<(String, String, Vec<u8>)> = sqlx::query_as::<_, (String, String, Vec<u8>)>(
         "select ca.label || case when u.content_type like 'image/png' then '.png' when u.content_type like 'image/jpeg' then '.jpg' else '' end, u.content_type, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1",
@@ -1085,7 +1097,7 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     let (Some(name), Some(email), Some(relay)) = (c.0.full_name.clone(), c.0.email.clone(), c.0.relay_address.clone()) else {
         return Err(err(StatusCode::PRECONDITION_FAILED, "personal data required"));
     };
-    let message_id = format!("<{}@verspaetomat.de>", Uuid::new_v4());
+    let message_id = new_message_id();
     let sent = crate::mail::send(crate::mail::OutgoingMail {
         from: &format!("{name} <{relay}>"),
         to: &orig.from_addr,
@@ -1216,7 +1228,7 @@ pub fn parse_raw_mail(raw: &[u8]) -> Option<InboundMail> {
     let to = msg
         .to()
         .and_then(|a| {
-            a.iter().find(|x| x.address().map(|ad| ad.to_lowercase().ends_with("@verspaetomat.de")).unwrap_or(false)).or_else(|| a.first()).and_then(|x| x.address().map(|s| s.to_string()))
+            a.iter().find(|x| x.address().map(|ad| ad.to_lowercase().ends_with(&format!("@{}", relay_domain()))).unwrap_or(false)).or_else(|| a.first()).and_then(|x| x.address().map(|s| s.to_string()))
         })
         .unwrap_or_default();
     let body = msg
@@ -1347,7 +1359,7 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
             bcc: None,
             subject: &format!("Fwd: {}", m.subject),
             body: &fwd_body,
-            message_id: &format!("<{}@verspaetomat.de>", Uuid::new_v4()),
+            message_id: &new_message_id(),
             in_reply_to: None,
             attachments: vec![],
         })
@@ -1506,22 +1518,22 @@ mod inbound_tests {
         let v = json!({
             "FromFull": {"Email": "fahrgastrechte@deutschebahn.com", "Name": "Servicecenter Fahrgastrechte"},
             "From": "Servicecenter Fahrgastrechte <fahrgastrechte@deutschebahn.com>",
-            "To": "fahrgast-0d8cffc4@verspaetomat.de",
-            "ToFull": [{"Email": "fahrgast-0d8cffc4@verspaetomat.de", "Name": ""}],
+            "To": "fahrgast-0d8cffc4@users.verspaetomat.de",
+            "ToFull": [{"Email": "fahrgast-0d8cffc4@users.verspaetomat.de", "Name": ""}],
             "Subject": "Ihr Antrag",
             "TextBody": "Sehr geehrter Herr Test,\n\n4,50 EUR werden überwiesen.",
             "HtmlBody": "<p>ignored when TextBody exists</p>",
             "MessageID": "73e6d360-66eb-11e1-8e72-a8904824019b",
-            "Headers": [{"Name": "In-Reply-To", "Value": "<abc@verspaetomat.de>"}, {"Name": "X-Spam-Status", "Value": "No"}],
+            "Headers": [{"Name": "In-Reply-To", "Value": "<abc@users.verspaetomat.de>"}, {"Name": "X-Spam-Status", "Value": "No"}],
             "Attachments": [{"Name": "Bescheid.pdf", "ContentType": "application/pdf", "ContentLength": 4, "Content": "JVBERg=="}]
         });
         let m = inbound_from_json(v).unwrap();
-        assert_eq!(m.to, "fahrgast-0d8cffc4@verspaetomat.de");
+        assert_eq!(m.to, "fahrgast-0d8cffc4@users.verspaetomat.de");
         assert!(m.from.contains("deutschebahn.com"));
         assert_eq!(m.subject, "Ihr Antrag");
         assert!(m.body.starts_with("Sehr geehrter"));
         assert_eq!(m.message_id.as_deref(), Some("<73e6d360-66eb-11e1-8e72-a8904824019b>"));
-        assert_eq!(m.in_reply_to.as_deref(), Some("<abc@verspaetomat.de>"));
+        assert_eq!(m.in_reply_to.as_deref(), Some("<abc@users.verspaetomat.de>"));
         assert_eq!(m.attachments.len(), 1);
         assert_eq!(m.attachments[0].0, "Bescheid.pdf");
         assert_eq!(m.attachments[0].2, b"%PDF");
@@ -1529,11 +1541,11 @@ mod inbound_tests {
 
     #[test]
     fn own_shape_and_raw_email_still_work() {
-        let m = inbound_from_json(json!({ "to": "fahrgast-1@verspaetomat.de", "from": "a@b.de", "subject": "s", "body": "b" })).unwrap();
-        assert_eq!(m.to, "fahrgast-1@verspaetomat.de");
-        let raw = "From: a@b.de\r\nTo: fahrgast-2@verspaetomat.de\r\nSubject: Hallo\r\nMessage-ID: <x@b.de>\r\n\r\nText\r\n";
+        let m = inbound_from_json(json!({ "to": "fahrgast-1@users.verspaetomat.de", "from": "a@b.de", "subject": "s", "body": "b" })).unwrap();
+        assert_eq!(m.to, "fahrgast-1@users.verspaetomat.de");
+        let raw = "From: a@b.de\r\nTo: fahrgast-2@users.verspaetomat.de\r\nSubject: Hallo\r\nMessage-ID: <x@b.de>\r\n\r\nText\r\n";
         let m = inbound_from_json(json!({ "RawEmail": raw, "To": "ignored" })).unwrap();
-        assert_eq!(m.to, "fahrgast-2@verspaetomat.de");
+        assert_eq!(m.to, "fahrgast-2@users.verspaetomat.de");
         assert_eq!(m.subject, "Hallo");
         assert!(inbound_from_json(json!({ "unrelated": 1 })).is_none());
     }

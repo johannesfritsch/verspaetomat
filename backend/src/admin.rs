@@ -713,13 +713,12 @@ pub async fn mail_test(State(s): State<AppState>, _a: Admin, Path(key): Path<Str
     let relay = match c.relay_address.clone() {
         Some(r) => r,
         None => {
-            let short = c.id.simple().to_string();
-            let r = format!("fahrgast-{}@verspaetomat.de", &short[..8]);
+            let r = handlers::relay_address_for(c.id);
             sqlx::query("update customers set relay_address = $2 where id = $1").bind(c.id).bind(&r).execute(&s.pool).await.map_err(internal)?;
             r
         }
     };
-    let message_id = format!("<{}@verspaetomat.de>", Uuid::new_v4());
+    let message_id = handlers::new_message_id();
     let subject = "Verspätomat: Testmail";
     let body = format!(
         "Hallo,\n\ndas ist eine Testmail des Verspätomat-Relays, gesendet von {relay}.\n\nWenn du auf diese Mail antwortest, landet die Antwort bei genau dieser Adresse und wird als eingehende Post verarbeitet. Das prüft den Rückweg.\n\nVerspätomat\n"

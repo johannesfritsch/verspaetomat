@@ -236,7 +236,7 @@ class Mock {
   static const userName = 'Johannes';
   static const userAddress = 'Venloer Straße 123\n50823 Köln';
   static const userEmail = 'johannes@example.de';
-  static const relayAddress = 'fahrgast-4711@verspaetomat.de';
+  static const relayAddress = 'fahrgast-4711@users.verspaetomat.de';
   static const ticketNumber = 'D-2026-0904-771-2201';
 
   static final today = DateTime(2026, 9, 9, 10, 46);

@@ -43,7 +43,7 @@ The app already holds every field. The timestamped check-in, with an optional on
 
 ## Sending: the relay model
 
-Each customer gets a personal sender address on our domain, e.g. `fahrgast-4711@verspaetomat.de`, created at the first claim. When the customer presses send:
+Each customer gets a personal sender address on our domain, e.g. `fahrgast-4711@users.verspaetomat.de`, created at the first claim. When the customer presses send:
 
 - the mail goes from that address to the claims desk, with the customer's name as display name, the PDF and the ticket image attached;
 - the customer's private inbox receives an identical copy (BCC), so they hold the full record;

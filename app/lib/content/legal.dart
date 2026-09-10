@@ -85,7 +85,7 @@ const datenschutz = LegalDoc(
       'Rechtsgrundlage: deine Einwilligung über die Standortfreigabe des Betriebssystems (Art. 6 Abs. 1 lit. a DSGVO), jederzeit in den Systemeinstellungen widerrufbar.',
     ]),
     LegalSection('Deine Verspätomat-Adresse', [
-      'Für Anträge bekommst du eine persönliche E-Mail-Adresse auf unserer Domain, zum Beispiel fahrgast-a1b2c3d4@verspaetomat.de. Von ihr gehen deine Anträge an das Eisenbahnunternehmen, in Kopie an dein privates Postfach. Antworten des Unternehmens kommen dort an, werden sofort und unverändert an dein privates Postfach weitergeleitet und in der App unter „Antwort“ angezeigt.',
+      'Für Anträge bekommst du eine persönliche E-Mail-Adresse auf unserer Domain, zum Beispiel fahrgast-a1b2c3d4@users.verspaetomat.de. Von ihr gehen deine Anträge an das Eisenbahnunternehmen, in Kopie an dein privates Postfach. Antworten des Unternehmens kommen dort an, werden sofort und unverändert an dein privates Postfach weitergeleitet und in der App unter „Antwort“ angezeigt.',
       'Wir behandeln dieses Postfach als deins. Das Fernmeldegeheimnis (§ 3 TDDDG) gilt. Eine Software liest jede eingehende Mail nur, um drei Dinge zu erkennen: ob der Antrag angenommen, abgelehnt oder mit einer Rückfrage versehen wurde, den genannten Betrag und ein Aktenzeichen. Mehr wird nicht ausgewertet, nichts wird zu anderen Zwecken verwendet, niemand liest mit. Antworten auf Rückfragen schreibst du selbst in der App; wir schicken nichts, was du nicht abgeschickt hast.',
       'Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO; für die Adresse und die Auswertung deine Einwilligung beim ersten Antrag (Art. 6 Abs. 1 lit. a DSGVO).',
     ]),

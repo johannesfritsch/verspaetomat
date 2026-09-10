@@ -18,15 +18,16 @@ is marked **[you]**. The rest is copy and paste.
 
 ## 1. DNS
 
-Two jobs: the API host, and mail for the relay addresses `fahrgast-XXXX@verspaetomat.de`.
+Two jobs: the API host, and mail for the relay addresses `fahrgast-XXXX@users.verspaetomat.de`. The relay lives on the subdomain `users.` so the apex `verspaetomat.de` keeps its own mailboxes; `RELAY_DOMAIN` in `.env` changes it.
 
 | Record | Name | Value | Why |
 |---|---|---|---|
 | A | `api.verspaetomat.de` | the VPS IPv4 | Caddy gets its certificate for this name |
 | AAAA | `api.verspaetomat.de` | the VPS IPv6 (if any) | same |
-| MX | `verspaetomat.de` | `10 inbound.postmarkapp.com` | Railway replies to `fahrgast-*@` land at Postmark, which posts them to us |
-| TXT | `verspaetomat.de` | `v=spf1 include:spf.mtasv.net -all` | SPF: Postmark may send as `@verspaetomat.de` |
-| TXT | `<selector>._domainkey.verspaetomat.de` (Postmark shows the exact host, e.g. `20260910pm._domainkey`) | the long `k=rsa; p=…` value from Sender Signatures → DKIM | DKIM: signatures on outbound mail |
+| MX | `users.verspaetomat.de` | `10 inbound.postmarkapp.com` | Railway replies to `fahrgast-*@users.` land at Postmark, which posts them to us. No MX at the apex for this |
+| TXT | `users.verspaetomat.de` | `v=spf1 include:spf.mtasv.net -all` | SPF for the From domain of the relay |
+| TXT | `verspaetomat.de` | `v=spf1 include:spf.mtasv.net -all` | SPF at the apex too (Postmark checks it when verifying the domain) |
+| TXT | `<selector>._domainkey.verspaetomat.de` (Postmark shows the exact host, e.g. `20260910pm._domainkey`) | the long `k=rsa; p=…` value from Sender Signatures → DKIM | DKIM on the apex covers `users.` too: a verified domain in Postmark may send from its subdomains |
 | CNAME | `pm-bounces.verspaetomat.de` | `pm.mtasv.net` | Return-Path alignment (DMARC passes on the envelope sender) |
 | TXT | `_dmarc.verspaetomat.de` | `v=DMARC1; p=none; rua=mailto:dmarc@verspaetomat.de` | DMARC in monitor mode first; tighten to `p=quarantine; adkim=s; aspf=s` after a few clean weeks of reports |
 
@@ -41,7 +42,7 @@ CNAMEs), inbound via SES receipt rule → SNS → HTTPS to the same webhook, and
 ## 2. Mail provider (Postmark as the worked example)
 
 1. **[you]** Servers → create a server "Verspätomat", Transactional stream.
-2. **[you]** Sender Signatures → add domain `verspaetomat.de`, set the DKIM and Return-Path
+2. **[you]** Sender Signatures → add domain `verspaetomat.de` (the apex; subdomains are covered), set the DKIM and Return-Path
    records from step 1, wait for both to verify.
 3. **[you]** Server → API Tokens → copy one. Outbound over SMTP uses that token as both user
    and password. Postmark speaks STARTTLS on 587 (no implicit TLS on 465):
@@ -59,7 +60,7 @@ CNAMEs), inbound via SES receipt rule → SNS → HTTPS to the same webhook, and
    attachment exactly as sent. Providers that POST the bare RFC 822 message use
    `/internal/inbound-mail/raw?secret=…` (same secret, same processing).
 5. **[you]** Inbound domain forwarding: under the inbound stream, set the inbound domain to
-   `verspaetomat.de` so `fahrgast-anything@verspaetomat.de` is accepted (the MX record
+   `users.verspaetomat.de` so `fahrgast-anything@users.verspaetomat.de` is accepted (the MX record
    from step 1 makes Postmark the receiver). Every relay address is routed by the
    backend: it looks the customer up by the `To` address.
 
