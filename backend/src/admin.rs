@@ -73,7 +73,7 @@ pub async fn customers(State(s): State<AppState>, _a: Admin) -> ApiResult {
         let ride = current_ride(&s, c.id).await?;
         let sim_location: Option<String> = sqlx::query_scalar("select label from sim_customer_location where customer_id = $1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
         let push_platform: Option<String> = sqlx::query_scalar("select push_platform from devices where id = $1 and push_token is not null").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?.flatten();
-        let (open, incidents): (i64, i64) = sqlx::query_as("select count(*) filter (where status in ('gesammelt','bereit'))::bigint, count(*)::bigint from incidents where customer_id = $1")
+        let (open, incidents): (i64, i64) = sqlx::query_as("select count(*) filter (where status in ('gesammelt','bereit') and discarded_at is null)::bigint, count(*)::bigint from incidents where customer_id = $1")
             .bind(c.id)
             .fetch_one(&s.pool)
             .await

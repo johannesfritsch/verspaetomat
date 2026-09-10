@@ -413,6 +413,16 @@ fn print_journey(v: &Value) {
     if status == "arrived" {
         println!("angekommen {}  ·  +{} min  ·  {} Punkte{}", hhmm(&j["actual_arrival"]), s(j, "final_delay_min"), s(j, "points"), if j["incomplete"].as_bool().unwrap_or(false) { "  ·  unvollständig" } else { "" });
     }
+    // Why it ended, and — while in transfer — whether this is a real change of train (docs/21).
+    match j["end_reason"].as_str() {
+        Some("aufgegeben") => println!("beendet: aufgegeben  ·  keine Punkte, kein Anspruch"),
+        Some("nicht_gefahren") => println!("beendet: gar nicht mitgefahren"),
+        Some("beendet") => println!("beendet: vom Fahrgast"),
+        _ => {}
+    }
+    if j["transfer_reason"].as_str() == Some("weiterfahrt") {
+        println!("wartet auf Weiterfahrt ab {}  (bis {})", s(j, "transfer_station_name"), hhmm(&j["transfer_deadline"]));
+    }
     if let Some(legs) = j["legs"].as_array() {
         for l in legs {
             let mark = match s(l, "status").as_str() { "riding" => "▶", "arrived" => "✓", "cancelled" => "✗", "skipped" => "·", _ => "○" };

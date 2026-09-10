@@ -214,8 +214,16 @@ class IncidentRow extends StatelessWidget {
   }
 }
 
-/// The evidence sheet behind an incident.
-Future<void> showEvidenceSheet(BuildContext context, ApiIncident i) {
+/// Why a case was taken out of a bundle (docs/21 §4).
+const discardReasons = <String, String>{
+  'nicht_gefahren': 'Ich bin da gar nicht mitgefahren',
+  'doppelt': 'Doppelt erfasst',
+  'sonst': 'Anderer Grund',
+};
+
+/// The evidence sheet behind an incident. [onDiscard] adds "Nicht einreichen" (and, for a
+/// case already taken out, "Doch einreichen"); it is offered only while the bundle is open.
+Future<void> showEvidenceSheet(BuildContext context, ApiIncident i, {Future<void> Function(String reason)? onDiscard, Future<void> Function()? onRestore}) {
   final ev = i.evidence;
   return showVSheet(
     context,
@@ -275,6 +283,28 @@ Future<void> showEvidenceSheet(BuildContext context, ApiIncident i) {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nachweis als PDF exportiert.')));
                   },
                 ),
+                if (onRestore != null) ...[
+                  const VGap.xs(),
+                  VGhostButton(
+                    label: 'Doch einreichen',
+                    icon: Icons.undo,
+                    onTap: () async {
+                      Navigator.of(ctx).pop();
+                      await onRestore();
+                    },
+                  ),
+                ] else if (onDiscard != null) ...[
+                  const VGap.xs(),
+                  VGhostButton(
+                    label: 'Nicht einreichen',
+                    icon: Icons.remove_circle_outline,
+                    color: VColors.ink2,
+                    onTap: () async {
+                      Navigator.of(ctx).pop();
+                      await showDiscardReasonSheet(context, onDiscard);
+                    },
+                  ),
+                ],
               ],
             ),
           ),
@@ -589,4 +619,44 @@ String monthLabel(String ym) {
   final m = int.tryParse(parts[1]);
   if (m == null || m < 1 || m > 12) return ym;
   return '${months[m - 1]} ${parts[0]}';
+}
+
+
+/// "Nicht einreichen": ask which of the three reasons it is (docs/21 §4).
+Future<void> showDiscardReasonSheet(BuildContext context, Future<void> Function(String reason) onPick) {
+  return showVSheet(
+    context,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.l),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const VSheetHeader(title: 'Nicht einreichen', subtitle: 'Der Fall bleibt in deiner Historie, geht aber nicht an die Bahn.'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const VGap.s(),
+                for (final e in discardReasons.entries) ...[
+                  VListRow(
+                    title: e.value,
+                    chevron: true,
+                    onTap: () async {
+                      Navigator.of(ctx).pop();
+                      await onPick(e.key);
+                    },
+                  ),
+                  const VRule.soft(),
+                ],
+                const VGap.m(),
+                VGhostButton(label: 'Zurück', color: VColors.ink2, onTap: () => Navigator.of(ctx).pop()),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

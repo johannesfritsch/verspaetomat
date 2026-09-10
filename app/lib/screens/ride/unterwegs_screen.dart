@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../mock/mock_data.dart' show TicketType;
 import '../../repo/app_repository.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
@@ -74,7 +75,8 @@ class RideSheetBody extends StatelessWidget {
               busy: m.busy,
               onConfirm: (leg) => _confirm(context, leg),
               onArrived: () => _finish(context, arrived: true),
-              onAbort: () => _finish(context, arrived: false),
+              onAbort: () => showAbortSheet(context, m),
+              onPickTrain: () => _pickOwnTrain(context, m.journey!.journey),
             )
           else
             _RidingView(
@@ -83,7 +85,7 @@ class RideSheetBody extends StatelessWidget {
               stale: m.stale,
               stamp: fmtLocal(m.stamp),
               onWrongTrain: () => _wrongTrain(context, live.ride),
-              onAbort: journey == null ? null : () => _finish(context, arrived: false),
+              onAbort: journey == null ? null : () => showAbortSheet(context, m),
             ),
           if (demoControls != null && !m.transfer) ...[const VGap.l(), demoControls],
         ],
@@ -111,6 +113,22 @@ class RideSheetBody extends StatelessWidget {
     } catch (e) {
       if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));
     }
+  }
+
+  /// Weiterfahrt (docs/21 §2): pick the train yourself, from where you stand, same destination.
+  void _pickOwnTrain(BuildContext context, ApiJourney j) {
+    final fromName = j.transferStationName ?? j.originStationName;
+    final fromId = j.legs.isEmpty ? j.originStationId : (j.currentLegInfo?.toStationId ?? j.originStationId);
+    monitor.closeSheet();
+    final earliest = j.earliestOnwardArrival;
+    final counted = j.countedCeilingMinutes;
+    context.push(
+      '${Routes.welcherZug}?from=${Uri.encodeComponent(fromId)}&fromName=${Uri.encodeComponent(fromName)}'
+      '&to=${Uri.encodeComponent(j.destinationStationId)}&toName=${Uri.encodeComponent(j.destinationStationName)}'
+      '&continue=${Uri.encodeComponent(j.id)}'
+      '${earliest == null ? '' : '&earliest=${Uri.encodeComponent(earliest.toIso8601String())}'}'
+      '${counted == null ? '' : '&counted=$counted'}',
+    );
   }
 
   Future<void> _simulateArrival(BuildContext context) async {
@@ -194,7 +212,12 @@ class RideSheetBody extends StatelessWidget {
   if (m.transfer) {
     final j = m.journey!.journey;
     final missed = j.missedConnection || (m.journey!.nextLeg ?? j.nextLeg)?.replanned == true;
-    return (missed ? 'Anschluss verpasst' : 'Umsteigen', j.transferStationName ?? (m.journey!.nextLeg ?? j.nextLeg)?.fromStationName ?? '');
+    final caption = j.waitingForOwnTrain
+        ? 'Weiterfahrt'
+        : missed
+            ? 'Anschluss verpasst'
+            : 'Umsteigen';
+    return (caption, j.transferStationName ?? (m.journey!.nextLeg ?? j.nextLeg)?.fromStationName ?? '');
   }
   final r = m.rideLive?.ride;
   final stops = m.rideLive?.stops ?? const [];
@@ -239,8 +262,12 @@ class _RidingView extends StatelessWidget {
         const VGap.l(),
         Opacity(
           opacity: stale ? 0.45 : 1,
-          child: VDelay(delay, size: VDelaySize.display, cancelled: r.cancelled),
+          child: VDelay(j?.cappedDelay(delay) ?? delay, size: VDelaySize.display, cancelled: r.cancelled),
         ),
+        if (j?.countedCeilingMinutes != null && delay > j!.countedCeilingMinutes!) ...[
+          const SizedBox(height: 6),
+          Text('Mehr zählt nicht: die Zeit nach dem frühesten Zug ab ${j.transferStationName ?? 'dem Halt'} ist deine.', style: VText.caption),
+        ],
         const VGap.m(),
         Text(
           delay > 0
@@ -334,33 +361,63 @@ class _RidingView extends StatelessWidget {
 /// Between two legs: confirm the connection with one tap, or the alternative after a miss.
 /// The station is the sheet's header; the body starts with the context line.
 class _TransferView extends StatelessWidget {
-  const _TransferView({required this.live, required this.busy, required this.onConfirm, required this.onArrived, required this.onAbort});
+  const _TransferView({required this.live, required this.busy, required this.onConfirm, required this.onArrived, required this.onAbort, required this.onPickTrain});
   final ApiJourneyLive live;
   final bool busy;
   final ValueChanged<ApiLeg> onConfirm;
   final VoidCallback onArrived;
   final VoidCallback onAbort;
+  final VoidCallback onPickTrain;
 
   @override
   Widget build(BuildContext context) {
     final j = live.journey;
     final next = live.nextLeg ?? j.nextLeg;
-    final missed = j.missedConnection || next?.replanned == true;
+    final ownTrain = j.waitingForOwnTrain;
+    // A Weiterfahrt is a choice, not a miss: it never gets the red "next possibility" styling.
+    final missed = !ownTrain && (j.missedConnection || next?.replanned == true);
     final done = live.ride;
     final where = j.transferStationName ?? next?.fromStationName ?? done?.exitStationName ?? '';
     final legDelay = done?.finalDelayMinutes ?? 0;
+    // What the railway caused, and therefore the most this journey can still be worth
+    // (docs/21 §2). Zero is not a warning, it is noise: then we say nothing about the cap.
+    final raw = j.countedCeilingMinutes;
+    final ceiling = (raw != null && raw >= 1) ? raw : null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          done == null
-              ? 'Weiter nach ${j.destinationStationName}.'
-              : '${done.line} war ${legDelay > 0 ? '+$legDelay' : 'pünktlich'}${missed ? ' · der geplante Anschluss ist weg' : ''}. Weiter nach ${j.destinationStationName}.',
+          ownTrain
+              ? 'Du fährst weiter nach ${j.destinationStationName}. Es zählt die Verspätung bis zum frühesten Zug ab hier — eine längere Pause ist deine Zeit.'
+              : done == null
+                  ? 'Weiter nach ${j.destinationStationName}.'
+                  : '${done.line} war ${legDelay > 0 ? '+$legDelay' : 'pünktlich'}${missed ? ' · der geplante Anschluss ist weg' : ''}. Weiter nach ${j.destinationStationName}.',
           style: VText.body.copyWith(color: VColors.ink2),
         ),
         const VGap.l(),
-        if (next == null) ...[
+        if (ownTrain && next == null) ...[
+          Container(
+            padding: const EdgeInsets.all(VSpace.m),
+            decoration: BoxDecoration(
+              border: Border.all(color: VColors.ink, width: 1.5),
+              borderRadius: BorderRadius.circular(4),
+              color: VColors.paperElevated,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('WEITERFAHRT', style: VText.eyebrow),
+                const SizedBox(height: 8),
+                Text('Wähl den Zug, mit dem du weiterfährst.', style: VText.title),
+                const SizedBox(height: 4),
+                Text('Ab ${where.isEmpty ? 'hier' : where} nach ${j.destinationStationName}.', style: VText.caption),
+                const SizedBox(height: 14),
+                VPrimaryButton(label: 'Zug wählen', icon: Icons.train_outlined, onTap: busy ? null : onPickTrain),
+              ],
+            ),
+          ),
+        ] else if (next == null) ...[
           Text('Keine Verbindung gefunden.', style: VText.bodyStrong),
           const SizedBox(height: 4),
           Text('Sag uns, wenn du angekommen bist. Die Verspätung bis hierher zählt.', style: VText.caption),
@@ -405,16 +462,33 @@ class _TransferView extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (ownTrain && ceiling != null) ...[
+                  const SizedBox(height: 10),
+                  const VRule(),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Frühester Zug ab hier: ${next.line}, an ${fmtLocal(next.liveArrival ?? next.plannedArrival)} · ${fmtMinutes(ceiling)} ${ceiling == 1 ? 'zählt' : 'zählen'}.',
+                    style: VText.captionInk,
+                  ),
+                ],
                 const SizedBox(height: 14),
                 VPrimaryButton(label: busy ? 'Einen Moment …' : 'Ich bin drin', icon: Icons.check, onTap: busy ? null : () => onConfirm(next)),
+                if (ownTrain) ...[
+                  const SizedBox(height: 4),
+                  VGhostButton(label: 'Anderen Zug wählen', color: VColors.ink2, onTap: busy ? null : onPickTrain),
+                ],
               ],
             ),
           ),
         const VGap.m(),
         Text(
-          missed
-              ? 'Die Verspätung zählt am Ziel, nicht pro Zug. Ein verpasster Anschluss ist ein gültiger Antragsgrund.'
-              : 'Ein bestätigter Zug ist ein Beleg. Ein vermuteter nicht. Deshalb die eine Frage.',
+          ownTrain
+              ? (ceiling == null
+                  ? 'Es zählt die Verspätung bis zum frühesten Zug, mit dem du ab hier weiterkommst.'
+                  : 'Nimmst du einen späteren Zug, zählt deine Pause nicht mit — es bleiben ${fmtMinutes(ceiling)}.')
+              : missed
+                  ? 'Die Verspätung zählt am Ziel, nicht pro Zug. Ein verpasster Anschluss ist ein gültiger Antragsgrund.'
+                  : 'Ein bestätigter Zug ist ein Beleg. Ein vermuteter nicht. Deshalb die eine Frage.',
           style: VText.caption,
         ),
         const VGap.xl(),
@@ -432,4 +506,132 @@ class _TransferView extends StatelessWidget {
       ],
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Abbrechen (docs/21 §1)
+// ---------------------------------------------------------------------------
+
+/// "Abbrechen" never ends a journey without asking why. Three answers, each with its
+/// consequence written next to it, because only one of them keeps the claim alive.
+Future<void> showAbortSheet(BuildContext context, RideMonitor monitor) {
+  return showVSheet(
+    context,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.l),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const VSheetHeader(title: 'Fahrt beenden?', subtitle: 'Was ist passiert?'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const VGap.s(),
+                VChoiceCard(
+                  key: const Key('abort-weiterfahrt'),
+                  title: 'Ich fahre weiter',
+                  subtitle: 'Es zählt die Verspätung bis zum frühesten Zug ab hier. Eine längere Pause zählt nicht mit.',
+                  selected: true,
+                  trailing: const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    await _abortAction(context, monitor, () => monitor.replan());
+                  },
+                ),
+                const VGap.s(),
+                VChoiceCard(
+                  key: const Key('abort-aufgegeben'),
+                  title: 'Ich gebe auf',
+                  subtitle: 'Zu viel Verspätung, ich fahre nicht mehr. Keine Geduldspunkte, kein Anspruch — die Entschädigung hängt an der Ankunft.',
+                  selected: false,
+                  trailing: const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    final ticket = RepoScope.read(context).me?.settings.ticket;
+                    await _abortAction(context, monitor, () => monitor.finish(arrived: false, reason: 'aufgegeben'));
+                    if (context.mounted) await showGaveUpSheet(context, ticket);
+                  },
+                ),
+                const VGap.s(),
+                VChoiceCard(
+                  key: const Key('abort-nicht-gefahren'),
+                  title: 'Ich bin gar nicht mitgefahren',
+                  subtitle: 'War ein Versehen. Die Fahrt zählt nirgends mit.',
+                  selected: false,
+                  trailing: const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    await _abortAction(context, monitor, () => monitor.finish(arrived: false, reason: 'nicht_gefahren'));
+                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Fahrt verworfen.')));
+                  },
+                ),
+                const VGap.m(),
+                VGhostButton(label: 'Zurück', color: VColors.ink2, onTap: () => Navigator.of(ctx).pop()),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+Future<void> _abortAction(BuildContext context, RideMonitor monitor, Future<void> Function() run) async {
+  try {
+    await run();
+  } catch (e) {
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));
+  }
+}
+
+/// After "Ich gebe auf": the right the passenger has instead, which almost nobody knows.
+/// Art. 18 VO (EU) 2021/782 — the fare back, not the compensation (docs/02, docs/21 §0).
+Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket) {
+  final single = ticket == TicketType.einzelfahrkarte;
+  return showVSheet(
+    context,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.l),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const VSheetHeader(title: 'Aufgegeben', subtitle: 'Keine Geduldspunkte für diese Fahrt.'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const VGap.s(),
+                Text('Dafür hast du ein anderes Recht.', style: VText.bodyStrong),
+                const SizedBox(height: 6),
+                Text(
+                  'Ab 60 Minuten erwarteter Verspätung darfst du die Fahrt abbrechen und den Fahrpreis zurückverlangen (Art. 18 der EU-Fahrgastrechte).',
+                  style: VText.bodyS,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  single
+                      ? 'Mit Einzelfahrkarte holst du dir das Geld am Schalter oder über das Fahrgastrechte-Formular der Bahn. Das ist meist mehr als die Entschädigung gewesen wäre.'
+                      : 'Mit dem Deutschlandticket gibt es für die einzelne Fahrt nichts zurück — das Ticket läuft ja weiter.',
+                  style: VText.bodyS.copyWith(color: VColors.ink2),
+                ),
+                const VGap.m(),
+                const VRule.red(),
+                const VGap.m(),
+                Text('Fährst du doch noch?', style: VText.bodyStrong),
+                const SizedBox(height: 6),
+                Text('Dann check wieder ein. Es zählt dann die Verspätung bis zum frühesten Zug ab hier, nicht die Pause.', style: VText.bodyS),
+                const VGap.m(),
+                VOutlineButton(label: 'Verstanden', onTap: () => Navigator.of(ctx).pop()),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

@@ -161,10 +161,19 @@ pub async fn journey_json(pool: &PgPool, j: &JourneyRow) -> anyhow::Result<Value
         })
         .collect();
     let next = j.next_leg.clone();
+    // After a re-plan (docs/21 §2) the last leg is `abandoned`, not `arrived`: the passenger left
+    // the train early, and its exit station was rewritten to where they actually got off.
+    let last_leg = rides.iter().filter(|r| matches!(r.status, RideStatus::Arrived | RideStatus::Abandoned)).max_by_key(|r| r.leg_no);
     let transfer_station_name = if j.status == JourneyStatus::Transfer {
-        rides.iter().filter(|r| r.status == RideStatus::Arrived).max_by_key(|r| r.leg_no).map(|r| if r.cancelled { r.from_station_name.clone() } else { r.exit_station_name.clone() })
+        last_leg.map(|r| if r.cancelled { r.from_station_name.clone() } else { r.exit_station_name.clone() })
     } else {
         None
+    };
+    // Why this transfer exists: a planned change of train, or the passenger giving up on this one.
+    let transfer_reason = match (j.status, last_leg.map(|r| r.status)) {
+        (JourneyStatus::Transfer, Some(RideStatus::Abandoned)) => "weiterfahrt",
+        (JourneyStatus::Transfer, _) => "umstieg",
+        _ => "",
     };
     Ok(json!({
         "id": j.id, "status": j.status,
@@ -175,6 +184,9 @@ pub async fn journey_json(pool: &PgPool, j: &JourneyRow) -> anyhow::Result<Value
         "missed_connection": j.missed_connection, "incomplete": j.incomplete, "cancelled": j.cancelled, "points": j.points, "ticket": j.ticket,
         "current_leg": j.current_leg, "legs": legs, "next_leg": next,
         "transfer_station_name": transfer_station_name, "transfer_deadline": j.transfer_deadline,
+        "transfer_reason": if transfer_reason.is_empty() { Value::Null } else { json!(transfer_reason) },
+        "end_reason": j.end_reason,
+        "earliest_onward_arrival": j.earliest_onward_arrival,
         "created_at": j.created_at, "finalised_at": j.finalised_at,
     }))
 }
@@ -199,6 +211,7 @@ fn legacy_ride_as_journey(r: &RideRow) -> Value {
         "actual_arrival": r.actual_arrival, "final_delay_min": r.final_delay_min,
         "missed_connection": false, "incomplete": false, "cancelled": r.cancelled, "points": r.points, "ticket": r.ticket,
         "current_leg": 1, "legs": [leg], "next_leg": Value::Null, "transfer_station_name": Value::Null, "transfer_deadline": Value::Null,
+        "transfer_reason": Value::Null, "end_reason": Value::Null, "earliest_onward_arrival": Value::Null,
         "created_at": r.checked_in_at, "finalised_at": r.finalised_at, "legacy": true,
     })
 }
@@ -611,6 +624,9 @@ pub async fn confirm(s: &AppState, customer: &CustomerRow, j: &JourneyRow, trip_
     let idx = j.current_leg as usize; // 0-based index of the next leg in the plan
     let last_ride: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 order by leg_no desc limit 1").bind(j.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let (from_id, from_name) = match &last_ride {
+        // A re-plan (docs/21 §2) rewrote the abandoned leg's exit station to where the passenger
+        // got off, so it is the truth even when that train was cancelled under them.
+        Some(r) if r.status == RideStatus::Abandoned => (r.exit_station_id.clone(), r.exit_station_name.clone()),
         Some(r) if r.cancelled => (r.from_station_id.clone(), r.from_station_name.clone()),
         Some(r) => (r.exit_station_id.clone(), r.exit_station_name.clone()),
         None => (j.origin_station_id.clone(), j.origin_station_name.clone()),
@@ -674,10 +690,53 @@ pub async fn confirm_leg(State(s): State<AppState>, c: Customer, Path(id): Path<
 pub struct FinishBody {
     #[serde(default = "default_true")]
     pub arrived: bool,
+    /// Why (docs/21 §1): `aufgegeben` (too much delay) or `nicht_gefahren` (never boarded).
+    /// Absent on an abort means `aufgegeben`; ignored when `arrived`.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// How long a passenger who gave up on a train may take to pick the next one before the
+/// journey is finalised `incomplete`. Longer than the 2 h a real transfer gets (docs/21 §2).
+pub const REPLAN_WINDOW_HOURS: i64 = 6;
+
+/// The arrival the claim is measured against (docs/21 §2). A journey interrupted mid-way carries
+/// the arrival the earliest onward connection would have reached: waiting longer than that is the
+/// passenger's own choice and must not be claimed. Never later than the true arrival.
+pub fn counted_arrival(actual: DateTime<Utc>, earliest_onward: Option<DateTime<Utc>>) -> DateTime<Utc> {
+    match earliest_onward {
+        Some(e) => actual.min(e),
+        None => actual,
+    }
+}
+
+/// Records the destination arrival of the earliest onward connection at an interruption.
+/// Keeps the earliest value already stored: the first interruption is the railway's doing,
+/// a second one later in the journey must not push the cap outwards.
+async fn note_earliest_onward(pool: &PgPool, journey: Uuid, arrival: DateTime<Utc>) -> anyhow::Result<()> {
+    sqlx::query("update journeys set earliest_onward_arrival = least(coalesce(earliest_onward_arrival, $2), $2) where id = $1")
+        .bind(journey)
+        .bind(arrival)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// The reason a journey ended, as it is stored and returned. `arrived` decides the default;
+/// an unknown reason is refused so a typo never lands in the ledger.
+pub fn end_reason_for(arrived: bool, reason: Option<&str>) -> Result<&'static str, String> {
+    if arrived {
+        return Ok("beendet");
+    }
+    match reason {
+        None | Some("aufgegeben") => Ok("aufgegeben"),
+        Some("nicht_gefahren") => Ok("nicht_gefahren"),
+        Some(other) => Err(format!("reason must be aufgegeben or nicht_gefahren, got {other}")),
+    }
 }
 
 /// `POST /v1/journeys/{id}/finish`: "Ich bin da" (arrived) or abort.
@@ -686,6 +745,7 @@ pub async fn finish(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
     if !matches!(j.status, JourneyStatus::Riding | JourneyStatus::Transfer) {
         return Err(err(StatusCode::CONFLICT, "journey already finished"));
     }
+    let end_reason = end_reason_for(b.arrived, b.reason.as_deref()).map_err(|m| err(StatusCode::BAD_REQUEST, &m))?;
     let riding: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 and status = 'riding' order by leg_no desc limit 1").bind(j.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let now = crate::clock::now();
     let (updated, fin) = if b.arrived {
@@ -699,13 +759,111 @@ pub async fn finish(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
         if let Some(r) = &riding {
             sqlx::query("update rides set status = 'abandoned' where id = $1").bind(r.id).execute(&s.pool).await.map_err(internal)?;
         }
-        let u: JourneyRow = sqlx::query_as("update journeys set status = 'abandoned', next_leg = null, transfer_deadline = null, finalised_at = now() where id = $1 returning *").bind(j.id).fetch_one(&s.pool).await.map_err(internal)?;
-        rules::audit(&s.pool, "journey", j.id, Some("riding"), "abandoned", "aborted by the passenger").await.map_err(internal)?;
-        s.events.publish(c.0.id, "journey", json!({ "journey_id": j.id, "status": "abandoned", "transfer": false, "arrived": false, "finished": true, "missed_connection": u.missed_connection, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null }));
+        let u: JourneyRow = sqlx::query_as("update journeys set status = 'abandoned', end_reason = $2, next_leg = null, transfer_deadline = null, finalised_at = now() where id = $1 returning *")
+            .bind(j.id)
+            .bind(end_reason)
+            .fetch_one(&s.pool)
+            .await
+            .map_err(internal)?;
+        rules::audit(&s.pool, "journey", j.id, Some("riding"), "abandoned", end_reason).await.map_err(internal)?;
+        s.events.publish(c.0.id, "journey", json!({ "journey_id": j.id, "status": "abandoned", "transfer": false, "arrived": false, "finished": true, "missed_connection": u.missed_connection, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null, "end_reason": end_reason }));
         (u, None)
     };
     let _ = fin;
+    if b.arrived {
+        sqlx::query("update journeys set end_reason = $2 where id = $1").bind(j.id).bind(end_reason).execute(&s.pool).await.map_err(internal)?;
+    }
+    let updated: JourneyRow = sqlx::query_as("select * from journeys where id = $1").bind(updated.id).fetch_one(&s.pool).await.map_err(internal)?;
     Ok(Json(journey_json(&s.pool, &updated).await.map_err(internal)?))
+}
+
+/// The next stop the current leg reaches, from the live trip and how many stops are behind.
+/// None when the trip cannot be read or the train is already at its exit stop.
+async fn next_stop_of(s: AppState, r: &RideRow) -> Option<(String, String)> {
+    let t = s.train.trip(&r.trip_id).await.ok()?;
+    let (from_idx, _) = t.find_stop(Some(r.from_station_id.as_str()), &r.from_station_name)?;
+    let (exit_idx, _) = t.find_stop(Some(r.exit_station_id.as_str()), &r.exit_station_name)?;
+    let next = (from_idx + r.passed_stops.max(0) as usize + 1).min(exit_idx);
+    let stop = t.stops.get(next)?;
+    Some((stop.stop_id.clone().unwrap_or_else(|| r.exit_station_id.clone()), stop.name.clone()))
+}
+
+#[derive(Deserialize)]
+pub struct ReplanBody {
+    /// Where the passenger is now. Defaults to the current leg's exit stop.
+    #[serde(default)]
+    pub from_station_id: Option<String>,
+    #[serde(default)]
+    pub from_station_name: Option<String>,
+}
+
+/// `POST /v1/journeys/{id}/replan` — "Ich fahre später weiter" (docs/21 §2).
+///
+/// The passenger leaves this train but keeps the journey: the destination and the planned
+/// arrival stay, so the delay is still measured against the original plan (Art. 18(1)(b)/(c)
+/// keeps the compensation right alive, docs/02). The journey lands in `transfer`, which is
+/// the state `POST /v1/journeys/{id}/legs` already knows how to leave.
+pub async fn replan(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(b): Json<ReplanBody>) -> ApiResult {
+    let j = journey_of(&s.pool, c.0.id, id).await?;
+    if j.status != JourneyStatus::Riding {
+        return Err(err(StatusCode::CONFLICT, "journey is not riding"));
+    }
+    let riding: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 and status = 'riding' order by leg_no desc limit 1").bind(j.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(r) = riding else { return Err(err(StatusCode::CONFLICT, "no leg is riding")) };
+    // Where they got off. The caller should say; when it does not, work it out from the trip
+    // rather than fall back to the exit stop — on a direct journey that is the destination, which
+    // would claim the passenger is already there. A passenger can only leave at a stop the train
+    // reaches, so the next one not yet passed is the honest answer.
+    let (station_id, station_name) = match (b.from_station_id.clone(), b.from_station_name.clone()) {
+        (Some(id), Some(name)) => (id, name),
+        _ => next_stop_of(s.clone(), &r).await.unwrap_or_else(|| (r.exit_station_id.clone(), r.exit_station_name.clone())),
+    };
+    sqlx::query("update rides set status = 'abandoned', exit_station_id = $2, exit_station_name = $3 where id = $1")
+        .bind(r.id)
+        .bind(&station_id)
+        .bind(&station_name)
+        .execute(&s.pool)
+        .await
+        .map_err(internal)?;
+    let deadline = crate::clock::now() + Duration::hours(REPLAN_WINDOW_HOURS);
+    let updated: JourneyRow = sqlx::query_as("update journeys set status = 'transfer', next_leg = null, transfer_deadline = $2 where id = $1 returning *")
+        .bind(j.id)
+        .bind(deadline)
+        .fetch_one(&s.pool)
+        .await
+        .map_err(internal)?;
+    // The earliest way onward from here, so the app can propose it and so the pause the passenger
+    // may now take is not billed to the railway (docs/21 §2).
+    let mut updated = updated;
+    match s.train.plan(&station_id, &j.destination_station_id, crate::clock::now(), 3).await {
+        Ok(its) if !its.is_empty() => {
+            let it = &its[0];
+            let arrival = it.live_arrival.unwrap_or(it.planned_arrival);
+            note_earliest_onward(&s.pool, j.id, arrival).await.map_err(internal)?;
+            if let Some(first) = it.legs.first() {
+                let mut next_json = leg_json(first);
+                next_json["replanned"] = json!(true);
+                next_json["reason"] = json!("weiterfahrt");
+                updated = sqlx::query_as("update journeys set next_leg = $2 where id = $1 returning *")
+                    .bind(j.id)
+                    .bind(&next_json)
+                    .fetch_one(&s.pool)
+                    .await
+                    .map_err(internal)?;
+            } else {
+                updated = sqlx::query_as("select * from journeys where id = $1").bind(j.id).fetch_one(&s.pool).await.map_err(internal)?;
+            }
+        }
+        Ok(_) => tracing::warn!(journey = %j.id, "replan: no onward connection found; the delay stays uncapped"),
+        Err(e) => tracing::warn!(journey = %j.id, error = %e, "replan: onward lookup failed; the delay stays uncapped"),
+    }
+    rules::audit(&s.pool, "journey", j.id, Some("riding"), "transfer", "passenger continues later").await.map_err(internal)?;
+    s.events.publish(
+        c.0.id,
+        "journey",
+        json!({ "journey_id": j.id, "status": "transfer", "transfer": true, "arrived": false, "finished": false, "missed_connection": updated.missed_connection, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null, "transfer_reason": "weiterfahrt" }),
+    );
+    Ok(Json(current_payload(&s, &updated, false).await.map_err(internal)?))
 }
 
 // ---------------------------------------------------------------------------
@@ -761,6 +919,8 @@ pub async fn on_leg_finalised(s: &AppState, ride: &RideRow) -> anyhow::Result<Le
                     new_plan.truncate(leg_no);
                     new_plan.extend(it.legs.iter().cloned());
                     replanned = true;
+                    // The earliest the passenger can now reach the destination: the cap (docs/21 §2).
+                    note_earliest_onward(&s.pool, j.id, it.live_arrival.unwrap_or(it.planned_arrival)).await?;
                 }
                 Ok(_) => tracing::warn!(journey = %j.id, "transfer: no re-plan found, keeping the planned connection"),
                 Err(e) => tracing::warn!(journey = %j.id, error = %e, "transfer: re-plan failed, keeping the planned connection"),
@@ -801,10 +961,23 @@ pub async fn expire_transfers(s: &AppState) -> anyhow::Result<usize> {
     let mut n = 0;
     for j in due {
         let last: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 and status = 'arrived' order by leg_no desc limit 1").bind(j.id).fetch_optional(&s.pool).await?;
-        let (actual, planned, cancelled) = match &last {
-            Some(r) => (r.actual_arrival.unwrap_or(r.planned_arrival), r.planned_arrival, r.cancelled),
-            None => (now, j.planned_arrival, false),
+        let Some(r) = &last else {
+            // No leg ever arrived: the passenger gave up on their first train, said they would
+            // continue later (docs/21 §2) and never did. They reached no stop, so there is no
+            // delay to measure and no claim to make — compensation hangs on arriving (docs/02).
+            let u: JourneyRow = sqlx::query_as(
+                "update journeys set status = 'abandoned', end_reason = 'aufgegeben', next_leg = null, transfer_deadline = null, finalised_at = now() where id = $1 returning *",
+            )
+            .bind(j.id)
+            .fetch_one(&s.pool)
+            .await?;
+            sqlx::query("update rides set status = 'abandoned' where journey_id = $1 and status = 'riding'").bind(j.id).execute(&s.pool).await?;
+            rules::audit(&s.pool, "journey", j.id, Some("transfer"), "abandoned", "no leg was ever confirmed").await?;
+            s.events.publish(j.customer_id, "journey", json!({ "journey_id": j.id, "status": "abandoned", "transfer": false, "arrived": false, "finished": true, "missed_connection": u.missed_connection, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null, "end_reason": "aufgegeben" }));
+            n += 1;
+            continue;
         };
+        let (actual, planned, cancelled) = (r.actual_arrival.unwrap_or(r.planned_arrival), r.planned_arrival, r.cancelled);
         finalise_journey(s.clone(), &j, actual, planned, cancelled, true, "transfer timed out").await?;
         n += 1;
     }
@@ -823,7 +996,10 @@ pub async fn finalise_journey(
     incomplete: bool,
     reason: &str,
 ) -> anyhow::Result<(JourneyRow, Option<(Option<IncidentRow>, Option<BadgeRow>)>)> {
-    let delay = journey_delay_min(actual, planned, cancelled);
+    // A journey interrupted mid-way is claimed only up to the earliest onward connection: the
+    // passenger's own waiting is theirs (docs/21 §2). `actual_arrival` keeps the true time.
+    let counted = counted_arrival(actual, j.earliest_onward_arrival);
+    let delay = journey_delay_min(counted, planned, cancelled);
     let points = rules::points_for(delay, cancelled, false);
     let updated: JourneyRow = sqlx::query_as(
         "update journeys set status = 'arrived', actual_arrival = $2, final_delay_min = $3, cancelled = cancelled or $4, incomplete = $5, points = $6,
@@ -910,6 +1086,11 @@ async fn create_journey_incident(
             })
         })
         .collect();
+    let interrupted_at: Option<String> = if j.earliest_onward_arrival.is_some() {
+        rides.iter().filter(|r| r.status == RideStatus::Abandoned || r.cancelled).max_by_key(|r| r.leg_no).map(|r| r.exit_station_name.clone())
+    } else {
+        None
+    };
     let evidence = json!({
         "planned_arrival": planned, "actual_arrival": if cancelled && last_ride.map(|r| r.cancelled).unwrap_or(false) { Value::Null } else { json!(actual) },
         "source": "Live-Daten Transitous", "fetched_at": crate::clock::now(),
@@ -917,6 +1098,11 @@ async fn create_journey_incident(
             "id": j.id, "origin": j.origin_station_name, "destination": j.destination_station_name,
             "planned_departure": j.planned_departure, "planned_arrival": j.planned_arrival, "actual_arrival": actual,
             "missed_connection": j.missed_connection, "incomplete": incomplete, "legs": legs_ev,
+            // Set only when the journey was interrupted and the passenger's own waiting was
+            // capped away (docs/21 §2). The form prints the true arrival and this line beside it.
+            "earliest_onward_arrival": j.earliest_onward_arrival,
+            "counted_arrival": counted_arrival(actual, j.earliest_onward_arrival),
+            "interrupted_at": interrupted_at,
         },
     });
     let id = Uuid::new_v4();
@@ -955,6 +1141,47 @@ mod tests {
 
     fn t(s: &str) -> DateTime<Utc> {
         s.parse().unwrap()
+    }
+
+    /// docs/21 §3: an abort says why, an arrival is always `beendet`, a typo is refused.
+    #[test]
+    fn end_reasons() {
+        assert_eq!(end_reason_for(true, None), Ok("beendet"));
+        assert_eq!(end_reason_for(true, Some("aufgegeben")), Ok("beendet"), "arriving wins over any reason sent along");
+        assert_eq!(end_reason_for(false, None), Ok("aufgegeben"), "an abort without a reason is giving up");
+        assert_eq!(end_reason_for(false, Some("aufgegeben")), Ok("aufgegeben"));
+        assert_eq!(end_reason_for(false, Some("nicht_gefahren")), Ok("nicht_gefahren"));
+        assert!(end_reason_for(false, Some("abgebrochen")).is_err(), "an unknown reason never reaches the ledger");
+    }
+
+    /// docs/21 §2: a self-chosen pause is the passenger's own time, never the railway's.
+    #[test]
+    fn a_pause_does_not_count() {
+        let planned = t("2026-09-10T18:05:00Z");
+        let earliest = t("2026-09-10T19:15:00Z"); // the first train onward gets there 70 min late
+
+        // Dawdled: arrived three hours late, but only the railway's 70 minutes are claimed.
+        let actual = t("2026-09-10T21:05:00Z");
+        let counted = counted_arrival(actual, Some(earliest));
+        assert_eq!(counted, earliest);
+        assert_eq!(journey_delay_min(counted, planned, false), 70);
+        assert_eq!(journey_delay_min(actual, planned, false), 180, "the true arrival is still three hours late");
+
+        // Caught something faster than the earliest connection we saw: the truth wins.
+        let quick = t("2026-09-10T18:50:00Z");
+        assert_eq!(counted_arrival(quick, Some(earliest)), quick);
+        assert_eq!(journey_delay_min(counted_arrival(quick, Some(earliest)), planned, false), 45);
+
+        // A journey that ran through carries no cap and is measured as before.
+        assert_eq!(counted_arrival(actual, None), actual);
+        assert_eq!(journey_delay_min(counted_arrival(actual, None), planned, false), 180);
+    }
+
+    /// A passenger who gives up on one train gets longer than a real transfer to pick the next.
+    #[test]
+    fn replan_window_is_longer_than_a_transfer() {
+        assert_eq!(REPLAN_WINDOW_HOURS, 6);
+        assert!(REPLAN_WINDOW_HOURS > 2, "the 2 h a missed connection gets would be too tight here");
     }
 
     #[test]

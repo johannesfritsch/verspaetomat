@@ -57,6 +57,33 @@ class _AntragScreenState extends State<AntragScreen> {
     super.dispose();
   }
 
+  /// A case taken out while the draft is open (docs/21 §4). The draft is rebuilt; if the
+  /// rest no longer reaches 4 €, the backend drops it and we go back to Anträge.
+  Future<void> _discardFromDraft(String id, String reason) async {
+    final session = RepoScope.read(context);
+    bool claimDeleted = false;
+    try {
+      claimDeleted = await session.repo.discardIncident(id, reason);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ging nicht: $e')));
+      return;
+    }
+    if (!mounted) return;
+    _draft = null;
+    if (!claimDeleted) {
+      try {
+        await _load();
+      } catch (_) {}
+      if (!mounted) return;
+    }
+    if (claimDeleted || _draft == null || _incidents.isEmpty) {
+      _error = null;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Der Antrag erreicht die 4 € nicht mehr. Wird weiter gesammelt.')));
+      context.pop();
+    }
+  }
+
   Future<void> _load() async {
     final session = RepoScope.read(context);
     setState(() {
@@ -186,6 +213,7 @@ class _AntragScreenState extends State<AntragScreen> {
       0 => _Pruefen(
           draft: _draft!,
           incidents: _incidents,
+          onDiscard: _discardFromDraft,
           me: me,
           desk: widget.desk,
           unknown: _unknownDesk,
@@ -334,6 +362,7 @@ class _Pruefen extends StatelessWidget {
   const _Pruefen({
     required this.draft,
     required this.incidents,
+    required this.onDiscard,
     required this.me,
     required this.desk,
     required this.unknown,
@@ -344,6 +373,7 @@ class _Pruefen extends StatelessWidget {
   });
   final ApiClaimDraft draft;
   final List<ApiIncident> incidents;
+  final Future<void> Function(String id, String reason) onDiscard;
   final ApiCustomer? me;
   final String desk;
   final bool unknown;
@@ -371,7 +401,10 @@ class _Pruefen extends StatelessWidget {
             padding: const EdgeInsets.only(top: VSpace.m),
             child: Text('Keine offenen Fälle für diese Stelle.', style: VText.caption),
           ),
-        for (final i in incidents) IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i)),
+        for (final i in incidents)
+          IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i, onDiscard: (reason) => onDiscard(i.id, reason))),
+        const VGap.xs(),
+        Text('Gehört ein Fall nicht dazu? Tipp ihn an und nimm ihn raus.', style: VText.caption),
         const VGap.xl(),
         const VSection('Geht an'),
         const VGap.m(),

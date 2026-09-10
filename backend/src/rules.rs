@@ -96,19 +96,19 @@ pub async fn refresh_statuses(pool: &PgPool, customer_id: Uuid, today: NaiveDate
 
     let mut changes: Vec<(Uuid, IncidentStatus, IncidentStatus)> = Vec::new();
     for i in rows.iter_mut() {
-        if i.status.is_open() && i.legal_deadline < today {
+        if i.open() && i.legal_deadline < today {
             changes.push((i.id, i.status, IncidentStatus::Verfallen));
             i.status = IncidentStatus::Verfallen;
         }
     }
     changes.extend(apply_monthly_cap(&mut rows));
-    let mut desks: Vec<String> = rows.iter().filter(|i| i.status.is_open()).map(|i| i.desk.clone()).collect();
+    let mut desks: Vec<String> = rows.iter().filter(|i| i.open()).map(|i| i.desk.clone()).collect();
     desks.sort();
     desks.dedup();
     for desk in desks {
-        let open: Vec<&IncidentRow> = rows.iter().filter(|i| i.status.is_open() && i.desk == desk).collect();
+        let open: Vec<&IncidentRow> = rows.iter().filter(|i| i.open() && i.desk == desk).collect();
         let target = if bundle_ready(&open) { IncidentStatus::Bereit } else { IncidentStatus::Gesammelt };
-        for i in rows.iter_mut().filter(|i| i.status.is_open() && i.desk == desk) {
+        for i in rows.iter_mut().filter(|i| i.open() && i.desk == desk) {
             if i.status != target {
                 changes.push((i.id, i.status, target));
                 i.status = target;
@@ -140,7 +140,8 @@ pub fn apply_monthly_cap(rows: &mut [IncidentRow]) -> Vec<(Uuid, IncidentStatus,
     let mut changes = Vec::new();
     for k in order {
         let i = &mut rows[k];
-        if matches!(i.status, IncidentStatus::Abgelehnt | IncidentStatus::Verfallen) {
+        // Rejected, expired and discarded incidents never consume the month's cap.
+        if matches!(i.status, IncidentStatus::Abgelehnt | IncidentStatus::Verfallen) || i.discarded_at.is_some() {
             continue;
         }
         use chrono::Datelike;
@@ -228,7 +229,40 @@ mod tests {
             evidence: None,
             created_at: chrono::Utc::now(),
             journey_id: None,
+            discarded_at: None,
+            discard_reason: None,
         }
+    }
+
+    /// docs/21 §4: a discarded case counts nowhere — not in a bundle, not against the cap.
+    #[test]
+    fn discarded_incidents_count_nowhere() {
+        let mut i = incident(3, IncidentStatus::Gesammelt, 150);
+        assert!(i.open());
+        i.discarded_at = Some(chrono::Utc::now());
+        assert!(!i.open(), "discarded is never open, whatever the status says");
+
+        // The month's cap: eleven of twelve fit (1575 / 150). Discarding two early ones frees
+        // the two that were capped.
+        let mut rows: Vec<IncidentRow> = (1..=12).map(|d| incident(d, IncidentStatus::Gesammelt, 150)).collect();
+        apply_monthly_cap(&mut rows);
+        assert_eq!(rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).count(), 2);
+        rows[0].discarded_at = Some(chrono::Utc::now());
+        rows[1].discarded_at = Some(chrono::Utc::now());
+        apply_monthly_cap(&mut rows);
+        assert_eq!(rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).count(), 0, "two discarded cases free the two that were over the cap");
+    }
+
+    /// The rule a discard applies to a draft claim: what is left must still reach the minimum.
+    #[test]
+    fn draft_survives_a_discard_only_above_the_minimum() {
+        let three: Vec<IncidentRow> = (1..=3).map(|d| incident(d, IncidentStatus::Bereit, 150)).collect();
+        let refs: Vec<&IncidentRow> = three.iter().collect();
+        assert!(bundle_ready(&refs), "3 × 1,50 € = 4,50 € is above the 4 € minimum");
+        let refs: Vec<&IncidentRow> = three.iter().take(2).collect();
+        assert!(!bundle_ready(&refs), "taking one out drops the rest to 3,00 €: the draft goes");
+        let refs: Vec<&IncidentRow> = Vec::new();
+        assert!(!bundle_ready(&refs), "an empty remainder is never ready");
     }
 
     #[test]

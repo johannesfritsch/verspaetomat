@@ -64,6 +64,9 @@ final rideRoutes = <RouteBase>[
       fromLat: double.tryParse(s.uri.queryParameters['lat'] ?? ''),
       fromLon: double.tryParse(s.uri.queryParameters['lon'] ?? ''),
       firstTripId: s.uri.queryParameters['departure'],
+      continueJourneyId: s.uri.queryParameters['continue'],
+      earliestOnwardArrival: DateTime.tryParse(s.uri.queryParameters['earliest'] ?? ''),
+      countedMinutes: int.tryParse(s.uri.queryParameters['counted'] ?? ''),
     ),
   ),
   // The ride lives in the sheet over Home (docs/19); the route stays for pushes and deep links.

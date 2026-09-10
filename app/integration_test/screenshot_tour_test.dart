@@ -14,7 +14,7 @@ import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/state/ride_monitor.dart';
-import 'package:verspaetomat/widgets/kit.dart' show VPrimaryButton;
+import 'package:verspaetomat/widgets/kit.dart' show VGhostButton, VOutlineButton, VPrimaryButton;
 
 const tour = <(String, String)>[
   ('showcase', Routes.showcase),
@@ -108,6 +108,25 @@ void main() {
     // Not awaited: frames come from the test pumps, so the future would wait forever.
     monitor().sheetController.animateTo(0.5, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
     await shot('sheet-half');
+    // "Abbrechen" asks why, and "Ich gebe auf" explains the Art. 18 right (docs/21 §1).
+    monitor().sheetController.animateTo(0.92, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+    await wait(tester, 800);
+    final abbrechen = find.widgetWithText(VGhostButton, 'Abbrechen').first;
+    await tester.ensureVisible(abbrechen);
+    await wait(tester, 600);
+    await tester.tap(abbrechen);
+    await wait(tester, 900);
+    await shot('abbrechen-sheet');
+    await tester.tap(find.byKey(const Key('abort-aufgegeben')));
+    await wait(tester, 1200);
+    await shot('abbrechen-aufgegeben');
+    await tester.tap(find.widgetWithText(VOutlineButton, 'Verstanden').first);
+    await wait(tester, 600);
+    demo.reset();
+    demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
+    await wait(tester, 800);
+    monitor().openSheet();
+    await wait(tester, 800);
     // The arrival while the sheet is open: the reveal in place.
     demo.simulateArrival(minutes: 68);
     await shot('sheet-arrived');
@@ -132,6 +151,23 @@ void main() {
     await home('bahnsteig-away-wir'); // the away box and the Wir block above the fold
     demo.awayFromStation = false;
     demo.reset();
+    // "Ich fahre weiter" (docs/21 §2): the passenger gives up on this train at Hagen and
+    // picks the next one onward; only the delay up to that earliest train counts.
+    DemoLeg tourLeg(String tripId, String from, String to) {
+      final d = Mock.allDepartures.firstWhere((x) => x.id == tripId);
+      return DemoLeg(departure: d, from: from, exit: d.stops.firstWhere((x) => x.name == to));
+    }
+    demo.startJourney(origin: 'Köln Hbf', destination: 'Lüdenscheid', legs: [tourLeg('re7-0747', 'Köln Hbf', 'Hagen Hbf'), tourLeg('rb52-0855', 'Hagen Hbf', 'Lüdenscheid')]);
+    await wait(tester, 600);
+    demo.liveDelay = 74;
+    demo.replanJourney();
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    await wait(tester, 600);
+    monitor().openSheet();
+    await shot('weiterfahrt-sheet');
+    monitor().closeSheet();
+    await wait(tester, 400);
+    demo.reset();
     // Anträge (docs/18): the cards. Collecting only, then sent + question + accepted.
     Future<void> tab(String route, String name) async {
       GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
@@ -148,6 +184,17 @@ void main() {
     await tab(Routes.antraege, 'antraege-mixed');
     demo.incidents.removeWhere((i) => i.isOpen); // only the claim cards, so they sit above the fold
     await tab(Routes.antraege, 'antraege-claims-only');
+    demo.reset();
+    // A case taken out of the bundle, shown in the list (docs/21 §4).
+    demo.incidents.removeWhere((i) => i.status == IncidentStatus.eingereicht);
+    demo.mails.clear();
+    demo.discardIncident(demo.openIncidents.first.id, 'nicht_gefahren');
+    await tab(Routes.antraege, 'antraege-discarded');
+    demo.reset();
+    // Nothing at all: the explainer instead of an empty box (docs/21 §5).
+    demo.incidents.clear();
+    demo.mails.clear();
+    await tab(Routes.antraege, 'antraege-empty');
     demo.reset();
     // The Einchecken card without any journey history: only the Wohin? field.
     demo.noHistory = true;

@@ -110,6 +110,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/journeys/current", get(journeys::current))
         .route("/v1/journeys/{id}/legs", post(journeys::confirm_leg))
         .route("/v1/journeys/{id}/finish", post(journeys::finish))
+        .route("/v1/journeys/{id}/replan", post(journeys::replan))
         // rides
         .route("/v1/rides", get(handlers::rides).post(handlers::check_in))
         .route("/v1/rides/current", get(handlers::current_ride))
@@ -118,6 +119,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/rides/nachtrag", post(handlers::nachtrag))
         // ledger and claims
         .route("/v1/incidents", get(handlers::incidents))
+        .route("/v1/incidents/{id}/discard", post(handlers::incident_discard))
+        .route("/v1/incidents/{id}/restore", post(handlers::incident_restore))
         .route("/v1/claims", get(handlers::claims))
         .route("/v1/claims/draft", post(handlers::claim_draft))
         .route("/v1/claims/{id}", patch(handlers::claim_patch))

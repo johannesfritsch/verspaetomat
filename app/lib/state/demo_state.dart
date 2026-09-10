@@ -48,6 +48,18 @@ class DemoJourney {
   int currentLeg = 1;
   JourneyPhase phase = JourneyPhase.riding;
   bool missedConnection = false;
+
+  /// How it ended (docs/21 §3): `beendet`, `aufgegeben`, `nicht_gefahren`, or null.
+  String? endReason;
+
+  /// The passenger asked to continue: this transfer is a Weiterfahrt (docs/21 §2).
+  bool replanned = false;
+
+  /// The destination arrival of the earliest onward connection at the moment of the
+  /// interruption, as a clock time. Everything later is the passenger's own pause and
+  /// never counts. The repository converts it like every other planned time.
+  TimeOfDay? earliestOnwardArrival;
+
   /// The re-planned next leg after a missed connection (null = the planned one still works).
   Departure? proposal;
   int? finalDelay;
@@ -218,11 +230,39 @@ class DemoState extends ChangeNotifier {
     _board(leg, locationVerified: true);
   }
 
-  /// "Ich bin da" / "Abbrechen" while a journey is open.
-  void finishJourney({required bool arrived}) {
+  /// "Ich fahre später weiter" (docs/21 §2): the leg ends here, no points, and the journey
+  /// waits at this station for a train the passenger picks. The planned arrival stays.
+  void replanJourney({String? at}) {
+    final j = journey;
+    if (j == null || j.phase != JourneyPhase.riding) return;
+    if (at != null && at.isNotEmpty && at != j.current.exit.name) {
+      final stop = j.current.departure.stops.where((s) => s.name == at).firstOrNull;
+      if (stop != null) j.legs[j.currentLeg - 1] = DemoLeg(departure: j.current.departure, from: j.current.from, exit: stop);
+    }
+    final leaveAfter = j.current.exit.planned.hour * 60 + j.current.exit.planned.minute + liveDelay;
+    // The earliest train that still gets the passenger onward: it sets the ceiling.
+    j.proposal = Mock.allDepartures
+        .where((d) => d.stops.any((x) => x.name == j.destination) && d.planned.hour * 60 + d.planned.minute >= leaveAfter && !d.cancelled)
+        .firstOrNull;
+    final onward = j.proposal;
+    if (onward != null) {
+      j.earliestOnwardArrival = onward.stops.firstWhere((x) => x.name == j.destination, orElse: () => onward.stops.last).planned;
+    }
+    j.phase = JourneyPhase.transfer;
+    j.replanned = true;
+    j.current.finalDelay = liveDelay;
+    // Everything planned after this leg is gone; the passenger chooses the next train.
+    if (j.legs.length > j.currentLeg) j.legs.removeRange(j.currentLeg, j.legs.length);
+    phase = TripPhase.riding;
+    notifyListeners();
+  }
+
+  /// "Ich bin da" / the abort with its reason (docs/21 §1).
+  void finishJourney({required bool arrived, String? reason}) {
     final j = journey;
     if (j == null) return;
     if (!arrived) {
+      j.endReason = reason ?? 'aufgegeben';
       j.phase = JourneyPhase.abandoned;
       journeyHistory.insert(0, j);
       journey = null;
@@ -231,6 +271,7 @@ class DemoState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    j.endReason = 'beendet';
     if (j.phase == JourneyPhase.transfer) {
       // Ended at the transfer stop: the delay there counts, marked incomplete by the backend.
       j.phase = JourneyPhase.arrived;
@@ -446,7 +487,22 @@ class DemoState extends ChangeNotifier {
   final List<Incident> incidents = List.of(Mock.incidents);
   final List<RailMail> mails = List.of(Mock.mails);
 
-  List<Incident> get openIncidents => incidents.where((i) => i.isOpen).toList();
+  /// Cases the passenger took out of the bundle (docs/21 §4): id → reason.
+  final Map<String, String> discardedIncidents = {};
+
+  void discardIncident(String id, String reason) {
+    discardedIncidents[id] = reason;
+    _refreshReady();
+    notifyListeners();
+  }
+
+  void restoreIncident(String id) {
+    discardedIncidents.remove(id);
+    _refreshReady();
+    notifyListeners();
+  }
+
+  List<Incident> get openIncidents => incidents.where((i) => i.isOpen && !discardedIncidents.containsKey(i.id)).toList();
 
   /// Open incidents grouped by claims desk.
   Map<String, List<Incident>> get openByDesk {

@@ -48,12 +48,18 @@ abstract class AppRepository {
   /// The current journey (riding, in transfer, or arrived in the last two hours), else null.
   Future<ApiJourneyLive?> currentJourney();
   Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId);
-  /// "Ich bin da" (arrived: true) or "Abbrechen" (arrived: false).
-  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived});
+  /// "Ich bin da" (arrived: true) or the abort with its reason (docs/21 §1).
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason});
+  /// "Ich fahre später weiter": the leg ends here, the journey waits for the next train (docs/21 §2).
+  Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName});
   Future<List<ApiJourney>> journeys();
 
   // -- ledger and claims ----------------------------------------------------
   Future<ApiIncidents> incidents();
+  /// Takes one case out of every open bundle; [restoreIncident] puts it back (docs/21 §4).
+  /// True when a draft claim fell below the 4 € minimum and was dropped with it.
+  Future<bool> discardIncident(String id, String reason);
+  Future<void> restoreIncident(String id);
   Future<List<ApiClaim>> claims();
   /// The claim card's thread was opened: its inbound mails count as seen (docs/18).
   Future<void> markClaimSeen(String claimId);

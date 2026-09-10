@@ -59,7 +59,7 @@ ApiCategory categoryFromWire(String? s) => switch (s) {
       _ => ApiCategory.other,
     };
 
-enum ApiRideStatus { riding, arrived }
+enum ApiRideStatus { riding, arrived, abandoned }
 
 enum ApiClaimStatus { draft, sent, question, accepted, rejected, bounced }
 
@@ -621,7 +621,7 @@ class ApiRide {
         ticket: ticketFromWire(_sn(j['ticket'])),
         checkedInAt: _dt(j['checked_in_at']) ?? DateTime.now().toUtc(),
         locationVerified: _b(j['location_verified']),
-        status: _s(j['status']) == 'arrived' ? ApiRideStatus.arrived : ApiRideStatus.riding,
+        status: switch (_s(j['status'])) { 'arrived' => ApiRideStatus.arrived, 'abandoned' => ApiRideStatus.abandoned, _ => ApiRideStatus.riding },
         passedStops: _i(j['passed_stops']),
         liveDelayMinutes: _i(j['live_delay_minutes'] ?? j['live_delay_min']),
         cause: _sn(j['cause']),
@@ -693,6 +693,8 @@ class ApiIncident {
     this.fareCents,
     required this.legalDeadline,
     this.evidence,
+    this.discardedAt,
+    this.discardReason,
   });
   final String id;
   final String? rideId;
@@ -715,7 +717,12 @@ class ApiIncident {
   final DateTime legalDeadline;
   final ApiEvidence? evidence;
 
-  bool get isOpen => status == IncidentStatus.gesammelt || status == IncidentStatus.bereit;
+  /// Set when the passenger took this case out of the bundle (docs/21 §4).
+  final DateTime? discardedAt;
+  final String? discardReason;
+
+  bool get discarded => discardedAt != null;
+  bool get isOpen => !discarded && (status == IncidentStatus.gesammelt || status == IncidentStatus.bereit);
 
   factory ApiIncident.fromJson(Map<String, dynamic> j) => ApiIncident(
         id: _s(j['id']),
@@ -738,6 +745,8 @@ class ApiIncident {
         fareCents: _in(j['fare_cents']),
         legalDeadline: _date(j['legal_deadline']) ?? DateTime.now(),
         evidence: _m(j['evidence']) == null ? null : ApiEvidence.fromJson(_m(j['evidence'])!),
+        discardedAt: _dt(j['discarded_at']),
+        discardReason: _sn(j['discard_reason']),
       );
 }
 
@@ -1306,6 +1315,10 @@ class ApiJourney {
     this.nextLeg,
     this.transferStationName,
     this.transferDeadline,
+    this.endReason,
+    this.replanned = false,
+    this.transferReason,
+    this.earliestOnwardArrival,
     required this.createdAt,
     this.finalisedAt,
   });
@@ -1329,8 +1342,47 @@ class ApiJourney {
   final ApiLeg? nextLeg;
   final String? transferStationName;
   final DateTime? transferDeadline;
+
+  /// How the journey ended (docs/21 §3): `beendet`, `aufgegeben`, `nicht_gefahren`, or null.
+  final String? endReason;
+
+  /// The passenger asked to continue, so this transfer is a Weiterfahrt, not an Umstieg.
+  final bool replanned;
+
+  /// `umstieg` (planned or missed) or `weiterfahrt` (the passenger's own decision).
+  final String? transferReason;
+
+  /// When the journey was interrupted (docs/21 §2): the destination arrival of the earliest
+  /// onward connection that existed at that moment. A self-chosen pause beyond it is the
+  /// passenger's own time and never counts, so this is the ceiling for everything we show.
+  final DateTime? earliestOnwardArrival;
+
+  /// The most the delay can still come to: the railway's part, in minutes. Null when the
+  /// journey was never interrupted, so nothing is capped.
+  int? get countedCeilingMinutes {
+    final e = earliestOnwardArrival, p = plannedArrival;
+    if (e == null || p == null) return null;
+    final m = e.difference(p).inMinutes;
+    return m < 0 ? 0 : m;
+  }
+
+  /// A delay to show the passenger, never more than the claim can contain.
+  int cappedDelay(int liveMinutes) {
+    final ceiling = countedCeilingMinutes;
+    if (ceiling == null) return liveMinutes;
+    return liveMinutes < ceiling ? liveMinutes : ceiling;
+  }
+
   final DateTime createdAt;
   final DateTime? finalisedAt;
+
+  bool get gaveUp => endReason == 'aufgegeben';
+  bool get neverTravelled => endReason == 'nicht_gefahren';
+
+  /// A transfer the passenger asked for (docs/21 §2), as opposed to a planned change or a
+  /// missed connection. The backend says which; older payloads fall back to the shape.
+  bool get waitingForOwnTrain =>
+      inTransfer && (transferReason == 'weiterfahrt' || (transferReason == null && (replanned || (nextLeg == null && !missedConnection))));
 
   bool get riding => status == ApiJourneyStatus.riding;
   bool get inTransfer => status == ApiJourneyStatus.transfer;
@@ -1362,6 +1414,10 @@ class ApiJourney {
         nextLeg: _m(j['next_leg']) == null ? null : ApiLeg.fromJson(_m(j['next_leg'])!),
         transferStationName: _sn(j['transfer_station_name']),
         transferDeadline: _dt(j['transfer_deadline']),
+        endReason: _sn(j['end_reason']),
+        replanned: _b(j['replanned']),
+        transferReason: _sn(j['transfer_reason']),
+        earliestOnwardArrival: _dt(j['earliest_onward_arrival']),
         createdAt: _dt(j['created_at']) ?? DateTime.now().toUtc(),
         finalisedAt: _dt(j['finalised_at']),
       );

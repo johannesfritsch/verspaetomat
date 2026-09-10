@@ -729,7 +729,6 @@ class Mock {
     VBadge(id: 'bestaetigt', name: 'Bestätigt', rule: 'Erste Antwort der Bahn', earned: true, earnedOn: '18. Juli 2026'),
     VBadge(id: 'deutschland', name: 'Deutschlandreise', rule: 'Check-ins in fünf Bundesländern', earned: false),
     VBadge(id: 'stammgleis', name: 'Stammgleis', rule: '50 Fahrten auf derselben Linie', earned: true, earnedOn: '3. Aug. 2026'),
-    VBadge(id: 'geduld', name: 'Geduld ist eine Tugend', rule: '1.000 Geduldspunkte', earned: false),
     VBadge(id: 'minuten-1000', name: '1.000 Minuten', rule: '1.000 Verspätungsminuten gesammelt', earned: true, earnedOn: '21. Aug. 2026'),
     VBadge(id: 'minuten-2000', name: '2.000 Minuten', rule: '2.000 Verspätungsminuten gesammelt', earned: false),
     VBadge(id: 'minuten-4000', name: '4.000 Minuten', rule: '4.000 Verspätungsminuten gesammelt', earned: false),

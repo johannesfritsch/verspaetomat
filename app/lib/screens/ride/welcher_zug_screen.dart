@@ -22,6 +22,9 @@ class WelcherZugScreen extends StatefulWidget {
     this.fromLat,
     this.fromLon,
     this.firstTripId,
+    this.continueJourneyId,
+    this.earliestOnwardArrival,
+    this.countedMinutes,
   });
   final String fromStationId;
   final String fromStationName;
@@ -30,6 +33,15 @@ class WelcherZugScreen extends StatefulWidget {
   final double? fromLat;
   final double? fromLon;
   final String? firstTripId;
+
+  /// Weiterfahrt (docs/21 §2): confirm this train as the next leg of a journey that is
+  /// already running, instead of starting a new one. The planned arrival stays.
+  final String? continueJourneyId;
+
+  /// The arrival of the earliest onward connection, and the minutes it is worth. Anything
+  /// later is the passenger's own pause and adds nothing to the claim.
+  final DateTime? earliestOnwardArrival;
+  final int? countedMinutes;
 
   @override
   State<WelcherZugScreen> createState() => _WelcherZugScreenState();
@@ -74,6 +86,12 @@ class _WelcherZugScreenState extends State<WelcherZugScreen> {
     setState(() => _sending = true);
     try {
       HapticFeedback.mediumImpact();
+      final continuing = widget.continueJourneyId;
+      if (continuing != null) {
+        await session.repo.confirmLeg(continuing, it.legs.first.tripId);
+        if (mounted) context.go(Routes.unterwegs);
+        return;
+      }
       final loc = await currentPosition(timeout: const Duration(seconds: 2));
       await session.repo.startJourney(StartJourneyRequest(
         fromStationId: widget.fromStationId,
@@ -92,6 +110,13 @@ class _WelcherZugScreenState extends State<WelcherZugScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Check-in nicht möglich: ${shortError(e)}')));
       }
     }
+  }
+
+  /// True when this itinerary arrives after the earliest onward connection (docs/21 §2).
+  bool _later(ApiItinerary it) {
+    final e = widget.earliestOnwardArrival;
+    final a = it.liveArrival ?? it.plannedArrival;
+    return e != null && a != null && a.isAfter(e);
   }
 
   @override
@@ -127,12 +152,24 @@ class _WelcherZugScreenState extends State<WelcherZugScreen> {
               child: Text('Gerade keine Verbindung in Sicht. Versuch es gleich noch mal oder nimm ein anderes Ziel.', style: VText.bodyS.copyWith(color: VColors.ink2)),
             ),
           if (_itineraries.isNotEmpty) ...[
-            Text('Tipp auf den Zug, in dem du sitzt.', style: VText.bodyStrong),
+            Text(widget.continueJourneyId != null ? 'Tipp auf den Zug, mit dem du weiterfährst.' : 'Tipp auf den Zug, in dem du sitzt.', style: VText.bodyStrong),
             const SizedBox(height: 2),
-            Text('Umstiege folgen später von selbst.', style: VText.caption),
+            Text(
+              widget.continueJourneyId != null ? 'Deine Fahrt läuft weiter. Die Verspätung zählt am Ziel.' : 'Umstiege folgen später von selbst.',
+              style: VText.caption,
+            ),
           ],
           const VGap.m(),
-          for (final it in _itineraries) ItineraryRow(itinerary: it, onTap: _sending ? null : () => _start(it)),
+          for (final it in _itineraries) ...[
+            ItineraryRow(itinerary: it, onTap: _sending ? null : () => _start(it)),
+            // A later train than the earliest one: the extra wait is the passenger's, not the railway's.
+            if (_later(it)) ...[
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: VSpace.s),
+                child: Text('Deine Pause zählt nicht mit — es bleiben ${fmtMinutes(widget.countedMinutes ?? 0)}.', style: VText.caption),
+              ),
+            ],
+          ],
           if (_sending) const LoadingLine(label: 'Einchecken …'),
           const VGap.xl(),
         ],

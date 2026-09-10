@@ -10,6 +10,7 @@ import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../community/community_widgets.dart' show TabHeader, pickNgo;
+import '../ride/checkin_launcher.dart' show startCheckin;
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
 
@@ -84,6 +85,29 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
     }
   }
 
+  /// Takes one case out of every open bundle, or puts it back (docs/21 §4).
+  Future<void> _discard(BuildContext context, String id, String reason) async {
+    final session = RepoScope.read(context);
+    try {
+      await session.repo.discardIncident(id, reason);
+      _loader.refresh();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ging nicht: $e')));
+    }
+  }
+
+  Future<void> _restore(BuildContext context, String id) async {
+    final session = RepoScope.read(context);
+    try {
+      await session.repo.restoreIncident(id);
+      _loader.refresh();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ging nicht: $e')));
+    }
+  }
+
   Future<void> _simulateReply(BuildContext context) async {
     final session = RepoScope.read(context);
     try {
@@ -122,7 +146,9 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
         final claims = data.claims.where((c) => c.status != ApiClaimStatus.draft).toList()
           ..sort((a, b) => (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)));
         final out = claims.where((c) => c.status == ApiClaimStatus.sent || c.status == ApiClaimStatus.question || c.status == ApiClaimStatus.bounced).toList();
-        final expired = ledger.incidents.where((i) => i.status == IncidentStatus.verfallen).toList();
+        final expired = ledger.incidents.where((i) => !i.discarded && i.status == IncidentStatus.verfallen).toList();
+        final discarded = ledger.incidents.where((i) => i.discarded).toList();
+        final nothingAtAll = ledger.incidents.isEmpty && claims.isEmpty;
         final openCount = summary.desks.fold(0, (s, d) => s + d.incidentIds.length);
         final caption = [
           if (openCount > 0) '$openCount ${openCount == 1 ? 'Fall' : 'Fälle'} gesammelt',
@@ -133,8 +159,10 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
 
         String? ngoName(String id) => session.ngos.where((n) => n.id == id).map((n) => n.name).firstOrNull;
         final cards = <Widget>[
-          // The bundle(s) being collected first (docs/18).
-          if (desks.isEmpty)
+          // The bundle(s) being collected first (docs/18); nothing at all gets the explainer (docs/21 §5).
+          if (nothingAtAll)
+            _EmptyAntraege(ngoName: ngoName(session.me?.settings.ngoId ?? ''))
+          else if (desks.isEmpty)
             _EmptyCollecting()
           else
             for (final d in desks)
@@ -147,8 +175,13 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
                 minPayoutCents: summary.minPayoutCents,
                 oldest: summary.oldestOpen,
                 busy: _busy,
+                discarded: discarded,
+                onDiscard: (id, reason) => _discard(context, id, reason),
+                onRestore: (id) => _restore(context, id),
                 onPrepare: d.ready ? () => _prepare(context, d.desk) : null,
               ),
+          // Cases taken out while no bundle is collecting still need a way back.
+          if (desks.isEmpty && discarded.isNotEmpty) _DiscardedCard(incidents: discarded, onRestore: (id) => _restore(context, id)),
           // Then every claim, newest first, status in words.
           for (final c in claims)
             _ClaimCard(
@@ -293,6 +326,9 @@ class _ClaimCard extends StatelessWidget {
                 VGhostButton(label: 'PDF ansehen', icon: Icons.picture_as_pdf_outlined, onTap: () => ClaimPdfPage.open(context, c.id)),
               ],
             ),
+            // A sent claim is out of the passenger's hands (docs/21 §4).
+            const VGap.xs(),
+            Text('Eingereicht — Änderungen nur noch über eine Antwort an das Unternehmen.', style: VText.caption.copyWith(color: VColors.ink2)),
             // The claim's own address, a footnote: the only place an address appears in the app (docs/18).
             if (c.replyAddress != null) ...[
               const VGap.s(),
@@ -316,6 +352,9 @@ class _CollectingCard extends StatelessWidget {
     required this.minPayoutCents,
     required this.oldest,
     required this.busy,
+    required this.discarded,
+    required this.onDiscard,
+    required this.onRestore,
     required this.onPrepare,
   });
   final ApiDeskSummary desk;
@@ -326,6 +365,9 @@ class _CollectingCard extends StatelessWidget {
   final int minPayoutCents;
   final ApiOldestOpen? oldest;
   final bool busy;
+  final List<ApiIncident> discarded;
+  final Future<void> Function(String id, String reason) onDiscard;
+  final Future<void> Function(String id) onRestore;
   final VoidCallback? onPrepare;
 
   @override
@@ -374,15 +416,146 @@ class _CollectingCard extends StatelessWidget {
               ),
             ),
             const VGap.s(),
-            for (final i in incidents) IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i)),
+            for (final i in incidents)
+              IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i, onDiscard: (reason) => onDiscard(i.id, reason))),
             if (oldest != null && incidents.any((i) => i.id == oldest!.id)) ...[
               const VGap.s(),
               _DeadlineLine(oldest: oldest!),
+            ],
+            if (discarded.isNotEmpty) ...[
+              const VGap.s(),
+              _DiscardedLine(incidents: discarded, onRestore: onRestore),
             ],
             if (onPrepare != null) ...[
               const VGap.m(),
               VPrimaryButton(label: busy ? 'Einen Moment …' : 'Antrag vorbereiten', icon: Icons.edit_outlined, onTap: busy ? null : onPrepare),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The whole tab is empty: no case, no Antrag, nothing taken out. Say what will
+/// happen here and when, rather than showing an empty box (docs/21 §5).
+class _EmptyAntraege extends StatelessWidget {
+  const _EmptyAntraege({required this.ngoName});
+  final String? ngoName;
+
+  @override
+  Widget build(BuildContext context) {
+    final steps = [
+      'Einchecken, wenn du in den Zug steigst.',
+      'Ab 60 Minuten Verspätung am Ziel entstehen 1,50 €.',
+      'Ab 4 € geht ein Antrag an das Eisenbahnunternehmen — mit deiner Unterschrift, von dir.',
+      'Antwortet die Bahn, zahlt sie direkt an ${ngoName ?? 'deinen Verein'}.',
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.m),
+      child: Container(
+        key: const Key('antraege-empty'),
+        padding: const EdgeInsets.all(VSpace.m),
+        decoration: BoxDecoration(border: Border.all(color: VColors.ink, width: 1.5), borderRadius: BorderRadius.circular(4)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Hier wird es später voll.', style: VText.title),
+            const SizedBox(height: 4),
+            Text('So läuft es:', style: VText.bodySStrong.copyWith(color: VColors.ink2)),
+            const VGap.s(),
+            for (var n = 0; n < steps.length; n++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 22, child: Text('${n + 1}.', style: VText.bodySStrong.copyWith(color: VColors.red))),
+                    Expanded(child: Text(steps[n], style: VText.bodyS)),
+                  ],
+                ),
+              ),
+            const VGap.xs(),
+            Text('Anträge müssen innerhalb eines Jahres gestellt werden. Wir erinnern dich rechtzeitig.', style: VText.caption),
+            const VGap.m(),
+            VPrimaryButton(label: 'Einchecken', icon: Icons.train_outlined, onTap: () => startCheckin(context)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "1 Fall nicht eingereicht · anzeigen": the way back for a case taken out (docs/21 §4).
+class _DiscardedLine extends StatefulWidget {
+  const _DiscardedLine({required this.incidents, required this.onRestore});
+  final List<ApiIncident> incidents;
+  final Future<void> Function(String id) onRestore;
+
+  @override
+  State<_DiscardedLine> createState() => _DiscardedLineState();
+}
+
+class _DiscardedLineState extends State<_DiscardedLine> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final n = widget.incidents.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _open = !_open),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Flexible(child: Text('$n ${n == 1 ? 'Fall' : 'Fälle'} nicht eingereicht', style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 6),
+                Text(_open ? 'verbergen' : 'anzeigen', style: VText.caption.copyWith(color: VColors.ink2, decoration: TextDecoration.underline)),
+              ],
+            ),
+          ),
+        ),
+        if (_open)
+          for (final i in widget.incidents)
+            IncidentRow(
+              incident: i,
+              note: discardReasons[i.discardReason] ?? 'Nicht eingereicht',
+              onTap: () => showEvidenceSheet(context, i, onRestore: () => widget.onRestore(i.id)),
+            ),
+      ],
+    );
+  }
+}
+
+/// Cases taken out while nothing is collecting: their own small card, so they are never lost.
+class _DiscardedCard extends StatelessWidget {
+  const _DiscardedCard({required this.incidents, required this.onRestore});
+  final List<ApiIncident> incidents;
+  final Future<void> Function(String id) onRestore;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.m),
+      child: Container(
+        padding: const EdgeInsets.all(VSpace.m),
+        decoration: BoxDecoration(border: Border.all(color: VColors.rule, width: 1.5), borderRadius: BorderRadius.circular(4)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Nicht eingereicht', style: VText.title),
+            const SizedBox(height: 4),
+            Text('Von dir aussortiert. Die Minuten und Punkte bleiben.', style: VText.caption),
+            const VGap.s(),
+            for (final i in incidents)
+              IncidentRow(
+                incident: i,
+                note: discardReasons[i.discardReason] ?? 'Nicht eingereicht',
+                onTap: () => showEvidenceSheet(context, i, onRestore: () => onRestore(i.id)),
+              ),
           ],
         ),
       ),

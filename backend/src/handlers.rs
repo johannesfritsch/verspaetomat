@@ -810,7 +810,7 @@ pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
     let today = today();
     let rows = rules::refresh_statuses(&s.pool, c.0.id, today).await.map_err(internal)?;
     let mut by_desk: BTreeMap<String, Vec<&IncidentRow>> = BTreeMap::new();
-    for i in rows.iter().filter(|i| i.status.is_open()) {
+    for i in rows.iter().filter(|i| i.open()) {
         by_desk.entry(i.desk.clone()).or_default().push(i);
     }
     let desks: Vec<Value> = by_desk
@@ -821,14 +821,16 @@ pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
         })
         .collect();
     let ready_desk = by_desk.iter().find(|(_, l)| rules::bundle_ready(l)).map(|(d, _)| d.clone());
-    let oldest = rows.iter().filter(|i| i.status.is_open()).min_by_key(|i| i.ride_date);
+    let oldest = rows.iter().filter(|i| i.open()).min_by_key(|i| i.ride_date);
     let confirmed: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Bestaetigt).map(|i| i.amount_cents).sum();
     let submitted: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Eingereicht).map(|i| i.amount_cents).sum();
     let capped: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).map(|i| i.amount_cents).sum();
     let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and status <> 'draft' order by sent_at desc nulls last").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    let discarded: Vec<&IncidentRow> = rows.iter().filter(|i| i.discarded_at.is_some()).collect();
     Ok(Json(json!({
         "incidents": rows,
         "claims": claims,
+        "discarded_ids": discarded.iter().map(|i| i.id).collect::<Vec<_>>(),
         "summary": {
             "desks": desks,
             "ready_desk": ready_desk,
@@ -840,6 +842,75 @@ pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
             "dticket_monthly_cap_cents": rules::dticket_monthly_cap_cents(),
         }
     })))
+}
+
+#[derive(Deserialize)]
+pub struct DiscardBody {
+    /// `nicht_gefahren` | `doppelt` | `sonst` (docs/21 §4).
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// `POST /v1/incidents/{id}/discard` — the passenger takes a case out of the bundle (docs/21 §4).
+/// It keeps its row and its evidence, counts nowhere, and can be restored. Refused once the
+/// case has left the house in a claim that is no longer a draft.
+pub async fn incident_discard(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(b): Json<DiscardBody>) -> ApiResult {
+    let reason = match b.reason.as_deref() {
+        None | Some("sonst") => "sonst",
+        Some("nicht_gefahren") => "nicht_gefahren",
+        Some("doppelt") => "doppelt",
+        Some(other) => return Err(err(StatusCode::BAD_REQUEST, &format!("reason must be nicht_gefahren, doppelt or sonst, got {other}"))),
+    };
+    let inc: Option<IncidentRow> = sqlx::query_as("select * from incidents where id = $1 and customer_id = $2").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(inc) = inc else { return Err(err(StatusCode::NOT_FOUND, "incident not found")) };
+    if inc.discarded_at.is_some() {
+        return Ok(Json(json!({ "incident": inc, "claim_deleted": false })));
+    }
+    // Which claims hold it? A sent one is final; a draft can still be corrected.
+    let claims: Vec<ClaimRow> = sqlx::query_as("select c.* from claims c join claim_incidents ci on ci.claim_id = c.id where ci.incident_id = $1").bind(id).fetch_all(&s.pool).await.map_err(internal)?;
+    if claims.iter().any(|cl| cl.status != ClaimStatus::Draft) {
+        return Err(err(StatusCode::CONFLICT, "der Fall ist schon eingereicht; Änderungen nur noch über eine Antwort an das Unternehmen"));
+    }
+    sqlx::query("update incidents set discarded_at = now(), discard_reason = $2, claim_id = null where id = $1").bind(id).bind(reason).execute(&s.pool).await.map_err(internal)?;
+    sqlx::query("delete from claim_incidents where incident_id = $1").bind(id).execute(&s.pool).await.map_err(internal)?;
+    rules::audit(&s.pool, "incident", id, Some(rules::from_label(inc.status)), "verworfen", reason).await.map_err(internal)?;
+
+    // A draft that held it is recomputed; if what is left no longer reaches the minimum, it goes.
+    let mut claim_deleted = false;
+    for cl in &claims {
+        let rest: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1").bind(cl.id).fetch_all(&s.pool).await.map_err(internal)?;
+        let refs: Vec<&IncidentRow> = rest.iter().collect();
+        if rest.is_empty() || !rules::bundle_ready(&refs) {
+            sqlx::query("delete from claim_attachments where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
+            sqlx::query("delete from claim_incidents where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
+            sqlx::query("update incidents set claim_id = null where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
+            sqlx::query("delete from claims where id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
+            rules::audit(&s.pool, "claim", cl.id, Some("draft"), "deleted", "below the minimum after a case was taken out").await.map_err(internal)?;
+            claim_deleted = true;
+        } else {
+            let amount: Cents = rest.iter().map(|i| i.amount_cents).sum();
+            sqlx::query("update claims set amount_claimed_cents = $2 where id = $1").bind(cl.id).bind(amount).execute(&s.pool).await.map_err(internal)?;
+        }
+    }
+    let _ = rules::refresh_statuses(&s.pool, c.0.id, today()).await.map_err(internal)?;
+    let inc: IncidentRow = sqlx::query_as("select * from incidents where id = $1").bind(id).fetch_one(&s.pool).await.map_err(internal)?;
+    s.events.publish(c.0.id, "incident", json!({ "incident_id": id, "discarded": true }));
+    Ok(Json(json!({ "incident": inc, "claim_deleted": claim_deleted })))
+}
+
+/// `POST /v1/incidents/{id}/restore` — back into the bundle.
+pub async fn incident_restore(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
+    let inc: Option<IncidentRow> = sqlx::query_as("select * from incidents where id = $1 and customer_id = $2").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(inc) = inc else { return Err(err(StatusCode::NOT_FOUND, "incident not found")) };
+    if inc.discarded_at.is_none() {
+        return Ok(Json(json!({ "incident": inc, "claim_deleted": false })));
+    }
+    sqlx::query("update incidents set discarded_at = null, discard_reason = null where id = $1").bind(id).execute(&s.pool).await.map_err(internal)?;
+    rules::audit(&s.pool, "incident", id, Some("verworfen"), rules::from_label(inc.status), "restored").await.map_err(internal)?;
+    let _ = rules::refresh_statuses(&s.pool, c.0.id, today()).await.map_err(internal)?;
+    let inc: IncidentRow = sqlx::query_as("select * from incidents where id = $1").bind(id).fetch_one(&s.pool).await.map_err(internal)?;
+    s.events.publish(c.0.id, "incident", json!({ "incident_id": id, "discarded": false }));
+    Ok(Json(json!({ "incident": inc, "claim_deleted": false })))
 }
 
 pub async fn claims(State(s): State<AppState>, c: Customer) -> ApiResult {
@@ -895,7 +966,7 @@ pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<D
     let rows = rules::refresh_statuses(&s.pool, c.0.id, today).await.map_err(internal)?;
     let selected: Vec<&IncidentRow> = rows
         .iter()
-        .filter(|i| i.status.is_open() && i.desk == d.desk && d.incident_ids.as_ref().map(|ids| ids.contains(&i.id)).unwrap_or(true))
+        .filter(|i| i.open() && i.desk == d.desk && d.incident_ids.as_ref().map(|ids| ids.contains(&i.id)).unwrap_or(true))
         .collect();
     if selected.is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "no open incidents for this desk"));
@@ -1760,7 +1831,7 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     // Money: the desk that is ready, else the one closest to the minimum payout.
     let rows = rules::refresh_statuses(pool, c.0.id, today).await.map_err(internal)?;
     let mut by_desk: BTreeMap<String, Vec<&IncidentRow>> = BTreeMap::new();
-    for i in rows.iter().filter(|i| i.status.is_open()) {
+    for i in rows.iter().filter(|i| i.open()) {
         by_desk.entry(i.desk.clone()).or_default().push(i);
     }
     let desks: Vec<(String, Cents, bool)> = by_desk.iter().map(|(d, l)| (d.clone(), l.iter().map(|i| i.amount_cents).sum(), rules::bundle_ready(l))).collect();
@@ -1825,7 +1896,7 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     } else if let Some(id) = question_claim {
         candidates.push(NextThing::Mail { claim_id: Some(id), body: "Rückfrage zum Antrag".to_string() });
     }
-    if let Some(i) = rows.iter().filter(|i| i.status.is_open()).min_by_key(|i| i.ride_date) {
+    if let Some(i) = rows.iter().filter(|i| i.open()).min_by_key(|i| i.ride_date) {
         let days_left = rules::days_until(i.legal_deadline, today);
         if days_left <= rules::WARN_DAYS_BEFORE_DEADLINE {
             candidates.push(NextThing::Deadline { incident_id: i.id, days_left, body: format!("{} vom {} · noch {} Tage", i.line, i.ride_date.format("%d.%m."), days_left.max(0)) });

@@ -30,7 +30,8 @@ class _HistorieScreenState extends State<HistorieScreen> {
         for (final j in journeys) {
           groups.putIfAbsent(Mock.shortDate(j.date), () => []).add(j);
         }
-        final total = journeys.fold(0, (s, j) => s + (j.finalDelayMin ?? 0));
+        final counted = journeys.where((j) => !j.neverTravelled).toList();
+        final total = counted.fold(0, (s, j) => s + (j.finalDelayMin ?? 0));
 
         return VScreen(
           title: 'Alle Fahrten',
@@ -41,7 +42,7 @@ class _HistorieScreenState extends State<HistorieScreen> {
               const VGap.s(),
               FilterChips(options: lines, selected: _line, onSelect: (v) => setState(() => _line = v)),
               const VGap.m(),
-              Text('${journeys.length} Fahrten · ${fmtInt(total)} Minuten gewartet', style: VText.caption),
+              Text('${counted.length} Fahrten · ${fmtInt(total)} Minuten gewartet', style: VText.caption),
               const VGap.m(),
               for (final entry in groups.entries) ...[
                 VSection(entry.key),
@@ -78,7 +79,9 @@ class _JourneyRowState extends State<_JourneyRow> {
       if (j.cancelled) const VChip('Ausfall', tone: VTone.red),
       if (j.missedConnection) const VChip('Anschluss verpasst', tone: VTone.red),
       if (j.incomplete) const VChip('unvollständig'),
-      if (j.status == ApiJourneyStatus.abandoned) const VChip('abgebrochen'),
+      if (j.gaveUp) const VChip('aufgegeben'),
+      if (j.neverTravelled) const VChip('nicht gefahren'),
+      if (j.status == ApiJourneyStatus.abandoned && j.endReason == null) const VChip('abgebrochen'),
       if (j.transfers > 0) VChip('${j.transfers}× umsteigen'),
     ];
     return Column(
@@ -89,12 +92,24 @@ class _JourneyRowState extends State<_JourneyRow> {
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
               children: [
-                SizedBox(width: 64, child: Text(j.legs.isEmpty ? '–' : j.legs.first.line, style: VText.bodyStrong, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                SizedBox(
+                  width: 64,
+                  child: Text(
+                    j.legs.isEmpty ? '–' : j.legs.first.line,
+                    style: VText.bodyStrong.copyWith(color: j.neverTravelled ? VColors.ink3 : null),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${j.originStationName} → ${j.destinationStationName}', style: VText.bodyS, overflow: TextOverflow.ellipsis),
+                      Text(
+                        '${j.originStationName} → ${j.destinationStationName}',
+                        style: VText.bodyS.copyWith(color: j.neverTravelled ? VColors.ink3 : null),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       if (chips.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Wrap(spacing: 6, runSpacing: 4, children: chips),

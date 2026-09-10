@@ -81,6 +81,15 @@ pub struct JourneyRow {
     pub created_at: DateTime<Utc>,
     pub finalised_at: Option<DateTime<Utc>>,
     pub dismissed_at: Option<DateTime<Utc>>,
+    /// Why the journey ended: `beendet` | `aufgegeben` | `nicht_gefahren` (docs/21 §3).
+    /// Null for journeys the follower finalised on its own.
+    #[serde(default)]
+    pub end_reason: Option<String>,
+    /// When the earliest onward connection would have reached the destination, recorded at the
+    /// interruption (docs/21 §2). The claimed delay is capped at this: a self-chosen pause is
+    /// the passenger's own time, not the railway's. Null on journeys that ran through.
+    #[serde(default)]
+    pub earliest_onward_arrival: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
@@ -268,6 +277,19 @@ pub struct IncidentRow {
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub journey_id: Option<Uuid>,
+    /// Taken out of the bundle by the passenger (docs/21 §4). Set = it counts nowhere.
+    #[serde(default)]
+    pub discarded_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub discard_reason: Option<String>,
+}
+
+impl IncidentRow {
+    /// Open *and* not discarded: the only rows that count towards a bundle, a sum or a draft.
+    /// Prefer this over `status.is_open()` everywhere a bundle is built (docs/21 §4).
+    pub fn open(&self) -> bool {
+        self.status.is_open() && self.discarded_at.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

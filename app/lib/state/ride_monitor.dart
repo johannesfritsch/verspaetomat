@@ -6,7 +6,7 @@ import '../api/events.dart';
 import '../api/models.dart';
 import '../repo/app_repository.dart';
 import '../repo/repo_scope.dart';
-import '../screens/ride/ride_widgets.dart' show shortError;
+import '../screens/ride/ride_widgets.dart' show fromIndex, shortError;
 
 /// The one place that knows whether a journey is under way (docs/19).
 ///
@@ -154,16 +154,16 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// "Ich bin da" / "Abbrechen" on a journey; the plain arrival call on a legacy ride.
-  /// Returns the arrival result for a legacy ride, null otherwise.
-  Future<ApiArrivalResult?> finish({required bool arrived}) async {
+  /// "Ich bin da" / the abort with its reason (docs/21 §1); the plain arrival call on a
+  /// legacy ride. Returns the arrival result for a legacy ride, null otherwise.
+  Future<ApiArrivalResult?> finish({required bool arrived, String? reason}) async {
     if (busy) return null;
     busy = true;
     notifyListeners();
     try {
       final j = journey;
       if (j != null) {
-        await session.repo.finishJourney(j.journey.id, arrived: arrived);
+        await session.repo.finishJourney(j.journey.id, arrived: arrived, reason: reason);
         await refresh(quiet: true);
         if (!arrived) sheetOpen = false;
         return null;
@@ -171,6 +171,34 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
       final result = await session.repo.arrival(const ArrivalRequest());
       await refresh(quiet: true);
       return result;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  /// "Ich fahre später weiter" (docs/21 §2): this leg ends, the journey waits for a train
+  /// the passenger picks. The destination and its planned arrival stay, so the delay counts.
+  Future<void> replan() async {
+    final j = journey;
+    if (j == null || busy) return;
+    busy = true;
+    notifyListeners();
+    try {
+      final r = j.ride;
+      final stops = j.stops;
+      // Where the passenger can actually get off: the next stop the train still reaches (the
+      // one the sheet calls "Nächster Halt"), else the last one it passed. Never the exit
+      // stop by default — on a direct journey that is the destination itself.
+      final here = stops.isEmpty || r == null
+          ? null
+          : stops[(r.passedStops + fromIndex(stops, r.fromStationId, r.fromStationName)).clamp(0, stops.length - 1)];
+      await session.repo.replanJourney(
+        j.journey.id,
+        fromStationId: here?.stationId ?? r?.fromStationId,
+        fromStationName: here?.name ?? r?.fromStationName,
+      );
+      await refresh(quiet: true);
     } finally {
       busy = false;
       notifyListeners();

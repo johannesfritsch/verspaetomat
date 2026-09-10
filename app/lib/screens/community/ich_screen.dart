@@ -55,7 +55,8 @@ class IchScreen extends StatelessWidget {
         final year = DateTime.now().year;
         final thisYear = arrived.where((r) => r.date.year == year).toList();
         final minutesThisYear = thisYear.fold(0, (s, r) => s + (r.finalDelayMinutes ?? 0));
-        final recent = rides.where((r) => DateTime.now().difference(r.date).inDays <= 14).length;
+        // An abandoned ride was not a trip: neither "aufgegeben" nor "nicht gefahren" counts (docs/21 §3).
+        final recent = rides.where((r) => r.status != ApiRideStatus.abandoned && DateTime.now().difference(r.date).inDays <= 14).length;
         final earned = data.badges.where((b) => b.earned).length;
         final name = displayName(me) ?? 'Fahrgast';
         final lvl = data.standing.level;

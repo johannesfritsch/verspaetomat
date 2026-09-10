@@ -16,6 +16,16 @@ import '../../widgets/kit.dart';
 // ---------------------------------------------------------------------------
 
 /// "09:38" in local time, or "–" when unknown.
+/// A span of minutes for prose. Long ones read as hours, because a four-digit minute
+/// figure looks like a bug even when it is true: "120" → "2 Stunden", "135" → "2 Stunden
+/// 15 Minuten". Spelled out, so it can end a sentence without a doubled full stop.
+String fmtMinutes(int m) {
+  if (m < 120) return '$m ${m == 1 ? 'Minute' : 'Minuten'}';
+  final h = m ~/ 60, rest = m % 60;
+  final hours = '$h ${h == 1 ? 'Stunde' : 'Stunden'}';
+  return rest == 0 ? hours : '$hours $rest ${rest == 1 ? 'Minute' : 'Minuten'}';
+}
+
 String fmtLocal(DateTime? d) => d == null ? '–' : fmtTime(TimeOfDay.fromDateTime(d.toLocal()));
 
 /// "Di 09.09." for a date.

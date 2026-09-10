@@ -44,7 +44,7 @@ pub async fn run_once(s: &AppState) -> anyhow::Result<Value> {
 /// (b) Open incidents past their deadline become `verfallen`, for every customer that has one.
 /// `rules::refresh_statuses` does the transition and the audit per customer.
 async fn expire(s: &AppState, today: NaiveDate) -> anyhow::Result<usize> {
-    let customers: Vec<Uuid> = sqlx::query_scalar("select distinct customer_id from incidents where status in ('gesammelt','bereit') and legal_deadline < $1").bind(today).fetch_all(&s.pool).await?;
+    let customers: Vec<Uuid> = sqlx::query_scalar("select distinct customer_id from incidents where status in ('gesammelt','bereit') and discarded_at is null and legal_deadline < $1").bind(today).fetch_all(&s.pool).await?;
     let mut n = 0;
     for customer in customers {
         let rows = rules::refresh_statuses(&s.pool, customer, today).await?;
@@ -59,7 +59,7 @@ async fn expire(s: &AppState, today: NaiveDate) -> anyhow::Result<usize> {
 async fn warn(s: &AppState, today: NaiveDate) -> anyhow::Result<usize> {
     let due: Vec<(Uuid, Uuid, NaiveDate)> = sqlx::query_as(
         "update incidents set warned_at = now()
-         where status in ('gesammelt','bereit') and warned_at is null and legal_deadline >= $1 and legal_deadline - $2::int <= $1
+         where status in ('gesammelt','bereit') and discarded_at is null and warned_at is null and legal_deadline >= $1 and legal_deadline - $2::int <= $1
          returning id, customer_id, legal_deadline",
     )
     .bind(today)

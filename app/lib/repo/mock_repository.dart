@@ -229,7 +229,9 @@ class MockRepository implements AppRepository {
     if (j.phase == JourneyPhase.transfer) {
       final planned = j.next;
       if (j.proposal != null) {
-        next = _leg(j.proposal!, j.current.exit.name, planned?.exit.name ?? j.destination, legNo: j.currentLeg + 1, replanned: true, reason: j.current.cancelled ? 'ausfall' : 'verpasst');
+        // A Weiterfahrt the passenger asked for is not a missed connection: no red marker.
+        next = _leg(j.proposal!, j.current.exit.name, planned?.exit.name ?? j.destination,
+            legNo: j.currentLeg + 1, replanned: !j.replanned, reason: j.replanned ? null : (j.current.cancelled ? 'ausfall' : 'verpasst'));
       } else if (planned != null) {
         next = _leg(planned.departure, planned.from, planned.exit.name, legNo: j.currentLeg + 1);
       }
@@ -258,7 +260,11 @@ class MockRepository implements AppRepository {
       legs: legs,
       nextLeg: next,
       transferStationName: j.phase == JourneyPhase.transfer ? j.current.exit.name : null,
-      transferDeadline: j.phase == JourneyPhase.transfer ? _at(j.current.exit.planned).add(const Duration(hours: 2)) : null,
+      transferDeadline: j.phase == JourneyPhase.transfer ? _at(j.current.exit.planned).add(Duration(hours: j.replanned ? 6 : 2)) : null,
+      endReason: j.endReason,
+      replanned: j.replanned,
+      transferReason: j.phase == JourneyPhase.transfer ? (j.replanned ? 'weiterfahrt' : 'umstieg') : null,
+      earliestOnwardArrival: j.earliestOnwardArrival == null ? null : _at(j.earliestOnwardArrival!),
       createdAt: j.startedAt.toUtc(),
       finalisedAt: j.phase == JourneyPhase.arrived ? DateTime.now().toUtc() : null,
     );
@@ -291,11 +297,18 @@ class MockRepository implements AppRepository {
   }
 
   @override
-  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived}) async {
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) async {
     final j = state.journey;
     if (j == null) throw StateError('no journey');
-    state.finishJourney(arrived: arrived);
+    state.finishJourney(arrived: arrived, reason: reason);
     return _journey(j);
+  }
+
+  @override
+  Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName}) async {
+    if (state.journey == null) throw StateError('no journey');
+    state.replanJourney(at: fromStationName);
+    return (await currentJourney())!;
   }
 
   @override
@@ -375,7 +388,7 @@ class MockRepository implements AppRepository {
         date: r.date,
       );
 
-  static ApiIncident _incident(Incident i) => ApiIncident(
+  static ApiIncident _incident(Incident i, {DateTime? discardedAt, String? discardReason}) => ApiIncident(
         id: i.id,
         date: i.date,
         line: i.line,
@@ -393,6 +406,8 @@ class MockRepository implements AppRepository {
         claimId: i.bundleId,
         fareCents: i.fare == null ? null : _cents(i.fare!),
         legalDeadline: i.legalDeadline,
+        discardedAt: discardedAt,
+        discardReason: discardReason,
         evidence: i.plannedArrival == null
             ? null
             : ApiEvidence(
@@ -667,7 +682,10 @@ class MockRepository implements AppRepository {
     }).toList();
     final oldest = state.oldestOpen;
     return ApiIncidents(
-      incidents: state.incidents.map(_incident).toList(),
+      incidents: state.incidents.map((i) {
+        final reason = state.discardedIncidents[i.id];
+        return _incident(i, discardedAt: reason == null ? null : i.date, discardReason: reason);
+      }).toList(),
       summary: ApiIncidentSummary(
         desks: desks,
         readyDesk: state.readyDesk,
@@ -677,6 +695,15 @@ class MockRepository implements AppRepository {
       ),
     );
   }
+
+  @override
+  Future<bool> discardIncident(String id, String reason) async {
+    state.discardIncident(id, reason);
+    return state.readyDesk == null;
+  }
+
+  @override
+  Future<void> restoreIncident(String id) async => state.restoreIncident(id);
 
   @override
   Future<List<ApiClaim>> claims() async {

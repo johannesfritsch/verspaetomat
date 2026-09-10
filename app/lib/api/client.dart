@@ -198,14 +198,29 @@ class ApiClient {
   Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) async =>
       ApiJourneyLive.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/legs', {'trip_id': tripId})));
 
-  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived}) async =>
-      ApiJourney.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/finish', {'arrived': arrived})));
+  /// "Ich bin da" (arrived) or the abort with its reason (docs/21 §1).
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) async => ApiJourney.fromJson(
+      _map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/finish', {'arrived': arrived, if (reason != null) 'reason': reason})));
+
+  /// "Ich fahre später weiter" (docs/21 §2): the leg ends, the journey waits for the next train.
+  Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName}) async =>
+      ApiJourneyLive.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/replan', {
+        if (fromStationId != null) 'from_station_id': fromStationId,
+        if (fromStationName != null) 'from_station_name': fromStationName,
+      })));
 
   Future<List<ApiJourney>> journeys() async => _list(await _get('/v1/journeys')).map(ApiJourney.fromJson).toList();
 
   // -- ledger and claims ----------------------------------------------------
 
   Future<ApiIncidents> incidents() async => ApiIncidents.fromJson(_map(await _get('/v1/incidents')));
+
+  /// Takes one case out of every open bundle (docs/21 §4). True when the draft claim it sat
+  /// in fell below the 4 € minimum and was dropped.
+  Future<bool> discardIncident(String id, String reason) async =>
+      _map(await _post('/v1/incidents/${Uri.encodeComponent(id)}/discard', {'reason': reason}))['claim_deleted'] == true;
+
+  Future<void> restoreIncident(String id) async => await _post('/v1/incidents/${Uri.encodeComponent(id)}/restore');
 
   Future<List<ApiClaim>> claims() async => _list(await _get('/v1/claims')).map(ApiClaim.fromJson).toList();
 

@@ -246,7 +246,6 @@ class BadgeIcon extends StatelessWidget {
     'bestaetigt': 'bestaetigt',
     'deutschland': 'deutschlandreise',
     'stammgleis': 'stammgleis',
-    'geduld': 'geduld-ist-eine-tugend',
   };
 
   static String? assetFor(String id, {required bool earned}) {

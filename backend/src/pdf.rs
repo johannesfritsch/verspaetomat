@@ -23,6 +23,11 @@ fn engine() -> &'static TypstEngine<typst_as_lib::TypstTemplateMainFile> {
     })
 }
 
+/// An ISO timestamp out of the stored evidence, if it is one.
+fn dt(v: Option<&serde_json::Value>) -> Option<DateTime<Utc>> {
+    v.and_then(|v| v.as_str()).and_then(|s| s.parse::<DateTime<Utc>>().ok())
+}
+
 pub struct ClaimDocument<'a> {
     pub claim: &'a ClaimRow,
     pub incidents: &'a [IncidentRow],
@@ -111,6 +116,26 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
     let mut notes = String::new();
     if c.ticket == TicketType::Deutschlandticket {
         notes.push_str("Deutschlandticket: Entschädigung 1,50 € je Fall ab 60 Minuten Verspätung, Auszahlung ab 4,00 € (Art. 19 VO (EU) 2021/782, § 8 EVO). ");
+    }
+    // docs/21 §2: where a journey was interrupted we claim only the railway's share. The form
+    // still carries the true arrival; this line says what was left out and why. Never a false time.
+    for i in doc.incidents {
+        let Some(j) = i.evidence.as_ref().and_then(|e| e.get("journey")) else { continue };
+        let (Some(actual), Some(counted)) = (dt(j.get("actual_arrival")), dt(j.get("counted_arrival"))) else { continue };
+        if counted >= actual {
+            continue;
+        }
+        let where_ = match j.get("interrupted_at").and_then(|v| v.as_str()) {
+            Some(st) if !st.is_empty() => format!("in {st}"),
+            _ => "unterwegs".to_string(),
+        };
+        let planned = dt(j.get("planned_arrival"));
+        let claimed = planned.map(|p| (counted - p).num_minutes().max(0)).unwrap_or(i.delay_min as i64);
+        notes.push_str(&format!(
+            "Fahrt {where_} unterbrochen. Tatsächliche Ankunft {}, frühestmögliche Ankunft bei sofortiger Weiterfahrt {}. Geltend gemacht wird nur die dadurch entstandene Verspätung von {claimed} Minuten. ",
+            berlin(actual).format("%d.%m.%Y %H:%M"),
+            berlin(counted).format("%d.%m.%Y %H:%M"),
+        ));
     }
     if let Some(n) = claim.signed_by.as_deref() {
         if doc.signature_png.is_none() && !n.is_empty() {
@@ -246,7 +271,37 @@ mod tests {
             evidence: Some(json!({ "planned_arrival": "2026-09-01T10:00:00Z", "actual_arrival": "2026-09-01T11:08:00Z" })),
             created_at: Utc::now(),
             journey_id: None,
+            discarded_at: None,
+            discard_reason: None,
         };
+        // docs/21 §2: an interrupted journey prints the true arrival plus the line saying only
+        // the railway's share is claimed. The passenger's own pause is named, never hidden.
+        let mut interrupted = incident(1, 68);
+        interrupted.evidence = Some(json!({
+            "journey": {
+                "planned_arrival": "2026-09-01T10:00:00Z",
+                "actual_arrival": "2026-09-01T13:00:00Z",
+                "counted_arrival": "2026-09-01T11:10:00Z",
+                "earliest_onward_arrival": "2026-09-01T11:10:00Z",
+                "interrupted_at": "Hagen Hbf",
+            }
+        }));
+        let notes = claim_inputs(&ClaimDocument { claim: &claim, incidents: &[interrupted], customer: &customer, signature_png: None })["notes"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(notes.contains("Fahrt in Hagen Hbf unterbrochen"), "the form names where the journey broke: {notes}");
+        // The form prints Berlin local time, as a German form must (13:00 UTC = 15:00).
+        assert!(notes.contains("01.09.2026 15:00"), "the true arrival stays on the form: {notes}");
+        assert!(notes.contains("01.09.2026 13:10"), "the earliest onward arrival is named: {notes}");
+        assert!(notes.contains("70 Minuten"), "only the railway's 70 minutes are claimed: {notes}");
+        // A journey that ran through says nothing of the sort.
+        let plain = claim_inputs(&ClaimDocument { claim: &claim, incidents: &[incident(1, 68)], customer: &customer, signature_png: None })["notes"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(!plain.contains("unterbrochen"), "an uninterrupted journey gets no such line: {plain}");
+
         let incidents = vec![incident(1, 68), incident(3, 75), incident(5, 130)];
         let pdf = render(&ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png: None }).expect("render");
         assert!(pdf.starts_with(b"%PDF"));

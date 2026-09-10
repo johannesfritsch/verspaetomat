@@ -106,7 +106,10 @@ class HttpRepository implements AppRepository {
   @override
   Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) => client.confirmLeg(journeyId, tripId);
   @override
-  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived}) => client.finishJourney(journeyId, arrived: arrived);
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) => client.finishJourney(journeyId, arrived: arrived, reason: reason);
+  @override
+  Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName}) =>
+      client.replanJourney(journeyId, fromStationId: fromStationId, fromStationName: fromStationName);
   @override
   Future<List<ApiJourney>> journeys() async {
     try {
@@ -119,6 +122,10 @@ class HttpRepository implements AppRepository {
 
   @override
   Future<ApiIncidents> incidents() => client.incidents();
+  @override
+  Future<bool> discardIncident(String id, String reason) => client.discardIncident(id, reason);
+  @override
+  Future<void> restoreIncident(String id) => client.restoreIncident(id);
   @override
   Future<List<ApiClaim>> claims() => client.claims();
   @override

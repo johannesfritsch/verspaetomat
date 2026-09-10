@@ -55,6 +55,19 @@ Ten thousand active D-Ticket users move a low five-figure sum per year, much of 
 
 Context: DB received 6.9 million passenger-rights claims in 2024 and paid out 196.8 million €. Only about 6 % of eligible passengers claim at all.
 
+## Giving up mid-journey (researched 11 September 2026)
+
+Johannes asked whether abandoning a badly delayed journey earns compensation. It does not, but a different right applies.
+
+- **Art. 18(1) VO (EU) 2021/782**: from an *expected* delay of 60 minutes at the destination the passenger chooses between (a) the full fare back, plus a ride back to the start when the journey has lost its point, (b) re-routing at the earliest opportunity, (c) re-routing later at a time of their own choosing. The Eisenbahn-Bundesamt puts it as: *"Zeichnet sich eine Verspätung von mindestens 60 Minuten ab, kann der Fahrgast auch von einer Fahrt absehen und Rückerstattung des Fahrpreises verlangen oder die Fahrt zu einem späteren Zeitpunkt auch mit geänderter Streckenführung durchführen."*
+- **Art. 19(1)**: compensation is owed only for a delay *"für die keine Fahrpreiserstattung nach Artikel 18 erfolgt ist"*. Refund and compensation are alternatives.
+- The compensation is measured **at the destination**. DB's Deutschland-Ticket FAQ: *"Erreichen Sie Ihr Ziel im Nahverkehr … mit mindestens 60 Minuten Verzögerung"*. Someone who never arrives has no arrival delay.
+- So: **Einzelfahrkarte** — abandoning is worth the whole fare, usually more than the 25 %. **Deutschlandticket or another Zeitkarte** — no single fare exists to refund, so abandoning is worth nothing.
+- **But options (b) and (c) keep the compensation right alive.** Taking the next train onward still produces an arrival late against the *original* plan, and that is an ordinary 1,50 € case. Hence "Ich fahre weiter" is the first option in the abort sheet (docs/21).
+- **A self-chosen break does not count, though.** Compensation is for the delay the railway caused. The carriers' conditions allow the "later time of your own choosing" option *"wenn dem Fahrgast dadurch die zügige Weiterreise erleichtert wird"* — it exists to let you travel faster, not to pause. So the app measures against the **earliest onward connection** at the moment of the interruption: `counted = min(tatsächliche Ankunft, früheste mögliche Ankunft)`. The form still prints the true arrival and adds a line saying only the railway-caused part is claimed. Under-claiming with a reason is safe; overstating a time is not (docs/21 §2).
+
+Sources: [Art. 19 VO (EU) 2021/782](https://www.buzer.de/19_Fahrgastrechte-VO.htm), [Art. 18](https://www.buzer.de/18_Fahrgastrechte-VO.htm), [EBA Beispiele und Ausnahmen](https://www.eba.bund.de/DE/Themen/Fahrgastrechte/Bahn/Beispiele_Ausnahmen/beispiele_ausnahmen_node.html), [DB Deutschland-Ticket Fahrgastrechte](https://www.bahn.de/faq/pk/angebot/regionale-angebote/deutschland-ticket/fahrgastrechte), [DB Erstattung](https://www.bahn.de/faq/deutschlandticket-verspaetung-erstattung).
+
 ## Legislative outlook
 
 No German plan to cut regional-rail compensation was found for 2024 to 2026. A May 2026 European Commission draft revision strengthens rights (multi-ticket journeys). D-Ticket funding by Bund and Länder is secured until 2030; from 2027 the price follows a cost index.

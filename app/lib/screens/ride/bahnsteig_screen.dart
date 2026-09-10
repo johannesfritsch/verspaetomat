@@ -344,7 +344,8 @@ class _RideCard extends StatelessWidget {
     final headsign = stops.isEmpty ? r.exitStationName : stops.last.name;
     final nextIdx = (r.passedStops + fromIndex(stops, r.fromStationId, r.fromStationName)).clamp(0, stops.isEmpty ? 0 : stops.length - 1);
     final next = stops.isEmpty ? null : stops[nextIdx];
-    final delay = r.liveDelayMinutes;
+    // Capped at what the railway caused when the journey was interrupted (docs/21 §2).
+    final delay = j?.cappedDelay(r.liveDelayMinutes) ?? r.liveDelayMinutes;
     final dest = j?.destinationStationName ?? r.exitStationName;
     final destAt = j?.plannedArrival ?? r.plannedArrival;
     return Column(
