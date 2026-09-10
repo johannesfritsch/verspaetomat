@@ -121,9 +121,12 @@ pub fn compose(kind: &str, payload: &Value, facts: &Facts) -> Option<Notificatio
                 Some("question") => "Rückfrage zum Antrag. Antworten kannst du in der App.".to_string(),
                 Some("rejected") => "Antrag abgelehnt. Die Begründung steht in der App.".to_string(),
                 Some("bounce") => "Die Mail kam zurück. Bitte in der App prüfen.".to_string(),
-                _ => "Neue Nachricht zu deinem Antrag.".to_string(),
+                _ if c.is_some() => "Neue Nachricht zu deinem Antrag.".to_string(),
+                // No claim behind it: not the railway, just mail to the relay address.
+                _ => "Eine Nachricht an deine Verspätomat-Adresse. Du findest sie in der App.".to_string(),
             };
-            Some(Notification { title: "Post von der Bahn".to_string(), body, kind: "mail", data: json!({ "claim_id": s("claim_id") }) })
+            let title = if c.is_some() { "Post von der Bahn" } else { "Neue Post" };
+            Some(Notification { title: title.to_string(), body, kind: "mail", data: json!({ "claim_id": s("claim_id") }) })
         }
         "incident" if b("warning") => {
             let i = facts.incident.as_ref()?;
