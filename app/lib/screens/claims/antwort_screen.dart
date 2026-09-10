@@ -135,11 +135,11 @@ class _AntwortScreenState extends State<AntwortScreen> {
   String _senderName(String from) {
     final lt = from.indexOf('<');
     final name = lt > 0 ? from.substring(0, lt).trim() : from;
-    return name.contains('deutschebahn') || name.toLowerCase().contains('servicecenter') ? deskDisplay('Servicecenter Fahrgastrechte') : name;
+    return name.contains('deutschebahn') || name.toLowerCase().contains('servicecenter') ? 'Servicecenter Fahrgastrechte' : name;
   }
 
   String _recipientName(String to) {
-    if (to.contains('deutschebahn')) return deskDisplay('Servicecenter Fahrgastrechte');
+    if (to.contains('deutschebahn')) return 'Servicecenter';
     return to.split('@').first;
   }
 }

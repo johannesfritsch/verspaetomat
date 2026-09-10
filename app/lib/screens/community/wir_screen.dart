@@ -101,7 +101,7 @@ class _WirScreenState extends State<WirScreen> {
               const VRule.red(),
               const VGap.m(),
               Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: BigFigure(
@@ -120,7 +120,6 @@ class _WirScreenState extends State<WirScreen> {
                     child: BigFigure(
                       value: fmtEuroWhole(c.confirmedCents / 100),
                       label: 'Bestätigt',
-                      style: VText.number.copyWith(fontSize: 40, letterSpacing: -1.2),
                       onTap: () => showSourceSheet(
                         context,
                         title: 'Bestätigte Euro',

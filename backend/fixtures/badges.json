@@ -1,6 +1,6 @@
 [
   {"id": "erste", "name": "Erste Verspätung", "rule": "Erste verspätete Fahrt", "earned_on": "2025-05-14"},
-  {"id": "sev", "name": "Schienenersatzverkehr", "rule": "In einen Ersatzbus eingecheckt", "earned_on": "2026-09-02"},
+  {"id": "sev", "name": "Schienen\u00adersatzverkehr", "rule": "In einen Ersatzbus eingecheckt", "earned_on": "2026-09-02"},
   {"id": "stellwerk", "name": "Stellwerksstörung", "rule": "Verspätung mit dieser Ursache", "earned_on": "2026-09-09"},
   {"id": "gleis", "name": "Personen im Gleis", "rule": "Verspätung mit dieser Ursache"},
   {"id": "gegenzug", "name": "Gegenzug abgewartet", "rule": "Unter 10 Minuten, am Ziel wieder pünktlich", "earned_on": "2026-06-11"},

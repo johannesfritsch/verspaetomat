@@ -234,18 +234,38 @@ class BadgeTile extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              badge.name,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: VText.captionInk.copyWith(color: earned ? VColors.ink : VColors.ink3, fontWeight: earned ? FontWeight.w600 : FontWeight.w500),
+            SizedBox(
+              height: 36,
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  final style = VText.captionInk.copyWith(color: earned ? VColors.ink : VColors.ink3, fontWeight: earned ? FontWeight.w600 : FontWeight.w500);
+                  return Text(
+                    hyphenateToFit(badge.name, style, c.maxWidth),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: style,
+                  );
+                },
+              ),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+/// Flutter breaks at a soft hyphen (U+00AD) but draws no hyphen. When a name
+/// does not fit on one line, the first soft hyphen becomes "-" + line break;
+/// otherwise the soft hyphens are dropped.
+String hyphenateToFit(String name, TextStyle style, double maxWidth) {
+  if (!name.contains('\u00AD')) return name;
+  final plain = name.replaceAll('\u00AD', '');
+  final painter = TextPainter(text: TextSpan(text: plain, style: style), textDirection: TextDirection.ltr, maxLines: 1)..layout(maxWidth: double.infinity);
+  if (painter.width <= maxWidth) return plain;
+  final at = name.indexOf('\u00AD');
+  return '${name.substring(0, at)}-\n${name.substring(at + 1).replaceAll('\u00AD', '')}';
 }
 
 /// Settings row with a switch on the right.

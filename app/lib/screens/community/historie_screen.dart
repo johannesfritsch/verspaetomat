@@ -33,7 +33,7 @@ class _HistorieScreenState extends State<HistorieScreen> {
 
         return VScreen(
           title: 'Alle Fahrten',
-          eyebrow: 'HISTORIE',
+          eyebrow: 'Historie',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

@@ -159,6 +159,19 @@ class LineBadge extends StatelessWidget {
   }
 }
 
+/// A fixed-width slot for a [LineBadge] in list rows, so the destination column
+/// starts at the same x for "S 6" and "ICE 512" alike.
+class LineBadgeColumn extends StatelessWidget {
+  const LineBadgeColumn({super.key, required this.child});
+  final Widget child;
+  static const width = 76.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(width: width, child: Align(alignment: Alignment.centerLeft, child: child));
+  }
+}
+
 /// One departure in board style: line, destination, planned time, platform, delay.
 class DepartureRow extends StatelessWidget {
   const DepartureRow({super.key, required this.departure, required this.onTap});
@@ -190,8 +203,7 @@ class DepartureRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                LineBadge(d.line, cancelled: d.cancelled),
-                const SizedBox(width: 12),
+                LineBadgeColumn(child: LineBadge(d.line, cancelled: d.cancelled)),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

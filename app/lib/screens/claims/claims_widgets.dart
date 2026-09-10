@@ -129,10 +129,13 @@ class LoadError extends StatelessWidget {
 /// One incident in the ledger: date, line, route on the left; delay,
 /// amount and status on the right. Hairline below.
 class IncidentRow extends StatelessWidget {
-  const IncidentRow({super.key, required this.incident, this.onTap, this.leading, this.note});
+  const IncidentRow({super.key, required this.incident, this.onTap, this.leading, this.note, this.showStatus = false});
   final ApiIncident incident;
   final VoidCallback? onTap;
   final Widget? leading;
+
+  /// Show the status chip. Off by default: sections already carry the status in their label.
+  final bool showStatus;
 
   /// A caption under the route, e.g. "Abgeschickt 15.08. · Antwort in etwa 4 Wochen".
   final String? note;
@@ -184,8 +187,10 @@ class IncidentRow extends StatelessWidget {
                     VDelay(i.delayMinutes, size: VDelaySize.small),
                     const SizedBox(height: 2),
                     Text(fmtCents(i.amountCents), style: VText.captionInk.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
-                    const SizedBox(height: 4),
-                    VChip(i.status.label, tone: toneFor(i.status)),
+                    if (showStatus) ...[
+                      const SizedBox(height: 4),
+                      VChip(i.status.label, tone: toneFor(i.status)),
+                    ],
                   ],
                 ),
               ],

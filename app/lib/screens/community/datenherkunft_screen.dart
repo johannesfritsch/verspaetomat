@@ -46,7 +46,7 @@ class DatenherkunftScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return VScreen(
       title: 'Woher kommen die Daten?',
-      eyebrow: 'JEDE ZAHL UND IHRE QUELLE',
+      eyebrow: 'Jede Zahl und ihre Quelle',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

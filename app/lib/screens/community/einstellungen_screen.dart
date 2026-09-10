@@ -41,7 +41,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
 
     return VScreen(
       title: 'Einstellungen',
-      eyebrow: 'UND DATENSCHUTZ',
+      eyebrow: 'Dein Verspätomat',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

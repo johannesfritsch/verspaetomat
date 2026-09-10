@@ -125,7 +125,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
 
     return VScreen(
       eyebrow: 'Nachtrag',
-      title: 'Gestern vergessen einzuchecken?',
+      title: 'Gestern vergessen?',
       bottom: VPrimaryButton(label: _sending ? 'Wird nachgetragen …' : 'Nachtragen', onTap: canSubmit ? _submit : null),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -177,8 +177,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
                       children: [
                         SizedBox(width: 52, child: Text(fmtLocal(d.scheduledDeparture), style: VText.mono)),
                         const SizedBox(width: 10),
-                        LineBadge(d.line),
-                        const SizedBox(width: 12),
+                        LineBadgeColumn(child: LineBadge(d.line)),
                         Expanded(child: Text(d.destination, style: VText.bodyStrong, maxLines: 1, overflow: TextOverflow.ellipsis)),
                         Container(
                           width: 22,

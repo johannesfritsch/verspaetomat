@@ -37,8 +37,9 @@ class VScreen extends StatelessWidget {
     final canPop = Navigator.of(context).canPop();
     final header = (title != null || eyebrow != null || (showBack && canPop))
         ? Padding(
-            padding: const EdgeInsets.fromLTRB(VSpace.m, VSpace.s, VSpace.m, 0),
+            padding: const EdgeInsets.fromLTRB(VSpace.m, VSpace.m, VSpace.m, 0),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 if (showBack && canPop)
                   VIconButton(icon: Icons.arrow_back, onTap: () => Navigator.of(context).maybePop())
@@ -49,8 +50,8 @@ class VScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (eyebrow != null) Text(eyebrow!, style: VText.eyebrow),
-                      if (title != null) Text(title!, style: VText.title),
+                      if (eyebrow != null) Text(eyebrow!, style: VText.caption),
+                      if (title != null) Text(title!, style: VText.h2, maxLines: 2, overflow: TextOverflow.ellipsis),
                     ],
                   ),
                 ),

@@ -9,6 +9,7 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../community/community_widgets.dart' show TabHeader;
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
 
@@ -102,12 +103,6 @@ class _KontoScreenState extends State<KontoScreen> {
 
         return VScreen(
           showBack: false,
-          eyebrow: 'Deine Ansprüche',
-          title: 'Konto',
-          trailing: Padding(
-            padding: const EdgeInsets.only(right: VSpace.s),
-            child: VIconButton(icon: Icons.refresh, onTap: refresh, color: VColors.ink2),
-          ),
           bottom: readyDesk == null
               ? null
               : VPrimaryButton(
@@ -118,6 +113,12 @@ class _KontoScreenState extends State<KontoScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              TabHeader(
+                title: 'Konto',
+                caption: 'Deine Ansprüche',
+                trailing: VIconButton(icon: Icons.refresh, onTap: refresh, color: VColors.ink2),
+              ),
+              const VGap.l(),
               _Header(summary: summary, ngoName: ngoName),
               if (summary.oldestOpen != null) ...[
                 const VGap.m(),
@@ -168,7 +169,7 @@ class _KontoScreenState extends State<KontoScreen> {
               if (closed.isNotEmpty) ...[
                 const VGap.xl(),
                 const VSection('Abgeschlossen'),
-                for (final i in closed) IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i)),
+                for (final i in closed) IncidentRow(incident: i, showStatus: true, onTap: () => showEvidenceSheet(context, i)),
                 const VGap.s(),
                 Text(
                   'Verfallen heißt: die Frist ist um, bevor 4 € zusammenkamen. Die Minuten und Punkte bleiben.',

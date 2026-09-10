@@ -274,6 +274,8 @@ void main() {
       // Step 4: sign.
       await pumpUntilFound(tester, find.byType(SignaturePad), timeout: const Duration(seconds: 20));
       final pad = find.byType(SignaturePad);
+      await tester.ensureVisible(pad);
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.drag(pad, const Offset(120, 30));
       await tester.pump(const Duration(milliseconds: 200));
       await tester.drag(pad, const Offset(-60, 40));
@@ -290,7 +292,8 @@ void main() {
       await tapText(tester, 'Zurück zum Konto');
 
       // 4. eingereicht → the railway answers (Stellwerk) → bestätigt → Wir.
-      await pumpUntilFound(tester, find.text('eingereicht'), timeout: const Duration(seconds: 40));
+      // Rows no longer carry a status chip; the section label does (uppercased by VSection).
+      await pumpUntilFound(tester, find.text('EINGEREICHT'), timeout: const Duration(seconds: 40));
       expect(find.textContaining('Demo:'), findsNothing);
       await sw.reply(customer!, 'accepted');
 
@@ -301,7 +304,7 @@ void main() {
         await tapIcon(tester, Icons.groups_outlined);
         await tapIcon(tester, Icons.receipt_long_outlined);
       }
-      await pumpUntilFound(tester, find.text('bestätigt'), timeout: const Duration(seconds: 40));
+      await pumpUntilFound(tester, find.text('BESTÄTIGT'), timeout: const Duration(seconds: 40));
 
       await tapIcon(tester, Icons.groups_outlined);
       await pumpUntilFound(tester, find.text('Bestätigt'), timeout: const Duration(seconds: 40));

@@ -57,14 +57,13 @@ class ZweckScreen extends StatelessWidget {
                   border: Border.all(color: VColors.rule),
                   borderRadius: BorderRadius.circular(4),
                 ),
+                clipBehavior: Clip.antiAlias,
                 child: Stack(
                   children: [
-                    Positioned(
-                      left: 20,
-                      bottom: -20,
+                    Center(
                       child: Text(ngo.name.isNotEmpty ? ngo.name.substring(0, 1) : '?', style: VText.display.copyWith(color: VColors.ruleSoft)),
                     ),
-                    Positioned(right: 16, top: 16, child: Text('Bild folgt', style: VText.caption)),
+                    Positioned(right: 12, bottom: 10, child: Text('Bild folgt', style: VText.caption.copyWith(color: VColors.ink3))),
                   ],
                 ),
               ),

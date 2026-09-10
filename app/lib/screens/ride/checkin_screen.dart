@@ -96,6 +96,8 @@ class _CheckinScreenState extends State<CheckinScreen> {
     return VScreen(
       scroll: false,
       padding: EdgeInsets.zero,
+      eyebrow: 'Einchecken',
+      title: name,
       bottom: InkWell(
         onTap: () => showTicketSheet(context),
         child: Padding(
@@ -118,8 +120,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name, style: VText.h1, maxLines: 2, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
+                const SizedBox(height: VSpace.s),
                 Row(
                   children: [
                     Text('${fmtLocal(DateTime.now())} Uhr', style: VText.caption),

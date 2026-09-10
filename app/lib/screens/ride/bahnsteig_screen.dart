@@ -198,15 +198,15 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: VSpace.m),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('${me?.pointsThisWeek ?? 0}', style: VText.number),
+                          Text('${me?.pointsThisWeek ?? 0}', style: VText.numberM),
                           const SizedBox(height: 4),
-                          Text('Geduldspunkte diese Woche', style: VText.caption),
+                          Text('Punkte diese Woche', style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
                         ],
                       ),
                     ),
@@ -217,8 +217,10 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                           Text(fmtEuro(openCents / 100), style: VText.numberM),
                           const SizedBox(height: 4),
                           Text(
-                            ready ? '${open.length} Verspätungen · Bündel bereit' : '${open.length} Verspätungen gesammelt',
+                            ready ? '${open.length} Verspätungen · bereit' : '${open.length} Verspätungen gesammelt',
                             style: VText.caption,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ),

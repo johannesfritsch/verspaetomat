@@ -84,7 +84,7 @@ class IchScreen extends StatelessWidget {
               const VRule.red(),
               const VGap.m(),
               Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(child: BigFigure(value: '+${me.pointsThisWeek}', label: 'Diese Woche')),
                   Expanded(child: BigFigure(value: '$recent', label: 'Fahrten, letzte 14 Tage')),
