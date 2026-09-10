@@ -41,7 +41,7 @@ Only an organisation in the Zuwendungsempfängerregister can issue a Zuwendungsb
 
 ## NGO consent
 
-Listing an NGO's IBAN as payee needs written agreement, ideally with a dedicated account per NGO so incoming railway transfers can be reconciled and reported back. The NGO must expect many small transfers with no useful reference.
+Legally, naming a payee on the claim form needs nobody's agreement: a published donation IBAN accepts money from strangers by design. Decided 10 September 2026 (Johannes): an NGO is listed once its IBAN is found on its own website; `consent_date` records the day of the lookup and `donation_url` the page it came from. A written agreement is the upgrade for scale, when three things start to matter: use of the NGO's name and story in the app, the monthly statement that confirms silently paid claims, and donation receipts, for which the NGO would need the donor's identity, which we do not share. Whatever the arrangement, the NGO must expect many small transfers from the railway with a claim reference and no donor name.
 
 ## Sammlungsgesetze
 
