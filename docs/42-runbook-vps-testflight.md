@@ -136,13 +136,13 @@ ssh root@api.verspaetomat.de 'cd /opt/verspaetomat/deploy && docker compose exec
 
 ## Part B — iOS build into TestFlight
 
-Facts already in the project: bundle id `de.verspaetomat.verspaetomat`, team `VYWFP7DKTG`, automatic signing, version `1.0.0+1` in `app/pubspec.yaml`, display name "Verspätomat", app icon (Bahnhofsuhr) in all sizes, privacy manifest, `ITSAppUsesNonExemptEncryption = false` (no export-compliance question per build), Always-location and background-location strings, `UIBackgroundModes = location`.
+Facts already in the project: bundle id `de.verspaetomat.verspaetomat`, team `PNC6S4SMVN`, automatic signing, version `1.0.0+1` in `app/pubspec.yaml`, display name "Verspätomat", app icon (Bahnhofsuhr) in all sizes, privacy manifest, `ITSAppUsesNonExemptEncryption = false` (no export-compliance question per build), Always-location and background-location strings, `UIBackgroundModes = location`.
 
 A release build starts at Willkommen on a fresh install and at the Bahnsteig once onboarding is done, and talks to the real backend by default. The Showcase stays reachable from Einstellungen.
 
 ### B1. Apple accounts **[you]** (once)
 
-1. https://developer.apple.com/programs/enroll → Apple Developer Program, 99 €/year. Team `VYWFP7DKTG` is already in the project, so you may already have this; check at https://developer.apple.com/account under Membership.
+1. https://developer.apple.com/programs/enroll → Apple Developer Program, 99 €/year. Team `PNC6S4SMVN` is already in the project, so you may already have this; check at https://developer.apple.com/account under Membership.
 2. Xcode → Settings → Accounts → your Apple ID is signed in and shows the team.
 
 ### B2. Register the app id and capabilities **[you]** (5 min)
@@ -232,7 +232,7 @@ Uncomment and fill:
 ```
 APNS_KEY_P8=/secrets/AuthKey_XXXXXXXXXX.p8
 APNS_KEY_ID=XXXXXXXXXX
-APNS_TEAM_ID=VYWFP7DKTG
+APNS_TEAM_ID=PNC6S4SMVN
 APNS_TOPIC=de.verspaetomat.verspaetomat
 APNS_SANDBOX=0
 ```
