@@ -101,13 +101,11 @@ If `curl` fails with a certificate error, Caddy is still fetching it: `docker co
 ### A7. Every later update
 
 ```bash
-# on the Mac
-git push
-# on the server
-ssh root@api.verspaetomat.de 'cd /opt/verspaetomat && git pull && cd deploy && docker compose up -d --build api && docker compose logs --tail 30 api'
+git push                                                # on the Mac
+ssh verspaetomat /opt/verspaetomat/deploy/deploy.sh     # pull, rebuild only the API, reload Caddy, show status
 ```
 
-Postgres and Caddy keep running; only the API is rebuilt and restarted. Migrations run on start. Rolling back is `git checkout <commit>` plus the same compose line; migrations are forward-only, so only roll back across commits without new migration files.
+Postgres and Caddy keep running. Migrations run on start. Rolling back is `git checkout <commit>` plus `docker compose up -d --build api`; migrations are forward-only, so only roll back across commits without new migration files.
 
 ### A8. Backups (2 min)
 
@@ -125,12 +123,13 @@ Copy dumps off the machine from time to time (`scp root@api.verspaetomat.de:/var
 
 ### A9. Stellwerk against the server
 
-The admin API is not reachable from the internet (Caddy answers 404 for `/admin/*`). Use it inside the container:
+The admin API is reachable over HTTPS, guarded by the long random `ADMIN_TOKEN`. Once:
 
 ```bash
-ssh root@api.verspaetomat.de 'cd /opt/verspaetomat/deploy && docker compose exec api stellwerk customers'
-ssh root@api.verspaetomat.de 'cd /opt/verspaetomat/deploy && docker compose exec api stellwerk locate Johannes "Köln Hbf"'
+stellwerk config init --ssh verspaetomat     # reads ADMIN_TOKEN over SSH, writes ~/.config/verspaetomat/stellwerk.toml
 ```
+
+Then `stellwerk --prod customers`, `stellwerk --prod locate Johannes "Köln Hbf"`, and so on. `--dev` (the local backend) stays the default.
 
 ---
 
@@ -189,7 +188,9 @@ If it fails with a signing or provisioning message, go back to B2 and build in X
 
 ### B5. Upload (5 min, then 10 to 30 min processing)
 
-Easiest: **Transporter** from the Mac App Store → sign in → drag the `.ipa` in → Deliver.
+Preferred from now on: `app/tools/release.sh` builds, signs, exports and uploads in one go using an App Store Connect API key, with no Apple ID signed in to Xcode. It needs `~/.config/verspaetomat/release.env` (`ASC_KEY_ID`, `ASC_ISSUER_ID`) and the key file under `~/.appstoreconnect/private_keys/`. Build numbers are the commit count, so they only go up.
+
+Manual alternative: **Transporter** from the Mac App Store → sign in → drag the `.ipa` in → Deliver.
 
 Command line alternative, with an app-specific password from https://appleid.apple.com → Sign-In and Security → App-Specific Passwords:
 
@@ -216,7 +217,7 @@ ssh root@api.verspaetomat.de 'cd /opt/verspaetomat/deploy && docker compose exec
 
 Your phone is the row with the newest `last_seen`. Set a nickname in Einstellungen so it stops saying "Fahrgast".
 
-### B7. Push, once the APNs key exists **[you]** (10 min)
+### B7. Push (done 10 September 2026 with key M2SJ43K28U; kept for the next server) **[you]** (10 min)
 
 1. https://developer.apple.com/account/resources/authkeys/list → **+** → name "Verspätomat APNs", tick **Apple Push Notifications service (APNs)** → Continue → Register → **Download** (only possible once; keep the `.p8` safe). Note the **Key ID** on that page and your **Team ID** (top right, or Membership).
 2. Copy the key to the server and switch push on:

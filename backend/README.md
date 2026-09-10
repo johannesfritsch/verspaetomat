@@ -99,6 +99,13 @@ Env: `STELLWERK_URL` (default `http://127.0.0.1:8080`), `ADMIN_TOKEN` (default `
 
 `deploy/` has the Dockerfile (multi-stage, fonts and migrations embedded), a compose file with Postgres 17, the API and Caddy for TLS, `.env.example` with every variable, and a README with the DNS records for the API host and the mail domain (SPF, DKIM, DMARC, MX to Postmark), the inbound webhook, backups and the update procedure.
 
+## Stellwerk targets
+
+`stellwerk` talks to the local backend by default (`--dev`: http://127.0.0.1:8080, token `stellwerk`).
+`stellwerk config init --ssh verspaetomat` writes `~/.config/verspaetomat/stellwerk.toml` with a `prod`
+target (URL and the server's `ADMIN_TOKEN`, read once over SSH); then `stellwerk --prod …`.
+`--target NAME`, `STELLWERK_TARGET`, `--url` and `ADMIN_TOKEN` override.
+
 ## Needs external setup
 
 Everything else works; these need an account and go into `deploy/.env`:

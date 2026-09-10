@@ -84,18 +84,17 @@ and `--dart-define=BACKEND=local`.
 
 ## 4. Stellwerk against the server
 
-Caddy answers 404 for `/admin/*` from the internet. Use the CLI inside the container:
+`/admin/*` is reachable over HTTPS and guarded by `ADMIN_TOKEN` (long and random, compared in
+constant time). From a laptop:
 
 ```bash
-docker compose exec api stellwerk customers
-docker compose exec api stellwerk push Johannes "Testnachricht"
-docker compose exec api stellwerk ngo-report bahnhofsmission /tmp/statement.csv
+stellwerk config init --ssh verspaetomat   # once: reads ADMIN_TOKEN from the server's deploy/.env,
+                                           # writes ~/.config/verspaetomat/stellwerk.toml (mode 600)
+stellwerk --prod customers                 # --dev (the local backend on 8080) is the default
+stellwerk --prod push Johannes "Test"
 ```
 
-`STELLWERK_URL` and `ADMIN_TOKEN` are already set in the container's environment. From
-your laptop, tunnel instead: `ssh -L 8080:127.0.0.1:8080 vps` will not work because the
-port is not published on the host; use `docker compose exec` or publish `127.0.0.1:8080:8080`
-on the api service if you want the tunnel.
+Or on the server: `docker compose exec api stellwerk customers`.
 
 ## 5. Backups
 
@@ -114,13 +113,13 @@ the machine, and keep them inside the EU.
 ## 6. Updating
 
 ```bash
-cd /opt/verspaetomat && git pull
-cd deploy && docker compose up -d --build api      # rebuilds only the API, Postgres and Caddy keep running
-docker compose logs --tail 50 api                  # migrations applied, listening
+ssh verspaetomat /opt/verspaetomat/deploy/deploy.sh     # git pull, rebuild only the API, reload Caddy, show status
 ```
 
-Rolling back is `git checkout <previous> && docker compose up -d --build api`; migrations
-are forward-only, so roll back only across commits without new migration files.
+Postgres keeps running. Migrations run on start. Rolling back is `git checkout <previous>`
+followed by `docker compose up -d --build api`; migrations are forward-only, so roll back
+only across commits without new migration files. After a change to `docker-compose.yml`
+itself, run `docker compose up -d` once so the affected containers are recreated.
 
 ## 7. Checks after every deploy
 

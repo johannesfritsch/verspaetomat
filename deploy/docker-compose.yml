@@ -1,8 +1,9 @@
 # One VPS: Postgres, the API, Caddy for TLS. Copy .env.example to .env first.
 #
-#   docker compose up -d --build
+#   ./deploy.sh                                     # git pull, rebuild the API, reload Caddy (the usual update)
+#   docker compose up -d --build                     # first start
 #   docker compose logs -f api
-#   docker compose exec api stellwerk customers      # ADMIN_TOKEN comes from .env
+#   docker compose exec api stellwerk customers      # ADMIN_TOKEN comes from .env; or `stellwerk --prod` from a laptop
 
 services:
   db:
@@ -52,7 +53,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # A directory, not a single file: git replaces files by inode and a file mount would keep the old one.
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
 

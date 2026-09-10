@@ -36,9 +36,11 @@ Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (stri
 
 ## Production
 
-- API: `https://api.verspaetomat.de` (Caddy with Let's Encrypt in front of the container). `/admin/*` is hidden from the internet; Stellwerk runs inside the container.
-- Deploy: push to `main`, then on the server `cd /opt/verspaetomat && git pull && cd deploy && docker compose up -d --build api`. The server builds the image from source; nothing is transferred. Migrations run on start.
-- Checks: `curl https://api.verspaetomat.de/health`; `docker compose exec api stellwerk customers`; `docker compose logs --tail 50 api`.
+- API: `https://api.verspaetomat.de` (Caddy with Let's Encrypt in front of the container). `/admin/*` is reachable and guarded by the long random `ADMIN_TOKEN`.
+- Deploy: push to `main`, then `ssh verspaetomat /opt/verspaetomat/deploy/deploy.sh` (pull, rebuild only the API, reload Caddy, print status). The server builds the image from source; nothing is transferred. Migrations run on start.
+- Stellwerk against production: `stellwerk --prod …` after a one-time `stellwerk config init --ssh verspaetomat`. `--dev` is the default.
+- iOS release: `app/tools/release.sh` (App Store Connect API key in `~/.config/verspaetomat/release.env`, key file in `~/.appstoreconnect/private_keys/`), build number = commit count.
+- Checks: `curl https://api.verspaetomat.de/health`; `stellwerk --prod customers`; `ssh verspaetomat 'cd /opt/verspaetomat/deploy && docker compose logs --tail 50 api'`.
 - Secrets live only in `deploy/.env` and `deploy/secrets/` on the server. Mail (Postmark) and push (APNs, FCM) are switched on by uncommenting the lines there; see `deploy/README.md` and `docs/42-runbook-vps-testflight.md`.
 - Never `docker compose down -v` (drops the database). Backups: nightly `pg_dump` in `/var/backups` on the server.
 
