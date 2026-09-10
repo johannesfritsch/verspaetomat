@@ -188,7 +188,7 @@ If it fails with a signing or provisioning message, go back to B2 and build in X
 
 ### B5. Upload (5 min, then 10 to 30 min processing)
 
-Preferred from now on: `app/tools/release.sh` builds, signs, exports and uploads in one go using an App Store Connect API key, with no Apple ID signed in to Xcode. It needs `~/.config/verspaetomat/release.env` (`ASC_KEY_ID`, `ASC_ISSUER_ID`) and the key file under `~/.appstoreconnect/private_keys/`. Build numbers are the commit count, so they only go up.
+Preferred from now on: `app/tools/release.sh` builds, signs, exports and uploads in one go using an App Store Connect API key, with no Apple ID signed in to Xcode. It needs `~/.config/verspaetomat/release.env` (`ASC_KEY_ID`, `ASC_ISSUER_ID`) and the key file under `~/.appstoreconnect/private_keys/`. Build numbers continue from the last uploaded build (git tags `ios-<version>-<build>`).
 
 Manual alternative: **Transporter** from the Mac App Store → sign in → drag the `.ipa` in → Deliver.
 
