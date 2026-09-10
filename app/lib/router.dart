@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'screens/claims/claims_routes.dart';
 import 'screens/community/community_routes.dart';
+import 'screens/ride/checkin_launcher.dart';
 import 'screens/ride/ride_routes.dart';
 import 'screens/showcase_screen.dart';
 import 'state/demo_state.dart';
@@ -17,8 +18,9 @@ class Routes {
   static const permissions = '/permissions';
   static const setup = '/setup';
 
-  static const bahnsteig = '/bahnsteig';
-  static const konto = '/konto';
+  static const bahnsteig = '/bahnsteig'; // "Home" in the nav
+  static const antraege = '/antraege'; // ?claim=<claim id> scrolls to that claim
+  static const konto = '/konto'; // alias of antraege (older links, pushes)
   static const wir = '/wir';
   static const ich = '/ich';
 
@@ -58,12 +60,13 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
       GoRoute(path: '/', redirect: (_, __) => Routes.showcase),
       GoRoute(path: Routes.showcase, builder: (_, __) => const ShowcaseScreen()),
 
-      // The four tabs live in a shell with the bottom navigation.
+      // The four tabs live in a shell with the bottom navigation; the Einchecken square in the middle is not a tab.
       ShellRoute(
         builder: (context, routerState, child) => _TabShell(location: routerState.uri.path, child: child),
         routes: [
           GoRoute(path: Routes.bahnsteig, builder: (c, s) => bahnsteigBuilder(c, s)),
-          GoRoute(path: Routes.konto, builder: (c, s) => kontoBuilder(c, s)),
+          GoRoute(path: Routes.antraege, builder: (c, s) => antraegeBuilder(c, s)),
+          GoRoute(path: Routes.konto, builder: (c, s) => antraegeBuilder(c, s)),
           GoRoute(path: Routes.wir, builder: (c, s) => wirBuilder(c, s)),
           GoRoute(path: Routes.ich, builder: (c, s) => ichBuilder(c, s)),
         ],
@@ -76,20 +79,21 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
   );
 }
 
-/// The four-tab shell: Bahnsteig, Konto, Wir, Ich.
+/// The tab shell: Home · Anträge · [Einchecken] · Wir · Ich.
 class _TabShell extends StatelessWidget {
   const _TabShell({required this.location, required this.child});
   final String location;
   final Widget child;
 
-  static const _tabs = [Routes.bahnsteig, Routes.konto, Routes.wir, Routes.ich];
+  static const _tabs = [Routes.bahnsteig, Routes.antraege, Routes.wir, Routes.ich];
 
   @override
   Widget build(BuildContext context) {
-    final index = _tabs.indexWhere((t) => location.startsWith(t)).clamp(0, 3);
+    var index = _tabs.indexWhere((t) => location.startsWith(t));
+    if (location.startsWith(Routes.konto)) index = 1;
     return Scaffold(
       body: child,
-      bottomNavigationBar: VBottomNav(index: index, onTap: (i) => context.go(_tabs[i])),
+      bottomNavigationBar: VBottomNav(index: index.clamp(0, 3), onTap: (i) => context.go(_tabs[i]), onCheckin: () => startCheckin(context)),
     );
   }
 }

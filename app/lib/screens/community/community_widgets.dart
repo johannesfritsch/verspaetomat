@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
+import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 
@@ -15,12 +17,17 @@ String? displayName(ApiCustomer? me) {
   return null;
 }
 
-/// Header for a tab screen: title on the left, small station clock right.
+/// Header for a tab screen: title on the left, an optional trailing widget and
+/// the settings gear on the right (the gear sits top right on every tab, decided
+/// 10 September 2026).
 class TabHeader extends StatelessWidget {
-  const TabHeader({super.key, required this.title, this.caption, this.trailing});
+  const TabHeader({super.key, required this.title, this.caption, this.trailing, this.onSettings});
   final String title;
   final String? caption;
   final Widget? trailing;
+
+  /// Opens Einstellungen; defaults to pushing the route. Pass a callback to refresh afterwards.
+  final VoidCallback? onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -36,7 +43,8 @@ class TabHeader extends StatelessWidget {
             ],
           ),
         ),
-        trailing ?? const VStationClock(size: 40),
+        if (trailing != null) ...[trailing!, const SizedBox(width: 4)],
+        VIconButton(icon: Icons.settings_outlined, onTap: onSettings ?? () => context.push(Routes.einstellungen)),
       ],
     );
   }

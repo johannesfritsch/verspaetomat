@@ -54,10 +54,10 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
         } else if (n.isJourney) {
           router.go(n.journeyArrived ? Routes.angekommen : Routes.unterwegs);
         } else if (n.kind == 'mail') {
-          router.go(Routes.bahnsteig);
-          router.push(Routes.antwort);
+          // Railway mail lands on Anträge, scrolled to its claim (docs/11 §10).
+          router.go(n.claimId == null ? Routes.antraege : '${Routes.antraege}?claim=${Uri.encodeComponent(n.claimId!)}');
         } else if (n.kind != 'station') {
-          router.go(Routes.konto);
+          router.go(Routes.antraege);
         }
       },
     )..start();

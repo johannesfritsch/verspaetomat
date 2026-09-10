@@ -1,6 +1,6 @@
 # 11 — Every screen
 
-Navigation: four tabs at the bottom, named after places, not features. **Bahnsteig** (home), **Konto** (the ledger of claims), **Wir** (community), **Ich** (profile). The ledger is never called "Spendenkonto": most of what it holds is not a donation yet, and some of it never will be. The ride view and the claim flow are full-screen moments that sit on top of the tabs.
+Navigation (decided 10 September 2026): a bottom bar with four tabs and one action: **Home · Anträge · [Einchecken] · Wir · Ich**. The middle slot is a raised black square with the train icon; it is not a tab but opens the check-in directly (at a station: "Wohin?" for that station, predictions first; elsewhere: the station search, then "Wohin?"). Home is the Bahnsteig. Anträge answers "what is happening with my claims?", Wir "what did it all add up to?". The settings gear sits top right on every tab. Nothing is ever called "Spendenkonto": most of what the ledger holds is not a donation yet, and some of it never will be. The ride view and the claim flow are full-screen moments that sit on top of the tabs.
 
 All copy below is German because that is what the customer reads. Explanations are in English.
 
@@ -58,13 +58,13 @@ The screen the customer sees a hundred times. Second version, decided 10 Septemb
 
 **2 · Momentum.** "+96" in board type, "Geduldspunkte diese Woche · letzte Woche 41", the level bar underneath with "Gleis 7 · 128 bis „Bahnhofsmission“". A quiet week reads "Diese Woche noch keine Fahrt", never a zero. Tap for Ich.
 
-**3 · Money countdown.** "1,50 €" board type, "bis zum Antrag · 4,50 € gesammelt für Bahnhofsmission Köln"; before the first incident: "4,00 € bis zum ersten Antrag · jede Verspätung ab 60 Minuten zählt". When a bundle is ready the block becomes the primary button "6,00 € beantragen" with "Bündel bereit · geht an Bahnhofsmission Köln" and starts the claim flow (screen 11) directly. Tap for Konto otherwise.
+**3 · The claim cycle.** A four-step strip, Sammeln → Antrag bereit → Eingereicht → Bestätigt, the current step in ink with a red dot, the others grey, joined by a hairline. One line beneath the active step: collecting "4,50 von 4,00 € · für Bahnhofsmission Köln" (or "Noch keine Verspätung ab 60 Minuten. Die erste zählt 1,50 €."); ready: the primary button "6,00 € beantragen" with "Bündel bereit · geht an …"; submitted: "Antwort bis 8. Okt. · 4,50 € unterwegs" or "Rückfrage der Bahn · bitte antworten"; answered (a claim closed in the last 14 days): "4,50 € bestätigt · geht an …" or "Abgelehnt · Widerspruch möglich", and the last step is labelled accordingly. Priority: a claim awaiting a reply shows Eingereicht, else a recently closed one, else ready or collecting; a ready bundle keeps an outline button "Nächstes Bündel: 6,00 € beantragen" underneath in the other stages. Tap for Anträge.
 
 **4 · Standing.** "Platz 5" board type, "auf der RE 7 diese Woche · 38 Punkte bis Platz 4"; at rank 1 "ganz oben, von 23". The city board when the line board has fewer than five riders; hidden when the customer is on neither. Tap for Wir.
 
 **5 · Community with my share.** "1.208.316 Minuten haben wir gewartet · 1.372 davon deine." ticking, and "48.320 € an Vereine bestätigt · 4,50 € durch dich". Tap for Wir.
 
-**6 · The one next thing.** At most one card: "Post von der Bahn · 4,50 € bestätigt" (→ Antwort), "Läuft bald ab · RE 10 vom 21.08. verfällt in 10 Tagen" (→ Konto, red when 7 days or fewer), "Gestern vergessen?" (→ Nachtrag, only for people who ride most days), "Neues Abzeichen · Volle Stunde" (→ Ich). Nothing otherwise.
+**6 · The one next thing.** At most one card: "Post von der Bahn · 4,50 € bestätigt" (→ Anträge, scrolled to the claim), "Läuft bald ab · RE 10 vom 21.08. verfällt in 10 Tagen" (→ Anträge, red when 7 days or fewer), "Gestern vergessen?" (→ Nachtrag, only for people who ride most days), "Neues Abzeichen · Volle Stunde" (→ Ich). Nothing otherwise.
 
 Data: `GET /v1/me/standing` computes blocks 2 to 6 server-side (docs/16); the station context comes from nearby stations, the geofence station set and the current ride.
 
@@ -164,18 +164,17 @@ If the claim is ready, "Jetzt einreichen" opens the claim flow (screen 11).
 
 ---
 
-## 10. Konto (the ledger)
+## 10. Anträge (my claims)
 
-The customer's delays that matter, as a list.
+Replaces Konto in the nav (10 September 2026). One question: what is happening with my claims? Header "Anträge" with a caption like "3 Fälle gesammelt · 1 Antrag unterwegs", the gear top right.
 
-- **Header:** "Bereit: 4,50 €" or "Gesammelt: 3,00 € · noch 1,50 € bis zur Auszahlung" and, below, the total ever confirmed for this customer.
-- **Deadline line** when relevant, in red when under 30 days: "Älteste Verspätung verfällt in 3 Wochen."
-- **Grouped by claims desk** with a heading only when there is more than one: "Servicecenter Fahrgastrechte (DB, ODEG, NEB …)", "NordWestBahn". Each group carries its own total and its own distance to 4 €, and one line explains why: "Ansprüche werden pro Bahnunternehmen gebündelt. Jedes Bündel muss 4 € erreichen."
-- **Each incident:** date, line, route, "+68", the amount, and a status chip: gesammelt · bereit · eingereicht · bestätigt · abgelehnt · verfallen. An "eingereicht" incident shows when it was sent and "Antwort in etwa 4 Wochen", so silence has a shape.
-- **Primary button:** "Antrag vorbereiten" when a bundle is ready.
-- Tapping an incident shows the evidence sheet: planned and actual times, source, timestamp, and "Als Nachweis exportieren".
+- **Sammeln.** The bundle being collected, grouped by claims desk with a heading only when there is more than one: the incidents, "4,50 von 4,00 €" or the "bereit" chip, the dots "2 von 3 · noch 1,50 €", and one line explaining the per-desk bundling when it applies. The deadline line above it in red when the oldest incident expires within 30 days. "Antrag vorbereiten" as the primary button at the bottom when a bundle is ready. Empty: "Nichts offen. Gut so. Verspätungen ab 60 Minuten landen hier. Ab 4 € geht ein Antrag raus."
+- **Eingereicht.** One card per claim that is out: "Antrag vom 15.08." with the amount, a status chip (eingereicht · Rückfrage · nicht zugestellt), "Antwort bis 12.09. · Servicecenter", the incidents, then the mail thread collapsed to the last message ("POST VON DER BAHN · 18.07." or "DEINE MAIL · 15.08." above a compact mail view). Buttons: "Antworten" on a question, "Alle 3 Nachrichten" or "Ganze Mail lesen" (opens screen 12 with the thread and the reply form), "PDF ansehen".
+- **Bestätigt.** The same card for accepted claims: "4,50 € überwiesen", the railway's mail beneath.
+- **Abgeschlossen.** Rejected claims (with "Widerspruch") and expired incidents, with the one line: "Verfallen heißt: die Frist ist um, bevor 4 € zusammenkamen. Die Minuten und Punkte bleiben."
+- A push for railway mail opens this tab scrolled to the claim (`/antraege?claim=<id>`). Tapping an incident shows the evidence sheet as before.
 
-Ordinary-ticket incidents appear here too, each with its own "Einreichen". They take the same five steps with one incident instead of a bundle: step 1 shows the fare and the booking number instead of the D-Ticket number, step 2 asks for the ticket itself (the booking PDF or a photo of the paper ticket), and the amount is 25 % or 50 % of the fare.
+Ordinary-ticket incidents appear under Sammeln too, each with its own "Einreichen". They take the same five steps with one incident instead of a bundle: step 1 shows the fare and the booking number instead of the D-Ticket number, step 2 asks for the ticket itself (the booking PDF or a photo of the paper ticket), and the amount is 25 % or 50 % of the fare.
 
 ---
 
@@ -199,7 +198,7 @@ Paper route alternative on 11.5: "Als PDF zum Drucken" with the postal address s
 
 ## 12. Antwort (the reply)
 
-Most replies arrive on their own. The railway answers to the customer's Verspätomat address; the app forwards the mail whole to the private inbox and, at the same moment, shows it here.
+The thread behind a claim card on Anträge (screen 10), reached with "Alle Nachrichten", "Antworten" or "Widerspruch"; the reply form lives here. Most replies arrive on their own. The railway answers to the customer's Verspätomat address; the app forwards the mail whole to the private inbox and, at the same moment, shows it here.
 
 - **Accepted:** "Die Bahn hat geantwortet: 4,50 € an Bahnhofsmission überwiesen." The original mail is one tap away. Incidents turn "bestätigt". If the amount could not be read, the app shows the mail and asks the customer to enter it.
 - **Question from the railway:** the mail is shown, with "Antworten" opening a reply composed by the customer, again through their own address. Templates for the usual questions (ticket copy, exact train) are offered; nothing is sent without the customer.
@@ -211,7 +210,8 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 
 ## 13. Wir (community)
 
-- **Top figure, board type:** minutes waited together, ticking.
+- **Dein Teil first** (10 September 2026): two figures, "Bestätigt, durch dich" (euros the railway confirmed for this customer) and "Minuten gewartet", the level bar with "Gleis 7 · 128 bis „Bahnhofsmission“", then the rows "Eingereicht, unterwegs" and "Zweck" (tap opens the NGO page). These were the header numbers of the old Konto.
+- **Top community figure, board type:** minutes waited together, ticking.
 - **Two euro figures side by side:** "Eingereicht" and "Bestätigt", the second larger. Tap either for the source sheet.
 - **Vereine:** one row per NGO with the euros confirmed for it and, smaller, the euros submitted and still unanswered. No goals, no deadlines, no progress bars: the number is the story.
 - **Boards:** "Meine Linie" as the default, with "Meine Stadt" and "Deutschland" as tabs. Seven-day window, ten names, the customer's own row pinned at the bottom if not in the ten.
@@ -228,7 +228,7 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 
 ## 15. Ich (profile)
 
-- Name or nickname, level name, Geduldspunkte total, points this week.
+- Name or nickname, level name, Geduldspunkte total, points this week. The level bar moved to Home and Wir; the gear is the shared one in the tab header.
 - Badges as a grid, earned ones in colour, others as outlines with their names visible (the museum is part of the fun).
 - History ("Alle Fahrten"): every journey, grouped by day and filterable by line, as one row "RE 7 · Köln Hbf → Lüdenscheid · +68" with chips for "2× umsteigen", "Anschluss verpasst", "unvollständig", "abgebrochen"; a tap unfolds the legs with their times and delays (docs/17). Data: `GET /v1/journeys`.
 - "Meine Statistik": average delay, most patient line, longest wait, minutes this year.

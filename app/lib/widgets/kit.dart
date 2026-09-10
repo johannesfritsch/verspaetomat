@@ -234,7 +234,7 @@ class VOutlineButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[Icon(icon, size: 20), const SizedBox(width: 10)],
-            Text(label, style: VText.button),
+            Flexible(child: Text(label, style: VText.button, maxLines: 1, overflow: TextOverflow.ellipsis)),
           ],
         ),
       ),
@@ -576,21 +576,38 @@ class VChoiceCard extends StatelessWidget {
   }
 }
 
-/// Bottom navigation in the paper style: a hairline on top, icons + labels.
+/// Bottom navigation in the paper style: a hairline on top, four tabs and the
+/// raised "Einchecken" square in the middle (decided 10 September 2026). The
+/// square is not a tab: it opens the check-in directly.
 class VBottomNav extends StatelessWidget {
-  const VBottomNav({super.key, required this.index, required this.onTap});
+  const VBottomNav({super.key, required this.index, required this.onTap, required this.onCheckin});
   final int index;
   final ValueChanged<int> onTap;
+  final VoidCallback onCheckin;
 
+  /// The four tabs, in order. Index 1 (Anträge) keeps the receipt icon the E2E taps.
   static const items = [
-    (Icons.train_outlined, Icons.train, 'Bahnsteig'),
-    (Icons.receipt_long_outlined, Icons.receipt_long, 'Konto'),
+    (Icons.home_outlined, Icons.home, 'Home'),
+    (Icons.receipt_long_outlined, Icons.receipt_long, 'Anträge'),
     (Icons.groups_outlined, Icons.groups, 'Wir'),
     (Icons.person_outline, Icons.person, 'Ich'),
   ];
 
   @override
   Widget build(BuildContext context) {
+    Widget tab(int i) => Expanded(
+          child: InkWell(
+            onTap: () => onTap(i),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(i == index ? items[i].$2 : items[i].$1, size: 24, color: i == index ? VColors.ink : VColors.ink3),
+                const SizedBox(height: 4),
+                Text(items[i].$3, style: VText.tab.copyWith(color: i == index ? VColors.ink : VColors.ink3)),
+              ],
+            ),
+          ),
+        );
     return Container(
       decoration: const BoxDecoration(
         color: VColors.paper,
@@ -602,20 +619,37 @@ class VBottomNav extends StatelessWidget {
           height: 60,
           child: Row(
             children: [
-              for (var i = 0; i < items.length; i++)
-                Expanded(
-                  child: InkWell(
-                    onTap: () => onTap(i),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(i == index ? items[i].$2 : items[i].$1, size: 24, color: i == index ? VColors.ink : VColors.ink3),
-                        const SizedBox(height: 4),
-                        Text(items[i].$3, style: VText.tab.copyWith(color: i == index ? VColors.ink : VColors.ink3)),
-                      ],
-                    ),
+              tab(0),
+              tab(1),
+              Expanded(
+                child: InkWell(
+                  onTap: onCheckin,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Transform.translate(
+                        offset: const Offset(0, -10),
+                        child: Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: VColors.ink,
+                            borderRadius: BorderRadius.circular(4),
+                            boxShadow: const [BoxShadow(color: Color(0x33111111), blurRadius: 8, offset: Offset(0, 3))],
+                          ),
+                          child: const Icon(Icons.train, size: 26, color: VColors.paper),
+                        ),
+                      ),
+                      Transform.translate(
+                        offset: const Offset(0, -8),
+                        child: Text('Einchecken', style: VText.tab.copyWith(color: VColors.ink)),
+                      ),
+                    ],
                   ),
                 ),
+              ),
+              tab(2),
+              tab(3),
             ],
           ),
         ),

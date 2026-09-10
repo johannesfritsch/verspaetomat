@@ -4,12 +4,12 @@ import '../../api/models.dart';
 import '../../router.dart';
 import 'antrag_screen.dart';
 import 'antwort_screen.dart';
-import 'konto_screen.dart';
+import 'antraege_screen.dart';
 import 'zweck_screen.dart';
 
-/// Owned by the "claims" builder. Konto + Antrag + Antwort + Zweck.
+/// Owned by the "claims" builder. Anträge + Antrag + Antwort + Zweck.
 
-GoRouterWidgetBuilder kontoBuilder = (_, __) => const KontoScreen();
+GoRouterWidgetBuilder antraegeBuilder = (_, s) => AntraegeScreen(claimId: s.uri.queryParameters['claim']);
 
 final claimsRoutes = <RouteBase>[
   GoRoute(

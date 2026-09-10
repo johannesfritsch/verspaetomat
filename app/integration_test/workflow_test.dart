@@ -280,7 +280,7 @@ void main() {
         customer = await rideOnce(tester, sw, n, knownCustomer: customer);
       }
 
-      // 3. Konto → Antrag.
+      // 3. Anträge → Antrag (the receipt icon is the Anträge tab).
       await tapIcon(tester, Icons.receipt_long_outlined);
       await pumpUntilFound(tester, find.text('bereit'), timeout: const Duration(seconds: 40));
       await tapText(tester, 'Antrag vorbereiten');
@@ -335,7 +335,7 @@ void main() {
       expect(find.textContaining('@verspaetomat.de'), findsWidgets);
       await tapText(tester, 'Absenden');
       await pumpUntilFound(tester, find.text('Abgeschickt.'), timeout: const Duration(seconds: 40));
-      await tapText(tester, 'Zurück zum Konto');
+      await tapText(tester, 'Zu den Anträgen');
 
       // 4. eingereicht → the railway answers (Stellwerk) → bestätigt → Wir.
       // Rows no longer carry a status chip; the section label does (uppercased by VSection).

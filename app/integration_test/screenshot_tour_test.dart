@@ -29,7 +29,7 @@ const tour = <(String, String)>[
   ('angekommen-14', '${Routes.angekommen}?variant=14'),
   ('angekommen-ausfall', '${Routes.angekommen}?variant=ausfall'),
   ('angekommen-nodata', '${Routes.angekommen}?variant=nodata'),
-  ('konto', Routes.konto),
+  ('antraege', Routes.antraege),
   ('antrag', '${Routes.antrag}?desk=Servicecenter%20Fahrgastrechte'),
   ('antrag-unbekannt', '${Routes.antrag}?desk=Unbekannt'),
   ('antwort-ok', '${Routes.antwort}?mail=m-0718-in'),
@@ -97,6 +97,25 @@ void main() {
     await wait(tester, 600);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
     await shot('bahnsteig-arrived');
+    demo.reset();
+    // The claim cycle on Home in its four states (decided 10 September 2026).
+    Future<void> home(String name) async {
+      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+      await wait(tester, 600);
+      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+      await shot(name);
+    }
+    demo.awayFromStation = true; // the compact station box keeps the cycle strip above the fold
+    await home('bahnsteig-cycle-submitted'); // the demo ledger has two bundles out
+    demo.receiveReply();
+    demo.receiveReply();
+    await home('bahnsteig-cycle-answered');
+    demo.reset();
+    demo.incidents.removeWhere((i) => i.status == IncidentStatus.eingereicht);
+    await home('bahnsteig-cycle-ready'); // 3 × 1,50 € collected, nothing out
+    demo.incidents.removeWhere((i) => i.id == 'i-0909');
+    await home('bahnsteig-cycle-collecting'); // 3,00 € of 4,00 €
+    demo.awayFromStation = false;
     demo.reset();
 
     // Journeys with a connection (docs/17): transfer, missed connection, arrival with the journey delay.

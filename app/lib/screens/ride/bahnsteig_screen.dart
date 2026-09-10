@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../mock/mock_data.dart' show Mock;
 import '../../repo/app_repository.dart';
 import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../claims/claims_widgets.dart' show fmtCents;
 import 'ride_widgets.dart';
 import 'wohin_screen.dart';
 
@@ -31,6 +33,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   ApiRideLive? _live;
   ApiJourneyLive? _journey;
   ApiDestinations _destinations = ApiDestinations.empty;
+  List<ApiClaim> _claims = const [];
   ApiStanding _standing = ApiStanding.empty;
   bool _loading = true;
   bool _busy = false;
@@ -115,6 +118,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         repo.standing().catchError((_) => ApiStanding.empty),
         repo.geofence().catchError((_) => ApiGeofence.empty),
         repo.currentJourney().catchError((_) => null),
+        repo.claims().catchError((_) => const <ApiClaim>[]),
       ]);
       if (!mounted) return;
       final nearby = results[0] as ApiNearby;
@@ -141,6 +145,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         _journey = results[4] as ApiJourneyLive?;
         _standing = results[2] as ApiStanding;
         _frequent = results[3] as ApiGeofence;
+        _claims = results[5] as List<ApiClaim>;
         _minuteTick = 0;
         _error = null;
       });
@@ -291,9 +296,9 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   void _openNext(ApiStandingNext n) {
     switch (n.kind) {
       case 'mail':
-        context.push(Routes.antwort);
+        context.go(n.claimId == null ? Routes.antraege : '${Routes.antraege}?claim=${Uri.encodeComponent(n.claimId!)}');
       case 'deadline':
-        context.go(Routes.konto);
+        context.go(Routes.antraege);
       case 'nachtrag':
         context.push(Routes.nachtrag);
       case 'badge':
@@ -349,6 +354,8 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                       : const SizedBox.shrink(),
                 ),
                 const VStationClock(size: 32),
+                const SizedBox(width: 4),
+                VIconButton(icon: Icons.settings_outlined, onTap: () => context.push(Routes.einstellungen).then((_) => _load())),
               ],
             ),
             if (_error != null) ...[
@@ -409,11 +416,12 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             _Momentum(standing: st, onTap: () => context.go(Routes.ich)),
             const VRule(),
 
-            // 3 · Money countdown.
-            _Money(
+            // 3 · The claim cycle: Sammeln → Antrag bereit → Eingereicht → Bestätigt.
+            _CycleStrip(
               standing: st,
+              claims: _claims,
               busy: _busy,
-              onOpen: () => context.go(Routes.konto),
+              onOpen: () => context.go(Routes.antraege),
               onClaim: st.money?.readyDesk == null
                   ? null
                   : () => _prepareClaim(st.money!.readyDesk!),
@@ -1055,78 +1063,152 @@ class _Momentum extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 3 · Money countdown
+// 3 · The claim cycle (decided 10 September 2026)
 // ---------------------------------------------------------------------------
 
-class _Money extends StatelessWidget {
-  const _Money({
+enum _Stage { collecting, ready, submitted, answered }
+
+/// Four steps, the current one in ink, one line beneath it. A ready bundle keeps
+/// its button even while another claim is out or was just answered.
+class _CycleStrip extends StatelessWidget {
+  const _CycleStrip({
     required this.standing,
+    required this.claims,
     required this.busy,
     required this.onOpen,
     this.onClaim,
   });
   final ApiStanding standing;
+  final List<ApiClaim> claims;
   final bool busy;
   final VoidCallback onOpen;
   final VoidCallback? onClaim;
 
+  static const _labels = ['Sammeln', 'Antrag bereit', 'Eingereicht', 'Bestätigt'];
+
   @override
   Widget build(BuildContext context) {
     final m = standing.money;
-    if (m == null) {
-      return InkWell(
-        onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: VSpace.m),
-          child: Text(
-            'Noch keine Verspätung ab 60 Minuten. Die erste zählt 1,50 €.',
-            style: VText.caption,
-          ),
-        ),
-      );
+    final now = DateTime.now();
+    final out = claims.where((c) => c.status == ApiClaimStatus.sent || c.status == ApiClaimStatus.question).toList()
+      ..sort((a, b) => (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)));
+    final closed = claims
+        .where((c) => (c.status == ApiClaimStatus.accepted || c.status == ApiClaimStatus.rejected) && c.sentAt != null && now.difference(c.sentAt!).inDays <= 60)
+        .toList()
+      ..sort((a, b) => (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)));
+    final recentClosed = closed.where((c) => _closedAt(c) != null && now.difference(_closedAt(c)!).inDays <= 14).firstOrNull;
+    final ready = m != null && m.ready && onClaim != null;
+
+    final _Stage stage;
+    if (out.isNotEmpty) {
+      stage = _Stage.submitted;
+    } else if (recentClosed != null) {
+      stage = _Stage.answered;
+    } else if (ready) {
+      stage = _Stage.ready;
+    } else {
+      stage = _Stage.collecting;
     }
-    if (m.ready && onClaim != null) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: VSpace.m),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            VPrimaryButton(
-              label: busy
-                  ? 'Einen Moment …'
-                  : '${fmtEuro(m.openCents / 100)} beantragen',
-              icon: Icons.edit_outlined,
-              onTap: busy ? null : onClaim,
-            ),
-            const SizedBox(height: 6),
-            Text('Bündel bereit · geht an ${m.ngoName}', style: VText.caption),
-          ],
-        ),
-      );
+    final active = stage.index;
+    final answeredLabel = recentClosed?.status == ApiClaimStatus.rejected ? 'Abgelehnt' : 'Bestätigt';
+
+    String line;
+    switch (stage) {
+      case _Stage.collecting:
+        line = m == null || m.openCents == 0
+            ? 'Noch keine Verspätung ab 60 Minuten. Die erste zählt 1,50 €.'
+            : 'Noch ${fmtEuro(m.missingCents / 100)} bis zum Antrag · ${fmtEuro(m.openCents / 100)} gesammelt für ${m.ngoName}';
+      case _Stage.ready:
+        line = 'Bündel bereit · geht an ${m!.ngoName}';
+      case _Stage.submitted:
+        final c = out.first;
+        line = c.status == ApiClaimStatus.question
+            ? 'Rückfrage der Bahn · bitte antworten'
+            : c.expectedReplyBy != null
+                ? 'Antwort bis ${Mock.shortDate(c.expectedReplyBy!.toLocal())} · ${fmtCents(c.amountClaimedCents)} unterwegs'
+                : '${fmtCents(c.amountClaimedCents)} unterwegs · Antwort in etwa 4 Wochen';
+      case _Stage.answered:
+        final c = recentClosed!;
+        line = c.status == ApiClaimStatus.rejected ? 'Abgelehnt · Widerspruch möglich' : '${fmtCents(c.amountConfirmedCents ?? c.amountClaimedCents)} bestätigt · geht an ${m?.ngoName ?? 'deinen Verein'}';
     }
-    final first = m.openCents == 0;
+
     return InkWell(
       onTap: onOpen,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: VSpace.m),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(fmtEuro(m.missingCents / 100), style: VText.numberM),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                first
-                    ? 'bis zum ersten Antrag · jede Verspätung ab 60 Minuten zählt'
-                    : 'bis zum Antrag · ${fmtEuro(m.openCents / 100)} gesammelt für ${m.ngoName}',
-                style: VText.caption,
-                maxLines: 2,
-              ),
+            Row(
+              children: [
+                for (var i = 0; i < 4; i++) ...[
+                  if (i > 0)
+                    Expanded(
+                      child: Container(height: 1, color: i <= active ? VColors.ink : VColors.rule),
+                    ),
+                  _Step(label: i == 3 ? answeredLabel : _labels[i], state: i < active ? _StepState.done : i == active ? _StepState.active : _StepState.ahead),
+                ],
+              ],
             ),
+            const SizedBox(height: 10),
+            if (ready && stage == _Stage.ready)
+              VPrimaryButton(
+                label: busy ? 'Einen Moment …' : '${fmtEuro(m.openCents / 100)} beantragen',
+                icon: Icons.edit_outlined,
+                onTap: busy ? null : onClaim,
+              )
+            else
+              Text(line, style: VText.bodyS.copyWith(color: VColors.ink2), maxLines: 2),
+            if (ready && stage != _Stage.ready) ...[
+              const SizedBox(height: 10),
+              VOutlineButton(
+                label: busy ? 'Einen Moment …' : 'Nächstes Bündel · ${fmtEuro(m.openCents / 100)}',
+                icon: Icons.edit_outlined,
+                onTap: busy ? null : onClaim,
+              ),
+            ],
           ],
         ),
       ),
+    );
+  }
+
+  /// When the railway answered: the reply date is not on the claim, so the sent date
+  /// plus the usual four weeks stands in unless the claim is younger than that.
+  static DateTime? _closedAt(ApiClaim c) {
+    final sent = c.sentAt;
+    if (sent == null) return null;
+    final replied = c.expectedReplyBy ?? sent.add(const Duration(days: 28));
+    return replied.isBefore(DateTime.now()) ? replied : DateTime.now();
+  }
+}
+
+enum _StepState { done, active, ahead }
+
+class _Step extends StatelessWidget {
+  const _Step({required this.label, required this.state});
+  final String label;
+  final _StepState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (state) { _StepState.active => VColors.ink, _StepState.done => VColors.ink2, _StepState.ahead => VColors.ink3 };
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: state == _StepState.ahead ? Colors.transparent : color,
+            border: Border.all(color: color, width: 1.5),
+          ),
+          child: state == _StepState.active ? Center(child: Container(width: 4, height: 4, decoration: const BoxDecoration(color: VColors.red, shape: BoxShape.circle))) : null,
+        ),
+        const SizedBox(height: 6),
+        Text(label, style: VText.tab.copyWith(color: color, fontWeight: state == _StepState.active ? FontWeight.w700 : FontWeight.w600)),
+      ],
     );
   }
 }

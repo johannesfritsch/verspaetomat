@@ -145,13 +145,13 @@ class _AntwortScreenState extends State<AntwortScreen> {
   }
 }
 
-/// Back to the ledger: pops when the reply screen was pushed, else switches the tab.
+/// Back to Anträge: pops when the reply screen was pushed, else switches the tab.
 class _ZumKonto extends StatelessWidget {
   const _ZumKonto();
 
   @override
   Widget build(BuildContext context) {
-    return VGhostButton(label: 'Zum Konto', icon: Icons.receipt_long_outlined, onTap: () => (context.canPop() ? context.pop() : context.go(Routes.konto)));
+    return VGhostButton(label: 'Zu den Anträgen', icon: Icons.receipt_long_outlined, onTap: () => (context.canPop() ? context.pop() : context.go(Routes.antraege)));
   }
 }
 

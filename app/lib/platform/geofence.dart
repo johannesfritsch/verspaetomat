@@ -149,6 +149,8 @@ class GeofenceNudge {
   String? get journeyId => data['journey_id'];
   bool get journeyTransfer => data['transfer'] == 'true';
   bool get journeyArrived => data['arrived'] == 'true';
+  /// The claim a railway-mail push belongs to (backend push data `claim_id`), if any.
+  String? get claimId => (data['claim_id'] ?? '').isEmpty ? null : data['claim_id'];
 
   factory GeofenceNudge.fromMap(Map<String, dynamic> m) {
     final data = <String, String>{for (final e in m.entries) e.key: '${e.value ?? ''}'};

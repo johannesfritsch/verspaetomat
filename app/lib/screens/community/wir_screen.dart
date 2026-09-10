@@ -13,8 +13,10 @@ import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
 
 class _WirData {
-  const _WirData(this.community);
+  const _WirData(this.community, this.standing, this.ledger);
   final ApiCommunity community;
+  final ApiStanding standing;
+  final ApiIncidents? ledger;
 }
 
 /// Wir: the community. Minutes waited together, euros submitted and
@@ -62,17 +64,69 @@ class _WirScreenState extends State<WirScreen> {
       controller: _loader,
       load: (repo) async {
         final c = await repo.community();
-        return _WirData(c);
+        final st = await repo.standing().catchError((_) => ApiStanding.empty);
+        ApiIncidents? ledger;
+        try {
+          ledger = await repo.incidents();
+        } catch (_) {}
+        return _WirData(c, st, ledger);
       },
       builder: (context, data, refresh) {
         final c = data.community;
+        final st = data.standing;
+        final my = st.community;
+        final lvl = st.level;
+        final ngoName = session.ngos.where((n) => n.id == session.me?.settings.ngoId).map((n) => n.name).firstOrNull ?? '–';
         return VScreen(
           showBack: false,
           padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.l, VSpace.page, VSpace.xl),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              TabHeader(title: 'Wir', caption: '${fmtInt(c.users)} Fahrgäste'),
+              TabHeader(title: 'Wir', caption: '${fmtInt(c.users)} Fahrgäste', onSettings: () => context.push(Routes.einstellungen).then((_) => refresh())),
+              const VGap.xl(),
+
+              // My part first: what my delays added up to (decided 10 September 2026).
+              const VSection('Dein Teil'),
+              const VGap.m(),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: BigFigure(
+                      value: fmtEuro((my?.myConfirmedCents ?? data.ledger?.summary.confirmedCents ?? 0) / 100),
+                      label: 'Bestätigt, durch dich',
+                      onTap: () => context.go(Routes.antraege),
+                    ),
+                  ),
+                  Expanded(
+                    child: BigFigure(
+                      value: fmtInt(my?.myMinutes ?? session.me?.pointsTotal ?? 0),
+                      label: 'Minuten gewartet',
+                      onTap: () => context.go(Routes.ich),
+                    ),
+                  ),
+                ],
+              ),
+              if (lvl != null) ...[
+                const VGap.s(),
+                VProgress(confirmed: lvl.progress),
+                const SizedBox(height: 6),
+                Text(
+                  lvl.pointsToNext > 0 ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“' : '${lvl.name} · höchste Stufe erreicht',
+                  style: VText.caption,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const VGap.m(),
+              const VRule(),
+              VKeyValue('Eingereicht, unterwegs', fmtCents(data.ledger?.summary.submittedCents ?? 0)),
+              const VRule(),
+              InkWell(
+                onTap: session.me?.settings.ngoId == null ? null : () => context.push('${Routes.zweck}?id=${session.me!.settings.ngoId}'),
+                child: VKeyValue('Zweck', ngoName),
+              ),
               const VGap.xl(),
               Text('ZUSAMMEN GEWARTET', style: VText.eyebrow),
               const SizedBox(height: 6),

@@ -48,7 +48,6 @@ class IchScreen extends StatelessWidget {
         final thisYear = arrived.where((r) => r.date.year == year).toList();
         final minutesThisYear = thisYear.fold(0, (s, r) => s + (r.finalDelayMinutes ?? 0));
         final recent = rides.where((r) => DateTime.now().difference(r.date).inDays <= 14).length;
-        final progress = me.nextLevelAt > 0 ? (me.pointsTotal / me.nextLevelAt).clamp(0.0, 1.0) : 1.0;
         final earned = data.badges.where((b) => b.earned).length;
         final name = displayName(me) ?? 'Fahrgast';
 
@@ -61,7 +60,7 @@ class IchScreen extends StatelessWidget {
               TabHeader(
                 title: name,
                 caption: me.levelName,
-                trailing: VIconButton(icon: Icons.settings_outlined, onTap: () => context.push(Routes.einstellungen).then((_) => refresh())),
+                onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
               ),
               const VGap.xl(),
               Row(
@@ -74,13 +73,6 @@ class IchScreen extends StatelessWidget {
                 ],
               ),
               const VGap.m(),
-              VProgress(confirmed: progress),
-              const SizedBox(height: 8),
-              Text(
-                me.nextLevelAt > me.pointsTotal ? '${fmtInt(me.nextLevelAt - me.pointsTotal)} bis „${me.nextLevelName}“' : 'Höchste Stufe erreicht.',
-                style: VText.caption,
-              ),
-              const VGap.l(),
               const VRule.red(),
               const VGap.m(),
               Row(

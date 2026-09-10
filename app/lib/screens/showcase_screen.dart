@@ -74,7 +74,7 @@ class ShowcaseScreen extends StatelessWidget {
           ]),
           const VGap.l(),
           _group(context, 'Konto und Antrag', [
-            ('Konto', 'deine Ansprüche', Routes.konto),
+            ('Anträge', 'Sammeln, unterwegs, beantwortet', Routes.antraege),
             ('Antrag', 'fünf Schritte, Servicecenter', '${Routes.antrag}?desk=Servicecenter%20Fahrgastrechte'),
             ('Antrag, unbekannter Betreiber', 'Adresse fehlt', '${Routes.antrag}?desk=Unbekannt'),
             ('Antwort: angenommen', 'Post vom Servicecenter', '${Routes.antwort}?mail=m-0718-in'),
