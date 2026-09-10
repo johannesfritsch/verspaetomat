@@ -175,6 +175,37 @@ paths:
       responses: { "200": { description: result }, "404": { description: no such customer } }
   /admin/scan:
     post: { summary: "Run one deadline-scanner pass now: warnings, expiry across all customers, reply nudges, retention sweep.", responses: { "200": { description: "{today, warned, expired, nudged, retained}" } } }
+  /admin/ngos:
+    get:
+      summary: Every NGO, inactive ones included, with totals and how many customers chose it (Stellwerk)
+      security: [{ adminToken: [] }]
+      responses: { '200': { description: List } }
+  /admin/ngos/{id}:
+    put:
+      summary: Create or update an NGO (managed data; the fixture only seeds an empty table). New ones need name, account_holder and iban; the IBAN is checksum-validated and normalised.
+      security: [{ adminToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                tagline: { type: string }
+                story: { type: array, items: { type: string } }
+                account_holder: { type: string }
+                iban: { type: string }
+                donation_url: { type: string }
+                active: { type: boolean }
+                consent_date: { type: string, format: date }
+                last_report: { type: string, format: date }
+      responses: { '200': { description: The NGO }, '400': { description: Bad id or IBAN, or a new NGO without name/holder/iban } }
+    delete:
+      summary: Delete an NGO nobody references, otherwise deactivate it; the last active NGO cannot be removed (409)
+      security: [{ adminToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: '{deleted, deactivated}' }, '404': { description: No such NGO }, '409': { description: Last active NGO } }
   /admin/ngos/{id}/report:
     post:
       summary: "Import an NGO's monthly statement: JSON {transfers:[{date, amount_cents | amount \"4,50\", reference, counterparty}]} (CSV text `date,amount,reference,counterparty` is accepted too). Each transfer is matched to a sent/question claim of that NGO with exactly that amount, sent within the 60 days before the transfer date, oldest unmatched first (a claim named in reference/counterparty by claimant or id prefix wins). Matches become accepted (amount_confirmed_cents, closed_at), incidents bestätigt with an audit entry \"ngo report\", the bestaetigt badge is awarded, incident and claim events go to the customer, retention runs. One ngo_reports row per import."

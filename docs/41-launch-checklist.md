@@ -50,6 +50,6 @@ Everything in the code that can be built without an account is built (see 30 for
 ## What I can do as soon as each item lands
 
 - A1 + A2: verify DNS, send the SMTP sink test against the real provider, switch the relay out of dry-run.
-- A3: put the NGO into `backend/fixtures/ngos.json` with the real IBAN and consent date, regenerate a claim PDF and check it.
+- A3: `stellwerk --prod ngo set <id> --name … --holder … --iban … --consent YYYY-MM-DD` (NGOs live in the database, not in the repo; the fixture only seeds an empty table), then regenerate a claim PDF and check it.
 - A4: nothing on my side until D1, then the TestFlight build with `API_URL=https://api.verspaetomat.de`.
 - B1: I can run the deployment with you on a shared terminal; the compose file is tested locally.

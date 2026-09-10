@@ -13,6 +13,7 @@
 //!   stellwerk watch Johannes
 //!   stellwerk locate Johannes "Köln Hbf"   |  locate Johannes 50.943,6.9586  |  locate Johannes --clear
 //!   stellwerk forget Johannes
+//!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk ngo-report bahnhofsmission statement.csv   (or .json)
 //!   stellwerk scan
 //!
@@ -135,6 +136,42 @@ fn resolve(cli: &Cli, cfg: &ConfigFile) -> anyhow::Result<(String, Target)> {
         t.token = Some("stellwerk".into());
     }
     Ok((name, t))
+}
+
+#[derive(Subcommand)]
+enum NgoCmd {
+    /// All NGOs, inactive ones included, with totals and how many customers chose them
+    List,
+    /// Create or update one NGO; a new one needs --name, --holder and --iban
+    Set {
+        /// Id: letters, digits, - and _ (e.g. bahnhofsmission-koeln)
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        tagline: Option<String>,
+        /// Story paragraph; repeat for several paragraphs (replaces the story)
+        #[arg(long = "story")]
+        story: Vec<String>,
+        /// Account holder as it appears on the claim form
+        #[arg(long)]
+        holder: Option<String>,
+        #[arg(long)]
+        iban: Option<String>,
+        #[arg(long = "donation-url")]
+        donation_url: Option<String>,
+        /// Date of the written consent to appear as payee (YYYY-MM-DD)
+        #[arg(long)]
+        consent: Option<String>,
+        #[arg(long, conflicts_with = "inactive")]
+        active: bool,
+        #[arg(long)]
+        inactive: bool,
+    },
+    /// Create or update NGOs from a JSON file: one object or an array, same fields as fixtures/ngos.json
+    Import { file: std::path::PathBuf },
+    /// Delete an NGO nobody references, otherwise deactivate it
+    Remove { id: String },
 }
 
 #[derive(Subcommand)]
@@ -266,6 +303,11 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Manage the NGOs customers can choose (list, set, import, remove)
+    Ngo {
+        #[command(subcommand)]
+        cmd: NgoCmd,
+    },
     /// Import an NGO's monthly statement (CSV date,amount,reference,counterparty; amount "4,50" or "4.50") and confirm matching claims
     NgoReport {
         /// NGO id, e.g. bahnhofsmission
@@ -298,6 +340,10 @@ impl Api {
     }
     async fn post(&self, path: &str, body: Value) -> anyhow::Result<Value> {
         let r = self.http.post(format!("{}{}", self.url, path)).header("x-admin-token", &self.token).json(&body).send().await?;
+        Self::body(r).await
+    }
+    async fn put(&self, path: &str, body: Value) -> anyhow::Result<Value> {
+        let r = self.http.put(format!("{}{}", self.url, path)).header("x-admin-token", &self.token).json(&body).send().await?;
         Self::body(r).await
     }
     async fn delete(&self, path: &str) -> anyhow::Result<Value> {
@@ -468,6 +514,55 @@ async fn main() -> anyhow::Result<()> {
             let v = api.delete(&path).await?;
             println!("Vergessen: {} ({}), {} gesendete Anträge", s(&v, "nickname"), s(&v, "forgotten"), s(&v, "sent_claims"));
         }
+        Cmd::Ngo { cmd } => match cmd {
+            NgoCmd::List => {
+                let v = api.get("/admin/ngos").await?;
+                println!("{:<24} {:<32} {:<8} {:<11} {:<11} {:<8} {:<10} IBAN", "ID", "Name", "aktiv", "bestätigt", "eingereicht", "Kunden", "Consent");
+                for n in v.as_array().unwrap_or(&vec![]) {
+                    println!(
+                        "{:<24} {:<32} {:<8} {:>9} € {:>9} € {:<8} {:<10} {}",
+                        s(n, "id"),
+                        s(n, "name").chars().take(32).collect::<String>(),
+                        if n["active"].as_bool().unwrap_or(false) { "ja" } else { "nein" },
+                        n["confirmed_total_cents"].as_i64().unwrap_or(0) / 100,
+                        n["submitted_total_cents"].as_i64().unwrap_or(0) / 100,
+                        s(n, "customers"),
+                        n["consent_date"].as_str().unwrap_or("–"),
+                        s(n, "iban")
+                    );
+                }
+            }
+            NgoCmd::Set { id, name, tagline, story, holder, iban, donation_url, consent, active, inactive } => {
+                let mut body = serde_json::Map::new();
+                if let Some(v) = name { body.insert("name".into(), json!(v)); }
+                if let Some(v) = tagline { body.insert("tagline".into(), json!(v)); }
+                if !story.is_empty() { body.insert("story".into(), json!(story)); }
+                if let Some(v) = holder { body.insert("account_holder".into(), json!(v)); }
+                if let Some(v) = iban { body.insert("iban".into(), json!(v)); }
+                if let Some(v) = donation_url { body.insert("donation_url".into(), json!(v)); }
+                if let Some(v) = consent { body.insert("consent_date".into(), json!(v)); }
+                if active { body.insert("active".into(), json!(true)); }
+                if inactive { body.insert("active".into(), json!(false)); }
+                let v = api.put(&format!("/admin/ngos/{id}"), Value::Object(body)).await?;
+                println!("{} · {} · {} · {} · aktiv: {}", s(&v, "id"), s(&v, "name"), s(&v, "account_holder"), s(&v, "iban"), v["active"].as_bool().unwrap_or(false));
+            }
+            NgoCmd::Import { file } => {
+                let v: Value = serde_json::from_str(&std::fs::read_to_string(&file)?)?;
+                let items: Vec<Value> = match v {
+                    Value::Array(a) => a,
+                    o => vec![o],
+                };
+                for item in items {
+                    let id = item["id"].as_str().ok_or_else(|| anyhow::anyhow!("every NGO needs an \"id\""))?.to_string();
+                    let r = api.put(&format!("/admin/ngos/{id}"), item).await?;
+                    println!("{} · {} · {}", s(&r, "id"), s(&r, "name"), s(&r, "iban"));
+                }
+            }
+            NgoCmd::Remove { id } => {
+                let v = api.delete(&format!("/admin/ngos/{id}")).await?;
+                println!("{}", if v["deleted"].as_bool().unwrap_or(false) { "gelöscht" } else { "deaktiviert (wird referenziert)" });
+            }
+        },
         Cmd::NgoReport { ngo, file } => {
             let text = std::fs::read_to_string(&file)?;
             let body = if file.extension().and_then(|e| e.to_str()) == Some("json") {

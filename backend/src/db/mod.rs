@@ -45,7 +45,9 @@ pub async fn seed(pool: &PgPool) -> anyhow::Result<()> {
         .await?;
     }
 
-    for n in &f.ngos {
+    // NGOs are managed data (admin API, `stellwerk ngo …`): the fixture only fills an empty table.
+    let ngo_count: i64 = sqlx::query_scalar("select count(*) from ngos").fetch_one(pool).await?;
+    for n in f.ngos.iter().filter(|_| ngo_count == 0) {
         sqlx::query(
             "insert into ngos (id, name, tagline, story, account_holder, iban, donation_url, last_report, seed_confirmed_cents, seed_submitted_cents)
              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)

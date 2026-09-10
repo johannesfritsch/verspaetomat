@@ -1,11 +1,11 @@
 [
   {"id": "bahnhofsmission", "name": "Bahnhofsmission Köln", "tagline": "Hilft am Gleis, wenn sonst niemand da ist.",
    "story": ["Die Bahnhofsmission ist rund um die Uhr am Kölner Hauptbahnhof: für Menschen, die gestrandet sind, für Reisende mit Handicap, für alle, die einen Kaffee und ein Gespräch brauchen.", "Verspätungen sind ihr Alltag. Wer nachts den letzten Zug verpasst, landet oft hier.", "Jede Entschädigung, die du hierher lenkst, bezahlt Decken, warme Getränke und die Nachtschicht."],
-   "account_holder": "Bahnhofsmission Köln e.V.", "iban": "DE12 3456 7890 0000 4711 00", "donation_url": "https://beispiel.bahnhofsmission.de/spenden", "last_report": "2026-09-01", "confirmed_total_cents": 1241000, "submitted_total_cents": 198000},
+   "account_holder": "Bahnhofsmission Köln e.V.", "iban": "DE14 1234 5678 0000 0047 11", "donation_url": "https://beispiel.bahnhofsmission.de/spenden", "last_report": "2026-09-01", "confirmed_total_cents": 1241000, "submitted_total_cents": 198000},
   {"id": "wald", "name": "Wald für morgen e.V.", "tagline": "Pflanzt, wo der Wald verschwunden ist.",
    "story": ["Der Verein forstet Kahlflächen im Sauerland und in der Eifel wieder auf, mit Baumarten, die den nächsten Sommer überstehen.", "Ein Euro ist ein Setzling. 68 Minuten Warten sind eine kleine Baumreihe."],
-   "account_holder": "Wald für morgen e.V.", "iban": "DE98 7654 3210 0000 0815 00", "donation_url": "https://beispiel.waldfuermorgen.de/spenden", "last_report": "2026-09-01", "confirmed_total_cents": 873000, "submitted_total_cents": 221000},
+   "account_holder": "Wald für morgen e.V.", "iban": "DE29 8765 4321 0000 0008 15", "donation_url": "https://beispiel.waldfuermorgen.de/spenden", "last_report": "2026-09-01", "confirmed_total_cents": 873000, "submitted_total_cents": 221000},
   {"id": "kinderhospiz", "name": "Kinderhospiz Rheinland", "tagline": "Zeit, die zählt, für Familien, die wenig davon haben.",
    "story": ["Das Kinderhospiz begleitet Familien mit schwerstkranken Kindern, zu Hause und im Haus in Köln-Ehrenfeld.", "Wartezeit bekommt hier eine andere Bedeutung. Deine Verspätung kauft Stunden für Menschen, die sie brauchen."],
-   "account_holder": "Kinderhospiz Rheinland gGmbH", "iban": "DE55 1122 3344 0000 9999 00", "donation_url": "https://beispiel.kinderhospiz-rheinland.de/spenden", "last_report": "2026-09-01", "confirmed_total_cents": 2714000, "submitted_total_cents": 156000}
+   "account_holder": "Kinderhospiz Rheinland gGmbH", "iban": "DE34 1122 3344 0000 0099 99", "donation_url": "https://beispiel.kinderhospiz-rheinland.de/spenden", "last_report": "2026-09-01", "confirmed_total_cents": 2714000, "submitted_total_cents": 156000}
 ]

@@ -99,6 +99,24 @@ Env: `STELLWERK_URL` (default `http://127.0.0.1:8080`), `ADMIN_TOKEN` (default `
 
 `deploy/` has the Dockerfile (multi-stage, fonts and migrations embedded), a compose file with Postgres 17, the API and Caddy for TLS, `.env.example` with every variable, and a README with the DNS records for the API host and the mail domain (SPF, DKIM, DMARC, MX to Postmark), the inbound webhook, backups and the update procedure.
 
+## NGOs are managed data
+
+`backend/fixtures/ngos.json` only seeds an empty `ngos` table (first start). After that the table is
+the source of truth and is never overwritten by a deploy. Manage it with the admin API
+(`GET /admin/ngos`, `PUT /admin/ngos/{id}`, `DELETE /admin/ngos/{id}`) or:
+
+```bash
+stellwerk --prod ngo list
+stellwerk --prod ngo set bahnhofsmission --holder "Bahnhofsmission Köln e.V." --iban "DE.." --consent 2026-10-01
+stellwerk --prod ngo set neuer-verein --name "…" --holder "…" --iban "…" --tagline "…" --story "Absatz 1" --story "Absatz 2" --donation-url https://…
+stellwerk --prod ngo import ngos.json      # one object or an array, same fields as the fixture
+stellwerk --prod ngo remove <id>           # deleted when unreferenced, otherwise deactivated; the last active one stays
+```
+
+IBANs are checksum-validated and stored in groups of four; the claim form snapshots holder and IBAN
+at send time, so later edits never rewrite sent claims. The fixture's IBANs are valid-format
+placeholders with fake bank codes.
+
 ## Stellwerk targets
 
 `stellwerk` talks to the local backend by default (`--dev`: http://127.0.0.1:8080, token `stellwerk`).

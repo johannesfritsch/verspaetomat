@@ -530,3 +530,164 @@ mod tests {
         assert_eq!(parse_report_amount("4,505"), None);
     }
 }
+
+// ---------------------------------------------------------------------------
+// NGOs: managed data. The fixture seeds an empty table once; from then on this API owns it.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+pub struct NgoUpsert {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub tagline: Option<String>,
+    #[serde(default)]
+    pub story: Option<Vec<String>>,
+    #[serde(default)]
+    pub account_holder: Option<String>,
+    #[serde(default)]
+    pub iban: Option<String>,
+    #[serde(default)]
+    pub donation_url: Option<String>,
+    #[serde(default)]
+    pub active: Option<bool>,
+    #[serde(default)]
+    pub consent_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    pub last_report: Option<chrono::NaiveDate>,
+}
+
+/// IBAN normalised to groups of four, or an error. Checks length per country prefix loosely and the mod-97 checksum.
+pub fn normalise_iban(raw: &str) -> Result<String, String> {
+    let compact: String = raw.chars().filter(|c| !c.is_whitespace()).map(|c| c.to_ascii_uppercase()).collect();
+    if compact.len() < 15 || compact.len() > 34 || !compact.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("IBAN length or characters".into());
+    }
+    if compact.starts_with("DE") && compact.len() != 22 {
+        return Err("a German IBAN has 22 characters".into());
+    }
+    let rearranged = format!("{}{}", &compact[4..], &compact[..4]);
+    let mut rem: u32 = 0;
+    for c in rearranged.chars() {
+        let v = c.to_digit(36).ok_or("IBAN characters")?;
+        rem = if v >= 10 { (rem * 100 + v) % 97 } else { (rem * 10 + v) % 97 };
+    }
+    if rem != 1 {
+        return Err("IBAN checksum".into());
+    }
+    Ok(compact.as_bytes().chunks(4).map(|c| std::str::from_utf8(c).unwrap_or("")).collect::<Vec<_>>().join(" "))
+}
+
+async fn ngo_json(pool: &sqlx::PgPool, id: &str) -> Result<Value, (StatusCode, Json<Value>)> {
+    let row: Option<(String, String, String, Value, String, String, String, Option<chrono::NaiveDate>, bool, Option<chrono::NaiveDate>, i64, i64, i64, i64, i64)> = sqlx::query_as(
+        "select n.id, n.name, n.tagline, n.story, n.account_holder, n.iban, n.donation_url, n.last_report, n.active, n.consent_date,
+                n.seed_confirmed_cents, n.seed_submitted_cents,
+                coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'bestaetigt'), 0)::bigint,
+                coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'eingereicht'), 0)::bigint,
+                (select count(*) from customers c where c.ngo_id = n.id)::bigint
+         from ngos n where n.id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(internal)?;
+    let Some((id, name, tagline, story, holder, iban, url, last_report, active, consent, sc, ss, c, sub, customers)) = row else {
+        return Err(err(StatusCode::NOT_FOUND, "no such NGO"));
+    };
+    Ok(json!({
+        "id": id, "name": name, "tagline": tagline, "story": story, "account_holder": holder, "iban": iban, "donation_url": url,
+        "last_report": last_report, "active": active, "consent_date": consent,
+        "confirmed_total_cents": sc + c, "submitted_total_cents": ss + sub, "customers": customers,
+    }))
+}
+
+/// `GET /admin/ngos`: every NGO, inactive ones included, with totals and how many customers chose it.
+pub async fn ngos_list(State(s): State<AppState>, _a: Admin) -> ApiResult {
+    let ids: Vec<String> = sqlx::query_scalar("select id from ngos order by active desc, name").fetch_all(&s.pool).await.map_err(internal)?;
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        out.push(ngo_json(&s.pool, &id).await?);
+    }
+    Ok(Json(json!(out)))
+}
+
+/// `PUT /admin/ngos/{id}`: create or update. A new NGO needs name, account_holder and iban; updates take any subset.
+pub async fn ngo_upsert(State(s): State<AppState>, _a: Admin, Path(id): Path<String>, Json(b): Json<NgoUpsert>) -> ApiResult {
+    let id = id.trim().to_lowercase();
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(err(StatusCode::BAD_REQUEST, "id: letters, digits, - and _"));
+    }
+    let iban = match &b.iban {
+        Some(raw) => Some(normalise_iban(raw).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?),
+        None => None,
+    };
+    let exists: bool = sqlx::query_scalar("select exists(select 1 from ngos where id = $1)").bind(&id).fetch_one(&s.pool).await.map_err(internal)?;
+    let story = b.story.as_ref().map(|v| serde_json::to_value(v).unwrap_or(json!([])));
+    if exists {
+        sqlx::query(
+            "update ngos set name = coalesce($2, name), tagline = coalesce($3, tagline), story = coalesce($4, story),
+                account_holder = coalesce($5, account_holder), iban = coalesce($6, iban), donation_url = coalesce($7, donation_url),
+                active = coalesce($8, active), consent_date = coalesce($9, consent_date), last_report = coalesce($10, last_report)
+             where id = $1",
+        )
+        .bind(&id).bind(&b.name).bind(&b.tagline).bind(&story).bind(&b.account_holder).bind(&iban).bind(&b.donation_url)
+        .bind(b.active).bind(b.consent_date).bind(b.last_report)
+        .execute(&s.pool).await.map_err(internal)?;
+        crate::rules::audit(&s.pool, "ngo", Uuid::nil(), None, &id, "updated via admin").await.map_err(internal)?;
+    } else {
+        let (Some(name), Some(holder), Some(iban)) = (&b.name, &b.account_holder, &iban) else {
+            return Err(err(StatusCode::BAD_REQUEST, "a new NGO needs name, account_holder and iban"));
+        };
+        sqlx::query(
+            "insert into ngos (id, name, tagline, story, account_holder, iban, donation_url, last_report, active, consent_date)
+             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        )
+        .bind(&id).bind(name).bind(b.tagline.clone().unwrap_or_default()).bind(story.unwrap_or(json!([]))).bind(holder).bind(iban)
+        .bind(b.donation_url.clone().unwrap_or_default()).bind(b.last_report).bind(b.active.unwrap_or(true)).bind(b.consent_date)
+        .execute(&s.pool).await.map_err(internal)?;
+        crate::rules::audit(&s.pool, "ngo", Uuid::nil(), None, &id, "created via admin").await.map_err(internal)?;
+    }
+    Ok(Json(ngo_json(&s.pool, &id).await?))
+}
+
+/// `DELETE /admin/ngos/{id}`: deletes an NGO nobody references; otherwise deactivates it. The last active NGO stays.
+pub async fn ngo_remove(State(s): State<AppState>, _a: Admin, Path(id): Path<String>) -> ApiResult {
+    let active_others: i64 = sqlx::query_scalar("select count(*) from ngos where active and id <> $1").bind(&id).fetch_one(&s.pool).await.map_err(internal)?;
+    if active_others == 0 {
+        return Err(err(StatusCode::CONFLICT, "the last active NGO cannot be removed; add another first"));
+    }
+    let referenced: bool = sqlx::query_scalar(
+        "select exists(select 1 from incidents where ngo_id = $1) or exists(select 1 from customers where ngo_id = $1) or exists(select 1 from ngo_reports where ngo_id = $1)",
+    )
+    .bind(&id)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    if referenced {
+        let n = sqlx::query("update ngos set active = false where id = $1").bind(&id).execute(&s.pool).await.map_err(internal)?.rows_affected();
+        if n == 0 {
+            return Err(err(StatusCode::NOT_FOUND, "no such NGO"));
+        }
+        crate::rules::audit(&s.pool, "ngo", Uuid::nil(), Some("active"), &id, "deactivated via admin").await.map_err(internal)?;
+        return Ok(Json(json!({ "id": id, "deactivated": true, "deleted": false })));
+    }
+    let n = sqlx::query("delete from ngos where id = $1").bind(&id).execute(&s.pool).await.map_err(internal)?.rows_affected();
+    if n == 0 {
+        return Err(err(StatusCode::NOT_FOUND, "no such NGO"));
+    }
+    crate::rules::audit(&s.pool, "ngo", Uuid::nil(), None, &id, "deleted via admin").await.map_err(internal)?;
+    Ok(Json(json!({ "id": id, "deactivated": false, "deleted": true })))
+}
+
+#[cfg(test)]
+mod ngo_tests {
+    use super::normalise_iban;
+
+    #[test]
+    fn iban() {
+        assert_eq!(normalise_iban("DE89 3704 0044 0532 0130 00").unwrap(), "DE89 3704 0044 0532 0130 00");
+        assert_eq!(normalise_iban("de89370400440532013000").unwrap(), "DE89 3704 0044 0532 0130 00");
+        assert!(normalise_iban("DE12 3456 7890 0000 4711 00").is_err()); // the fixture placeholder
+        assert!(normalise_iban("DE89 3704 0044 0532 0130").is_err());
+    }
+}
