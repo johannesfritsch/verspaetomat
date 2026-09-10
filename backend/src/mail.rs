@@ -1,5 +1,6 @@
 //! Outbound mail. With `SMTP_URL` set mails really leave; without it every send is a
-//! recorded dry-run. Schemes: `smtps://user:pass@host:465` (implicit TLS),
+//! recorded dry-run. `POSTMARK_TOKEN` (preferred: synchronous errors) or `SMTP_URL`.
+//! SMTP schemes: `smtps://user:pass@host:465` (implicit TLS),
 //! `smtp://user:pass@host:587` (STARTTLS), and `smtp://host:1025?starttls=no` for a
 //! local sink without TLS (see `scripts/smtp-sink-check.sh`).
 
@@ -24,7 +25,53 @@ pub enum SendResult {
 }
 
 pub fn configured() -> bool {
-    std::env::var("SMTP_URL").is_ok()
+    std::env::var("POSTMARK_TOKEN").is_ok() || std::env::var("SMTP_URL").is_ok()
+}
+
+/// Postmark's HTTP API. Unlike SMTP, which answers 250 and rejects later in the activity log,
+/// it returns errors synchronously (e.g. 412 while the account is pending approval), so the
+/// caller and `stellwerk mail-test` see them.
+async fn send_postmark(token: &str, mail: &OutgoingMail<'_>) -> anyhow::Result<()> {
+    use base64::Engine;
+    let attachments: Vec<serde_json::Value> = mail
+        .attachments
+        .iter()
+        .map(|(name, ct, bytes)| serde_json::json!({ "Name": name, "ContentType": ct, "Content": base64::engine::general_purpose::STANDARD.encode(bytes) }))
+        .collect();
+    let mut headers = vec![serde_json::json!({ "Name": "Message-ID", "Value": mail.message_id })];
+    if let Some(r) = mail.in_reply_to {
+        headers.push(serde_json::json!({ "Name": "In-Reply-To", "Value": r }));
+        headers.push(serde_json::json!({ "Name": "References", "Value": r }));
+    }
+    let body = serde_json::json!({
+        "From": mail.from,
+        "To": mail.to,
+        "Bcc": mail.bcc,
+        "Subject": mail.subject,
+        "TextBody": mail.body,
+        "MessageStream": "outbound",
+        "Headers": headers,
+        "Attachments": attachments,
+    });
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build()?;
+    let r = client
+        .post("https://api.postmarkapp.com/email")
+        .header("X-Postmark-Server-Token", token)
+        .header("Accept", "application/json")
+        .json(&body)
+        .send()
+        .await?;
+    let status = r.status();
+    let v: serde_json::Value = r.json().await.unwrap_or_default();
+    if !status.is_success() || v.get("ErrorCode").and_then(|c| c.as_i64()).unwrap_or(0) != 0 {
+        anyhow::bail!(
+            "Postmark {} (ErrorCode {}): {}",
+            status.as_u16(),
+            v.get("ErrorCode").and_then(|c| c.as_i64()).unwrap_or(0),
+            v.get("Message").and_then(|m| m.as_str()).unwrap_or("no message")
+        );
+    }
+    Ok(())
 }
 
 fn transport() -> anyhow::Result<AsyncSmtpTransport<Tokio1Executor>> {
@@ -48,6 +95,10 @@ fn transport() -> anyhow::Result<AsyncSmtpTransport<Tokio1Executor>> {
 pub async fn send(mail: OutgoingMail<'_>) -> anyhow::Result<SendResult> {
     if !configured() {
         return Ok(SendResult::DryRun);
+    }
+    if let Ok(token) = std::env::var("POSTMARK_TOKEN") {
+        send_postmark(&token, &mail).await?;
+        return Ok(SendResult::Sent);
     }
     let from: Mailbox = mail.from.parse()?;
     let to: Mailbox = mail.to.parse()?;

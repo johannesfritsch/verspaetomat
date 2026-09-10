@@ -44,9 +44,9 @@ CNAMEs), inbound via SES receipt rule → SNS → HTTPS to the same webhook, and
 1. **[you]** Servers → create a server "Verspätomat", Transactional stream.
 2. **[you]** Sender Signatures → add domain `verspaetomat.de` (the apex; subdomains are covered), set the DKIM and Return-Path
    records from step 1, wait for both to verify.
-3. **[you]** Server → API Tokens → copy one. Outbound over SMTP uses that token as both user
-   and password. Postmark speaks STARTTLS on 587 (no implicit TLS on 465):
-   `SMTP_URL=smtp://TOKEN:TOKEN@smtp.postmarkapp.com:587`.
+3. **[you]** Server → API Tokens → copy one into `POSTMARK_TOKEN`. The backend then uses Postmark's
+   HTTP API, which reports rejections synchronously; over SMTP (`SMTP_URL=smtp://TOKEN:TOKEN@smtp.postmarkapp.com:587`)
+   Postmark answers 250 and only rejects later in the activity log.
 4. **[you]** Inbound: Server → Inbound stream → "Inbound webhook":
 
    ```
@@ -70,7 +70,11 @@ A new Postmark account is in "test mode": it may only send to addresses on your 
 domains until you request approval (Account → "Request approval", a short form about what you
 send). The Servicecenter's address is not on your domain, so request approval right away.
 
-Check both directions with one command once `SMTP_URL` and the webhook are set:
+While the account is pending approval, Postmark only delivers to the From domain. That still
+tests the whole loop: `stellwerk --prod mail-test <customer> fahrgast-<other>@users.verspaetomat.de`
+goes out through Postmark and comes back through the inbound webhook.
+
+Check both directions with one command once the token and the webhook are set:
 `stellwerk --prod mail-test <customer> you@example.org`, then reply to that mail from your inbox;
 the reply shows up in `docker compose logs api` as an inbound mail for that relay address.
 
