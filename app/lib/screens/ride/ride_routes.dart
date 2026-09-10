@@ -35,6 +35,8 @@ final rideRoutes = <RouteBase>[
       tripId: s.uri.queryParameters['departure'],
       fromStationId: s.uri.queryParameters['station'],
       fromStationName: s.uri.queryParameters['name'],
+      fromLat: double.tryParse(s.uri.queryParameters['lat'] ?? ''),
+      fromLon: double.tryParse(s.uri.queryParameters['lon'] ?? ''),
     ),
   ),
   GoRoute(path: Routes.unterwegs, builder: (_, __) => const UnterwegsScreen()),

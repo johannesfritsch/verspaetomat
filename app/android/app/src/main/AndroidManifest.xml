@@ -1,9 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- The backend and the train feed. -->
     <uses-permission android:name="android.permission.INTERNET"/>
-    <!-- One position fix when the Bahnsteig opens and at check-in. No background location (docs/14). -->
+    <!-- One position fix when the Bahnsteig opens and at check-in (docs/14). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Station geofences for the nudge with the app closed (docs/15). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
         android:label="Verspätomat"
         android:name="${applicationName}"
@@ -30,6 +34,17 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Geofence transitions from Play services and re-registration after a reboot (docs/15). -->
+        <receiver android:name=".GeofenceReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="de.verspaetomat.verspaetomat.GEOFENCE"/>
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

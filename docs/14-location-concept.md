@@ -10,7 +10,7 @@ The one promise printed in the app: *Dein Standort bleibt am Bahnhof.* Everythin
 | Checking in | one position fix | mark the ride "verified" for the boards (within 500 m of the from-station) | lat/lon on the ride only |
 | During the ride | nothing | the server follows the train, not the phone | — |
 
-No continuous tracking, no location history, no background location in this version. The background geofence nudge is a later, separate decision (docs/06).
+No continuous tracking, no location history. The background nudge (decided 10 September 2026) uses the operating system's region monitoring, not location updates: see [15-geofence.md](15-geofence.md). It adds one moment: the phone takes fixes for up to 90 s after entering a registered station region, and one nearby query when it leaves the umbrella region. Nothing from that is stored.
 
 ## The server never guesses
 

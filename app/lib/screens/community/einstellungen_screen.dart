@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
 import '../../mock/mock_data.dart';
+import '../../platform/geofence_sync.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../state/demo_state.dart';
@@ -20,9 +21,6 @@ class EinstellungenScreen extends StatefulWidget {
 }
 
 class _EinstellungenScreenState extends State<EinstellungenScreen> {
-  bool _nudges = true;
-  bool _quietHours = true;
-
   @override
   Widget build(BuildContext context) {
     final state = DemoScope.of(context);
@@ -64,15 +62,15 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           const VSection('Bahnsteig-Hinweis'),
           SwitchRow(
             title: 'Hinweis am Bahnhof',
-            subtitle: 'Nach zwei bis drei Minuten an einem Bahnhof',
-            value: _nudges,
-            onChanged: (v) => setState(() => _nudges = v),
+            subtitle: locationMode == LocationMode.always ? 'Nach etwa einer Minute an einem deiner Bahnhöfe' : 'Nur solange die App offen ist',
+            value: settings?.nudgeEnabled ?? state.nudgeEnabled,
+            onChanged: (v) => session.updateSettings(MePatch(nudgeEnabled: v)),
           ),
           SwitchRow(
             title: 'Ruhezeiten',
-            subtitle: '22:00 bis 06:00 kein Hinweis',
-            value: _quietHours,
-            onChanged: (v) => setState(() => _quietHours = v),
+            subtitle: (settings?.quietHours ?? state.quietHours) ? '${settings?.quietFrom ?? '22:00'} bis ${settings?.quietTo ?? '06:00'} kein Hinweis' : 'Hinweis rund um die Uhr',
+            value: settings?.quietHours ?? state.quietHours,
+            onChanged: (v) => session.updateSettings(MePatch(quietFrom: v ? '22:00' : '', quietTo: v ? '06:00' : '')),
           ),
           VListRow(
             title: 'Stumme Bahnhöfe',
@@ -94,7 +92,10 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
                 LocationMode.never => 'Manueller Check-in, jederzeit möglich',
               },
               selected: locationMode == m,
-              onTap: () => session.updateSettings(MePatch(locationMode: m)),
+              onTap: () async {
+                await session.updateSettings(MePatch(locationMode: m));
+                await GeofenceSync.requestFor(m);
+              },
             ),
           const VGap.xl(),
           const VSection('Anträge'),

@@ -20,11 +20,13 @@ extension TicketTypeX on TicketType {
 }
 
 class Station {
-  const Station({required this.id, required this.name, required this.distanceM, this.evaNr});
+  const Station({required this.id, required this.name, required this.distanceM, this.evaNr, this.lat = 0, this.lon = 0});
   final String id;
   final String name;
   final int distanceM;
   final String? evaNr;
+  final double lat;
+  final double lon;
   String get distanceLabel => distanceM < 1000 ? '$distanceM m' : '${(distanceM / 1000).toStringAsFixed(1).replaceAll('.', ',')} km';
 }
 
@@ -241,9 +243,9 @@ class Mock {
 
   // Stations near the customer (Köln)
   static const nearbyStations = [
-    Station(id: 'koeln-hbf', name: 'Köln Hbf', distanceM: 380, evaNr: '8000207'),
-    Station(id: 'koeln-deutz', name: 'Köln Messe/Deutz', distanceM: 1200, evaNr: '8003368'),
-    Station(id: 'koeln-hansaring', name: 'Köln Hansaring', distanceM: 1700, evaNr: '8003367'),
+    Station(id: 'koeln-hbf', name: 'Köln Hbf', distanceM: 380, evaNr: '8000207', lat: 50.9432, lon: 6.9586),
+    Station(id: 'koeln-deutz', name: 'Köln Messe/Deutz', distanceM: 1200, evaNr: '8003368', lat: 50.9410, lon: 6.9750),
+    Station(id: 'koeln-hansaring', name: 'Köln Hansaring', distanceM: 1700, evaNr: '8003367', lat: 50.9563, lon: 6.9431),
   ];
 
   static const homeStation = 'Köln Hbf';

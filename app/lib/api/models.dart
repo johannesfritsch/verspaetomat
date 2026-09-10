@@ -314,6 +314,9 @@ class ApiSettings {
     this.traewellingLinked = false,
     this.onboardingDone = false,
     this.mutedStations = const [],
+    this.nudgeEnabled = true,
+    this.quietFrom = '22:00',
+    this.quietTo = '06:00',
   });
   final TicketType ticket;
   final String ngoId;
@@ -324,6 +327,12 @@ class ApiSettings {
   final bool traewellingLinked;
   final bool onboardingDone;
   final List<ApiMutedStation> mutedStations;
+
+  /// Station nudge on/off and the quiet window ("HH:MM", null = no quiet hours). See docs/15.
+  final bool nudgeEnabled;
+  final String? quietFrom;
+  final String? quietTo;
+  bool get quietHours => quietFrom != null && quietTo != null;
 
   bool isMuted(String stationId) => mutedStations.any((m) => m.id == stationId);
 
@@ -337,12 +346,29 @@ class ApiSettings {
         traewellingLinked: _b(j['traewelling_linked']),
         onboardingDone: _b(j['onboarding_done']),
         mutedStations: (j['muted_stations'] as List? ?? const []).whereType<Map<String, dynamic>>().map(ApiMutedStation.fromJson).toList(),
+        nudgeEnabled: _b(j['nudge_enabled'], true),
+        quietFrom: j.containsKey('quiet_from') ? _sn(j['quiet_from']) : '22:00',
+        quietTo: j.containsKey('quiet_to') ? _sn(j['quiet_to']) : '06:00',
       );
 }
 
 /// PATCH /v1/me body. Only set fields are sent.
 class MePatch {
-  const MePatch({this.ticket, this.ngoId, this.locationMode, this.notifications, this.showOnBoards, this.keepCorrespondence, this.traewellingLinked, this.onboardingDone, this.nickname, this.mutedStations});
+  const MePatch({
+    this.ticket,
+    this.ngoId,
+    this.locationMode,
+    this.notifications,
+    this.showOnBoards,
+    this.keepCorrespondence,
+    this.traewellingLinked,
+    this.onboardingDone,
+    this.nickname,
+    this.mutedStations,
+    this.nudgeEnabled,
+    this.quietFrom,
+    this.quietTo,
+  });
   final TicketType? ticket;
   final String? ngoId;
   final LocationMode? locationMode;
@@ -354,6 +380,10 @@ class MePatch {
   final String? nickname;
   /// Full replacement of the muted list.
   final List<ApiMutedStation>? mutedStations;
+  final bool? nudgeEnabled;
+  /// "HH:MM"; an empty string clears the quiet window.
+  final String? quietFrom;
+  final String? quietTo;
 
   Map<String, dynamic> toJson() => {
         if (ticket != null) 'ticket': ticketToWire(ticket!),
@@ -366,7 +396,46 @@ class MePatch {
         if (onboardingDone != null) 'onboarding_done': onboardingDone,
         if (nickname != null) 'nickname': nickname,
         if (mutedStations != null) 'muted_stations': mutedStations!.map((m) => m.toJson()).toList(),
+        if (nudgeEnabled != null) 'nudge_enabled': nudgeEnabled,
+        if (quietFrom != null) 'quiet_from': quietFrom,
+        if (quietTo != null) 'quiet_to': quietTo,
       };
+}
+
+/// GET /v1/me/geofence: the stations the phone should watch (docs/15).
+class ApiGeofence {
+  const ApiGeofence({required this.enabled, required this.stations, this.quietFrom, this.quietTo});
+  final bool enabled;
+  final List<ApiGeofenceStation> stations;
+  final String? quietFrom;
+  final String? quietTo;
+
+  static const empty = ApiGeofence(enabled: false, stations: []);
+
+  factory ApiGeofence.fromJson(Map<String, dynamic> j) => ApiGeofence(
+        enabled: _b(j['enabled']),
+        stations: (j['stations'] as List? ?? const []).whereType<Map<String, dynamic>>().map(ApiGeofenceStation.fromJson).toList(),
+        quietFrom: _sn(j['quiet_from']),
+        quietTo: _sn(j['quiet_to']),
+      );
+}
+
+class ApiGeofenceStation {
+  const ApiGeofenceStation({required this.id, required this.name, required this.lat, required this.lon, this.checkins = 0});
+  final String id;
+  final String name;
+  final double lat;
+  final double lon;
+  final int checkins;
+
+  factory ApiGeofenceStation.fromJson(Map<String, dynamic> j) => ApiGeofenceStation(
+        id: _s(j['id']),
+        name: _s(j['name']),
+        lat: (j['lat'] as num?)?.toDouble() ?? 0,
+        lon: (j['lon'] as num?)?.toDouble() ?? 0,
+        checkins: (j['checkins'] as num?)?.toInt() ?? 0,
+      );
+  Map<String, dynamic> toChannel() => {'id': id, 'name': name, 'lat': lat, 'lon': lon};
 }
 
 class ApiCustomer {
@@ -431,6 +500,8 @@ class CheckInRequest {
     required this.exitStationName,
     this.ticket,
     this.location,
+    this.fromLat,
+    this.fromLon,
   });
   final String tripId;
   final String fromStationId;
@@ -439,6 +510,9 @@ class CheckInRequest {
   final String exitStationName;
   final TicketType? ticket;
   final ApiLocation? location;
+  /// The from-station's own coordinates (not the phone's): feed the geofence set.
+  final double? fromLat;
+  final double? fromLon;
   Map<String, dynamic> toJson() => {
         'trip_id': tripId,
         'from_station_id': fromStationId,
@@ -447,6 +521,7 @@ class CheckInRequest {
         'exit_station_name': exitStationName,
         if (ticket != null) 'ticket': ticketToWire(ticket!),
         if (location != null) 'location': location!.toJson(),
+        if (fromLat != null && fromLon != null) ...{'from_lat': fromLat, 'from_lon': fromLon},
       };
 }
 

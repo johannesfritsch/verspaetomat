@@ -46,7 +46,7 @@ Paste into "Notes" in App Review Information:
 >
 > No login: accounts are anonymous device accounts created on first launch. No demo credentials are needed. A recovery code (Einstellungen → Konto) restores an account on another device.
 >
-> Location: requested "When In Use" only. It is read once when the home screen opens (to list nearby stations) and once at check-in (to mark the ride as verified). No background location, no location during the ride: the server follows the train in public timetable data, not the phone. The app is fully usable with location denied (stations can be searched by name).
+> Location: "Always" is requested for the station nudge, which is on by default and can be turned off in Einstellungen. The app uses region monitoring for at most 19 stations (the user's frequent check-in stations and the three nearest) plus one 8 km umbrella region; it is woken only on entry/exit, takes fixes for at most 90 s after entering a station region to confirm the user is standing there, then shows a local notification. No continuous location updates, no location history, no location during the ride: the server follows the train in public timetable data, not the phone. Foreground reads: once when the home screen opens (to list nearby stations) and once at check-in (to mark the ride as verified). The app is fully usable with location denied (stations can be searched by name). Testing the nudge: set a simulated location outside Cologne, then to 50.9432, 6.9586 (Köln Hbf) and wait about a minute.
 >
 > Testing without live delays: real German trains at the moment of review will mostly be on time, so the compensation flow (delay ≥ 60 min) will not trigger by itself. To see it: Einstellungen → Backend → "Demo (eingebaut)" switches the app to built-in sample data, where the whole flow (check-in, arrival +68, claim, signature, send, reply) can be walked through offline. Our server-side test controls ("Stellwerk") are not reachable from the app and not available to reviewers.
 >
@@ -70,7 +70,7 @@ Section by section, as the console asks.
 
 | Category | Type | Collected | Shared | Optional | Purpose |
 |---|---|---|---|---|---|
-| Location | Precise location | yes | no | yes (user can deny; app works) | App functionality |
+| Location | Precise location | yes | no | yes (user can deny; app works; Always permission for the background station nudge, see docs/15) | App functionality |
 | Location | Approximate location | no | | | |
 | Personal info | Name | yes | shared with the railway when the user sends a claim | yes (only at first claim) | App functionality |
 | Personal info | Email address | yes | shared with the railway (BCC copy goes to the user's own address) | yes | App functionality |
@@ -90,7 +90,7 @@ Section by section, as the console asks.
 
 **Permissions declaration** (Play Console → App content)
 
-- `ACCESS_FINE_LOCATION`: foreground only, core feature "find the station you are at and verify a check-in". No background location: do not fill in the background location declaration; do not request `ACCESS_BACKGROUND_LOCATION` (the manifest does not).
+- `ACCESS_FINE_LOCATION` and `ACCESS_BACKGROUND_LOCATION`: core feature "find the station you are at and verify a check-in", plus the background station nudge via the Geofencing API (docs/15). Play's background location declaration: feature "Hinweis am Bahnhof", user-visible benefit "a notification when you arrive at one of your stations so you can check in", on by default, opt-out in Einstellungen, prominent disclosure on the onboarding permissions screen. A short video of the onboarding screen and the notification is required for the declaration.
 - `INTERNET`: standard.
 - No SMS/Call Log, no Accessibility, no VPN, no device admin.
 

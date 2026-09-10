@@ -175,6 +175,9 @@ mod tests {
             home_station_id: None,
             home_station_name: None,
             muted_stations: json!([]),
+            nudge_enabled: true,
+            quiet_from: None,
+            quiet_to: None,
             created_at: Utc::now(),
         };
         let claim = ClaimRow {

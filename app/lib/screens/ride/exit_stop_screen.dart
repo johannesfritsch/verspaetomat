@@ -12,10 +12,13 @@ import 'ride_widgets.dart';
 
 /// The train's stops as a line. One tap selects, a confirm bar appears.
 class ExitStopScreen extends StatefulWidget {
-  const ExitStopScreen({super.key, this.tripId, this.fromStationId, this.fromStationName});
+  const ExitStopScreen({super.key, this.tripId, this.fromStationId, this.fromStationName, this.fromLat, this.fromLon});
   final String? tripId;
   final String? fromStationId;
   final String? fromStationName;
+  /// The from-station's coordinates, passed through from the check-in list (docs/15).
+  final double? fromLat;
+  final double? fromLon;
 
   @override
   State<ExitStopScreen> createState() => _ExitStopScreenState();
@@ -82,6 +85,8 @@ class _ExitStopScreenState extends State<ExitStopScreen> {
         exitStationId: exit.stationId ?? exit.name,
         exitStationName: exit.name,
         location: loc,
+        fromLat: widget.fromLat,
+        fromLon: widget.fromLon,
       ));
       if (mounted) context.go(Routes.unterwegs);
     } catch (e) {

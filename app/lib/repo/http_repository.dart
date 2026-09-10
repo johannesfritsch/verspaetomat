@@ -65,6 +65,16 @@ class HttpRepository implements AppRepository {
   @override
   Future<ApiRide> checkIn(CheckInRequest request) => client.checkIn(request);
   @override
+  Future<ApiGeofence> geofence() async {
+    try {
+      return await client.geofence();
+    } on ApiException catch (e) {
+      // An older backend without the route: no stations, nothing to watch.
+      if (e.status == 404) return ApiGeofence.empty;
+      rethrow;
+    }
+  }
+  @override
   Future<ApiRideLive?> currentRide() => client.currentRide();
   @override
   Future<ApiArrivalResult> arrival(ArrivalRequest request) => client.arrival(request);

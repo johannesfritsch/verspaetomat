@@ -114,6 +114,12 @@ pub struct CustomerRow {
     pub home_station_id: Option<String>,
     pub home_station_name: Option<String>,
     pub muted_stations: serde_json::Value,
+    #[serde(default)]
+    pub nudge_enabled: bool,
+    #[serde(default)]
+    pub quiet_from: Option<chrono::NaiveTime>,
+    #[serde(default)]
+    pub quiet_to: Option<chrono::NaiveTime>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -183,6 +189,10 @@ pub struct RideRow {
     pub last_polled_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub dismissed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub from_lat: Option<f64>,
+    #[serde(default)]
+    pub from_lon: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

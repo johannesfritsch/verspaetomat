@@ -83,7 +83,8 @@ class _CheckinScreenState extends State<CheckinScreen> {
 
   void _toExit(ApiDeparture d) {
     final s = _station!;
-    context.push('${Routes.exitStop}?departure=${Uri.encodeComponent(d.tripId)}&station=${Uri.encodeComponent(s.id)}&name=${Uri.encodeComponent(s.name)}');
+    final coords = s.lat != 0 || s.lon != 0 ? '&lat=${s.lat}&lon=${s.lon}' : '';
+    context.push('${Routes.exitStop}?departure=${Uri.encodeComponent(d.tripId)}&station=${Uri.encodeComponent(s.id)}&name=${Uri.encodeComponent(s.name)}$coords');
   }
 
   @override
@@ -245,6 +246,8 @@ class _CheckinScreenState extends State<CheckinScreen> {
         exitStationId: exit?.stationId ?? exit?.name ?? cancelled.destination,
         exitStationName: exit?.name ?? cancelled.destination,
         location: _position,
+        fromLat: s.lat != 0 ? s.lat : null,
+        fromLon: s.lon != 0 ? s.lon : null,
       ));
       final _ = from;
       final result = await repo.arrival(const ArrivalRequest(delayMinutes: 60, cancelled: true));

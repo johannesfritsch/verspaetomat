@@ -210,6 +210,9 @@ class MockRepository implements AppRepository {
           traewellingLinked: state.traewellingLinked,
           onboardingDone: state.onboardingDone,
           mutedStations: [for (final m in state.mutedStations) ApiMutedStation(id: m['id'] ?? '', name: m['name'] ?? '')],
+          nudgeEnabled: state.nudgeEnabled,
+          quietFrom: state.quietHours ? '22:00' : null,
+          quietTo: state.quietHours ? '06:00' : null,
         ),
         pointsTotal: Mock.pointsTotal + state.bonusPoints,
         pointsThisWeek: Mock.pointsThisWeek + state.bonusPoints,
@@ -233,7 +236,24 @@ class MockRepository implements AppRepository {
     if (p.onboardingDone == true) state.completeOnboarding();
     if (p.nickname != null) state.setNickname(p.nickname!);
     if (p.mutedStations != null) state.setMutedStations([for (final m in p.mutedStations!) {'id': m.id, 'name': m.name}]);
+    if (p.nudgeEnabled != null) state.setNudgeEnabled(p.nudgeEnabled!);
+    if (p.quietFrom != null || p.quietTo != null) state.setQuietHours((p.quietFrom ?? p.quietTo ?? '').isNotEmpty);
     return getMe();
+  }
+
+  /// Demo: the mock's nearby stations, minus muted ones, so the simulator can be tested without a backend.
+  @override
+  Future<ApiGeofence> geofence() async {
+    final muted = state.mutedStations.map((m) => m['id']).toSet();
+    return ApiGeofence(
+      enabled: state.locationMode == LocationMode.always && state.nudgeEnabled,
+      stations: [
+        for (final s in Mock.nearbyStations)
+          if (!muted.contains(s.id)) ApiGeofenceStation(id: s.id, name: s.name, lat: s.lat, lon: s.lon, checkins: s.id == 'koeln-hbf' ? 12 : 1),
+      ],
+      quietFrom: state.quietHours ? '22:00' : null,
+      quietTo: state.quietHours ? '06:00' : null,
+    );
   }
 
   @override
@@ -255,7 +275,7 @@ class MockRepository implements AppRepository {
 
   @override
   Future<ApiNearby> nearbyStations({double? lat, double? lon}) async => ApiNearby(
-        stations: Mock.nearbyStations.map((s) => ApiStation(id: s.id, name: s.name, distanceM: s.distanceM, eva: s.evaNr)).toList(),
+        stations: Mock.nearbyStations.map((s) => ApiStation(id: s.id, name: s.name, distanceM: s.distanceM, eva: s.evaNr, lat: s.lat, lon: s.lon)).toList(),
         source: 'demo',
       );
 

@@ -29,7 +29,7 @@ No account is created here. Sign-in is offered later, only for people who want a
 ## 2. Permissions (one screen, two asks)
 
 - **Mitteilungen:** "Damit wir dir beim Ankommen sagen können, wie spät es war." Asked first; nearly everyone accepts.
-- **Standort am Bahnhof:** explained with the clock image: "Wir schauen nur, ob du an einem Bahnhof stehst. Während der Fahrt folgen wir dem Zug, nicht dir." Two options: "Nur wenn die App offen ist" and "Auch im Hintergrund (empfohlen für den Bahnsteig-Hinweis)". A third, plainly visible: "Später, ich checke selbst ein."
+- **Standort am Bahnhof:** explained with the clock image: "Wir schauen nur, ob du an einem Bahnhof stehst. Während der Fahrt folgen wir dem Zug, nicht dir." Three options, "Auch im Hintergrund" preselected (docs/15): it asks the OS for the Always permission when tapped or on "Weiter"; "Nur wenn die App offen ist" asks for While Using; "Später, ich checke selbst ein" asks for nothing. Every path continues.
 
 Every path continues to the next screen. Nothing is gated.
 

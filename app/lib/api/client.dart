@@ -114,6 +114,7 @@ class ApiClient {
   Future<ApiCustomer> me() async => ApiCustomer.fromJson(_map(await _get('/v1/me')));
 
   Future<ApiCustomer> patchMe(MePatch p) async => ApiCustomer.fromJson(_map(await _patch('/v1/me', p.toJson())));
+  Future<ApiGeofence> geofence() async => ApiGeofence.fromJson(_map(await _get('/v1/me/geofence')));
 
   Future<ApiCustomer> putPersonalData(ApiPersonalData d) async => ApiCustomer.fromJson(_map(await _put('/v1/me/personal-data', d.toJson())));
 

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Verspätomat API
-  version: 0.3.0
+  version: 0.4.0
   description: >
     Contract for the Flutter app. Amounts are euro cents; timestamps RFC 3339 UTC; dates YYYY-MM-DD.
     Station ids and trip ids are Transitous ids passed through unchanged (trip ids go in query parameters).
@@ -50,7 +50,7 @@ paths:
   /v1/me:
     get: { summary: "Profile: nickname, relay_address, personal_data?, settings, points_total, points_this_week, level_name, next_level_name, next_level_at, home_station", responses: { "200": { description: Customer } } }
     patch:
-      summary: Change settings (nickname, ticket, ngo_id, location_mode, notifications, show_on_boards, keep_correspondence, traewelling_linked, onboarding_done, home_station_id/name).
+      summary: Change settings (nickname, ticket, ngo_id, location_mode, notifications, show_on_boards, keep_correspondence, traewelling_linked, onboarding_done, home_station_id/name, muted_stations, nudge_enabled, quiet_from/quiet_to as "HH:MM" or "" to clear).
       responses: { "200": { description: Customer } }
     delete: { summary: Delete the device and everything it owns, responses: { "200": { description: "{deleted}" } } }
   /v1/me/personal-data:
@@ -62,6 +62,10 @@ paths:
     get: { summary: Issue a new recovery code (twelve words). Shown once; the previous code stops working., responses: { "200": { description: "{recovery_code}" } } }
   /v1/me/export:
     get: { summary: Everything about this customer as JSON, responses: { "200": { description: export } } }
+  /v1/me/geofence:
+    get:
+      summary: "The stations the phone should watch in the background (docs/15): frequent check-in stations of the last 30 days (home station always, muted excluded, at most 15) with coordinates stored at check-in; enabled = location_mode == always && nudge_enabled."
+      responses: { "200": { description: "{enabled, stations: [{id, name, lat, lon, checkins}], quiet_from, quiet_to}" } }
   /v1/me/push-token:
     put:
       summary: Register the device's push token (devices.push_platform, push_token, push_updated_at). Stored only; APNs/FCM delivery is not wired.
@@ -191,3 +195,5 @@ components:
         exit_station_name: { type: string }
         ticket: { type: string, enum: [deutschlandticket, zeitkarte, einzelfahrkarte] }
         location: { type: object, properties: { lat: { type: number }, lon: { type: number }, accuracy_m: { type: number } } }
+        from_lat: { type: number, description: "the from-station's own coordinates (not the phone's); feed the geofence set" }
+        from_lon: { type: number }

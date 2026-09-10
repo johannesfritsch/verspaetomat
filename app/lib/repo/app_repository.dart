@@ -12,6 +12,9 @@ abstract class AppRepository {
   Future<bool> health();
   Future<ApiCustomer> getMe();
   Future<ApiCustomer> patchMe(MePatch patch);
+
+  /// The stations the phone should watch in the background (docs/15). Empty when unsupported.
+  Future<ApiGeofence> geofence();
   Future<ApiCustomer> putPersonalData(ApiPersonalData data);
   Future<String> recoveryCode();
   Future<void> deleteMe();

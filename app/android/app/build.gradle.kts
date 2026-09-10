@@ -43,3 +43,10 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Station geofences and one-shot fixes for the nudge (docs/15).
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    // NotificationCompat / ContextCompat for the nudge notification.
+    implementation("androidx.core:core:1.16.0")
+}

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
+import '../../platform/geofence_sync.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../state/demo_state.dart';
@@ -18,6 +19,7 @@ class PermissionsScreen extends StatefulWidget {
 
 class _PermissionsScreenState extends State<PermissionsScreen> {
   bool _notifications = false;
+  bool _asked = false;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +29,14 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     return VScreen(
       eyebrow: 'Schritt 1 von 2',
       title: 'Zwei Fragen',
-      bottom: VPrimaryButton(label: 'Weiter', onTap: () => context.go(Routes.setup)),
+      bottom: VPrimaryButton(
+        label: 'Weiter',
+        onTap: () async {
+          // The preselected "Auch im Hintergrund" asks the OS on the way out, so nobody has to tap twice.
+          if (!_asked) await GeofenceSync.requestFor(locationMode);
+          if (context.mounted) context.go(Routes.setup);
+        },
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -75,7 +84,11 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
               title: _title(mode),
               subtitle: _subtitle(mode),
               selected: locationMode == mode,
-              onTap: () => session.updateSettings(MePatch(locationMode: mode)),
+              onTap: () async {
+                await session.updateSettings(MePatch(locationMode: mode));
+                _asked = true;
+                await GeofenceSync.requestFor(mode);
+              },
             ),
             const VGap.s(),
           ],
@@ -93,7 +106,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
       };
 
   String _subtitle(LocationMode m) => switch (m) {
-        LocationMode.always => 'Empfohlen für den Bahnsteig-Hinweis. Wir merken, wenn du drei Minuten am Bahnhof stehst.',
+        LocationMode.always => 'Empfohlen. Dein Telefon merkt, wenn du an einem deiner Bahnhöfe stehst, auch bei geschlossener App. Kein Tracking, keine Historie.',
         LocationMode.whileUsing => 'Bestätigt deinen Bahnhof beim Einchecken. Kein Hinweis von selbst.',
         LocationMode.never => 'Manuell einchecken, Widget oder Bahnsteig-Screen. Geht genauso gut.',
       };

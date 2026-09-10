@@ -182,6 +182,9 @@ async fn customer_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value> 
             "show_on_boards": c.show_on_boards, "keep_correspondence": c.keep_correspondence,
             "traewelling_linked": c.traewelling_linked, "onboarding_done": c.onboarding_done,
             "muted_stations": c.muted_stations,
+            "nudge_enabled": c.nudge_enabled,
+            "quiet_from": c.quiet_from.map(|t| t.format("%H:%M").to_string()),
+            "quiet_to": c.quiet_to.map(|t| t.format("%H:%M").to_string()),
         },
         "points_total": points_total,
         "points_this_week": points_week,
@@ -226,6 +229,20 @@ pub struct MePatch {
     pub home_station_name: Option<String>,
     /// Full replacement: [{id, name}]
     pub muted_stations: Option<Vec<MutedStation>>,
+    pub nudge_enabled: Option<bool>,
+    /// "HH:MM"; an empty string clears the quiet window.
+    pub quiet_from: Option<String>,
+    pub quiet_to: Option<String>,
+}
+
+fn parse_quiet(s: &Option<String>) -> Result<Option<Option<chrono::NaiveTime>>, (StatusCode, Json<Value>)> {
+    match s.as_deref() {
+        None => Ok(None),
+        Some("") => Ok(Some(None)),
+        Some(v) => chrono::NaiveTime::parse_from_str(v, "%H:%M")
+            .map(|t| Some(Some(t)))
+            .map_err(|_| err(StatusCode::BAD_REQUEST, "quiet time must be HH:MM")),
+    }
 }
 
 #[derive(Deserialize, serde::Serialize)]
@@ -235,6 +252,8 @@ pub struct MutedStation {
 }
 
 pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePatch>) -> ApiResult {
+    let quiet_from = parse_quiet(&p.quiet_from)?;
+    let quiet_to = parse_quiet(&p.quiet_to)?;
     if let Some(n) = &p.ngo_id {
         let exists: bool = sqlx::query_scalar("select exists(select 1 from ngos where id = $1 and active)").bind(n).fetch_one(&s.pool).await.map_err(internal)?;
         if !exists {
@@ -248,7 +267,10 @@ pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePa
             show_on_boards = coalesce($7, show_on_boards), keep_correspondence = coalesce($8, keep_correspondence),
             traewelling_linked = coalesce($9, traewelling_linked), onboarding_done = coalesce($10, onboarding_done),
             home_station_id = coalesce($11, home_station_id), home_station_name = coalesce($12, home_station_name),
-            muted_stations = coalesce($13, muted_stations)
+            muted_stations = coalesce($13, muted_stations),
+            nudge_enabled = coalesce($14, nudge_enabled),
+            quiet_from = case when $15 then $16 else quiet_from end,
+            quiet_to = case when $17 then $18 else quiet_to end
          where id = $1 returning *",
     )
     .bind(c.0.id)
@@ -264,10 +286,87 @@ pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePa
     .bind(p.home_station_id)
     .bind(p.home_station_name)
     .bind(p.muted_stations.map(|m| serde_json::to_value(m).unwrap_or(serde_json::json!([]))))
+    .bind(p.nudge_enabled)
+    .bind(quiet_from.is_some())
+    .bind(quiet_from.flatten())
+    .bind(quiet_to.is_some())
+    .bind(quiet_to.flatten())
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
     Ok(Json(customer_json(&s.pool, &row).await.map_err(internal)?))
+}
+
+/// The customer's geofence set (docs/15): frequent check-in stations of the last 30 days,
+/// home station always, muted stations never, at most 15. Coordinates are the ones the app
+/// sent at check-in, so the set is empty until the first ride with coordinates.
+pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let since = crate::clock::now() - Duration::days(30);
+    let rows: Vec<(String, String, f64, f64, i64)> = sqlx::query_as(
+        "select from_station_id, from_station_name,
+                (array_agg(from_lat order by checked_in_at desc))[1],
+                (array_agg(from_lon order by checked_in_at desc))[1],
+                count(*)::bigint
+         from rides where customer_id = $1 and from_lat is not null and from_lon is not null and checked_in_at >= $2
+         group by from_station_id, from_station_name order by count(*) desc, max(checked_in_at) desc",
+    )
+    .bind(c.0.id)
+    .bind(since)
+    .fetch_all(&s.pool)
+    .await
+    .map_err(internal)?;
+    let home: Option<(String, String, f64, f64)> = match &c.0.home_station_id {
+        Some(hid) => sqlx::query_as(
+            "select from_station_id, from_station_name, from_lat, from_lon from rides
+             where customer_id = $1 and from_station_id = $2 and from_lat is not null order by checked_in_at desc limit 1",
+        )
+        .bind(c.0.id)
+        .bind(hid)
+        .fetch_optional(&s.pool)
+        .await
+        .map_err(internal)?,
+        None => None,
+    };
+    let muted: Vec<MutedStation> = serde_json::from_value(c.0.muted_stations.clone()).unwrap_or_default();
+    let stations = geofence_set(rows, home, &muted, 15);
+    Ok(Json(json!({
+        "enabled": c.0.loc_mode == LocationMode::Always && c.0.nudge_enabled,
+        "stations": stations,
+        "quiet_from": c.0.quiet_from.map(|t| t.format("%H:%M").to_string()),
+        "quiet_to": c.0.quiet_to.map(|t| t.format("%H:%M").to_string()),
+    })))
+}
+
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub struct GeofenceStation {
+    pub id: String,
+    pub name: String,
+    pub lat: f64,
+    pub lon: f64,
+    pub checkins: i64,
+}
+
+/// Pure part of [geofence]: rows are (id, name, lat, lon, checkins) in frequency order.
+pub fn geofence_set(rows: Vec<(String, String, f64, f64, i64)>, home: Option<(String, String, f64, f64)>, muted: &[MutedStation], cap: usize) -> Vec<GeofenceStation> {
+    let is_muted = |id: &str| muted.iter().any(|m| m.id == id);
+    let mut out: Vec<GeofenceStation> = Vec::new();
+    if let Some((id, name, lat, lon)) = home {
+        if !is_muted(&id) {
+            let checkins = rows.iter().find(|r| r.0 == id).map(|r| r.4).unwrap_or(0);
+            out.push(GeofenceStation { id, name, lat, lon, checkins });
+        }
+    }
+    for (id, name, lat, lon, checkins) in rows {
+        if out.len() >= cap {
+            break;
+        }
+        if is_muted(&id) || out.iter().any(|o| o.id == id) {
+            continue;
+        }
+        out.push(GeofenceStation { id, name, lat, lon, checkins });
+    }
+    out.truncate(cap);
+    out
 }
 
 #[derive(Deserialize)]
@@ -384,6 +483,11 @@ pub struct CheckIn {
     pub ticket: Option<TicketType>,
     #[serde(default)]
     pub location: Option<LocationFix>,
+    /// Coordinates of the from-station (the app has them from nearby/search); feed the geofence set.
+    #[serde(default)]
+    pub from_lat: Option<f64>,
+    #[serde(default)]
+    pub from_lon: Option<f64>,
 }
 
 fn find_stop<'a>(t: &'a TripInfo, id: &str, name: &str) -> Option<&'a crate::train::TripStop> {
@@ -415,8 +519,8 @@ pub async fn check_in(State(s): State<AppState>, c: Customer, Json(ci): Json<Che
     let row: RideRow = sqlx::query_as(
         "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name,
             exit_station_id, exit_station_name, planned_departure, planned_arrival, ticket, live_delay_min, cancelled,
-            location_verified, location_lat, location_lon)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning *",
+            location_verified, location_lat, location_lon, from_lat, from_lon)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) returning *",
     )
     .bind(id)
     .bind(c.0.id)
@@ -437,6 +541,8 @@ pub async fn check_in(State(s): State<AppState>, c: Customer, Json(ci): Json<Che
     .bind(ci.location.is_some())
     .bind(ci.location.as_ref().map(|l| l.lat))
     .bind(ci.location.as_ref().map(|l| l.lon))
+    .bind(ci.from_lat)
+    .bind(ci.from_lon)
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
@@ -1376,6 +1482,24 @@ pub async fn boards(State(s): State<AppState>, c: Customer, Query(q): Query<Boar
 #[cfg(test)]
 mod inbound_tests {
     use super::*;
+
+    #[test]
+    fn geofence_set_home_first_muted_out_capped() {
+        let rows = vec![
+            ("a".into(), "A".into(), 50.0, 7.0, 9),
+            ("b".into(), "B".into(), 50.1, 7.1, 5),
+            ("m".into(), "Muted".into(), 50.2, 7.2, 4),
+            ("c".into(), "C".into(), 50.3, 7.3, 1),
+        ];
+        let home = Some(("b".into(), "B".into(), 50.1, 7.1));
+        let muted = vec![MutedStation { id: "m".into(), name: "Muted".into() }];
+        let set = geofence_set(rows, home, &muted, 3);
+        let ids: Vec<&str> = set.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["b", "a", "c"]);
+        assert_eq!(set[0].checkins, 5);
+        let set = geofence_set(vec![("a".into(), "A".into(), 1.0, 2.0, 1)], None, &[], 15);
+        assert_eq!(set.len(), 1);
+    }
 
     #[test]
     fn postmark_payload_maps_to_inbound_mail() {

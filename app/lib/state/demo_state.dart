@@ -69,6 +69,20 @@ class DemoState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Station nudge and quiet hours (docs/15). Demo keeps a fixed 22:00–06:00 window.
+  bool nudgeEnabled = true;
+  bool quietHours = true;
+
+  void setNudgeEnabled(bool v) {
+    nudgeEnabled = v;
+    notifyListeners();
+  }
+
+  void setQuietHours(bool v) {
+    quietHours = v;
+    notifyListeners();
+  }
+
   void toggleOffline() {
     offline = !offline;
     notifyListeners();

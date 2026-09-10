@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'platform/geofence_sync.dart';
 import 'repo/repo_scope.dart';
 import 'router.dart';
 import 'state/demo_state.dart';
@@ -37,6 +38,23 @@ class VerspaetomatApp extends StatefulWidget {
 
 class _VerspaetomatAppState extends State<VerspaetomatApp> {
   late final router = buildRouter(widget.state);
+  late final GeofenceSync _geofence;
+
+  @override
+  void initState() {
+    super.initState();
+    // Keeps the phone's station regions in step with the account; a tapped nudge opens the check-in.
+    _geofence = GeofenceSync(
+      session: widget.session,
+      onNudge: (n) => router.go('${Routes.checkin}?station=${Uri.encodeComponent(n.stationId)}&name=${Uri.encodeComponent(n.stationName)}'),
+    )..start();
+  }
+
+  @override
+  void dispose() {
+    _geofence.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

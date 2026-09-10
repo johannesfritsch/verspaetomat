@@ -88,6 +88,8 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
         fromStationName: stations.first.name,
         exitStationId: exit.stationId ?? exit.name,
         exitStationName: exit.name,
+        fromLat: stations.first.lat != 0 ? stations.first.lat : null,
+        fromLon: stations.first.lon != 0 ? stations.first.lon : null,
       ));
     }
     return switch (v) {

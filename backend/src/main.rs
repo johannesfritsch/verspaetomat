@@ -88,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/me/recovery-code", get(handlers::recovery_code))
         .route("/v1/me/export", get(handlers::export_me))
         .route("/v1/me/push-token", put(handlers::put_push_token).delete(handlers::delete_push_token))
+        .route("/v1/me/geofence", get(handlers::geofence))
         // rides
         .route("/v1/rides", get(handlers::rides).post(handlers::check_in))
         .route("/v1/rides/current", get(handlers::current_ride))

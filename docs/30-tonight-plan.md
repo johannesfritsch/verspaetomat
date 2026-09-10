@@ -17,7 +17,7 @@ Written 9 September 2026, 20:40. Goal for tonight: the Flutter app on the simula
 | Typst claim PDF | half a day on its own | shipped 10 September: real EU form rendered server-side, see below |
 | Real SMTP send and provider inbound | needs a provider account, DNS (SPF/DKIM) | `lettre` wired behind `SMTP_URL`; without it "dry-run" records the mail; inbound via our own webhook |
 | Push notifications | APNs/FCM setup | in-app state only |
-| Background geofence nudge | a day of native work and store review | in-app banner when the app is open near a station |
+| Background geofence nudge | a day of native work and store review | shipped 10 September (docs/15): region monitoring on iOS and Android, background by default |
 | Träwelling OAuth | needs their client registration | settings row stays a mock |
 | NGO report import UI | ops feature | SQL script |
 | Boards from many users | one real user tonight | own points live, other rows seeded |
@@ -168,3 +168,8 @@ Run it:
 cd backend && ./dev.sh                                  # API on 127.0.0.1:8080
 cd app && flutter run -d "iPhone 15 Pro" --dart-define=BACKEND=local
 ```
+
+Shipped later on 10 September 2026 (station geofencing, docs/15):
+- Backend: migration 0019 (`rides.from_lat/from_lon`, `loc_mode` default `always`, `nudge_enabled`, `quiet_from/quiet_to`), check-in stores the from-station's coordinates, `GET /v1/me/geofence` (frequent stations of 30 days, home station, muted excluded, cap 15), PATCH /v1/me takes `nudge_enabled` and the quiet window.
+- App: `lib/platform/geofence.dart` (MethodChannel `de.verspaetomat/geofence`) and `geofence_sync.dart` (debounced configure on session change, foreground, ride changes; pending nudge on start), onboarding preselects "Auch im Hintergrund" and requests Always, Einstellungen persist "Hinweis am Bahnhof" and "Ruhezeiten", a tapped nudge opens `/checkin?station=<id>&name=<name>`, Datenschutz text extended.
+- Native iOS and Android layers: see their own entries.

@@ -26,6 +26,7 @@ Status: research, product concept and a fully mocked Flutter showcase app (`app/
 | [12-gamification.md](12-gamification.md) | Points, badges, boards |
 | [13-where-the-data-comes-from.md](13-where-the-data-comes-from.md) | Every piece of information on screen and its origin, in customer terms |
 | [14-location-concept.md](14-location-concept.md) | Where the customer is: the phone at three moments, no server guessing, the Stellwerk override |
+| [15-geofence.md](15-geofence.md) | Station geofencing: the nudge with the app closed, the 20-region limit, the MethodChannel contract, the backend endpoint |
 
 ## Backend
 
