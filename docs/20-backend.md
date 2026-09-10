@@ -29,10 +29,10 @@ Where Rust costs more: development speed for a solo developer new to it, and slo
 | Inbound mail | Provider inbound webhook → `POST /internal/inbound-mail` (JSON) or `/internal/inbound-mail/raw` (RFC 822, parsed with `mail-parser`); attachments as uploads of kind `inbound` today, object storage later |
 | PDF | Typst template rendered server-side; signature PNG embedded |
 | Object storage | S3-compatible (ticket images, signatures, PDFs, inbound attachments), encrypted at rest, keyed per claim |
-| Push | APNs (`a2`) and FCM HTTP v1 (`reqwest`); today only the token is stored (`PUT /v1/me/push-token`), no sender |
+| Push | APNs over HTTP/2 with token auth (`a2`, ring) and FCM HTTP v1 (service-account JWT via `jsonwebtoken`, `reqwest`); `backend/src/push.rs`; dry-run without credentials |
 | Auth | Anonymous device accounts with a bearer token; optional e-mail sign-in later for backup |
 | Observability | `tracing` with JSON logs, OpenTelemetry export |
-| Deployment | Docker image, one container plus Postgres, behind a reverse proxy |
+| Deployment | `deploy/`: multi-stage Dockerfile, compose with Postgres 17 + API + Caddy (TLS, `/admin` hidden), `.env.example`, README with DNS/mail/backup/update steps |
 
 ## Service layout
 
@@ -41,7 +41,8 @@ One binary, several loops:
 - **API** — the routes in `backend/openapi.yaml`.
 - **Trip follower** — for each ride in `riding`, poll the trip every 30 to 60 s, store the latest stop-by-stop forecast, detect arrival at the exit stop (forecast turned actual, or the trip's next stop is beyond the exit stop), finalise the delay, create an incident when the rules in 21 say so, send the arrival push.
 - **Relay** — outbound queue (send claim mails with BCC, retry, record message ids), inbound processing (match by relay address and claim reference, classify accepted / question / rejected / bounce, extract amount, forward the original to the customer's private inbox, update the claim).
-- **Deadline scanner** (`backend/src/scanner.rs`, shipped 10 September 2026) — hourly on the simulated clock: warn 21 days before an incident's legal deadline (once, `warned_at`), mark `verfallen` at the deadline across all customers, nudge once when a sent claim passed its expected reply date without an answer (`nudged_at`), sweep retention. Events go out over SSE; a push sender can hang off the same events later.
+- **Deadline scanner** (`backend/src/scanner.rs`, shipped 10 September 2026) — hourly on the simulated clock: warn 21 days before an incident's legal deadline (once, `warned_at`), mark `verfallen` at the deadline across all customers, nudge once when a sent claim passed its expected reply date without an answer (`nudged_at`), sweep retention. Events go out over SSE.
+- **Push sender** (`backend/src/push.rs`, shipped 10 September 2026) — taps the event bus and turns five events into notifications: arrival, post from the railway, deadline warning, reply nudge, NGO confirmation. Copy is composed server-side in the app's voice; the payload carries `kind` and the id so the app opens the right screen. APNs (token auth) and FCM v1; dead tokens are removed; `notifications=false` mutes; no credentials means one log line per push. `stellwerk push` for a test.
 - **NGO report matcher** (`POST /admin/ngos/{id}/report`, `stellwerk ngo-report`, shipped) — import of each NGO's statement as JSON or CSV; match transfers to sent claims by amount, a 90-day window and the claimant's name or claim reference; mark `bestätigt`; SSE event. Imports are recorded in `ngo_reports`.
 - **Aggregates** — community totals and seven-day boards computed on read from the rides and incidents tables (boards: real customers first, seeded rows fill the list).
 - **Retention** (shipped) — delete attachment bytes and inbound-mail attachments when a claim closes, unless the customer set "keep correspondence"; ledger, claim, mail and audit rows stay.

@@ -1,0 +1,62 @@
+# One VPS: Postgres, the API, Caddy for TLS. Copy .env.example to .env first.
+#
+#   docker compose up -d --build
+#   docker compose logs -f api
+#   docker compose exec api stellwerk customers      # ADMIN_TOKEN comes from .env
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: verspaetomat
+      POSTGRES_USER: verspaetomat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verspaetomat -d verspaetomat"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: verspaetomat-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://verspaetomat:${POSTGRES_PASSWORD}@db/verspaetomat
+      BIND: 0.0.0.0:8080
+      STELLWERK_URL: http://127.0.0.1:8080
+    volumes:
+      # Credential files referenced from .env (APNS_KEY_P8, FCM_SERVICE_ACCOUNT_JSON).
+      - ./secrets:/secrets:ro
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-api.verspaetomat.de}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

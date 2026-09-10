@@ -39,6 +39,9 @@ const tour = <(String, String)>[
   ('historie', Routes.historie),
   ('einstellungen', Routes.einstellungen),
   ('daten', Routes.datenherkunft),
+  ('impressum', '/rechtliches/impressum'),
+  ('datenschutz', '/rechtliches/datenschutz'),
+  ('bote', '/rechtliches/bote'),
 ];
 
 Future<void> wait(WidgetTester tester, int ms) async {

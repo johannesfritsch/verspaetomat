@@ -11,6 +11,10 @@ Collecting donor money and forwarding it is money remittance and needs BaFin per
 - Google Play exempts donations to tax-exempt nonprofits from Play Billing anyway.
 - Background location on both stores needs a stated core-functionality justification and a declaration form on Google Play. The station nudge is optional; the app must work fully without it.
 
+## In the app
+
+The three texts a store build needs live in `app/lib/content/legal.dart` and are shown under Einstellungen → Rechtliches: Impressum (§ 5 DDG, operator placeholders still to fill), Datenschutzerklärung (the sections below turned into plain German: device account, location at two moments, relay mailbox and TDDDG, retention, rights with the in-app controls named), and "Wie wir Anträge weiterleiten", the messenger clause in the customer's words. The claim flow links the messenger clause on the send step. docs/40-store-listing.md derives the store privacy labels from the same text. Change all of them together.
+
 ## Legal-services law (Rechtsdienstleistungsgesetz)
 
 Generating a document the customer reviews, signs and sends themselves is generally not a legal service. Submitting on the customer's behalf under a power of attorney, or taking assignment of claims (the Bahn-Buddy model), is regulated.

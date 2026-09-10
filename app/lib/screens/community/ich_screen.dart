@@ -50,7 +50,7 @@ class IchScreen extends StatelessWidget {
         final recent = rides.where((r) => DateTime.now().difference(r.date).inDays <= 14).length;
         final progress = me.nextLevelAt > 0 ? (me.pointsTotal / me.nextLevelAt).clamp(0.0, 1.0) : 1.0;
         final earned = data.badges.where((b) => b.earned).length;
-        final name = me.personalData?.name.split(' ').first ?? me.nickname;
+        final name = displayName(me) ?? 'Fahrgast';
 
         return VScreen(
           showBack: false,

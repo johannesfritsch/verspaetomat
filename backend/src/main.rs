@@ -9,6 +9,7 @@ mod handlers;
 mod mail;
 mod model;
 mod pdf;
+mod push;
 mod rules;
 mod scanner;
 mod train;
@@ -31,6 +32,7 @@ pub struct AppState {
     pub pool: PgPool,
     pub train: Arc<TrainSource>,
     pub events: Arc<events::EventHub>,
+    pub push: Arc<push::PushSender>,
 }
 
 #[tokio::main]
@@ -45,7 +47,10 @@ async fn main() -> anyhow::Result<()> {
     let train = Arc::new(TrainSource::new(TransitousClient::new()));
     train.load_overrides(&pool).await?;
     let events = Arc::new(events::EventHub::default());
-    let state = AppState { pool: pool.clone(), train: train.clone(), events: events.clone() };
+    let push_sender = Arc::new(push::PushSender::from_env()?);
+    let state = AppState { pool: pool.clone(), train: train.clone(), events: events.clone(), push: push_sender };
+    // Pushes: the sender taps the event bus before anything publishes.
+    push::spawn(state.clone());
 
     // The trip follower finalises rides; we turn finalised rides into incidents.
     let mut finalised = train::follower::spawn(pool.clone(), train.clone(), Duration::from_secs(45));
@@ -115,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/customers/{key}/reply", post(admin::reply))
         .route("/admin/customers/{key}/reset", post(admin::reset))
         .route("/admin/customers/{key}/locate", post(admin::locate).delete(admin::clear_location))
+        .route("/admin/customers/{key}/push", post(admin::push))
         .route("/admin/poll", post(admin::poll))
         .route("/admin/scan", post(admin::scan))
         .route("/admin/ngos/{id}/report", post(admin::ngo_report))

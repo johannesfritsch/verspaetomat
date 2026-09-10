@@ -90,12 +90,25 @@ Env: `STELLWERK_URL` (default `http://127.0.0.1:8080`), `ADMIN_TOKEN` (default `
 - NGO report import: `POST /admin/ngos/{id}/report` with `{transfers:[{date, amount_cents, reference, counterparty}]}` (or CSV). A transfer matches a sent claim of that NGO with exactly that amount, sent within the 60 days before the transfer, oldest unmatched first; a reference naming the claimant or the claim id prefix wins. Matches become `accepted` with the confirmed amount, incidents `bestaetigt` (audit "ngo report"), the badge is awarded, the customer gets incident and claim events, retention runs; one `ngo_reports` row (rows, matched) per import. Answer: `{matched:[claim ids], unmatched:[transfers]}`.
 - Boards (`GET /v1/boards?scope=`): seven-day sums of `points` over location-verified rides finalised in the last seven days, per customer with `show_on_boards`. `line` = rides on my most frequent line of the last 30 days, `city` = rides starting at a station whose first word matches my home station's, `germany` = all; a scope with nothing to narrow on falls back to all. Filled from `board_seed` (entries carry `seed: true`) up to ten entries; the requesting customer always appears with `is_me`.
 - Inbound mail: `POST /internal/inbound-mail` (JSON) and `POST /internal/inbound-mail/raw` (the RFC 822 message, parsed with mail-parser; attachments stored as uploads of kind `inbound`).
-- Push tokens: `PUT/DELETE /v1/me/push-token` stores the platform and token on the device row. Nothing is sent yet.
+- Push tokens: `PUT/DELETE /v1/me/push-token` stores the platform and token on the device row.
+- Push delivery (`src/push.rs`): one task taps the event bus and sends for five events: arrival (`+68 · RE 7` / `68 Geduldspunkte. Anspruch entstanden: 1,50 € für …`), post from the railway (`4,50 € bestätigt. Geht an …`, Rückfrage, abgelehnt, bounce), the 21-day deadline warning, the reply nudge, the NGO confirmation. APNs over HTTP/2 with token auth (`a2`), FCM HTTP v1 with a service-account JWT. A token the provider reports dead (APNs 410 / `BadDeviceToken` / `Unregistered`, FCM `UNREGISTERED`) is removed from the device row. `notifications = false` on the customer mutes everything. Without `APNS_*`/`FCM_*` every push is one `push (dry-run)` log line with title and body. `stellwerk push <customer> [text]` sends a test.
+- Inbound JSON webhook: `/internal/inbound-mail` takes our own shape or Postmark's inbound payload as posted (with `RawEmail` present the original MIME is parsed); `/internal/inbound-mail/raw` takes the bare RFC 822 message. Both guarded by `?secret=INBOUND_SECRET`.
+- SMTP: `smtps://` (implicit TLS, 465), `smtp://` (STARTTLS, 587), `smtp://host:1025?starttls=no` for a local sink. `scripts/smtp-sink-check.sh` drives three rides, a claim and a send against `scripts/smtp-sink.py` and checks envelope sender, desk recipient, the BCC as a separate RCPT with no `Bcc:` header, and the attached `EU-Antrag.pdf`.
+
+## Deploying
+
+`deploy/` has the Dockerfile (multi-stage, fonts and migrations embedded), a compose file with Postgres 17, the API and Caddy for TLS, `.env.example` with every variable, and a README with the DNS records for the API host and the mail domain (SPF, DKIM, DMARC, MX to Postmark), the inbound webhook, backups and the update procedure.
 
 ## Needs external setup
 
-- Push delivery: APNs and FCM credentials; the tokens are stored, no sender exists.
-- SMTP credentials (`SMTP_URL`) for real outbound mail; without them the relay dry-runs.
-- An inbound mail provider that posts to `/internal/inbound-mail` or `/internal/inbound-mail/raw`, plus `INBOUND_SECRET`.
-- Träwelling OAuth (client registration).
-- App Attest / Play Integrity; today only per-device rate limits.
+Everything else works; these need an account and go into `deploy/.env`:
+
+| What | You produce | Env |
+|---|---|---|
+| Outbound mail | Postmark server token (or SES SMTP credentials); domain verified with SPF, DKIM, Return-Path | `SMTP_URL=smtps://TOKEN:TOKEN@smtp.postmarkapp.com:465` |
+| Inbound mail | MX for `verspaetomat.de` to the provider; webhook URL with the secret | `INBOUND_SECRET` |
+| Push, iOS | APNs auth key `.p8`, its key id, the team id, the bundle id | `APNS_KEY_P8` (or `APNS_KEY_P8_BASE64`), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC`, `APNS_SANDBOX` |
+| Push, Android | Firebase service account JSON with the Cloud Messaging role | `FCM_SERVICE_ACCOUNT_JSON` |
+| Stellwerk on the server | a long random token | `ADMIN_TOKEN` |
+| Träwelling | OAuth client registration | not wired yet |
+| App Attest / Play Integrity | Apple and Google console setup | not wired yet; per-device rate limits only |

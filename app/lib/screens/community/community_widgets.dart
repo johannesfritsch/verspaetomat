@@ -4,6 +4,17 @@ import '../../api/models.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 
+/// The name a customer goes by: the nickname they chose, else the first name from
+/// their claim data, else null. "Fahrgast" is the server's blank, not a name.
+String? displayName(ApiCustomer? me) {
+  if (me == null) return null;
+  final nick = me.nickname.trim();
+  if (nick.isNotEmpty && nick != 'Fahrgast') return nick;
+  final first = me.personalData?.name.trim().split(RegExp(r'\s+')).first;
+  if (first != null && first.isNotEmpty) return first;
+  return null;
+}
+
 /// Header for a tab screen: title on the left, small station clock right.
 class TabHeader extends StatelessWidget {
   const TabHeader({super.key, required this.title, this.caption, this.trailing});

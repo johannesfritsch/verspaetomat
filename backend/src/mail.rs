@@ -1,5 +1,7 @@
-//! Outbound mail. With `SMTP_URL` set (e.g. `smtps://user:pass@smtp.example.com:465`)
-//! mails really leave; without it every send is a recorded dry-run.
+//! Outbound mail. With `SMTP_URL` set mails really leave; without it every send is a
+//! recorded dry-run. Schemes: `smtps://user:pass@host:465` (implicit TLS),
+//! `smtp://user:pass@host:587` (STARTTLS), and `smtp://host:1025?starttls=no` for a
+//! local sink without TLS (see `scripts/smtp-sink-check.sh`).
 
 use lettre::message::{header::ContentType, Attachment, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
@@ -29,13 +31,15 @@ fn transport() -> anyhow::Result<AsyncSmtpTransport<Tokio1Executor>> {
     let url = std::env::var("SMTP_URL")?;
     let parsed = url::Url::parse(&url)?;
     let host = parsed.host_str().ok_or_else(|| anyhow::anyhow!("SMTP_URL host"))?.to_string();
-    let port = parsed.port().unwrap_or(465);
+    let port = parsed.port().unwrap_or(if parsed.scheme() == "smtp" { 587 } else { 465 });
     let user = parsed.username().to_string();
     let pass = parsed.password().unwrap_or("").to_string();
-    let builder = match parsed.scheme() {
-        "smtps" => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?.port(port),
-        "smtp" => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?.port(port),
-        other => anyhow::bail!("SMTP_URL scheme {other}"),
+    let no_tls = parsed.query_pairs().any(|(k, v)| k == "starttls" && matches!(v.as_ref(), "no" | "false" | "0"));
+    let builder = match (parsed.scheme(), no_tls) {
+        ("smtps", _) => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?.port(port),
+        ("smtp", false) => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?.port(port),
+        ("smtp", true) => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&host).port(port),
+        (other, _) => anyhow::bail!("SMTP_URL scheme {other}"),
     };
     let builder = if user.is_empty() { builder } else { builder.credentials(Credentials::new(user, pass)) };
     Ok(builder.build())

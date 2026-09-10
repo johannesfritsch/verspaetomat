@@ -200,8 +200,7 @@ pub async fn reply(State(s): State<AppState>, _a: Admin, Path(key): Path<String>
         },
     )
     .await?;
-    s.events.publish(c.id, "mail", json!({ "claim_id": claim.id, "outcome": b.outcome }));
-    s.events.publish(c.id, "incident", json!({ "claim_id": claim.id }));
+    // process_inbound already published the mail and incident events (and the push).
     Ok(Json(result))
 }
 
@@ -317,6 +316,37 @@ pub async fn forget(State(s): State<AppState>, _a: Admin, Path(key): Path<String
     s.events.publish(c.id, "reset", json!({ "forgotten": true }));
     sqlx::query("delete from devices where id = $1").bind(c.id).execute(&s.pool).await.map_err(internal)?;
     Ok(Json(json!({ "forgotten": c.id, "nickname": c.nickname, "sent_claims": sent, "trip_overrides_cleared": trips.len() })))
+}
+
+#[derive(Deserialize)]
+pub struct PushBody {
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+/// `POST /admin/customers/{key}/push`: a test notification to the customer's device.
+/// Dry-run (logged only) when no APNs/FCM credentials are configured.
+pub async fn push(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<PushBody>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let (platform, token): (Option<String>, Option<String>) =
+        sqlx::query_as("select push_platform, push_token from devices where id = $1").bind(c.id).fetch_one(&s.pool).await.map_err(internal)?;
+    let n = crate::push::Notification {
+        title: "Verspätomat".to_string(),
+        body: b.text.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "Testnachricht vom Stellwerk.".to_string()),
+        kind: "test",
+        data: json!({}),
+    };
+    let result = crate::push::deliver(&s, c.id, &n).await.map_err(internal)?;
+    Ok(Json(json!({
+        "customer": c.id,
+        "nickname": c.nickname,
+        "platform": platform,
+        "token": token.is_some(),
+        "configured": platform.as_deref().map(|p| s.push.configured(p)).unwrap_or(false),
+        "result": result,
+        "title": n.title,
+        "body": n.body,
+    })))
 }
 
 /// `POST /admin/scan`: one deadline-scanner pass now (the loop runs hourly).

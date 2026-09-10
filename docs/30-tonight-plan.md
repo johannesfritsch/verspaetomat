@@ -140,15 +140,27 @@ Shipped on 10 September 2026 (backend cut list, migration 0018):
 - Real boards: customers with `show_on_boards` ranked by verified seven-day points, seeded rows fill the rest, `is_me` on the caller.
 - `stellwerk forget <customer>` (`DELETE /admin/customers/{key}`).
 - Raw-MIME inbound: `POST /internal/inbound-mail/raw` parsed with mail-parser, attachments stored as uploads.
-- Push-token registration: `PUT/DELETE /v1/me/push-token` (stored only; APNs/FCM delivery, Träwelling OAuth, App Attest, SMTP credentials and an inbound mail provider still need external setup).
+- Push-token registration: `PUT/DELETE /v1/me/push-token`.
+- Push delivery (`backend/src/push.rs`): APNs and FCM v1 senders behind the event bus, dry-run without credentials, `stellwerk push`. Verified on a scratch instance: arrival, reply, nudge and test pushes logged with the right copy; the Stellwerk reply no longer fires the mail event twice.
+- Real SMTP path verified against a local sink (`backend/scripts/smtp-sink-check.sh`): envelope sender is the relay address, the desk is the only visible recipient, the customer's copy travels as a BCC (separate RCPT, no header), `EU-Antrag.pdf` arrives intact (43 KB). `smtp://…?starttls=no` for sinks, `smtp://` STARTTLS on 587, `smtps://` on 465.
+- Inbound JSON webhook accepts Postmark's payload as posted (and `RawEmail`), so the provider needs no adapter.
+- Deploy kit in `deploy/`: Dockerfile, compose (Postgres 17, API, Caddy), `.env.example`, README with DNS (SPF/DKIM/DMARC/MX), webhook, backups, updates. Träwelling OAuth and App Attest still need external setup; APNs/FCM/SMTP/inbound need only credentials in `.env`.
 - App: the claim flow, Konto and Antwort show the backend's PDF (pdfx). Demo mode (no backend) ships one backend-rendered sample form as an asset instead of a placeholder.
 - E2E: the test now uses its own keychain slot (`TokenStore(namespace: 'e2e.')`), so it gets its own customer and never resets the account a person uses on the same simulator; it locates that customer at Köln Hbf through Stellwerk.
+
+Shipped later on 10 September 2026 (app, store plumbing):
+- Rechtliches in the app: Impressum, Datenschutz and "Wie wir Anträge weiterleiten" from `app/lib/content/legal.dart`, under Einstellungen and linked from the claim's send step. Operator name and address are placeholders.
+- Nickname: Einstellungen → Konto → Name edits it (PATCH /v1/me); Ich and the boards show it; a blank one takes the first name when claim data is saved (client-side, in `Session.savePersonalData`).
+- Konto and Antwort reload on ledger events with a 400 ms debounce (`LoaderController.refreshSoon`), so a Stellwerk fast-forward or reply shows without leaving the screen.
+- "Zum Konto" on every inbound reply branch (accepted, question, rejected).
+- iOS privacy manifest (`ios/Runner/PrivacyInfo.xcprivacy`, registered as a Runner resource); Android manifest with INTERNET and fine/coarse location, label "Verspätomat", `compileSdk = 37` (flutter_secure_storage 10 requires it; `platforms;android-37` installed via sdkmanager); `flutter build apk --debug` succeeds.
+- docs/40-store-listing.md: App Store privacy label, review notes, Play Data safety answers.
 
 Gotchas found:
 - The simulator's location permission alert survives app relaunches and hides the app; reboot the simulator or run with `NO_LOCATION=1` (a string compare: Flutter's `bool.fromEnvironment` only accepts the literal `true`).
 - Transitous station names carry a country suffix ("Köln Hbf (DE)"); stripped in the adapter.
 - Late in the evening the departures page of the feed is mostly buses and trams; the adapter now fetches 150 rows before filtering to rail.
-- Known rough edges: Konto refreshes only when the claim or reply screen pops back; the nickname is never set, so boards show "Fahrgast"; the reply screen's "Zum Konto" control is missing on the accepted branch.
+- Known rough edges (all fixed later on 10 September): Konto refreshed only when a sub-screen popped back; the nickname was never set; the reply screen's "Zum Konto" control was missing on the accepted branch.
 
 Run it:
 

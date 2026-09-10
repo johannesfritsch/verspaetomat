@@ -195,7 +195,7 @@ class MockRepository implements AppRepository {
   @override
   Future<ApiCustomer> getMe() async => ApiCustomer(
         id: 'demo-device',
-        nickname: Mock.userName,
+        nickname: state.nickname,
         relayAddress: state.personalDataEntered ? Mock.relayAddress : null,
         personalData: state.personalDataEntered
             ? const ApiPersonalData(name: Mock.userName, address: Mock.userAddress, email: Mock.userEmail, ticketNumber: Mock.ticketNumber)
@@ -231,6 +231,7 @@ class MockRepository implements AppRepository {
     if (p.keepCorrespondence != null) state.setKeepCorrespondence(p.keepCorrespondence!);
     if (p.traewellingLinked != null) state.setTraewellingLinked(p.traewellingLinked!);
     if (p.onboardingDone == true) state.completeOnboarding();
+    if (p.nickname != null) state.setNickname(p.nickname!);
     if (p.mutedStations != null) state.setMutedStations([for (final m in p.mutedStations!) {'id': m.id, 'name': m.name}]);
     return getMe();
   }

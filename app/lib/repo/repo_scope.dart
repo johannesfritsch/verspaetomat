@@ -172,6 +172,12 @@ class Session extends ChangeNotifier {
     try {
       me = await repo.putPersonalData(data);
       error = null;
+      // A customer who never picked a name goes by their first name from now on.
+      final nick = me?.nickname.trim() ?? '';
+      final first = data.name.trim().split(RegExp(r'\s+')).first;
+      if ((nick.isEmpty || nick == 'Fahrgast') && first.isNotEmpty) {
+        me = await repo.patchMe(MePatch(nickname: first));
+      }
     } catch (e) {
       error = e.toString();
     }

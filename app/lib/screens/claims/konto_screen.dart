@@ -34,15 +34,17 @@ class _KontoScreenState extends State<KontoScreen> {
   void initState() {
     super.initState();
     _eventSub = RepoScope.read(context).events.listen((e) {
-      if (mounted && e.touchesLedger) _loader.refresh();
+      if (mounted && e.touchesLedger) _loader.refreshSoon();
     });
   }
 
   @override
   void dispose() {
     _eventSub?.cancel();
+    _loader.dispose();
     super.dispose();
   }
+
   final _loader = LoaderController();
   bool _busy = false;
 

@@ -37,6 +37,7 @@ class DemoState extends ChangeNotifier {
   TicketType ticket = TicketType.deutschlandticket;
   String ngoId = 'bahnhofsmission';
   bool personalDataEntered = false;
+  String nickname = Mock.userName;
   bool showOnBoards = true;
   bool keepCorrespondence = false;
   bool offline = false;
@@ -75,6 +76,11 @@ class DemoState extends ChangeNotifier {
 
   void setShowOnBoards(bool v) {
     showOnBoards = v;
+    notifyListeners();
+  }
+
+  void setNickname(String v) {
+    nickname = v.trim().isEmpty ? Mock.userName : v.trim();
     notifyListeners();
   }
 

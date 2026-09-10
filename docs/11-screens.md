@@ -205,11 +205,18 @@ Most replies arrive on their own. The railway answers to the customer's Verspät
 - Standort: current permission with a plain explanation and a link to change it.
 - Persönliche Daten für Anträge: view, edit, delete.
 - Meine Verspätomat-Adresse: the sender address, what arrives there, "Korrespondenz nach Abschluss behalten" switch (off by default), and a full export of all sent and received mails.
-- Konto (optional sign-in for backup).
+- Konto: Name (the nickname shown in boards and on Ich; a blank one takes the first name once claim data is saved), Wiederherstellungscode (no sign-in; the 12-word code moves the account), Träwelling.
 - Träwelling verbinden: import check-ins from a linked Träwelling account so nobody checks in twice. Read-only, off by default.
 - Boards: "Mich in Ranglisten zeigen" switch.
 - Daten exportieren · Alles löschen: one tap each, with a confirmation.
 - "Woher kommen die Daten?" opens the content of doc 13 as a page.
+- Rechtliches: three pages rendered from `app/lib/content/legal.dart` (Impressum, Datenschutz, "Wie wir Anträge weiterleiten"); the last one is also linked from the send step of the claim ("Mehr").
+
+---
+
+## 17. Rechtliches (Impressum · Datenschutz · Wie wir Anträge weiterleiten)
+
+Plain reading pages under `/rechtliches/:id`. Eyebrow "Rechtliches", the title, a two-line lead, then sections with a hairline above each heading; text is selectable. Each page ends with links to the other two. The Datenschutz page is the wording the store privacy labels are derived from (docs/40-store-listing.md). Placeholders in square brackets (operator name and address) are filled in before the first store build.
 
 ---
 

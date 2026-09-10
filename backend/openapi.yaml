@@ -134,7 +134,7 @@ paths:
       responses: { "200": { description: Mail } }
   /internal/inbound-mail:
     post:
-      summary: Mail-provider webhook (and the demo's "Antwort simulieren"). Matches by relay address, classifies, forwards to the customer, updates statuses. Guarded by ?secret= when INBOUND_SECRET is set.
+      summary: Mail-provider webhook (and the demo's "Antwort simulieren"). Accepts our own shape or Postmark's inbound payload as posted (To/ToFull, From/FromFull, Subject, TextBody, MessageID, Headers, base64 Attachments; a RawEmail field is parsed as MIME instead). Matches by relay address, classifies, forwards to the customer, updates statuses. Guarded by ?secret= when INBOUND_SECRET is set.
       requestBody: { content: { application/json: { schema: { type: object, required: [to, from, subject, body], properties: { to: { type: string }, from: { type: string }, subject: { type: string }, body: { type: string }, message_id: { type: string }, in_reply_to: { type: string }, claim_id: { type: string, format: uuid } } } } } }
       responses: { "200": { description: "{mail, outcome, claim_id}" } }
   /internal/inbound-mail/raw:
@@ -163,6 +163,12 @@ paths:
       summary: Forget a customer (id, id prefix, nickname or relay address). Deletes the device row; everything cascades. Refused with 409 when the customer has a relay address and a sent claim (a railway may still write to it) unless ?force=true.
       parameters: [{ name: key, in: path, required: true, schema: { type: string } }, { name: force, in: query, schema: { type: boolean } }]
       responses: { "200": { description: "{forgotten, nickname, sent_claims, trip_overrides_cleared}" }, "404": { description: no such customer }, "409": { description: "relay address and sent claims; repeat with ?force=true" } }
+  /admin/customers/{key}/push:
+    post:
+      summary: "Send a test push to the customer's device; body {text?}. Without APNS_*/FCM_* credentials it is one `push (dry-run)` log line. Answers {customer, nickname, platform, token: bool, configured: bool, result: sent | dry-run | no-token | muted | unregistered, title, body}."
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { text: { type: string } } } } } }
+      responses: { "200": { description: result }, "404": { description: no such customer } }
   /admin/scan:
     post: { summary: "Run one deadline-scanner pass now: warnings, expiry across all customers, reply nudges, retention sweep.", responses: { "200": { description: "{today, warned, expired, nudged, retained}" } } }
   /admin/ngos/{id}/report:

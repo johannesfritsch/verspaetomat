@@ -33,6 +33,8 @@ class Routes {
   static const historie = '/historie';
   static const einstellungen = '/einstellungen';
   static const datenherkunft = '/einstellungen/daten';
+  static const rechtlichesBase = '/rechtliches'; // /rechtliches/:id  (impressum | datenschutz | bote)
+  static String rechtliches(String id) => '$rechtlichesBase/$id';
   static const showcase = '/showcase';
 }
 

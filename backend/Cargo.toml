@@ -34,3 +34,6 @@ mail-parser = "0.11.9"
 typst = "0.15.1"
 chrono-tz = "0.10"
 typst-layout = "0.15.1"
+a2 = { version = "0.10", default-features = false, features = ["ring"] }
+jsonwebtoken = "9"
+base64 = "0.22"

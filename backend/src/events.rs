@@ -27,6 +27,8 @@ pub struct AppEvent {
 pub struct EventHub {
     senders: RwLock<HashMap<Uuid, broadcast::Sender<AppEvent>>>,
     all: RwLock<Option<broadcast::Sender<AppEvent>>>,
+    /// Sees every per-customer publish: the push sender hangs here.
+    tap: RwLock<Option<broadcast::Sender<(Uuid, AppEvent)>>>,
 }
 
 impl EventHub {
@@ -50,7 +52,21 @@ impl EventHub {
 
     /// Tell one customer's open streams that something changed.
     pub fn publish(&self, customer: Uuid, kind: &'static str, payload: Value) {
-        let _ = self.sender_for(customer).send(AppEvent { kind, payload });
+        let ev = AppEvent { kind, payload };
+        if let Some(t) = self.tap.read().unwrap().as_ref() {
+            let _ = t.send((customer, ev.clone()));
+        }
+        let _ = self.sender_for(customer).send(ev);
+    }
+
+    /// Subscribe to every per-customer event (not the broadcast-to-all ones).
+    pub fn tap(&self) -> broadcast::Receiver<(Uuid, AppEvent)> {
+        if let Some(t) = self.tap.read().unwrap().as_ref() {
+            return t.subscribe();
+        }
+        let (tx, rx) = broadcast::channel(256);
+        *self.tap.write().unwrap() = Some(tx);
+        rx
     }
 
     /// Tell every open stream (e.g. the clock moved).

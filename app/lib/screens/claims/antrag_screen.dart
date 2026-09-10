@@ -775,6 +775,22 @@ class _Senden extends StatelessWidget {
         VKeyValue('Empfänger', draft.claim.accountHolder),
         const VGap.s(),
         Text('Nach dem Absenden steht alles auf „eingereicht“. Die Antwort der Bahn landet in der App und in deinem Postfach.', style: VText.caption),
+        const VGap.s(),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: Text('Das ist dein Antrag, in deinem Namen. Wir überbringen ihn nur und schreiben der Bahn nie von uns aus.', style: VText.caption)),
+            const SizedBox(width: VSpace.s),
+            InkWell(
+              onTap: () => context.push(Routes.rechtliches('bote')),
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text('Mehr', style: VText.caption.copyWith(color: VColors.ink, decoration: TextDecoration.underline)),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }

@@ -14,6 +14,8 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use base64::Engine;
+
 use crate::auth::{internal, sha256, Customer};
 use crate::db::rows::*;
 use crate::rules::{self, Cents};
@@ -1040,9 +1042,50 @@ fn inbound_secret_ok(q: &BTreeMap<String, String>) -> Result<(), (StatusCode, Js
 
 /// Mail-provider webhook (and the showcase's "Antwort simulieren"). Match by relay
 /// address and claim reference, classify, forward, update statuses.
-pub async fn inbound_mail(State(s): State<AppState>, axum::extract::Query(q): axum::extract::Query<BTreeMap<String, String>>, Json(m): Json<InboundMail>) -> ApiResult {
+pub async fn inbound_mail(State(s): State<AppState>, axum::extract::Query(q): axum::extract::Query<BTreeMap<String, String>>, Json(v): Json<Value>) -> ApiResult {
     inbound_secret_ok(&q)?;
+    let m = inbound_from_json(v).ok_or_else(|| err(StatusCode::BAD_REQUEST, "unrecognised inbound payload"))?;
     Ok(Json(process_inbound(&s, m).await?))
+}
+
+/// Accepts our own shape (`to`, `from`, `subject`, `body`, …) and Postmark's inbound
+/// webhook (`To`, `From`/`FromFull`, `Subject`, `TextBody`, `MessageID`, `Headers`,
+/// base64 `Attachments`; with "include raw email" on, `RawEmail` wins and is parsed as MIME).
+pub fn inbound_from_json(v: Value) -> Option<InboundMail> {
+    if let Some(raw) = v.get("RawEmail").and_then(|r| r.as_str()) {
+        return parse_raw_mail(raw.as_bytes());
+    }
+    if v.get("To").is_some() || v.get("ToFull").is_some() {
+        let str_of = |k: &str| v.get(k).and_then(|x| x.as_str()).map(|x| x.to_string());
+        let to = v.get("ToFull").and_then(|t| t.as_array()).and_then(|a| a.first()).and_then(|t| t.get("Email")).and_then(|e| e.as_str()).map(|e| e.to_string()).or_else(|| str_of("To"))?;
+        let from = str_of("From").or_else(|| v.get("FromFull").and_then(|f| f.get("Email")).and_then(|e| e.as_str()).map(|e| e.to_string()))?;
+        let body = str_of("TextBody").or_else(|| str_of("StrippedTextReply")).or_else(|| str_of("HtmlBody")).unwrap_or_default();
+        let header = |name: &str| {
+            v.get("Headers")
+                .and_then(|h| h.as_array())
+                .and_then(|h| h.iter().find(|x| x.get("Name").and_then(|n| n.as_str()).map(|n| n.eq_ignore_ascii_case(name)).unwrap_or(false)))
+                .and_then(|x| x.get("Value"))
+                .and_then(|x| x.as_str())
+                .map(|x| x.to_string())
+        };
+        let message_id = str_of("MessageID").map(|id| if id.starts_with('<') { id } else { format!("<{id}>") });
+        let attachments = v
+            .get("Attachments")
+            .and_then(|a| a.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| {
+                        let name = x.get("Name")?.as_str()?.to_string();
+                        let ct = x.get("ContentType").and_then(|c| c.as_str()).unwrap_or("application/octet-stream").to_string();
+                        let bytes = base64::engine::general_purpose::STANDARD.decode(x.get("Content")?.as_str()?).ok()?;
+                        Some((name, ct, bytes))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        return Some(InboundMail { to, from, subject: str_of("Subject").unwrap_or_default(), body, message_id, in_reply_to: header("In-Reply-To"), claim_id: None, attachments });
+    }
+    serde_json::from_value(v).ok()
 }
 
 /// `POST /internal/inbound-mail/raw`: the RFC 822 message as the body, for providers that
@@ -1328,4 +1371,46 @@ pub async fn boards(State(s): State<AppState>, c: Customer, Query(q): Query<Boar
     entries.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)));
     let out: Vec<Value> = entries.into_iter().enumerate().map(|(k, (name, points, is_me, seed))| json!({ "rank": k + 1, "name": name, "points": points, "is_me": is_me, "seed": seed })).collect();
     Ok(Json(json!(out)))
+}
+
+#[cfg(test)]
+mod inbound_tests {
+    use super::*;
+
+    #[test]
+    fn postmark_payload_maps_to_inbound_mail() {
+        let v = json!({
+            "FromFull": {"Email": "fahrgastrechte@deutschebahn.com", "Name": "Servicecenter Fahrgastrechte"},
+            "From": "Servicecenter Fahrgastrechte <fahrgastrechte@deutschebahn.com>",
+            "To": "fahrgast-0d8cffc4@verspaetomat.de",
+            "ToFull": [{"Email": "fahrgast-0d8cffc4@verspaetomat.de", "Name": ""}],
+            "Subject": "Ihr Antrag",
+            "TextBody": "Sehr geehrter Herr Test,\n\n4,50 EUR werden überwiesen.",
+            "HtmlBody": "<p>ignored when TextBody exists</p>",
+            "MessageID": "73e6d360-66eb-11e1-8e72-a8904824019b",
+            "Headers": [{"Name": "In-Reply-To", "Value": "<abc@verspaetomat.de>"}, {"Name": "X-Spam-Status", "Value": "No"}],
+            "Attachments": [{"Name": "Bescheid.pdf", "ContentType": "application/pdf", "ContentLength": 4, "Content": "JVBERg=="}]
+        });
+        let m = inbound_from_json(v).unwrap();
+        assert_eq!(m.to, "fahrgast-0d8cffc4@verspaetomat.de");
+        assert!(m.from.contains("deutschebahn.com"));
+        assert_eq!(m.subject, "Ihr Antrag");
+        assert!(m.body.starts_with("Sehr geehrter"));
+        assert_eq!(m.message_id.as_deref(), Some("<73e6d360-66eb-11e1-8e72-a8904824019b>"));
+        assert_eq!(m.in_reply_to.as_deref(), Some("<abc@verspaetomat.de>"));
+        assert_eq!(m.attachments.len(), 1);
+        assert_eq!(m.attachments[0].0, "Bescheid.pdf");
+        assert_eq!(m.attachments[0].2, b"%PDF");
+    }
+
+    #[test]
+    fn own_shape_and_raw_email_still_work() {
+        let m = inbound_from_json(json!({ "to": "fahrgast-1@verspaetomat.de", "from": "a@b.de", "subject": "s", "body": "b" })).unwrap();
+        assert_eq!(m.to, "fahrgast-1@verspaetomat.de");
+        let raw = "From: a@b.de\r\nTo: fahrgast-2@verspaetomat.de\r\nSubject: Hallo\r\nMessage-ID: <x@b.de>\r\n\r\nText\r\n";
+        let m = inbound_from_json(json!({ "RawEmail": raw, "To": "ignored" })).unwrap();
+        assert_eq!(m.to, "fahrgast-2@verspaetomat.de");
+        assert_eq!(m.subject, "Hallo");
+        assert!(inbound_from_json(json!({ "unrelated": 1 })).is_none());
+    }
 }

@@ -74,6 +74,8 @@ enum Cmd {
     },
     /// Live view of a customer's ride, refreshed every 3 s (Ctrl-C to stop)
     Watch { customer: String },
+    /// Send a test push to the customer's device (logged only without APNS_*/FCM_* credentials)
+    Push { customer: String, text: Option<String> },
     /// Delete a customer entirely (device, rides, incidents, claims, mails, uploads); --force when claims were already sent
     Forget {
         customer: String,
@@ -300,6 +302,14 @@ async fn main() -> anyhow::Result<()> {
             for u in &unmatched {
                 println!("  · {}  {:>8} ct  {}  {}", s(u, "date"), s(u, "amount_cents"), s(u, "reference"), s(u, "counterparty"));
             }
+        }
+        Cmd::Push { customer, text } => {
+            let v = api.post(&format!("/admin/customers/{customer}/push"), json!({ "text": text })).await?;
+            let platform = v["platform"].as_str().unwrap_or("–");
+            let token = if v["token"].as_bool().unwrap_or(false) { "Token da" } else { "kein Token" };
+            let how = if v["configured"].as_bool().unwrap_or(false) { "Provider konfiguriert" } else { "Dry-Run, nur Log" };
+            println!("Push an {} ({platform}, {token}, {how}): {}", s(&v, "nickname"), s(&v, "result"));
+            println!("  {} – {}", s(&v, "title"), s(&v, "body"));
         }
         Cmd::Scan => {
             let v = api.post("/admin/scan", json!({})).await?;

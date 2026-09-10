@@ -8,6 +8,7 @@ import '../../router.dart';
 import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../../content/legal.dart';
 import 'community_widgets.dart';
 
 /// Einstellungen & Datenschutz.
@@ -132,6 +133,12 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           const VGap.xl(),
           const VSection('Konto'),
           VListRow(
+            title: 'Name',
+            subtitle: displayName(me) == null ? 'Noch keiner. So heißt du in Ranglisten.' : '${displayName(me)} · in Ranglisten und auf dem Ich-Screen',
+            chevron: true,
+            onTap: () => _editNickname(context, session, me?.nickname ?? ''),
+          ),
+          VListRow(
             title: 'Wiederherstellungscode',
             subtitle: 'Kein Konto. Dieser Code holt dein Konto auf ein neues Gerät.',
             chevron: true,
@@ -149,6 +156,15 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           VListRow(title: 'Daten exportieren', subtitle: 'Alles, was wir über dich haben', chevron: true, onTap: () => _export(context, session)),
           VListRow(title: 'Alles löschen', subtitle: 'Konto, Fahrten, Anträge, Adresse', chevron: true, onTap: () => _deleteAll(context, state, session)),
           VListRow(title: 'Woher kommen die Daten?', subtitle: 'Jede Zahl und ihre Quelle', chevron: true, onTap: () => context.push(Routes.datenherkunft)),
+          const VGap.xl(),
+          const VSection('Rechtliches'),
+          for (final d in legalDocs)
+            VListRow(
+              title: d.title,
+              subtitle: switch (d.id) { 'impressum' => 'Wer hinter der App steht', 'datenschutz' => 'Was wir speichern und wie lange', _ => 'Bote, nicht Vertreter' },
+              chevron: true,
+              onTap: () => context.push(Routes.rechtliches(d.id)),
+            ),
           const VGap.xl(),
           const VSection('Backend'),
           for (final m in BackendMode.values)
@@ -185,6 +201,40 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           const VGap.l(),
           Text('Verspätomat 0.1 · Vorführung · Alle Daten erfunden', style: VText.caption),
         ],
+      ),
+    );
+  }
+
+  void _editNickname(BuildContext context, Session session, String current) {
+    final c = TextEditingController(text: current == 'Fahrgast' ? '' : current);
+    showVSheet(
+      context,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.l),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const VSheetHeader(title: 'Dein Name', subtitle: 'Für Ranglisten und den Ich-Screen. Kein Klarname nötig.'),
+            TextField(
+              controller: c,
+              autofocus: true,
+              maxLength: 24,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Name', hintText: 'z. B. Johannes oder Gleis7'),
+              style: VText.body,
+            ),
+            const VGap.m(),
+            VPrimaryButton(
+              label: 'Speichern',
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await session.updateSettings(MePatch(nickname: c.text.trim()));
+                if (context.mounted) showSnack(context, session.error ?? 'Gespeichert.');
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

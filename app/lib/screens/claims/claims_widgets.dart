@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -48,7 +49,17 @@ class Loader<T> extends StatefulWidget {
 
 class LoaderController {
   VoidCallback? _refresh;
+  Timer? _debounce;
   void refresh() => _refresh?.call();
+
+  /// Reload once, [after] the last call in a burst. Used for event-stream refreshes,
+  /// where a fast-forward emits ride, incident and claim events within milliseconds.
+  void refreshSoon({Duration after = const Duration(milliseconds: 400)}) {
+    _debounce?.cancel();
+    _debounce = Timer(after, refresh);
+  }
+
+  void dispose() => _debounce?.cancel();
 }
 
 class _LoaderState<T> extends State<Loader<T>> {

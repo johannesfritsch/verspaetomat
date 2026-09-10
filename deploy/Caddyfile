@@ -1,0 +1,18 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	encode zstd gzip
+	# The Stellwerk admin API is token-guarded; keep it off the public internet anyway.
+	@admin path /admin/*
+	respond @admin 404
+	reverse_proxy api:8080 {
+		# Server-sent events (/v1/events) must not be buffered.
+		flush_interval -1
+	}
+	log {
+		output stdout
+		format console
+	}
+}

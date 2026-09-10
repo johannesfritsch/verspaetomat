@@ -40,7 +40,7 @@ class _AntwortScreenState extends State<AntwortScreen> {
   void initState() {
     super.initState();
     _eventSub = RepoScope.read(context).events.listen((e) {
-      if (mounted && e.touchesLedger) _loader.refresh();
+      if (mounted && e.touchesLedger) _loader.refreshSoon();
     });
     _mailId = widget.mailId;
   }
@@ -48,6 +48,7 @@ class _AntwortScreenState extends State<AntwortScreen> {
   @override
   void dispose() {
     _eventSub?.cancel();
+    _loader.dispose();
     super.dispose();
   }
 
@@ -144,6 +145,16 @@ class _AntwortScreenState extends State<AntwortScreen> {
   }
 }
 
+/// Back to the ledger: pops when the reply screen was pushed, else switches the tab.
+class _ZumKonto extends StatelessWidget {
+  const _ZumKonto();
+
+  @override
+  Widget build(BuildContext context) {
+    return VGhostButton(label: 'Zum Konto', icon: Icons.receipt_long_outlined, onTap: () => (context.canPop() ? context.pop() : context.go(Routes.konto)));
+  }
+}
+
 /// Demo route opened before anything was sent.
 class _NothingSubmitted extends StatelessWidget {
   const _NothingSubmitted();
@@ -158,7 +169,7 @@ class _NothingSubmitted extends StatelessWidget {
         const VGap.s(),
         Text('Schick erst ein Bündel ab. Die Antwort der Bahn kann nur auf einen Antrag folgen.', style: VText.body.copyWith(color: VColors.ink2)),
         const VGap.l(),
-        VGhostButton(label: 'Zum Konto', icon: Icons.receipt_long_outlined, onTap: () => (context.canPop() ? context.pop() : context.go(Routes.konto))),
+        const _ZumKonto(),
       ],
     );
   }
@@ -250,6 +261,8 @@ class _Accepted extends StatelessWidget {
         VPrimaryButton(label: 'Antwort lesen', icon: Icons.mail_outline, onTap: () => showMailSheet(context, mail)),
         const VGap.s(),
         Text('Die Zahl auf dem Wir-Screen ist gerade um diesen Betrag gewachsen. Das warst du.', style: VText.caption),
+        const VGap.s(),
+        const _ZumKonto(),
       ],
     );
   }
@@ -273,6 +286,8 @@ class _Question extends StatelessWidget {
         MailView(mail: mail),
         const VGap.m(),
         VPrimaryButton(label: 'Antworten', icon: Icons.reply, onTap: () => _reply(context)),
+        const VGap.xs(),
+        const _ZumKonto(),
       ],
     );
   }
@@ -445,6 +460,8 @@ class _Rejected extends StatelessWidget {
             if (sent == true) onReplied();
           },
         ),
+        const VGap.xs(),
+        const _ZumKonto(),
       ],
     );
   }

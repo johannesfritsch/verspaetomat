@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "de.verspaetomat.verspaetomat"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37 // flutter_secure_storage 10 compiles against API 37; Flutter's default is lower
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

@@ -1,3 +1,6 @@
 .omc/
 .DS_Store
 backend/target/
+deploy/.env
+deploy/secrets/*
+!deploy/secrets/.gitkeep

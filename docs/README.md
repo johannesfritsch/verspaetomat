@@ -36,6 +36,14 @@ Status: research, product concept and a fully mocked Flutter showcase app (`app/
 
 The skeleton lives in `backend/` (see `backend/README.md`, `backend/openapi.yaml`).
 
+## Shipping
+
+| Doc | Content |
+|---|---|
+| [30-tonight-plan.md](30-tonight-plan.md) | The build plan and what shipped, day by day |
+| [40-store-listing.md](40-store-listing.md) | App Store privacy label, review notes, Play Data safety form, derived from the in-app Datenschutz text |
+| [41-launch-checklist.md](41-launch-checklist.md) | Launch checklist: what only Johannes can do (domain, mail provider, NGO, Apple, Google, server), ordered by lead time |
+
 [sources.md](sources.md) lists the URLs behind the research.
 
 Terms used throughout: **D-Ticket** = Deutschlandticket. **Servicecenter** = Servicecenter Fahrgastrechte, Frankfurt, the joint claims desk of DB and about 40 other railways. **Ledger** = the in-app "Konto" of qualifying delays and their claim status.
