@@ -173,3 +173,5 @@ Shipped later on 10 September 2026 (station geofencing, docs/15):
 - Backend: migration 0019 (`rides.from_lat/from_lon`, `loc_mode` default `always`, `nudge_enabled`, `quiet_from/quiet_to`), check-in stores the from-station's coordinates, `GET /v1/me/geofence` (frequent stations of 30 days, home station, muted excluded, cap 15), PATCH /v1/me takes `nudge_enabled` and the quiet window.
 - App: `lib/platform/geofence.dart` (MethodChannel `de.verspaetomat/geofence`) and `geofence_sync.dart` (debounced configure on session change, foreground, ride changes; pending nudge on start), onboarding preselects "Auch im Hintergrund" and requests Always, Einstellungen persist "Hinweis am Bahnhof" and "Ruhezeiten", a tapped nudge opens `/checkin?station=<id>&name=<name>`, Datenschutz text extended.
 - Native iOS and Android layers: see their own entries.
+
+10 September 2026, evening: production on a VPS (docs/42), TestFlight builds 3 and 4 via `app/tools/release.sh`, Stellwerk `--prod`, station geofencing (docs/15). Push verified end to end on a real iPhone with build 4; builds 1–3 never registered with APNs.
