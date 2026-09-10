@@ -67,7 +67,7 @@ The secret in the URL is the only guard on the webhook; make it long and random.
 ## 3. First start
 
 ```bash
-git clone <repo> verspaetomat && cd verspaetomat/deploy
+git clone https://github.com/johannesfritsch/verspaetomat.git /opt/verspaetomat && cd /opt/verspaetomat/deploy
 cp .env.example .env
 $EDITOR .env                       # POSTGRES_PASSWORD, ADMIN_TOKEN, INBOUND_SECRET, SMTP_URL, API_DOMAIN, ACME_EMAIL, APNS_*, FCM_*
 mkdir -p secrets && cp ~/Downloads/AuthKey_*.p8 secrets/ && cp ~/Downloads/firebase-*.json secrets/firebase-service-account.json

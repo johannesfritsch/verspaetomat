@@ -4,7 +4,7 @@ Written 10 September 2026 against commit `341afc4` plus the release fixes of the
 
 Total time if nothing goes wrong: about 90 minutes of doing, plus waiting for DNS (minutes to hours) and App Store Connect processing (10 to 30 minutes per build).
 
-The repository has no remote. Part A copies the tree to the server with rsync; if you push it to GitHub first, replace the rsync step with `git clone`.
+The code lives at https://github.com/johannesfritsch/verspaetomat (public). The server clones it; `deploy/.env` and `deploy/secrets/` are git-ignored and stay on the server.
 
 ---
 
@@ -42,7 +42,7 @@ The mail records (MX, SPF, DKIM, DMARC) come later with Postmark; they are in `d
 ```bash
 ssh root@api.verspaetomat.de            # or the IPv4 while DNS propagates
 apt-get update && apt-get -y dist-upgrade
-apt-get install -y rsync unattended-upgrades
+apt-get install -y git unattended-upgrades
 dpkg-reconfigure -plow unattended-upgrades   # choose Yes
 curl -fsSL https://get.docker.com | sh
 docker --version && docker compose version  # Docker 27+, Compose v2.x
@@ -50,18 +50,14 @@ mkdir -p /opt/verspaetomat /var/backups
 exit
 ```
 
-### A4. Copy the code (2 min)
-
-From your Mac. Only `backend/` and `deploy/` are needed on the server:
+### A4. Clone the code (1 min)
 
 ```bash
-cd /Users/johannes/code/verspaetomat
-rsync -az --delete \
-  --exclude 'backend/target' --exclude 'deploy/.env' --exclude 'deploy/secrets/*' \
-  backend deploy root@api.verspaetomat.de:/opt/verspaetomat/
+ssh root@api.verspaetomat.de
+git clone https://github.com/johannesfritsch/verspaetomat.git /opt/verspaetomat
 ```
 
-Re-run the same command for every update; then A7.
+Public repository, so no key is needed on the server. Every later update is `git pull` (A7).
 
 ### A5. Configure (5 min)
 
@@ -106,12 +102,12 @@ If `curl` fails with a certificate error, Caddy is still fetching it: `docker co
 
 ```bash
 # on the Mac
-rsync -az --delete --exclude 'backend/target' --exclude 'deploy/.env' --exclude 'deploy/secrets/*' backend deploy root@api.verspaetomat.de:/opt/verspaetomat/
+git push
 # on the server
-cd /opt/verspaetomat/deploy && docker compose up -d --build api && docker compose logs --tail 30 api
+ssh root@api.verspaetomat.de 'cd /opt/verspaetomat && git pull && cd deploy && docker compose up -d --build api && docker compose logs --tail 30 api'
 ```
 
-Postgres and Caddy keep running; only the API is rebuilt and restarted. Migrations run on start.
+Postgres and Caddy keep running; only the API is rebuilt and restarted. Migrations run on start. Rolling back is `git checkout <commit>` plus the same compose line; migrations are forward-only, so only roll back across commits without new migration files.
 
 ### A8. Backups (2 min)
 
