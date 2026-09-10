@@ -47,23 +47,29 @@ class Stellwerk {
   }
 
   Future<dynamic> _post(String path, [Map<String, dynamic>? body]) async {
-    http.Response r;
-    try {
-      r = await http.post(Uri.parse('$base$path'), headers: _h, body: jsonEncode(body ?? {}));
-    } on http.ClientException catch (e) {
-      // The debug backend occasionally resets the connection although it applied the request.
-      // One retry; a 4xx on the retry then means the first attempt already went through.
-      // ignore: avoid_print
-      print('POST $path: ${e.message}; retrying once');
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      r = await http.post(Uri.parse('$base$path'), headers: _h, body: jsonEncode(body ?? {}));
-      if (r.statusCode >= 400 && r.statusCode < 500) {
+    // The debug backend occasionally resets the connection on the response although it applied
+    // the request (the server log shows the work done, no panic). So: retry a few times, and a
+    // 4xx after such a reset means the first attempt already went through.
+    http.Response? r;
+    var reset = false;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        r = await http.post(Uri.parse('$base$path'), headers: _h, body: jsonEncode(body ?? {}));
+        break;
+      } on http.ClientException catch (e) {
+        reset = true;
         // ignore: avoid_print
-        print('retry POST $path → ${r.statusCode}: assuming the first attempt was applied');
-        return null;
+        print('POST $path: ${e.message} (attempt $attempt of 3)');
+        if (attempt == 3) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: 500 * attempt));
       }
     }
-    if (r.statusCode >= 300) throw StateError('POST $path → ${r.statusCode} ${r.body}');
+    if (reset && r!.statusCode >= 400 && r.statusCode < 500) {
+      // ignore: avoid_print
+      print('retry POST $path → ${r.statusCode}: the reset attempt had already been applied');
+      return null;
+    }
+    if (r!.statusCode >= 300) throw StateError('POST $path → ${r.statusCode} ${r.body}');
     return r.body.isEmpty ? null : jsonDecode(r.body);
   }
 
