@@ -30,8 +30,16 @@ class Session extends ChangeNotifier {
       : tokens = tokens ?? TokenStore(namespace: _namespaceFor(apiUrl)) {
     _mock = MockRepository(demo);
     _http = HttpRepository(client: ApiClient(baseUrl: apiUrl, tokens: this.tokens), tokens: this.tokens);
+    _http.client.awaitDevice = () => _deviceReady.future;
+    _http.client.onUnauthorized = () async {
+      await this.tokens.clear();
+      await _http.ensureDevice();
+    };
     demo.addListener(_onDemoChanged);
   }
+
+  /// Completed once `_bootstrap` has a device token (or gave up); reset on every bootstrap.
+  Completer<void> _deviceReady = Completer<void>();
 
   static const _modeKey = 'verspaetomat.backend_mode';
 
@@ -112,12 +120,14 @@ class Session extends ChangeNotifier {
   Future<void> _bootstrap() async {
     busy = true;
     error = null;
+    if (_deviceReady.isCompleted) _deviceReady = Completer<void>();
     notifyListeners();
     try {
       if (isLocal) {
         healthy = await _http.health().timeout(const Duration(seconds: 6), onTimeout: () => false);
         if (healthy == true) {
           await _http.ensureDevice();
+          if (!_deviceReady.isCompleted) _deviceReady.complete();
         } else {
           error = 'Backend nicht erreichbar unter $apiUrl';
         }
@@ -125,22 +135,16 @@ class Session extends ChangeNotifier {
         healthy = true;
       }
       if (healthy == true) {
-        try {
-          me = await repo.getMe();
-        } on ApiException catch (e) {
-          // The server does not know this token (its database was reset, or the token is
-          // from another server): start over as a fresh device rather than stay stuck.
-          if (e.status != 401 || !isLocal) rethrow;
-          await tokens.clear();
-          await _http.ensureDevice();
-          me = await repo.getMe();
-        }
+        // A token the server does not know (reset database, other server) is replaced
+        // by the client's 401 handler and the request retried, so this just works.
+        me = await repo.getMe();
         ngos = await repo.ngos();
       }
       await _restartEvents();
     } catch (e) {
       error = e.toString();
     } finally {
+      if (!_deviceReady.isCompleted) _deviceReady.complete();
       busy = false;
       notifyListeners();
     }

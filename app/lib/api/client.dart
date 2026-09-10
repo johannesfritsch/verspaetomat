@@ -29,8 +29,17 @@ class ApiClient {
     return base.replace(path: '${base.path.replaceAll(RegExp(r'/$'), '')}$path', queryParameters: query == null || query.isEmpty ? null : query);
   }
 
+  /// Set by the session: resolves once the device is registered. Requests that start
+  /// before that (the Bahnsteig loads on its first frame) wait instead of going out
+  /// without a token and failing with 401.
+  Future<void> Function()? awaitDevice;
+
   Future<Map<String, String>> _headers({bool json = true}) async {
-    final t = await tokens.token();
+    var t = await tokens.token();
+    if (t == null && awaitDevice != null) {
+      await awaitDevice!().timeout(const Duration(seconds: 12), onTimeout: () {});
+      t = await tokens.token();
+    }
     return {
       if (json) 'content-type': 'application/json',
       'accept': 'application/json',
@@ -51,16 +60,35 @@ class ApiClient {
     throw ApiException(r.statusCode, msg);
   }
 
-  Future<dynamic> _get(String path, [Map<String, String>? query]) async {
-    final r = await _http.get(_uri(path, query), headers: await _headers(json: false)).timeout(_timeout);
-    return _decode(r);
-  }
+  /// Set by the session: called when the server answers 401 for the stored token
+  /// (its database was reset, or the token belongs to another server). Replaces the
+  /// device; the request is then retried once with the new token.
+  Future<void> Function()? onUnauthorized;
+  Future<void>? _reauth;
 
-  Future<dynamic> _send(String method, String path, [Object? body]) async {
-    final req = http.Request(method, _uri(path))..headers.addAll(await _headers());
-    if (body != null) req.body = jsonEncode(body);
-    final r = await http.Response.fromStream(await _http.send(req).timeout(_timeout));
-    return _decode(r);
+  Future<dynamic> _get(String path, [Map<String, String>? query]) => _retryOnce(() async {
+        final r = await _http.get(_uri(path, query), headers: await _headers(json: false)).timeout(_timeout);
+        return _decode(r);
+      });
+
+  Future<dynamic> _send(String method, String path, [Object? body]) => _retryOnce(() async {
+        final req = http.Request(method, _uri(path))..headers.addAll(await _headers());
+        if (body != null) req.body = jsonEncode(body);
+        final r = await http.Response.fromStream(await _http.send(req).timeout(_timeout));
+        return _decode(r);
+      });
+
+  Future<dynamic> _retryOnce(Future<dynamic> Function() attempt) async {
+    try {
+      return await attempt();
+    } on ApiException catch (e) {
+      final handler = onUnauthorized;
+      if (e.status != 401 || handler == null) rethrow;
+      // Concurrent 401s share one re-registration.
+      _reauth ??= handler().whenComplete(() => _reauth = null);
+      await _reauth;
+      return await attempt();
+    }
   }
 
   Future<dynamic> _post(String path, [Object? body]) => _send('POST', path, body ?? const {});
