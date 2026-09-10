@@ -42,7 +42,7 @@ Optional disclosure text (App Store Connect allows a privacy policy URL only): h
 
 Paste into "Notes" in App Review Information:
 
-> Verspätomat is a form-filling and forwarding helper for EU rail passenger rights (Regulation (EU) 2021/782). The app records train delays the user checks in to, computes the statutory compensation, fills in the EU standard claim form with the user's own details and sends it from the user's personal relay address (fahrgast-…@verspaetomat.de) to the railway's claims desk. The railway pays the compensation directly to a charity the user chose. The app never collects, holds or forwards money (no IAP, no donations inside the app; "Trotzdem spenden" opens the charity's own website in Safari). See guideline 3.2.2(iv): nothing is collected in-app.
+> Verspätomat is a form-filling and forwarding helper for EU rail passenger rights (Regulation (EU) 2021/782). The app records train delays the user checks in to, computes the statutory compensation, fills in the EU standard claim form with the user's own details and sends it from the user's personal relay address (fahrgast-…@users.verspaetomat.de) to the railway's claims desk. The railway pays the compensation directly to a charity the user chose. The app never collects, holds or forwards money (no IAP, no donations inside the app; "Trotzdem spenden" opens the charity's own website in Safari). See guideline 3.2.2(iv): nothing is collected in-app.
 >
 > No login: accounts are anonymous device accounts created on first launch. No demo credentials are needed. A recovery code (Einstellungen → Konto) restores an account on another device.
 >
