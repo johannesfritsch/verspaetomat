@@ -713,11 +713,18 @@ pub fn ride_arrived_payload(ride_id: Uuid, final_delay_min: i64, fin: &Finalised
     })
 }
 
-/// Badges: first hour, short delays, first delay. Returns the first badge newly awarded.
+/// Badges: first hour, short delays, first delay, and the minute milestones (1.000, 2.000, …
+/// 64.000 minutes waited in total, doubling). Returns the first badge newly awarded.
 pub async fn award_badges(pool: &PgPool, customer_id: Uuid, ride_id: Uuid, delay: i64) -> anyhow::Result<Option<BadgeRow>> {
     let mut new_badge = None;
-    let candidates: Vec<&str> = if delay >= 60 { vec!["stunde", "erste"] } else if (1..10).contains(&delay) { vec!["gegenzug", "erste"] } else if delay > 0 { vec!["erste"] } else { vec![] };
+    let mut candidates: Vec<String> = if delay >= 60 { vec!["stunde".into(), "erste".into()] } else if (1..10).contains(&delay) { vec!["gegenzug".into(), "erste".into()] } else if delay > 0 { vec!["erste".into()] } else { vec![] };
+    let (total,): (i64,) = sqlx::query_as("select coalesce(sum(points),0)::bigint from rides where customer_id = $1 and status = 'arrived'")
+        .bind(customer_id)
+        .fetch_one(pool)
+        .await?;
+    candidates.extend(minute_milestones(total).into_iter().map(|m| format!("minuten-{m}")));
     for b in candidates {
+        let b = b.as_str();
         let inserted: Option<(String,)> = sqlx::query_as("insert into badge_awards (customer_id, badge_id, ride_id) values ($1, $2, $3) on conflict do nothing returning badge_id")
             .bind(customer_id)
             .bind(b)
@@ -729,6 +736,11 @@ pub async fn award_badges(pool: &PgPool, customer_id: Uuid, ride_id: Uuid, delay
         }
     }
     Ok(new_badge)
+}
+
+/// The minute milestones reached with `total` points: 1.000 · 2.000 · … · 64.000.
+fn minute_milestones(total: i64) -> Vec<i64> {
+    (0..7).map(|i| 1000_i64 << i).filter(|m| total >= *m).collect()
 }
 
 pub async fn dismiss(State(s): State<AppState>, c: Customer) -> ApiResult {
@@ -1882,6 +1894,9 @@ mod standing_tests {
     #[test]
     fn level_progress_bands() {
         assert_eq!(level_progress(0), ("Frischer Fahrgast", "Bahnsteigkante", 60, 0.0));
+        assert_eq!(minute_milestones(999), Vec::<i64>::new());
+        assert_eq!(minute_milestones(1000), vec![1000]);
+        assert_eq!(minute_milestones(70000), vec![1000, 2000, 4000, 8000, 16000, 32000, 64000]);
         let (name, next, missing, p) = level_progress(1372);
         assert_eq!((name, next, missing), ("Gleis 7", "Bahnhofsmission", 128));
         assert!((p - (772.0 / 900.0)).abs() < 1e-9);

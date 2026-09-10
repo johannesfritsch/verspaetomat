@@ -132,7 +132,7 @@ class IchScreen extends StatelessWidget {
                 physics: const NeverScrollableScrollPhysics(),
                 mainAxisSpacing: 6,
                 crossAxisSpacing: 6,
-                childAspectRatio: 0.92,
+                childAspectRatio: 0.84, // 64 px artwork + two caption lines
                 children: [
                   for (final b in data.badges) BadgeTile(badge: b, onTap: () => _showBadge(context, b)),
                 ],
@@ -180,6 +180,8 @@ class IchScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Center(child: BadgeIcon(badge: b, size: 140)),
+                  const VGap.m(),
                   Text(b.rule, style: VText.body),
                   if (b.earned) ...[
                     const VGap.m(),

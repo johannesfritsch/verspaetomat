@@ -233,10 +233,12 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
   Finder? pick;
   // Prefer trains whose operator the claims directory knows: an unknown operator becomes its
   // own desk ("Unbekannt") whose claim flow has no ticket step, which the test relies on.
-  for (final knownOnly in [true, false]) {
+  // A connecting journey with exactly one transfer first: the scenario confirms one leg and
+  // expects the arrival after the next; late at night Transitous sometimes only offers two.
+  for (final (knownOnly, oneTransfer) in [(true, true), (false, true), (true, false), (false, false)]) {
     for (var i = 0; i < rows.evaluate().length && pick == null; i++) {
       final it = tester.widget<ItineraryRow>(rows.at(i)).itinerary;
-      final ok = connecting ? it.transfers >= 1 : it.direct;
+      final ok = connecting ? (oneTransfer ? it.transfers == 1 : it.transfers >= 1) : it.direct;
       final known = it.legs.every((l) => Mock.desks.containsKey(l.operator) || l.operator.startsWith('DB '));
       if (ok && !it.first.cancelled && (known || !knownOnly)) pick = rows.at(i);
     }

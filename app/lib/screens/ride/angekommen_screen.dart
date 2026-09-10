@@ -7,6 +7,7 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../community/community_widgets.dart' show BadgeIcon;
 import 'ride_widgets.dart';
 
 /// The reveal. The only screen allowed to feel like a reward.
@@ -276,11 +277,18 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
           if (result.newBadge != null) ...[
             const VGap.m(),
             Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
               children: [
-                Expanded(child: Text('Neues Abzeichen', style: VText.bodyS)),
-                Text(result.newBadge!.name, style: VText.bodyStrong.copyWith(fontWeight: FontWeight.w800)),
+                BadgeIcon(badge: result.newBadge!, size: 44),
+                const SizedBox(width: VSpace.s),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Neues Abzeichen', style: VText.caption),
+                      Text(result.newBadge!.name, style: VText.bodyStrong.copyWith(fontWeight: FontWeight.w800)),
+                    ],
+                  ),
+                ),
               ],
             ),
             const VGap.m(),

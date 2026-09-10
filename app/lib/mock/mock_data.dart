@@ -730,6 +730,13 @@ class Mock {
     VBadge(id: 'deutschland', name: 'Deutschlandreise', rule: 'Check-ins in fünf Bundesländern', earned: false),
     VBadge(id: 'stammgleis', name: 'Stammgleis', rule: '50 Fahrten auf derselben Linie', earned: true, earnedOn: '3. Aug. 2026'),
     VBadge(id: 'geduld', name: 'Geduld ist eine Tugend', rule: '1.000 Geduldspunkte', earned: false),
+    VBadge(id: 'minuten-1000', name: '1.000 Minuten', rule: '1.000 Verspätungsminuten gesammelt', earned: true, earnedOn: '21. Aug. 2026'),
+    VBadge(id: 'minuten-2000', name: '2.000 Minuten', rule: '2.000 Verspätungsminuten gesammelt', earned: false),
+    VBadge(id: 'minuten-4000', name: '4.000 Minuten', rule: '4.000 Verspätungsminuten gesammelt', earned: false),
+    VBadge(id: 'minuten-8000', name: '8.000 Minuten', rule: '8.000 Verspätungsminuten gesammelt', earned: false),
+    VBadge(id: 'minuten-16000', name: '16.000 Minuten', rule: '16.000 Verspätungsminuten gesammelt', earned: false),
+    VBadge(id: 'minuten-32000', name: '32.000 Minuten', rule: '32.000 Verspätungsminuten gesammelt', earned: false),
+    VBadge(id: 'minuten-64000', name: '64.000 Minuten', rule: '64.000 Verspätungsminuten gesammelt', earned: false),
   ];
 
   static const pointsTotal = 1372;

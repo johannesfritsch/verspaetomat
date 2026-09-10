@@ -224,6 +224,65 @@ void showSourceSheet(BuildContext context, {required String title, required Stri
 }
 
 /// A badge: a circle in the station-clock spirit, name below.
+/// The achievement artwork from `assets/achievements/<stem>-aktiv|inaktiv.png` (Johannes'
+/// icons, prepared by `tools/badge_icons.sh`): a red ring with the motif when earned, grey
+/// otherwise. Ids that have no artwork fall back to the old dot in a ring.
+class BadgeIcon extends StatelessWidget {
+  const BadgeIcon({super.key, required this.badge, required this.size});
+  final ApiBadge badge;
+  final double size;
+
+  static const _stems = <String, String>{
+    'erste': 'erste-verspaetung',
+    'sev': 'schienenersatzverkehr',
+    'stellwerk': 'stellwerksstoerung',
+    'gleis': 'personen-im-gleis',
+    'gegenzug': 'gegenzug-abgewartet',
+    'letzter': 'letzter-zug',
+    'nacht': 'nachtschicht',
+    'stunde': 'volle-stunde',
+    'bagatell': 'bagatellgrenze-geknackt',
+    'abgeschickt': 'abgeschickt',
+    'bestaetigt': 'bestaetigt',
+    'deutschland': 'deutschlandreise',
+    'stammgleis': 'stammgleis',
+    'geduld': 'geduld-ist-eine-tugend',
+  };
+
+  static String? assetFor(String id, {required bool earned}) {
+    final stem = _stems[id] ?? (id.startsWith('minuten-') ? 'verspaetungsminuten-${id.substring(8)}' : null);
+    if (stem == null) return null;
+    return 'assets/achievements/$stem-${earned ? 'aktiv' : 'inaktiv'}.png';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final earned = badge.earned;
+    final asset = assetFor(badge.id, earned: earned);
+    if (asset != null) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Image.asset(asset, fit: BoxFit.contain, filterQuality: FilterQuality.medium),
+      );
+    }
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: earned ? VColors.paperElevated : Colors.transparent,
+        border: Border.all(color: earned ? VColors.ink : VColors.rule, width: earned ? 2.5 : 1.5),
+      ),
+      child: Center(
+        child: earned
+            ? Container(width: size / 5, height: size / 5, decoration: const BoxDecoration(color: VColors.red, shape: BoxShape.circle))
+            : Container(width: size / 5, height: size / 5, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: VColors.rule, width: 1.5))),
+      ),
+    );
+  }
+}
+
 class BadgeTile extends StatelessWidget {
   const BadgeTile({super.key, required this.badge, required this.onTap});
   final ApiBadge badge;
@@ -239,20 +298,7 @@ class BadgeTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(
           children: [
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: earned ? VColors.paperElevated : Colors.transparent,
-                border: Border.all(color: earned ? VColors.ink : VColors.rule, width: earned ? 2.5 : 1.5),
-              ),
-              child: Center(
-                child: earned
-                    ? Container(width: 12, height: 12, decoration: const BoxDecoration(color: VColors.red, shape: BoxShape.circle))
-                    : Container(width: 12, height: 12, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: VColors.rule, width: 1.5))),
-              ),
-            ),
+            BadgeIcon(badge: badge, size: 64),
             const SizedBox(height: 8),
             SizedBox(
               height: 36,
