@@ -691,3 +691,57 @@ mod ngo_tests {
         assert!(normalise_iban("DE89 3704 0044 0532 0130").is_err());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Mail test: one real message through the relay, from the customer's relay address.
+// A reply to it exercises the inbound path (Postmark webhook → mails table → forward).
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct MailTestBody {
+    pub to: String,
+}
+
+/// `POST /admin/customers/{key}/mail-test {to}`: assigns the relay address if the customer has none yet,
+/// sends a test mail from it, records it as an outbound mail without a claim.
+pub async fn mail_test(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<MailTestBody>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let to = b.to.trim().to_string();
+    if !to.contains('@') {
+        return Err(err(StatusCode::BAD_REQUEST, "to must be an e-mail address"));
+    }
+    let relay = match c.relay_address.clone() {
+        Some(r) => r,
+        None => {
+            let short = c.id.simple().to_string();
+            let r = format!("fahrgast-{}@verspaetomat.de", &short[..8]);
+            sqlx::query("update customers set relay_address = $2 where id = $1").bind(c.id).bind(&r).execute(&s.pool).await.map_err(internal)?;
+            r
+        }
+    };
+    let message_id = format!("<{}@verspaetomat.de>", Uuid::new_v4());
+    let subject = "Verspätomat: Testmail";
+    let body = format!(
+        "Hallo,\n\ndas ist eine Testmail des Verspätomat-Relays, gesendet von {relay}.\n\nWenn du auf diese Mail antwortest, landet die Antwort bei genau dieser Adresse und wird als eingehende Post verarbeitet. Das prüft den Rückweg.\n\nVerspätomat\n"
+    );
+    let result = crate::mail::send(crate::mail::OutgoingMail {
+        from: &relay,
+        to: &to,
+        bcc: None,
+        subject,
+        body: &body,
+        message_id: &message_id,
+        in_reply_to: None,
+        attachments: vec![],
+    })
+    .await
+    .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e:#}")))?;
+    let dry_run = matches!(result, crate::mail::SendResult::DryRun);
+    sqlx::query(
+        "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, bcc_addr, subject, body, dry_run)
+         values ($1,$2,null,'out',$3,null,$4,$5,null,$6,$7,$8)",
+    )
+    .bind(Uuid::new_v4()).bind(c.id).bind(&message_id).bind(&relay).bind(&to).bind(subject).bind(&body).bind(dry_run)
+    .execute(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "from": relay, "to": to, "message_id": message_id, "dry_run": dry_run })))
+}

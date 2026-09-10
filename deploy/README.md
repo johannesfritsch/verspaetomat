@@ -26,9 +26,9 @@ Two jobs: the API host, and mail for the relay addresses `fahrgast-XXXX@verspaet
 | AAAA | `api.verspaetomat.de` | the VPS IPv6 (if any) | same |
 | MX | `verspaetomat.de` | `10 inbound.postmarkapp.com` | Railway replies to `fahrgast-*@` land at Postmark, which posts them to us |
 | TXT | `verspaetomat.de` | `v=spf1 include:spf.mtasv.net -all` | SPF: Postmark may send as `@verspaetomat.de` |
-| CNAME | `<selector>._domainkey.verspaetomat.de` | what Postmark shows under Sender Signatures → DKIM | DKIM: signatures on outbound mail |
+| TXT | `<selector>._domainkey.verspaetomat.de` (Postmark shows the exact host, e.g. `20260910pm._domainkey`) | the long `k=rsa; p=…` value from Sender Signatures → DKIM | DKIM: signatures on outbound mail |
 | CNAME | `pm-bounces.verspaetomat.de` | `pm.mtasv.net` | Return-Path alignment (DMARC passes on the envelope sender) |
-| TXT | `_dmarc.verspaetomat.de` | `v=DMARC1; p=quarantine; rua=mailto:dmarc@verspaetomat.de; adkim=s; aspf=s` | DMARC with reports; strict alignment because we control both |
+| TXT | `_dmarc.verspaetomat.de` | `v=DMARC1; p=none; rua=mailto:dmarc@verspaetomat.de` | DMARC in monitor mode first; tighten to `p=quarantine; adkim=s; aspf=s` after a few clean weeks of reports |
 
 Deutsche Bahn's Servicecenter is a large corporate mail system: SPF, DKIM and DMARC all
 have to pass, or the claim mail lands in quarantine and nobody ever answers. Verify with
@@ -44,7 +44,8 @@ CNAMEs), inbound via SES receipt rule → SNS → HTTPS to the same webhook, and
 2. **[you]** Sender Signatures → add domain `verspaetomat.de`, set the DKIM and Return-Path
    records from step 1, wait for both to verify.
 3. **[you]** Server → API Tokens → copy one. Outbound over SMTP uses that token as both user
-   and password: `SMTP_URL=smtps://TOKEN:TOKEN@smtp.postmarkapp.com:465`.
+   and password. Postmark speaks STARTTLS on 587 (no implicit TLS on 465):
+   `SMTP_URL=smtp://TOKEN:TOKEN@smtp.postmarkapp.com:587`.
 4. **[you]** Inbound: Server → Inbound stream → "Inbound webhook":
 
    ```
@@ -63,6 +64,14 @@ CNAMEs), inbound via SES receipt rule → SNS → HTTPS to the same webhook, and
    backend: it looks the customer up by the `To` address.
 
 The secret in the URL is the only guard on the webhook; make it long and random.
+
+A new Postmark account is in "test mode": it may only send to addresses on your own verified
+domains until you request approval (Account → "Request approval", a short form about what you
+send). The Servicecenter's address is not on your domain, so request approval right away.
+
+Check both directions with one command once `SMTP_URL` and the webhook are set:
+`stellwerk --prod mail-test <customer> you@example.org`, then reply to that mail from your inbox;
+the reply shows up in `docker compose logs api` as an inbound mail for that relay address.
 
 ## 3. First start
 

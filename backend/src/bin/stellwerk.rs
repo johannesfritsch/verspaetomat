@@ -14,6 +14,7 @@
 //!   stellwerk locate Johannes "Köln Hbf"   |  locate Johannes 50.943,6.9586  |  locate Johannes --clear
 //!   stellwerk forget Johannes
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
+//!   stellwerk mail-test Johannes j@example.org
 //!   stellwerk ngo-report bahnhofsmission statement.csv   (or .json)
 //!   stellwerk scan
 //!
@@ -315,6 +316,8 @@ enum Cmd {
         /// CSV file; a .json file ({transfers:[…]}) is sent as is
         file: std::path::PathBuf,
     },
+    /// Send one real test mail from the customer's relay address (assigned if missing); reply to it to test the inbound path
+    MailTest { customer: String, to: String },
     /// Run one deadline-scanner pass now (warnings, expiry, reply nudges, retention)
     Scan,
     /// Put a customer at a station ("Köln Hbf") or at lat,lon; --clear returns to the phone's GPS
@@ -563,6 +566,10 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", if v["deleted"].as_bool().unwrap_or(false) { "gelöscht" } else { "deaktiviert (wird referenziert)" });
             }
         },
+        Cmd::MailTest { customer, to } => {
+            let v = api.post(&format!("/admin/customers/{customer}/mail-test"), json!({ "to": to })).await?;
+            println!("{} → {} · {}", s(&v, "from"), s(&v, "to"), if v["dry_run"].as_bool().unwrap_or(true) { "Trockenlauf (SMTP_URL nicht gesetzt)" } else { "gesendet" });
+        }
         Cmd::NgoReport { ngo, file } => {
             let text = std::fs::read_to_string(&file)?;
             let body = if file.extension().and_then(|e| e.to_str()) == Some("json") {
