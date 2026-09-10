@@ -675,6 +675,7 @@ class ApiIncident {
   const ApiIncident({
     required this.id,
     this.rideId,
+    this.journeyId,
     required this.date,
     required this.line,
     required this.from,
@@ -695,6 +696,7 @@ class ApiIncident {
   });
   final String id;
   final String? rideId;
+  final String? journeyId;
   final DateTime date;
   final String line;
   final String from;
@@ -718,6 +720,7 @@ class ApiIncident {
   factory ApiIncident.fromJson(Map<String, dynamic> j) => ApiIncident(
         id: _s(j['id']),
         rideId: _sn(j['ride_id']),
+        journeyId: _sn(j['journey_id']),
         date: _date(j['date'] ?? j['ride_date']) ?? DateTime.now(),
         line: _s(j['line']),
         from: _s(j['from'] ?? j['from_name']),
@@ -1098,5 +1101,350 @@ class ApiStandingNext {
         incidentId: _sn(j['incident_id']),
         badgeId: _sn(j['badge_id']),
         daysLeft: j['days_left'] == null ? null : _i(j['days_left']),
+      );
+}
+
+// ---------------------------------------------------------------------------
+// Journeys (docs/17): destination first, legs confirmed one at a time
+// ---------------------------------------------------------------------------
+
+enum ApiJourneyStatus { riding, transfer, arrived, abandoned }
+
+ApiJourneyStatus journeyStatusFromWire(String? s) => switch (s) {
+      'transfer' => ApiJourneyStatus.transfer,
+      'arrived' => ApiJourneyStatus.arrived,
+      'abandoned' => ApiJourneyStatus.abandoned,
+      _ => ApiJourneyStatus.riding,
+    };
+
+enum ApiLegStatus { planned, riding, arrived, cancelled, skipped }
+
+ApiLegStatus legStatusFromWire(String? s) => switch (s) {
+      'riding' => ApiLegStatus.riding,
+      'arrived' => ApiLegStatus.arrived,
+      'cancelled' => ApiLegStatus.cancelled,
+      'skipped' => ApiLegStatus.skipped,
+      _ => ApiLegStatus.planned,
+    };
+
+/// One train of a journey: inside an itinerary (planned), inside a journey (with its
+/// ride and outcome), or as the proposed next leg during a transfer.
+class ApiLeg {
+  const ApiLeg({
+    required this.tripId,
+    required this.line,
+    this.headsign = '',
+    this.operator = '',
+    this.category = ApiCategory.other,
+    required this.fromStationId,
+    required this.fromStationName,
+    required this.toStationId,
+    required this.toStationName,
+    this.plannedDeparture,
+    this.plannedArrival,
+    this.liveDeparture,
+    this.liveArrival,
+    this.platform,
+    this.cancelled = false,
+    this.delayMin = 0,
+    this.legNo,
+    this.rideId,
+    this.status = ApiLegStatus.planned,
+    this.actualArrival,
+    this.finalDelayMin,
+    this.replanned = false,
+    this.reason,
+  });
+  final String tripId;
+  final String line;
+  final String headsign;
+  final String operator;
+  final ApiCategory category;
+  final String fromStationId;
+  final String fromStationName;
+  final String toStationId;
+  final String toStationName;
+  final DateTime? plannedDeparture;
+  final DateTime? plannedArrival;
+  final DateTime? liveDeparture;
+  final DateTime? liveArrival;
+  final String? platform;
+  final bool cancelled;
+  final int delayMin;
+  final int? legNo;
+  final String? rideId;
+  final ApiLegStatus status;
+  final DateTime? actualArrival;
+  final int? finalDelayMin;
+  /// Next leg only: true after a missed connection, with [reason] "verpasst" or "ausfall".
+  final bool replanned;
+  final String? reason;
+
+  /// The departure this leg looks like on a board.
+  ApiDeparture toDeparture() => ApiDeparture(
+        tripId: tripId,
+        line: line,
+        destination: headsign.isNotEmpty ? headsign : toStationName,
+        scheduledDeparture: plannedDeparture ?? DateTime.now().toUtc(),
+        departure: liveDeparture ?? plannedDeparture?.add(Duration(minutes: delayMin)),
+        realtime: liveDeparture != null,
+        platform: platform,
+        category: category,
+        operator: operator,
+        cancelled: cancelled,
+      );
+
+  factory ApiLeg.fromJson(Map<String, dynamic> j) => ApiLeg(
+        tripId: _s(j['trip_id']),
+        line: _s(j['line']),
+        headsign: _s(j['headsign'] ?? j['destination']),
+        operator: _s(j['operator']),
+        category: categoryFromWire(_sn(j['category'])),
+        fromStationId: _s(j['from_station_id']),
+        fromStationName: _s(j['from_station_name']),
+        toStationId: _s(j['to_station_id']),
+        toStationName: _s(j['to_station_name']),
+        plannedDeparture: _dt(j['planned_departure']),
+        plannedArrival: _dt(j['planned_arrival']),
+        liveDeparture: _dt(j['live_departure']),
+        liveArrival: _dt(j['live_arrival']),
+        platform: _sn(j['platform']),
+        cancelled: _b(j['cancelled']),
+        delayMin: _i(j['delay_min'] ?? j['delay_minutes']),
+        legNo: _in(j['leg_no']),
+        rideId: _sn(j['ride_id']),
+        status: legStatusFromWire(_sn(j['status'])),
+        actualArrival: _dt(j['actual_arrival']),
+        finalDelayMin: _in(j['final_delay_min'] ?? j['final_delay_minutes']),
+        replanned: _b(j['replanned']),
+        reason: _sn(j['reason']),
+      );
+
+  Map<String, dynamic> toStartJson() => {'trip_id': tripId, 'from_station_id': fromStationId, 'to_station_id': toStationId};
+}
+
+/// One way to get there: rail legs only, transfers folded in between.
+class ApiItinerary {
+  const ApiItinerary({
+    required this.id,
+    this.preferred = false,
+    this.transfers = 0,
+    this.transferStations = const [],
+    this.plannedDeparture,
+    this.plannedArrival,
+    this.liveArrival,
+    this.durationMin,
+    required this.legs,
+  });
+  final String id;
+  final bool preferred;
+  final int transfers;
+  final List<String> transferStations;
+  final DateTime? plannedDeparture;
+  final DateTime? plannedArrival;
+  final DateTime? liveArrival;
+  final int? durationMin;
+  final List<ApiLeg> legs;
+
+  ApiLeg get first => legs.first;
+  bool get direct => transfers == 0;
+
+  factory ApiItinerary.fromJson(Map<String, dynamic> j) => ApiItinerary(
+        id: _s(j['id']),
+        preferred: _b(j['preferred']),
+        transfers: _i(j['transfers']),
+        transferStations: (j['transfer_stations'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+        plannedDeparture: _dt(j['planned_departure']),
+        plannedArrival: _dt(j['planned_arrival']),
+        liveArrival: _dt(j['live_arrival']),
+        durationMin: _in(j['duration_min']),
+        legs: _ml(j['legs']).map(ApiLeg.fromJson).toList(),
+      );
+}
+
+class ApiPlan {
+  const ApiPlan({this.from, this.to, required this.itineraries});
+  final ApiStation? from;
+  final ApiStation? to;
+  final List<ApiItinerary> itineraries;
+  factory ApiPlan.fromJson(Map<String, dynamic> j) => ApiPlan(
+        from: _m(j['from']) == null ? null : ApiStation.fromJson(_m(j['from'])!),
+        to: _m(j['to']) == null ? null : ApiStation.fromJson(_m(j['to'])!),
+        itineraries: _ml(j['itineraries']).map(ApiItinerary.fromJson).toList(),
+      );
+}
+
+class ApiJourney {
+  const ApiJourney({
+    required this.id,
+    required this.status,
+    required this.originStationId,
+    required this.originStationName,
+    required this.destinationStationId,
+    required this.destinationStationName,
+    this.plannedDeparture,
+    this.plannedArrival,
+    this.actualArrival,
+    this.finalDelayMin,
+    this.missedConnection = false,
+    this.incomplete = false,
+    this.cancelled = false,
+    this.points = 0,
+    this.ticket = TicketType.deutschlandticket,
+    this.currentLeg = 1,
+    this.legs = const [],
+    this.nextLeg,
+    this.transferStationName,
+    this.transferDeadline,
+    required this.createdAt,
+    this.finalisedAt,
+  });
+  final String id;
+  final ApiJourneyStatus status;
+  final String originStationId;
+  final String originStationName;
+  final String destinationStationId;
+  final String destinationStationName;
+  final DateTime? plannedDeparture;
+  final DateTime? plannedArrival;
+  final DateTime? actualArrival;
+  final int? finalDelayMin;
+  final bool missedConnection;
+  final bool incomplete;
+  final bool cancelled;
+  final int points;
+  final TicketType ticket;
+  final int currentLeg;
+  final List<ApiLeg> legs;
+  final ApiLeg? nextLeg;
+  final String? transferStationName;
+  final DateTime? transferDeadline;
+  final DateTime createdAt;
+  final DateTime? finalisedAt;
+
+  bool get riding => status == ApiJourneyStatus.riding;
+  bool get inTransfer => status == ApiJourneyStatus.transfer;
+  bool get arrived => status == ApiJourneyStatus.arrived;
+  bool get done => status == ApiJourneyStatus.arrived || status == ApiJourneyStatus.abandoned;
+  int get transfers => legs.length > 1 ? legs.length - 1 : 0;
+  ApiLeg? get currentLegInfo => legs.where((l) => l.legNo == currentLeg).firstOrNull ?? (legs.isEmpty ? null : legs[(currentLeg - 1).clamp(0, legs.length - 1)]);
+  DateTime get date => (plannedDeparture ?? createdAt).toLocal();
+  String get lineLabel => legs.map((l) => l.line).where((l) => l.isNotEmpty).join(' · ');
+
+  factory ApiJourney.fromJson(Map<String, dynamic> j) => ApiJourney(
+        id: _s(j['id']),
+        status: journeyStatusFromWire(_sn(j['status'])),
+        originStationId: _s(j['origin_station_id'] ?? j['from_station_id']),
+        originStationName: _s(j['origin_station_name'] ?? j['from_station_name']),
+        destinationStationId: _s(j['destination_station_id'] ?? j['to_station_id']),
+        destinationStationName: _s(j['destination_station_name'] ?? j['to_station_name']),
+        plannedDeparture: _dt(j['planned_departure']),
+        plannedArrival: _dt(j['planned_arrival']),
+        actualArrival: _dt(j['actual_arrival']),
+        finalDelayMin: _in(j['final_delay_min'] ?? j['final_delay_minutes']),
+        missedConnection: _b(j['missed_connection']),
+        incomplete: _b(j['incomplete']),
+        cancelled: _b(j['cancelled']),
+        points: _i(j['points']),
+        ticket: ticketFromWire(_sn(j['ticket'])),
+        currentLeg: _i(j['current_leg'], 1),
+        legs: _ml(j['legs']).map(ApiLeg.fromJson).toList(),
+        nextLeg: _m(j['next_leg']) == null ? null : ApiLeg.fromJson(_m(j['next_leg'])!),
+        transferStationName: _sn(j['transfer_station_name']),
+        transferDeadline: _dt(j['transfer_deadline']),
+        createdAt: _dt(j['created_at']) ?? DateTime.now().toUtc(),
+        finalisedAt: _dt(j['finalised_at']),
+      );
+}
+
+/// `GET /v1/journeys/current`: the journey plus the live view of its current leg.
+class ApiJourneyLive {
+  const ApiJourneyLive({required this.journey, this.ride, this.stops = const [], this.eta, this.nextLeg, this.justArrived = false, this.claimFromMinute = 60});
+  final ApiJourney journey;
+  final ApiRide? ride;
+  final List<ApiStop> stops;
+  final DateTime? eta;
+  final ApiLeg? nextLeg;
+  final bool justArrived;
+  final int claimFromMinute;
+
+  /// The same view the old ride screens consume, for the current leg.
+  ApiRideLive? get asRideLive => ride == null ? null : ApiRideLive(ride: ride!, stops: stops, eta: eta);
+
+  factory ApiJourneyLive.fromJson(Map<String, dynamic> j) {
+    final jm = _m(j['journey']) ?? j;
+    return ApiJourneyLive(
+      journey: ApiJourney.fromJson(jm),
+      ride: _m(j['ride']) == null ? null : ApiRide.fromJson(_m(j['ride'])!),
+      stops: _ml(j['stops']).map(ApiStop.fromJson).toList(),
+      eta: _dt(j['eta']),
+      nextLeg: _m(j['next_leg']) == null ? (_m(jm['next_leg']) == null ? null : ApiLeg.fromJson(_m(jm['next_leg'])!)) : ApiLeg.fromJson(_m(j['next_leg'])!),
+      justArrived: _b(j['just_arrived']),
+      claimFromMinute: _i(j['claim_from_minute'], 60),
+    );
+  }
+}
+
+class StartJourneyRequest {
+  const StartJourneyRequest({
+    required this.fromStationId,
+    required this.fromStationName,
+    required this.toStationId,
+    required this.toStationName,
+    required this.legs,
+    this.ticket,
+    this.location,
+    this.fromLat,
+    this.fromLon,
+  });
+  final String fromStationId;
+  final String fromStationName;
+  final String toStationId;
+  final String toStationName;
+  final List<ApiLeg> legs;
+  final TicketType? ticket;
+  final ApiLocation? location;
+  final double? fromLat;
+  final double? fromLon;
+  Map<String, dynamic> toJson() => {
+        'from_station_id': fromStationId,
+        'from_station_name': fromStationName,
+        'to_station_id': toStationId,
+        'to_station_name': toStationName,
+        'legs': legs.map((l) => l.toStartJson()).toList(),
+        if (ticket != null) 'ticket': ticketToWire(ticket!),
+        if (location != null) 'location': location!.toJson(),
+        if (fromLat != null && fromLon != null) ...{'from_lat': fromLat, 'from_lon': fromLon},
+      };
+}
+
+/// A place the customer goes to: predicted (with a label such as "Nach Hause"), recent, or home.
+class ApiDestination {
+  const ApiDestination({required this.stationId, required this.stationName, this.label, this.count = 0, this.lastAt});
+  final String stationId;
+  final String stationName;
+  final String? label;
+  final int count;
+  final DateTime? lastAt;
+  ApiStation get station => ApiStation(id: stationId, name: stationName);
+  factory ApiDestination.fromJson(Map<String, dynamic> j) => ApiDestination(
+        stationId: _s(j['station_id'] ?? j['id']),
+        stationName: _s(j['station_name'] ?? j['name']),
+        label: _sn(j['label']),
+        count: _i(j['count']),
+        lastAt: _dt(j['last_at']),
+      );
+}
+
+class ApiDestinations {
+  const ApiDestinations({this.home, this.predicted = const [], this.recent = const []});
+  static const empty = ApiDestinations();
+  final ApiDestination? home;
+  final List<ApiDestination> predicted;
+  final List<ApiDestination> recent;
+  factory ApiDestinations.fromJson(Map<String, dynamic> j) => ApiDestinations(
+        home: _m(j['home']) == null ? null : ApiDestination.fromJson(_m(j['home'])!),
+        predicted: _ml(j['predicted']).map(ApiDestination.fromJson).toList(),
+        recent: _ml(j['recent']).map(ApiDestination.fromJson).toList(),
       );
 }

@@ -69,7 +69,7 @@ class GeofenceSync with WidgetsBindingObserver {
   Future<void> _checkPending() async {
     final status = await _geofence.status();
     final pending = status.pendingNudge;
-    if (pending != null && pending.stationId.isNotEmpty) onNudge(pending);
+    if (pending != null && (pending.stationId.isNotEmpty || pending.kind != 'station')) onNudge(pending);
     if (status.pushToken != null) _sendPushToken(status.pushToken!);
     if (!_repaired) {
       _repaired = true;

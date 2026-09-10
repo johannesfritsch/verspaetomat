@@ -23,7 +23,8 @@ import 'package:verspaetomat/main.dart';
 import 'package:verspaetomat/api/token_store.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart';
-import 'package:verspaetomat/screens/ride/ride_widgets.dart';
+import 'package:verspaetomat/screens/ride/welcher_zug_screen.dart';
+import 'package:verspaetomat/screens/ride/wohin_screen.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 
 const adminToken = String.fromEnvironment('ADMIN_TOKEN', defaultValue: 'stellwerk');
@@ -45,7 +46,22 @@ class Stellwerk {
   }
 
   Future<dynamic> _post(String path, [Map<String, dynamic>? body]) async {
-    final r = await http.post(Uri.parse('$base$path'), headers: _h, body: jsonEncode(body ?? {}));
+    http.Response r;
+    try {
+      r = await http.post(Uri.parse('$base$path'), headers: _h, body: jsonEncode(body ?? {}));
+    } on http.ClientException catch (e) {
+      // The debug backend occasionally resets the connection although it applied the request.
+      // One retry; a 4xx on the retry then means the first attempt already went through.
+      // ignore: avoid_print
+      print('POST $path: ${e.message}; retrying once');
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      r = await http.post(Uri.parse('$base$path'), headers: _h, body: jsonEncode(body ?? {}));
+      if (r.statusCode >= 400 && r.statusCode < 500) {
+        // ignore: avoid_print
+        print('retry POST $path → ${r.statusCode}: assuming the first attempt was applied');
+        return null;
+      }
+    }
     if (r.statusCode >= 300) throw StateError('POST $path → ${r.statusCode} ${r.body}');
     return r.body.isEmpty ? null : jsonDecode(r.body);
   }
@@ -58,6 +74,9 @@ class Stellwerk {
   Future<void> reply(String id, String outcome) => _post('/admin/customers/$id/reply', {'outcome': outcome});
   Future<void> reset(String id) => _post('/admin/customers/$id/reset');
   Future<void> locate(String id, String station) => _post('/admin/customers/$id/locate', {'station': station});
+  /// Confirms the proposed next leg of the customer's journey, as the phone would (docs/17).
+  Future<dynamic> confirm(String id) => _post('/admin/customers/$id/confirm');
+  Future<dynamic> journey(String id) => _get('/admin/customers/$id/journey');
 
   /// The customer that is riding `line` right now. Polls for up to [timeout].
   Future<String> ridingCustomer({String? line, Set<String> exclude = const {}, Duration timeout = const Duration(seconds: 30)}) async {
@@ -128,56 +147,83 @@ Future<void> tapIcon(WidgetTester tester, IconData icon) async {
 // One ride: check in through the UI, then let the Stellwerk run the world.
 // ---------------------------------------------------------------------------
 
-Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? knownCustomer}) async {
+/// Destination first (docs/17): a predicted destination if the account has one,
+/// otherwise the search. Then the itinerary list; [connecting] picks one with a transfer.
+/// Returns the picked itinerary, or null when [connecting] found none.
+/// [search] goes into the station search; [match] is the substring of the station name to tap
+/// (the backend spells "Düsseldorf Hauptbahnhof", the predicted button keeps that name).
+Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {required String match, bool connecting = false}) async {
   // Bahnsteig, idle. A leftover arrival card from an earlier run is dismissed first.
   await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 40));
   if (find.text('ANGEKOMMEN').evaluate().isNotEmpty) {
     await tapText(tester, 'Fertig');
   }
   await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 40));
-  final chip = find.byType(ActionChip);
-  await pumpUntilFound(tester, chip, timeout: const Duration(seconds: 40));
+  // At a station: the card with the destination buttons and "Anderes Ziel …" / "Wohin? Ziel wählen …".
+  await pumpUntilFound(tester, find.byType(OutlinedButton), timeout: const Duration(seconds: 40));
   expect(find.textContaining('Köln', findRichText: true), findsWidgets);
-  await tester.ensureVisible(chip.first);
-  await tester.tap(chip.first, warnIfMissed: false);
-  await settle(tester);
-
-  // Einchecken: wait for departures, pick the first non-cancelled regional one.
-  await pumpUntilFound(tester, find.byType(DepartureRow), timeout: const Duration(seconds: 40));
-  await settle(tester, 800);
-  final rows = find.byType(DepartureRow);
-  Finder? pick;
-  // Prefer a train whose operator files at the Servicecenter, so three rides bundle at one desk.
-  for (final requireDesk in [true, false]) {
-    for (var i = 0; i < rows.evaluate().length; i++) {
-      final d = tester.widget<DepartureRow>(rows.at(i)).departure;
-      final regional = d.category == ApiCategory.re || d.category == ApiCategory.rb || d.category == ApiCategory.s;
-      final deskOk = !requireDesk || d.desk == 'Servicecenter Fahrgastrechte';
-      if (!d.cancelled && regional && deskOk) {
-        pick = rows.at(i);
-        break;
-      }
-    }
-    if (pick != null) break;
+  await settle(tester, 600);
+  final predicted = find.byWidgetPredicate((w) => w is DestinationButton && w.destination.stationName.contains(match));
+  if (predicted.evaluate().isNotEmpty) {
+    // ignore: avoid_print
+    print('destination $match: predicted');
+    await tester.ensureVisible(predicted.first);
+    await tester.tap(predicted.first, warnIfMissed: false);
+    await settle(tester);
+  } else {
+    final other = find.byType(OutlinedButton);
+    await tester.ensureVisible(other.first);
+    await tester.tap(other.first, warnIfMissed: false);
+    await settle(tester);
+    // Wohin?: search.
+    await pumpUntilFound(tester, find.text('Wohin?'), timeout: const Duration(seconds: 20));
+    await tapText(tester, 'Bahnhof suchen');
+    await pumpUntilFound(tester, find.byType(TextField), timeout: const Duration(seconds: 20));
+    await tester.enterText(find.byType(TextField).first, search);
+    // A Text widget only: find.text would also hit the search field's own contents.
+    final hit = find.byWidgetPredicate((w) => w is Text && (w.data ?? '').contains(match));
+    await pumpUntilFound(tester, hit, timeout: const Duration(seconds: 40));
+    await tester.tap(hit.first, warnIfMissed: false);
+    await settle(tester);
   }
-  pick ??= rows.first; // no regional train right now: any rail departure will do
-  final picked = tester.widget<DepartureRow>(pick).departure;
+  // Welcher Zug?: the itineraries.
+  await pumpUntilFound(tester, find.text('Welcher Zug?'), timeout: const Duration(seconds: 20));
+  await pumpUntilFound(tester, find.byType(ItineraryRow), timeout: const Duration(seconds: 60));
+  await settle(tester, 800);
+  final rows = find.byType(ItineraryRow);
+  Finder? pick;
+  for (var i = 0; i < rows.evaluate().length; i++) {
+    final it = tester.widget<ItineraryRow>(rows.at(i)).itinerary;
+    final ok = connecting ? it.transfers >= 1 : it.direct;
+    if (ok && !it.first.cancelled) {
+      pick = rows.at(i);
+      break;
+    }
+  }
+  if (pick == null) {
+    if (connecting) return null;
+    pick = rows.first;
+  }
+  final picked = tester.widget<ItineraryRow>(pick).itinerary;
   // ignore: avoid_print
-  print('ride $n: ${picked.line} → ${picked.destination} (${picked.category})');
+  print('journey → $match: ${picked.legs.map((l) => l.line).join(' + ')} (${picked.transfers} transfers)');
   await tester.ensureVisible(pick);
   await tester.tap(pick, warnIfMissed: false);
   await settle(tester);
+  return picked;
+}
 
-  // Ausstieg: the usual stop is preselected; confirm.
-  await pumpUntilFound(tester, find.byType(StopLine), timeout: const Duration(seconds: 40));
-  await tapText(tester, 'Einchecken');
+/// One direct journey: check in through the UI, then let the Stellwerk run the world.
+Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? knownCustomer}) async {
+  final picked = (await chooseJourney(tester, 'Düsseldorf Hbf', match: 'Düsseldorf H'))!;
+  final line = picked.first.line;
 
   // Unterwegs shows the line; no simulate buttons in local mode.
-  await pumpUntilFound(tester, find.textContaining(picked.line, findRichText: true), timeout: const Duration(seconds: 40));
+  await pumpUntilFound(tester, find.textContaining(line, findRichText: true), timeout: const Duration(seconds: 40));
   expect(find.textContaining('Demo:'), findsNothing);
 
   // Stellwerk: who is riding? Then +68 and fast-forward to the exit stop.
-  final customer = knownCustomer ?? await sw.ridingCustomer(line: picked.line);
+  final customer = knownCustomer ?? await sw.ridingCustomer(line: line);
   await sw.delay(customer, 68);
   await sw.fastForward(customer);
 
@@ -190,7 +236,7 @@ Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? known
   if (find.text('ANGEKOMMEN').evaluate().isNotEmpty && find.text('Fertig').evaluate().isEmpty) {
     await tapText(tester, 'Ansehen');
   }
-  // The reveal shows the final delay: the live delay the train already had plus our 68.
+  // The reveal shows the journey delay: the live delay the train already had plus our 68.
   final minutesLine = find.byWidgetPredicate((w) {
     if (w is! Text || w.data == null) return false;
     final m = RegExp(r'^(\d+) Minuten').firstMatch(w.data!);
@@ -205,7 +251,7 @@ Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? known
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('check-in x3 via Stellwerk, claim, send, reply', (tester) async {
+  testWidgets('journey x3 (destination first) via Stellwerk, claim, send, reply', (tester) async {
     final prefs = await SharedPreferences.getInstance();
     final demo = DemoState();
     // Own keychain slot: the test gets its own customer and never resets the one a person uses on this device.
@@ -310,6 +356,67 @@ void main() {
       await pumpUntilFound(tester, find.text('Bestätigt'), timeout: const Duration(seconds: 40));
     } finally {
       // Leave the customer clean for the next run.
+      if (customer != null) {
+        try {
+          await sw.reset(customer);
+        } catch (_) {}
+      }
+    }
+  }, timeout: const Timeout(Duration(minutes: 15)));
+
+  testWidgets('journey with a connection: transfer, confirm, arrive', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final demo = DemoState();
+    final session = Session(demo: demo, prefs: prefs, apiUrl: apiUrl, tokens: TokenStore(namespace: 'e2e.'));
+    session.init();
+    await tester.pumpWidget(VerspaetomatApp(state: demo, session: session));
+    await settle(tester, 1500);
+
+    final sw = Stellwerk(apiUrl);
+    String? customer;
+    try {
+      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'ANGEKOMMEN' || w.data == 'UNTERWEGS')), timeout: const Duration(seconds: 40));
+      customer = (await sw.customers()).first['id'] as String;
+      await sw.reset(customer);
+      await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 20));
+      await sw.locate(customer, 'Köln Hbf');
+
+      // Köln → Arnsberg always needs a change (Dortmund or Schwerte). No connecting itinerary right now: nothing to test.
+      final picked = await chooseJourney(tester, 'Arnsberg', match: 'Arnsberg, Bahnhof', connecting: true);
+      if (picked == null) {
+        // ignore: avoid_print
+        print('no connecting itinerary offered right now; connection scenario skipped');
+        return;
+      }
+      final leg1 = picked.legs.first.line;
+      await pumpUntilFound(tester, find.textContaining(leg1, findRichText: true), timeout: const Duration(seconds: 40));
+
+      // Leg 1 ends: the journey goes into transfer, the confirmation card appears.
+      await sw.fastForward(customer);
+      await pumpUntilFound(tester, find.text('Ich bin drin'), timeout: const Duration(seconds: 60));
+      final j1 = await sw.journey(customer);
+      expect(j1['status'] ?? j1['journey']?['status'], 'transfer');
+
+      // Stellwerk confirms the proposed next leg as the phone would; the app follows.
+      await sw.confirm(customer);
+      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'UNTERWEGS' || (w.data ?? '').startsWith('Stand '))), timeout: const Duration(seconds: 60));
+      await pumpUntilGone(tester, find.text('Ich bin drin'), timeout: const Duration(seconds: 30));
+
+      // Leg 2 ends at the destination: the arrival with the journey delay.
+      await sw.delay(customer, 68);
+      await sw.fastForward(customer);
+      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'Fertig' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 60));
+      if (find.text('ANGEKOMMEN').evaluate().isNotEmpty && find.text('Fertig').evaluate().isEmpty) {
+        await tapText(tester, 'Ansehen');
+      }
+      await pumpUntilFound(tester, find.textContaining('Arnsberg'), timeout: const Duration(seconds: 20));
+      final minutesLine = find.byWidgetPredicate((w) => w is Text && RegExp(r'^\d+ Minuten').hasMatch(w.data ?? ''));
+      await pumpUntilFound(tester, minutesLine, timeout: const Duration(seconds: 20));
+      final j2 = await sw.journey(customer);
+      final status = j2['status'] ?? j2['journey']?['status'];
+      expect(status, 'arrived');
+      await tapText(tester, 'Fertig');
+    } finally {
       if (customer != null) {
         try {
           await sw.reset(customer);

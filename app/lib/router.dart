@@ -23,7 +23,9 @@ class Routes {
   static const ich = '/ich';
 
   static const checkin = '/checkin'; // ?station=koeln-hbf
-  static const exitStop = '/checkin/exit'; // ?departure=re7-0747
+  static const exitStop = '/checkin/exit'; // ?departure=re7-0747  (legacy; the journey flow derives the exit stop)
+  static const wohin = '/wohin'; // ?station=<id>&name=<name>[&lat=&lon=][&departure=<trip id>&line=RE 7]
+  static const welcherZug = '/welcher-zug'; // ?from=<id>&fromName=&to=<id>&toName=[&lat=&lon=][&departure=<trip id>]
   static const unterwegs = '/unterwegs';
   static const angekommen = '/angekommen'; // ?variant=68|14|59|ausfall|nodata (absent = use DemoState)
   static const nachtrag = '/nachtrag';

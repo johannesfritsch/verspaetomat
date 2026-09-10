@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
 use super::transitous::TransitousClient;
-use super::{DepartureInfo, StopInfo, TripInfo};
+use super::{DepartureInfo, Itinerary, StopInfo, TripInfo};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TripOverride {
@@ -107,6 +107,29 @@ impl TrainSource {
             }
         }
         Ok(deps)
+    }
+
+    /// Itineraries with the Stellwerk's per-trip delays and cancellations applied to their legs.
+    pub async fn plan(&self, from: &str, to: &str, time: DateTime<Utc>, n: usize) -> Result<Vec<Itinerary>> {
+        let mut its = self.inner.plan(from, to, time, n).await?;
+        let map = self.overrides.read().unwrap();
+        if map.is_empty() {
+            return Ok(its);
+        }
+        for it in its.iter_mut() {
+            for l in it.legs.iter_mut() {
+                if let Some(o) = map.get(&l.trip_id) {
+                    let extra = Duration::minutes(o.extra_delay_min as i64);
+                    l.live_departure = Some(l.live_departure.unwrap_or(l.planned_departure) + extra);
+                    l.live_arrival = Some(l.live_arrival.unwrap_or(l.planned_arrival) + extra);
+                    l.delay_min += o.extra_delay_min as i64;
+                    l.cancelled |= o.cancelled;
+                    l.realtime = true;
+                }
+            }
+            it.live_arrival = it.legs.last().and_then(|l| l.live_arrival);
+        }
+        Ok(its)
     }
 
     pub async fn trip(&self, trip_id: &str) -> Result<TripInfo> {

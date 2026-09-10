@@ -2,6 +2,7 @@
 //!
 //!   stellwerk customers
 //!   stellwerk ride Johannes
+//!   stellwerk journey Johannes  |  stellwerk confirm Johannes [--trip <trip id>]
 //!   stellwerk delay Johannes +25
 //!   stellwerk cancel Johannes
 //!   stellwerk ff Johannes
@@ -264,6 +265,14 @@ enum Cmd {
     Customers,
     /// Show a customer's current ride with stops and live state
     Ride { customer: String },
+    /// Show a customer's journey: legs, transfer state, the proposed next leg (docs/17)
+    Journey { customer: String },
+    /// Confirm the proposed next leg at a transfer, as the phone would; --trip for another train
+    Confirm {
+        customer: String,
+        #[arg(long)]
+        trip: Option<String>,
+    },
     /// Add minutes of delay to the customer's current trip ("+25", "-5")
     Delay { customer: String, minutes: String },
     /// Cancel the customer's current trip
@@ -383,6 +392,40 @@ fn hhmm(v: &Value) -> String {
     }
 }
 
+fn print_journey(v: &Value) {
+    let j = &v["journey"];
+    if j.is_null() {
+        println!("{}  ·  keine Fahrt", s(v, "customer"));
+        return;
+    }
+    let status = s(j, "status");
+    println!(
+        "{}  ·  {} → {}  ·  {}  ·  geplant an {}{}",
+        s(v, "customer"), s(j, "origin_station_name"), s(j, "destination_station_name"), status.to_uppercase(), hhmm(&j["planned_arrival"]),
+        if j["missed_connection"].as_bool().unwrap_or(false) { "  ·  ANSCHLUSS VERPASST" } else { "" }
+    );
+    if status == "arrived" {
+        println!("angekommen {}  ·  +{} min  ·  {} Punkte{}", hhmm(&j["actual_arrival"]), s(j, "final_delay_min"), s(j, "points"), if j["incomplete"].as_bool().unwrap_or(false) { "  ·  unvollständig" } else { "" });
+    }
+    if let Some(legs) = j["legs"].as_array() {
+        for l in legs {
+            let mark = match s(l, "status").as_str() { "riding" => "▶", "arrived" => "✓", "cancelled" => "✗", "skipped" => "·", _ => "○" };
+            let delay = l["final_delay_min"].as_i64().or(l["delay_min"].as_i64()).unwrap_or(0);
+            println!("  {mark} {} {:<8} {} → {}   {} → {}   +{} min   {}", s(l, "leg_no"), s(l, "line"), s(l, "from_station_name"), s(l, "to_station_name"), hhmm(&l["planned_departure"]), hhmm(&l["planned_arrival"]), delay, s(l, "status"));
+        }
+    }
+    if let Some(n) = j.get("next_leg").filter(|n| !n.is_null()) {
+        let platform = n["platform"].as_str().map(|p| format!(", Gleis {p}")).unwrap_or_default();
+        println!(
+            "  → Vorschlag: {} nach {} ab {} {}{}   (bis {} bestätigen)",
+            s(n, "line"), s(n, "headsign"), s(n, "from_station_name"), hhmm(&n["live_departure"]).replace('–', &hhmm(&n["planned_departure"])), platform, hhmm(&j["transfer_deadline"])
+        );
+        if n["replanned"].as_bool().unwrap_or(false) {
+            println!("    neu geplant ({})", s(n, "reason"));
+        }
+    }
+}
+
 fn print_ride(v: &Value) {
     if v.get("riding").and_then(|b| b.as_bool()) != Some(true) {
         println!("{}  ·  nicht unterwegs", s(v, "customer"));
@@ -439,6 +482,13 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Cmd::Ride { customer } => print_ride(&api.get(&format!("/admin/customers/{customer}/ride")).await?),
+        Cmd::Journey { customer } => print_journey(&api.get(&format!("/admin/customers/{customer}/journey")).await?),
+        Cmd::Confirm { customer, trip } => {
+            let body = match trip { Some(t) => json!({ "trip_id": t }), None => json!({}) };
+            let v = api.post(&format!("/admin/customers/{customer}/confirm"), body).await?;
+            println!("Bestätigt.");
+            print_journey(&v);
+        }
         Cmd::Delay { customer, minutes } => {
             let m: i32 = minutes.trim_start_matches('+').parse()?;
             let v = api.post(&format!("/admin/customers/{customer}/delay"), json!({ "minutes": m })).await?;

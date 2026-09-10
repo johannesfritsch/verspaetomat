@@ -44,6 +44,46 @@ pub enum RideStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "journey_status", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum JourneyStatus {
+    Riding,
+    Transfer,
+    Arrived,
+    Abandoned,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct JourneyRow {
+    pub id: Uuid,
+    pub customer_id: Uuid,
+    pub origin_station_id: String,
+    pub origin_station_name: String,
+    pub destination_station_id: String,
+    pub destination_station_name: String,
+    /// The itinerary as planned at check-in (evidence).
+    pub itinerary: serde_json::Value,
+    /// The effective plan: original legs, replaced from the transfer on after a re-plan.
+    pub plan: serde_json::Value,
+    pub planned_departure: DateTime<Utc>,
+    pub planned_arrival: DateTime<Utc>,
+    pub status: JourneyStatus,
+    pub current_leg: i32,
+    pub next_leg: Option<serde_json::Value>,
+    pub transfer_deadline: Option<DateTime<Utc>>,
+    pub actual_arrival: Option<DateTime<Utc>>,
+    pub final_delay_min: Option<i32>,
+    pub missed_connection: bool,
+    pub incomplete: bool,
+    pub cancelled: bool,
+    pub points: i32,
+    pub ticket: TicketType,
+    pub created_at: DateTime<Utc>,
+    pub finalised_at: Option<DateTime<Utc>>,
+    pub dismissed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "incident_status", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum IncidentStatus {
@@ -193,6 +233,14 @@ pub struct RideRow {
     pub from_lat: Option<f64>,
     #[serde(default)]
     pub from_lon: Option<f64>,
+    #[serde(default)]
+    pub journey_id: Option<Uuid>,
+    #[serde(default)]
+    pub leg_no: Option<i32>,
+    #[serde(default)]
+    pub transfer_station_id: Option<String>,
+    #[serde(default)]
+    pub transfer_station_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -218,6 +266,8 @@ pub struct IncidentRow {
     pub legal_deadline: NaiveDate,
     pub evidence: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub journey_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

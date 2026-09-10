@@ -6,6 +6,7 @@ mod db;
 mod events;
 mod fixtures;
 mod handlers;
+mod journeys;
 mod mail;
 mod model;
 mod pdf;
@@ -54,13 +55,25 @@ async fn main() -> anyhow::Result<()> {
 
     // The trip follower finalises rides; we turn finalised rides into incidents.
     let mut finalised = train::follower::spawn(pool.clone(), train.clone(), Duration::from_secs(45));
-    let pool_for_incidents = pool.clone();
-    let events_for_follower = events.clone();
+    let state_for_follower = state.clone();
     tokio::spawn(async move {
         while let Ok(ev) = finalised.recv().await {
-            match handlers::on_ride_finalised(&pool_for_incidents, ev.ride_id).await {
-                Ok(fin) => events_for_follower.publish(ev.customer_id, "ride", serde_json::json!({ "ride_id": ev.ride_id, "status": "arrived", "final_delay_min": ev.final_delay_min, "incident": fin.incident.map(|i| i.id) })),
+            match handlers::on_ride_finalised(&state_for_follower, ev.ride_id).await {
+                Ok(fin) => state_for_follower.events.publish(ev.customer_id, "ride", handlers::ride_arrived_payload(ev.ride_id, ev.final_delay_min, &fin)),
                 Err(e) => tracing::error!("incident creation for ride {}: {e}", ev.ride_id),
+            }
+        }
+    });
+    // Journeys waiting at a transfer past their deadline are finalised `incomplete`.
+    let state_for_transfers = state.clone();
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            ticker.tick().await;
+            match journeys::expire_transfers(&state_for_transfers).await {
+                Ok(n) if n > 0 => tracing::info!(journeys = n, "transfer timeout: journeys finalised incomplete"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "transfer timeout pass failed"),
             }
         }
     });
@@ -90,6 +103,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/me/export", get(handlers::export_me))
         .route("/v1/me/push-token", put(handlers::put_push_token).delete(handlers::delete_push_token))
         .route("/v1/me/geofence", get(handlers::geofence))
+        .route("/v1/me/destinations", get(journeys::destinations))
+        // journeys (docs/17)
+        .route("/v1/journeys", get(journeys::list).post(journeys::create))
+        .route("/v1/journeys/plan", get(journeys::plan))
+        .route("/v1/journeys/current", get(journeys::current))
+        .route("/v1/journeys/{id}/legs", post(journeys::confirm_leg))
+        .route("/v1/journeys/{id}/finish", post(journeys::finish))
         // rides
         .route("/v1/rides", get(handlers::rides).post(handlers::check_in))
         .route("/v1/rides/current", get(handlers::current_ride))
@@ -116,6 +136,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/customers", get(admin::customers))
         .route("/admin/customers/{key}", delete(admin::forget))
         .route("/admin/customers/{key}/ride", get(admin::ride))
+        .route("/admin/customers/{key}/journey", get(admin::journey))
+        .route("/admin/customers/{key}/confirm", post(admin::confirm))
         .route("/admin/customers/{key}/delay", post(admin::delay))
         .route("/admin/customers/{key}/cancel", post(admin::cancel))
         .route("/admin/customers/{key}/ff", post(admin::fast_forward))

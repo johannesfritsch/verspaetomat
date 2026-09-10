@@ -59,10 +59,275 @@ class MockRepository implements AppRepository {
       );
 
   Departure? _findDeparture(String tripId) {
-    for (final d in Mock.departuresKoelnHbf) {
+    for (final d in Mock.allDepartures) {
       if (d.id == tripId) return d;
     }
     return null;
+  }
+
+  // -- journeys (docs/17) ---------------------------------------------------
+
+  static String _norm(String n) => n.toLowerCase().replaceAll('hauptbahnhof', 'hbf').trim();
+
+  /// One leg of an itinerary from a mocked departure, boarded at [from], left at [to].
+  static ApiLeg _leg(Departure d, String from, String to, {int? legNo, ApiLegStatus status = ApiLegStatus.planned, int? finalDelay, bool replanned = false, String? reason}) {
+    final fromStop = d.stops.firstWhere((s) => _norm(s.name) == _norm(from), orElse: () => d.stops.first);
+    final toStop = d.stops.firstWhere((s) => _norm(s.name) == _norm(to), orElse: () => d.stops.last);
+    return ApiLeg(
+      tripId: d.id,
+      line: d.line,
+      headsign: d.destination,
+      operator: d.operator,
+      category: _cat(d.category),
+      fromStationId: _stationId(fromStop.name),
+      fromStationName: fromStop.name,
+      toStationId: _stationId(toStop.name),
+      toStationName: toStop.name,
+      plannedDeparture: _at(fromStop.planned),
+      plannedArrival: _at(toStop.planned),
+      liveDeparture: d.delay > 0 ? _at(fromStop.planned).add(Duration(minutes: d.delay)) : null,
+      liveArrival: d.delay > 0 ? _at(toStop.planned).add(Duration(minutes: d.delay)) : null,
+      platform: d.platform,
+      cancelled: d.cancelled,
+      delayMin: d.delay,
+      legNo: legNo,
+      status: status,
+      finalDelayMin: finalDelay,
+      actualArrival: finalDelay == null ? null : _at(toStop.planned).add(Duration(minutes: finalDelay)),
+      replanned: replanned,
+      reason: reason,
+    );
+  }
+
+  static ApiItinerary _itinerary(String id, List<ApiLeg> legs, {bool preferred = false}) {
+    final transfers = legs.length - 1;
+    final dep = legs.first.plannedDeparture;
+    final arr = legs.last.plannedArrival;
+    return ApiItinerary(
+      id: id,
+      preferred: preferred,
+      transfers: transfers,
+      transferStations: [for (var i = 0; i < legs.length - 1; i++) legs[i].toStationName],
+      plannedDeparture: dep,
+      plannedArrival: arr,
+      durationMin: dep == null || arr == null ? null : arr.difference(dep).inMinutes,
+      legs: legs,
+    );
+  }
+
+  Departure _dep(String id) => _findDeparture(id)!;
+
+  @override
+  Future<ApiDestinations> destinations({String? from}) async {
+    final atHome = from != null && _norm(from).contains('bonn');
+    return ApiDestinations(
+      home: const ApiDestination(stationId: 'mock:bonn-hbf', stationName: 'Bonn Hbf'),
+      predicted: [
+        if (!atHome) const ApiDestination(stationId: 'mock:bonn-hbf', stationName: 'Bonn Hbf', label: 'Nach Hause', count: 12),
+        const ApiDestination(stationId: 'mock:d-sseldorf-hbf', stationName: 'Düsseldorf Hbf', count: 5),
+      ],
+      recent: [
+        ApiDestination(stationId: 'mock:l-denscheid', stationName: 'Lüdenscheid', lastAt: Mock.today.subtract(const Duration(days: 3))),
+        ApiDestination(stationId: 'mock:aachen-hbf', stationName: 'Aachen Hbf', lastAt: Mock.today.subtract(const Duration(days: 5))),
+        ApiDestination(stationId: 'mock:m-nster-westf-hbf', stationName: 'Münster (Westf) Hbf', lastAt: Mock.today.subtract(const Duration(days: 9))),
+      ],
+    );
+  }
+
+  /// Demo: direct trains straight from the Köln board; Düsseldorf and Lüdenscheid also via Hagen.
+  @override
+  Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip}) async {
+    final fromName = from.startsWith('mock:') ? 'Köln Hbf' : from;
+    final target = _norm(to.startsWith('mock:') ? to.substring(5).replaceAll('-', ' ') : to);
+    final targetName = to.startsWith('mock:') ? _nameFromId(to) : to;
+    final list = <ApiItinerary>[];
+    if (target.contains('sseldorf')) {
+      list.add(_itinerary('it-s6', [_leg(_dep('s6-0751'), 'Köln Hbf', 'Düsseldorf Hbf')], preferred: true));
+      list.add(_itinerary('it-re5', [_leg(_dep('re5-0755'), 'Köln Hbf', 'Düsseldorf Hbf')]));
+      list.add(_itinerary('it-re7-re4', [_leg(_dep('re7-0747'), 'Köln Hbf', 'Hagen Hbf'), _leg(_dep('re4-0850'), 'Hagen Hbf', 'Düsseldorf Hbf')]));
+    } else if (target.contains('denscheid')) {
+      list.add(_itinerary('it-re7-rb52', [_leg(_dep('re7-0747'), 'Köln Hbf', 'Hagen Hbf'), _leg(_dep('rb52-0855'), 'Hagen Hbf', 'Lüdenscheid')], preferred: true));
+    } else if (target.contains('bonn')) {
+      list.add(_itinerary('it-rb26', [_leg(_dep('rb26-0805'), 'Köln Hbf', 'Bonn Hbf')], preferred: true));
+    } else {
+      // Any train from the board whose stops reach the destination.
+      var first = true;
+      for (final d in Mock.departuresKoelnHbf) {
+        if (d.cancelled) continue;
+        if (d.stops.any((st) => _norm(st.name) == target || _norm(st.name).startsWith(target))) {
+          list.add(_itinerary('it-${d.id}', [_leg(d, fromName, targetName)], preferred: first));
+          first = false;
+        }
+      }
+    }
+    if (firstTrip != null) {
+      final filtered = list.where((i) => i.legs.first.tripId == firstTrip).toList();
+      if (filtered.isNotEmpty) {
+        list
+          ..clear()
+          ..addAll(filtered);
+      } else {
+        final d = _findDeparture(firstTrip);
+        if (d != null) {
+          final reaches = d.stops.any((st) => _norm(st.name) == target);
+          list
+            ..clear()
+            ..add(_itinerary('it-$firstTrip', [_leg(d, fromName, reaches ? targetName : d.stops.last.name)], preferred: true));
+        }
+      }
+    }
+    return ApiPlan(from: ApiStation(id: from, name: fromName), to: ApiStation(id: to, name: targetName), itineraries: list);
+  }
+
+  static String _nameFromId(String id) {
+    const known = {
+      'mock:bonn-hbf': 'Bonn Hbf',
+      'mock:d-sseldorf-hbf': 'Düsseldorf Hbf',
+      'mock:l-denscheid': 'Lüdenscheid',
+      'mock:aachen-hbf': 'Aachen Hbf',
+      'mock:m-nster-westf-hbf': 'Münster (Westf) Hbf',
+      'mock:hagen-hbf': 'Hagen Hbf',
+      'mock:k-ln-hbf': 'Köln Hbf',
+    };
+    return known[id] ?? id.substring(5);
+  }
+
+  @override
+  Future<ApiJourneyLive> startJourney(StartJourneyRequest r) async {
+    if (r.ticket != null) state.setTicket(r.ticket!);
+    final legs = <DemoLeg>[];
+    var from = r.fromStationName;
+    for (final l in r.legs) {
+      final d = _findDeparture(l.tripId);
+      if (d == null) throw StateError('unknown trip ${l.tripId}');
+      final toName = l.toStationName.isNotEmpty ? l.toStationName : _nameFromId(l.toStationId);
+      final exit = d.stops.firstWhere((s) => _norm(s.name) == _norm(toName), orElse: () => d.stops.last);
+      legs.add(DemoLeg(departure: d, from: from, exit: exit));
+      from = exit.name;
+    }
+    if (legs.isEmpty) throw StateError('no legs');
+    state.startJourney(origin: r.fromStationName, destination: r.toStationName, legs: legs, locationVerified: r.location != null);
+    return (await currentJourney())!;
+  }
+
+  ApiJourney _journey(DemoJourney j) {
+    final legs = <ApiLeg>[];
+    for (var i = 0; i < j.legs.length; i++) {
+      final l = j.legs[i];
+      final no = i + 1;
+      final status = j.phase == JourneyPhase.arrived
+          ? ApiLegStatus.arrived
+          : no < j.currentLeg
+              ? ApiLegStatus.arrived
+              : no == j.currentLeg
+                  ? (j.phase == JourneyPhase.transfer ? ApiLegStatus.arrived : ApiLegStatus.riding)
+                  : ApiLegStatus.planned;
+      legs.add(_leg(l.departure, l.from, l.exit.name, legNo: no, status: status, finalDelay: l.finalDelay));
+    }
+    ApiLeg? next;
+    if (j.phase == JourneyPhase.transfer) {
+      final planned = j.next;
+      if (j.proposal != null) {
+        next = _leg(j.proposal!, j.current.exit.name, planned?.exit.name ?? j.destination, legNo: j.currentLeg + 1, replanned: true, reason: j.current.cancelled ? 'ausfall' : 'verpasst');
+      } else if (planned != null) {
+        next = _leg(planned.departure, planned.from, planned.exit.name, legNo: j.currentLeg + 1);
+      }
+    }
+    return ApiJourney(
+      id: j.id,
+      status: switch (j.phase) {
+        JourneyPhase.riding => ApiJourneyStatus.riding,
+        JourneyPhase.transfer => ApiJourneyStatus.transfer,
+        JourneyPhase.arrived => ApiJourneyStatus.arrived,
+        JourneyPhase.abandoned => ApiJourneyStatus.abandoned,
+      },
+      originStationId: _stationId(j.origin),
+      originStationName: j.origin,
+      destinationStationId: _stationId(j.destination),
+      destinationStationName: j.destination,
+      plannedDeparture: _at(j.legs.first.departure.planned),
+      plannedArrival: _at(j.plannedArrivalStop.planned),
+      actualArrival: j.finalDelay == null ? null : _at(j.plannedArrivalStop.planned).add(Duration(minutes: j.finalDelay!)),
+      finalDelayMin: j.finalDelay,
+      missedConnection: j.missedConnection,
+      cancelled: j.legs.any((l) => l.cancelled),
+      points: j.finalDelay ?? 0,
+      ticket: state.ticket,
+      currentLeg: j.currentLeg,
+      legs: legs,
+      nextLeg: next,
+      transferStationName: j.phase == JourneyPhase.transfer ? j.current.exit.name : null,
+      transferDeadline: j.phase == JourneyPhase.transfer ? _at(j.current.exit.planned).add(const Duration(hours: 2)) : null,
+      createdAt: j.startedAt.toUtc(),
+      finalisedAt: j.phase == JourneyPhase.arrived ? DateTime.now().toUtc() : null,
+    );
+  }
+
+  @override
+  Future<ApiJourneyLive?> currentJourney() async {
+    final j = state.journey;
+    if (j == null) return null;
+    final live = await currentRide();
+    final api = _journey(j);
+    if (j.phase == JourneyPhase.transfer) {
+      final t = state.trip;
+      return ApiJourneyLive(
+        journey: api,
+        ride: t == null ? null : _ride(t, status: ApiRideStatus.arrived, finalDelay: j.current.finalDelay, cancelled: j.current.cancelled, points: j.current.finalDelay ?? 0),
+        stops: t == null ? const [] : t.departure.stops.map((s) => _stop(s, delay: j.current.finalDelay ?? 0)).toList(),
+        nextLeg: api.nextLeg,
+      );
+    }
+    return ApiJourneyLive(journey: api, ride: live?.ride, stops: live?.stops ?? const [], eta: live?.eta, justArrived: j.phase == JourneyPhase.arrived);
+  }
+
+  @override
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) async {
+    final d = _findDeparture(tripId);
+    if (d == null) throw StateError('unknown trip $tripId');
+    state.confirmLeg(d);
+    return (await currentJourney())!;
+  }
+
+  @override
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived}) async {
+    final j = state.journey;
+    if (j == null) throw StateError('no journey');
+    state.finishJourney(arrived: arrived);
+    return _journey(j);
+  }
+
+  @override
+  Future<List<ApiJourney>> journeys() async {
+    final list = <ApiJourney>[];
+    if (state.journey != null && state.journey!.phase == JourneyPhase.arrived) list.add(_journey(state.journey!));
+    for (final j in state.journeyHistory) {
+      if (!list.any((x) => x.id == j.id)) list.add(_journey(j));
+    }
+    // The seeded ride records as single-leg journeys.
+    for (var i = 0; i < state.rides.length; i++) {
+      final r = state.rides[i];
+      final planned = DateTime.utc(r.date.year, r.date.month, r.date.day, 8, 0);
+      list.add(ApiJourney(
+        id: 'journey-hist-$i',
+        status: ApiJourneyStatus.arrived,
+        originStationId: _stationId(r.from),
+        originStationName: r.from,
+        destinationStationId: _stationId(r.to),
+        destinationStationName: r.to,
+        plannedDeparture: planned,
+        plannedArrival: planned.add(const Duration(minutes: 50)),
+        actualArrival: planned.add(Duration(minutes: 50 + r.delay)),
+        finalDelayMin: r.delay,
+        cancelled: r.cancelled,
+        points: r.cancelled ? 60 : r.delay,
+        legs: [
+          ApiLeg(tripId: '', line: r.line, fromStationId: _stationId(r.from), fromStationName: r.from, toStationId: _stationId(r.to), toStationName: r.to, legNo: 1, status: ApiLegStatus.arrived, finalDelayMin: r.delay, plannedDeparture: planned),
+        ],
+        createdAt: r.date.toUtc(),
+      ));
+    }
+    return list;
   }
 
   ApiRide _ride(Trip t, {required ApiRideStatus status, int? finalDelay, bool cancelled = false, bool selfEntered = false, int points = 0}) => ApiRide(
@@ -290,7 +555,8 @@ class MockRepository implements AppRepository {
   }
 
   @override
-  Future<List<ApiDeparture>> departures(String stationId) async => Mock.departuresKoelnHbf.map(_departure).toList();
+  Future<List<ApiDeparture>> departures(String stationId) async =>
+      (stationId.contains('hagen') ? Mock.departuresHagenHbf : Mock.departuresKoelnHbf).map(_departure).toList();
 
   @override
   Future<ApiTrip> trip(String tripId) async {

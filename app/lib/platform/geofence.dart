@@ -25,7 +25,7 @@ class Geofence {
   Future<dynamic> _fromNative(MethodCall call) async {
     final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? const {};
     if (call.method == 'nudgeTapped') {
-      _nudges.add(GeofenceNudge(stationId: '${args['stationId'] ?? ''}', stationName: '${args['stationName'] ?? ''}'));
+      _nudges.add(GeofenceNudge.fromMap(args));
     } else if (call.method == 'pushToken') {
       _pushTokens.add(PushToken(platform: '${args['platform'] ?? 'ios'}', token: '${args['token'] ?? ''}'));
     }
@@ -78,7 +78,7 @@ class Geofence {
         pushToken: m['pushToken'] is String && (m['pushToken'] as String).isNotEmpty ? PushToken(platform: 'ios', token: m['pushToken'] as String) : null,
         registered: (m['registered'] as num?)?.toInt() ?? 0,
         lastEvent: m['lastEvent']?.toString(),
-        pendingNudge: pending == null ? null : GeofenceNudge(stationId: '${pending['stationId'] ?? ''}', stationName: '${pending['stationName'] ?? ''}'),
+        pendingNudge: pending == null ? null : GeofenceNudge.fromMap(pending),
       );
     } on MissingPluginException {
       return const GeofenceStatus.unavailable();
@@ -135,10 +135,25 @@ class PushToken {
   final String token;
 }
 
+/// A tapped notification: a station nudge (`kind: station`) or a server push
+/// (`kind: journey | mail | incident | claim | ride`, with the push's data fields).
 class GeofenceNudge {
-  const GeofenceNudge({required this.stationId, required this.stationName});
+  const GeofenceNudge({required this.stationId, required this.stationName, this.kind = 'station', this.data = const {}});
   final String stationId;
   final String stationName;
+  final String kind;
+  final Map<String, String> data;
+
+  bool get isStation => kind == 'station' && stationId.isNotEmpty;
+  bool get isJourney => kind == 'journey';
+  String? get journeyId => data['journey_id'];
+  bool get journeyTransfer => data['transfer'] == 'true';
+  bool get journeyArrived => data['arrived'] == 'true';
+
+  factory GeofenceNudge.fromMap(Map<String, dynamic> m) {
+    final data = <String, String>{for (final e in m.entries) e.key: '${e.value ?? ''}'};
+    return GeofenceNudge(stationId: '${m['stationId'] ?? ''}', stationName: '${m['stationName'] ?? ''}', kind: '${m['kind'] ?? 'station'}', data: data);
+  }
 }
 
 class GeofenceStationConfig {

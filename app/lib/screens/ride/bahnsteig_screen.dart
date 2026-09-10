@@ -10,6 +10,7 @@ import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'ride_widgets.dart';
+import 'wohin_screen.dart';
 
 /// Home, second version (docs/16). Six blocks, everything above the fold: the action
 /// for this moment, momentum, the money countdown, standing, the community with my
@@ -28,6 +29,8 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   List<ApiDeparture> _nearDepartures = const [];
   ApiGeofence _frequent = ApiGeofence.empty;
   ApiRideLive? _live;
+  ApiJourneyLive? _journey;
+  ApiDestinations _destinations = ApiDestinations.empty;
   ApiStanding _standing = ApiStanding.empty;
   bool _loading = true;
   bool _busy = false;
@@ -51,7 +54,9 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     });
     session.addListener(_onSession);
     _ticker = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (mounted && _standing.community != null) setState(() => _minuteTick += 1 + DateTime.now().second % 3);
+      if (mounted && _standing.community != null) {
+        setState(() => _minuteTick += 1 + DateTime.now().second % 3);
+      }
     });
   }
 
@@ -78,7 +83,9 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   void _onSession() {
     if (!mounted) return;
     final me = _session.me;
-    final stamp = me == null ? null : '${me.id}:${me.pointsTotal}:${me.pointsThisWeek}:${me.settings.ngoId}:${me.settings.showOnBoards}';
+    final stamp = me == null
+        ? null
+        : '${me.id}:${me.pointsTotal}:${me.pointsThisWeek}:${me.settings.ngoId}:${me.settings.showOnBoards}';
     if (stamp != _lastMeStamp) {
       _lastMeStamp = stamp;
       _loadStanding();
@@ -107,24 +114,31 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         repo.currentRide(),
         repo.standing().catchError((_) => ApiStanding.empty),
         repo.geofence().catchError((_) => ApiGeofence.empty),
+        repo.currentJourney().catchError((_) => null),
       ]);
       if (!mounted) return;
       final nearby = results[0] as ApiNearby;
-      // At a station: the next departures come with the screen, no second tap.
+      // At a station: the next departures and the predicted destinations come with the screen.
       final near = _nearestWithin(nearby, 300);
       List<ApiDeparture> deps = const [];
+      var dest = ApiDestinations.empty;
       if (near != null) {
-        try {
-          deps = await repo.departures(near.id);
-        } catch (_) {
-          deps = const [];
-        }
+        final more = await Future.wait<dynamic>([
+          repo.departures(near.id).catchError((_) => const <ApiDeparture>[]),
+          repo
+              .destinations(from: near.id)
+              .catchError((_) => ApiDestinations.empty),
+        ]);
+        deps = more[0] as List<ApiDeparture>;
+        dest = more[1] as ApiDestinations;
       }
       if (!mounted) return;
       setState(() {
         _nearby = nearby;
         _nearDepartures = deps;
+        _destinations = dest;
         _live = results[1] as ApiRideLive?;
+        _journey = results[4] as ApiJourneyLive?;
         _standing = results[2] as ApiStanding;
         _frequent = results[3] as ApiGeofence;
         _minuteTick = 0;
@@ -140,25 +154,54 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
 
   void _schedulePoll() {
     _poll?.cancel();
-    if (_live?.ride.status == ApiRideStatus.riding) {
+    if (_live?.ride.status == ApiRideStatus.riding ||
+        _journey?.journey.inTransfer == true) {
       _poll = Timer(const Duration(seconds: 20), _refreshRide);
     }
   }
 
   Future<void> _refreshRide() async {
     try {
-      final live = await RepoScope.read(context).repo.currentRide();
+      final repo = RepoScope.read(context).repo;
+      final live = await repo.currentRide();
+      final journey = await repo.currentJourney().catchError((_) => null);
       if (!mounted) return;
       final wasRiding = _live?.ride.status == ApiRideStatus.riding;
-      setState(() => _live = live);
-      // The ride ended while the customer was on the Bahnsteig: the reveal, once.
-      if (wasRiding && live != null && live.ride.status == ApiRideStatus.arrived) {
+      setState(() {
+        _live = live;
+        _journey = journey;
+      });
+      // The journey ended while the customer was on the Bahnsteig: the reveal, once.
+      final journeyArrived =
+          journey?.journey.arrived ??
+          (live != null && live.ride.status == ApiRideStatus.arrived);
+      if (wasRiding && journeyArrived && journey?.journey.inTransfer != true) {
         context.push(Routes.angekommen);
       }
     } catch (_) {
       // keep the last state
     }
     if (mounted) _schedulePoll();
+  }
+
+  /// "Ich bin drin": the proposed next leg becomes the ride.
+  Future<void> _confirmLeg(ApiJourneyLive j, ApiLeg leg) async {
+    setState(() => _busy = true);
+    try {
+      await RepoScope.read(context).repo.confirmLeg(j.journey.id, leg.tripId);
+      if (mounted) context.push(Routes.unterwegs);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Das ging nicht: ${shortError(e)}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+        _load();
+      }
+    }
   }
 
   Future<void> _dismiss() async {
@@ -182,7 +225,11 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     final session = RepoScope.read(context);
     await session.muteStation(ApiMutedStation(id: s.id, name: s.name));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${s.name} bleibt still. Ändern in den Einstellungen.')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${s.name} bleibt still. Ändern in den Einstellungen.'),
+      ),
+    );
   }
 
   /// The same path Konto takes: draft for the ready desk, then the five steps.
@@ -192,25 +239,43 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     try {
       final draft = await session.repo.draftClaim(desk: desk);
       if (!mounted) return;
-      await context.push('${Routes.antrag}?id=${draft.claim.id}&desk=${Uri.encodeComponent(desk)}', extra: draft);
+      await context.push(
+        '${Routes.antrag}?id=${draft.claim.id}&desk=${Uri.encodeComponent(desk)}',
+        extra: draft,
+      );
       if (mounted) _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Antrag nicht möglich: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Antrag nicht möglich: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   void _openStation(ApiStation s) {
-    context.push('${Routes.checkin}?station=${Uri.encodeComponent(s.id)}&name=${Uri.encodeComponent(s.name)}');
+    context.push(
+      '${Routes.checkin}?station=${Uri.encodeComponent(s.id)}&name=${Uri.encodeComponent(s.name)}',
+    );
   }
 
-  /// Straight to "Wo steigst du aus?", the way the Einchecken screen does it.
-  void _toExit(ApiStation s, ApiDeparture d) {
-    final coords = s.lat != 0 || s.lon != 0 ? '&lat=${s.lat}&lon=${s.lon}' : '';
-    context.push('${Routes.exitStop}?departure=${Uri.encodeComponent(d.tripId)}&station=${Uri.encodeComponent(s.id)}&name=${Uri.encodeComponent(s.name)}$coords');
-  }
+  /// A train first: "Wohin?" then plans with that train as leg 1 (docs/17).
+  void _toWohin(ApiStation s, ApiDeparture d) =>
+      context.push(wohinRoute(from: s, departure: d));
+
+  /// A destination first: straight to "Welcher Zug?".
+  void _toWelcherZug(ApiStation s, ApiDestination d) => context.push(
+    welcherZugRoute(
+      fromId: s.id,
+      fromName: s.name,
+      to: d.station,
+      lat: s.lat,
+      lon: s.lon,
+    ),
+  );
+
+  void _toAnderesZiel(ApiStation s) => context.push(wohinRoute(from: s));
 
   /// "Standort erlauben": ask the phone once, then reload. Never a guess.
   Future<void> _locate() async {
@@ -242,14 +307,28 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   Widget build(BuildContext context) {
     final session = RepoScope.of(context);
     final me = session.me;
-    final riding = _live?.ride.status == ApiRideStatus.riding;
-    final arrived = _live != null && _live!.ride.status == ApiRideStatus.arrived;
+    final journey = _journey;
+    final transfer = journey?.journey.inTransfer == true;
+    final riding =
+        !transfer &&
+        (journey?.journey.riding == true ||
+            _live?.ride.status == ApiRideStatus.riding);
+    final arrived =
+        !transfer &&
+        !riding &&
+        (journey?.journey.arrived == true ||
+            (_live != null && _live!.ride.status == ApiRideStatus.arrived));
     final near = _nearStation;
     final st = _standing;
 
     return VScreen(
       showBack: false,
-      padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, VSpace.l),
+      padding: const EdgeInsets.fromLTRB(
+        VSpace.page,
+        VSpace.s,
+        VSpace.page,
+        VSpace.l,
+      ),
       child: RefreshIndicator(
         onRefresh: _load,
         color: VColors.ink,
@@ -261,22 +340,44 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
               children: [
                 Expanded(
                   child: _nearby.simulated
-                      ? Text('Standort: Stellwerk · ${_nearby.label ?? ''}', style: VText.caption.copyWith(color: VColors.red), maxLines: 1, overflow: TextOverflow.ellipsis)
+                      ? Text(
+                          'Standort: Stellwerk · ${_nearby.label ?? ''}',
+                          style: VText.caption.copyWith(color: VColors.red),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        )
                       : const SizedBox.shrink(),
                 ),
                 const VStationClock(size: 32),
               ],
             ),
-            if (_error != null) ...[const VGap.m(), OfflineBanner(stamp: null), ErrorLine(message: _error!, onRetry: _load)],
+            if (_error != null) ...[
+              const VGap.m(),
+              OfflineBanner(stamp: null),
+              ErrorLine(message: _error!, onRetry: _load),
+            ],
             const VGap.s(),
 
             // 1 · Action, sized by the moment.
-            if (_loading && _live == null)
+            if (_loading && _live == null && journey == null)
               const LoadingLine(label: 'Bahnsteig wird geladen …')
-            else if (riding)
-              _RidingBlock(live: _live!)
-            else if (arrived)
-              _ArrivedBlock(live: _live!, onDismiss: _dismiss)
+            else if (transfer)
+              _TransferBlock(
+                live: journey!,
+                busy: _busy,
+                onConfirm: (leg) => _confirmLeg(journey, leg),
+              )
+            else if (riding && (_live != null || journey?.asRideLive != null))
+              _RidingBlock(
+                live: _live ?? journey!.asRideLive!,
+                journey: journey?.journey,
+              )
+            else if (arrived && (_live != null || journey?.asRideLive != null))
+              _ArrivedBlock(
+                live: _live ?? journey!.asRideLive!,
+                journey: journey?.journey,
+                onDismiss: _dismiss,
+              )
             else ...[
               const VSection('Einchecken'),
               const VGap.m(),
@@ -284,7 +385,10 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                 _StationCard(
                   station: near,
                   departures: _nearDepartures,
-                  onDeparture: (d) => _toExit(near, d),
+                  destinations: _destinations,
+                  onDestination: (d) => _toWelcherZug(near, d),
+                  onOther: () => _toAnderesZiel(near),
+                  onDeparture: (d) => _toWohin(near, d),
                   onAll: () => _openStation(near),
                   onMute: () => _muteStation(near),
                 )
@@ -306,7 +410,14 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             const VRule(),
 
             // 3 · Money countdown.
-            _Money(standing: st, busy: _busy, onOpen: () => context.go(Routes.konto), onClaim: st.money?.readyDesk == null ? null : () => _prepareClaim(st.money!.readyDesk!)),
+            _Money(
+              standing: st,
+              busy: _busy,
+              onOpen: () => context.go(Routes.konto),
+              onClaim: st.money?.readyDesk == null
+                  ? null
+                  : () => _prepareClaim(st.money!.readyDesk!),
+            ),
             const VRule(),
 
             // 4 · Standing.
@@ -316,7 +427,11 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             ],
 
             // 5 · Community with my share.
-            _Community(standing: st, tick: _minuteTick, onTap: () => context.go(Routes.wir)),
+            _Community(
+              standing: st,
+              tick: _minuteTick,
+              onTap: () => context.go(Routes.wir),
+            ),
 
             // 6 · The one next thing.
             if (st.next != null) ...[
@@ -356,81 +471,143 @@ class _StationRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Frequent first (most check-ins), then nearby ones not already listed, at most five.
-    final sorted = [...frequent]..sort((a, b) => b.checkins.compareTo(a.checkins));
+    final sorted = [...frequent]
+      ..sort((a, b) => b.checkins.compareTo(a.checkins));
     final entries = <(ApiStation, String?)>[];
     for (final f in sorted.take(3)) {
-      final isHome = f.name == homeStation || (homeStation.isEmpty && identical(f, sorted.first) && f.checkins > 1);
-      entries.add((ApiStation(id: f.id, name: f.name, lat: f.lat, lon: f.lon), isHome ? 'Stammbahnhof' : null));
+      final isHome =
+          f.name == homeStation ||
+          (homeStation.isEmpty && identical(f, sorted.first) && f.checkins > 1);
+      entries.add((
+        ApiStation(id: f.id, name: f.name, lat: f.lat, lon: f.lon),
+        isHome ? 'Stammbahnhof' : null,
+      ));
     }
     for (final s in nearby.stations) {
       if (entries.length >= 5) break;
       if (entries.any((e) => e.$1.id == s.id || e.$1.name == s.name)) continue;
       entries.add((s, s.distanceM == null ? null : _dist(s.distanceM!)));
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final (s, suffix) in entries)
-              ActionChip(
-                onPressed: () => onStation(s),
-                backgroundColor: VColors.paperElevated,
-                side: const BorderSide(color: VColors.rule),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                label: RichText(
-                  text: TextSpan(
-                    style: VText.bodySStrong,
-                    children: [
-                      TextSpan(text: s.name),
-                      if (suffix != null) TextSpan(text: ' · $suffix', style: VText.caption),
-                    ],
+    // The same box as the station card, so the idle state reads as "no station yet" rather
+    // than as loose chips: one line of context, then the ways in.
+    final title = !hasPosition
+        ? 'Wo bist du?'
+        : nearby.stations.isEmpty
+        ? 'Kein Bahnhof in der Nähe'
+        : 'Nicht am Bahnhof';
+    final caption = !hasPosition
+        ? 'Ohne Standort wissen wir nicht, ob du an einem Bahnhof stehst.'
+        : 'Stehst du an einem Bahnhof, zeigen wir hier die Abfahrten. Bis dahin:';
+    return Container(
+      padding: const EdgeInsets.all(VSpace.m),
+      decoration: BoxDecoration(
+        border: Border.all(color: VColors.rule, width: 1.5),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: VText.title),
+          const SizedBox(height: 2),
+          Text(caption, style: VText.caption),
+          const VGap.m(),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final (s, suffix) in entries)
+                ActionChip(
+                  onPressed: () => onStation(s),
+                  backgroundColor: VColors.paperElevated,
+                  side: const BorderSide(color: VColors.rule),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  label: RichText(
+                    text: TextSpan(
+                      style: VText.bodySStrong,
+                      children: [
+                        TextSpan(text: s.name),
+                        if (suffix != null)
+                          TextSpan(text: ' · $suffix', style: VText.caption),
+                      ],
+                    ),
                   ),
                 ),
+              ActionChip(
+                onPressed: onSearch,
+                backgroundColor: VColors.paperElevated,
+                side: const BorderSide(color: VColors.rule),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                avatar: const Icon(Icons.search, size: 18, color: VColors.ink),
+                label: Text('Suchen', style: VText.bodySStrong),
               ),
-            ActionChip(
-              onPressed: onSearch,
-              backgroundColor: VColors.paperElevated,
-              side: const BorderSide(color: VColors.rule),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-              avatar: const Icon(Icons.search, size: 18, color: VColors.ink),
-              label: Text('Suchen', style: VText.bodySStrong),
-            ),
-          ],
-        ),
-        if (nearby.none && !hasPosition) ...[
-          const VGap.s(),
-          Row(
-            children: [
-              Expanded(child: Text('Ohne Standort zeigen wir keinen Bahnhof in der Nähe.', style: VText.caption)),
-              TextButton(onPressed: onLocate, child: Text('Standort erlauben', style: VText.bodySStrong.copyWith(color: VColors.red))),
             ],
           ),
+          if (nearby.none && !hasPosition) ...[
+            const VGap.s(),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: onLocate,
+                child: Text(
+                  'Standort erlauben',
+                  style: VText.bodySStrong.copyWith(color: VColors.red),
+                ),
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
-  static String _dist(int m) => m < 1000 ? '$m m' : '${(m / 1000).toStringAsFixed(1).replaceAll('.', ',')} km';
+  static String _dist(int m) => m < 1000
+      ? '$m m'
+      : '${(m / 1000).toStringAsFixed(1).replaceAll('.', ',')} km';
 }
 
-/// At a station: the next three rail departures inline, one tap to the exit stop.
+/// At a station: the predicted destinations as one-tap buttons, the next three rail
+/// departures underneath as the other way in (docs/17).
 class _StationCard extends StatelessWidget {
-  const _StationCard({required this.station, required this.departures, required this.onDeparture, required this.onAll, required this.onMute});
+  const _StationCard({
+    required this.station,
+    required this.departures,
+    required this.destinations,
+    required this.onDestination,
+    required this.onOther,
+    required this.onDeparture,
+    required this.onAll,
+    required this.onMute,
+  });
   final ApiStation station;
   final List<ApiDeparture> departures;
+  final ApiDestinations destinations;
+  final ValueChanged<ApiDestination> onDestination;
+  final VoidCallback onOther;
   final ValueChanged<ApiDeparture> onDeparture;
   final VoidCallback onAll;
   final VoidCallback onMute;
 
   @override
   Widget build(BuildContext context) {
-    final next = departures.where((d) => !d.cancelled && d.category != ApiCategory.other && d.category != ApiCategory.bus).take(3).toList();
+    final next = departures
+        .where(
+          (d) =>
+              !d.cancelled &&
+              d.category != ApiCategory.other &&
+              d.category != ApiCategory.bus,
+        )
+        .take(3)
+        .toList();
     return Container(
       padding: const EdgeInsets.fromLTRB(VSpace.m, VSpace.m, VSpace.m, 0),
-      decoration: BoxDecoration(border: Border.all(color: VColors.ink, width: 1.5), borderRadius: BorderRadius.circular(4)),
+      decoration: BoxDecoration(
+        border: Border.all(color: VColors.ink, width: 1.5),
+        borderRadius: BorderRadius.circular(4),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -443,9 +620,16 @@ class _StationCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(station.name, style: VText.title, maxLines: 1, overflow: TextOverflow.ellipsis),
                       Text(
-                        station.distanceM == null ? 'Du bist hier · halten: nie hier erinnern' : 'Du bist hier · ${station.distanceM} m',
+                        station.name,
+                        style: VText.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        station.distanceM == null
+                            ? 'Du bist hier · halten: nie hier erinnern'
+                            : 'Du bist hier · ${station.distanceM} m',
                         style: VText.caption,
                       ),
                     ],
@@ -455,20 +639,59 @@ class _StationCard extends StatelessWidget {
                   onPressed: onAll,
                   backgroundColor: VColors.paperElevated,
                   side: const BorderSide(color: VColors.rule),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                   label: Text('Alle Abfahrten', style: VText.bodySStrong),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 10),
+          // Destination first: the places this person goes, one tap each.
+          for (final d
+              in destinations.predicted
+                  .where((p) => p.stationId != station.id)
+                  .take(2)) ...[
+            DestinationButton(
+              destination: d,
+              primary: identical(d, destinations.predicted.first),
+              onTap: () => onDestination(d),
+            ),
+            const SizedBox(height: 8),
+          ],
+          OutlinedButton.icon(
+            onPressed: onOther,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: VColors.ink,
+              side: const BorderSide(color: VColors.rule),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(4),
+              ),
+              minimumSize: const Size.fromHeight(44),
+              alignment: Alignment.centerLeft,
+            ),
+            icon: const Icon(Icons.search, size: 20),
+            label: Text(
+              destinations.predicted.isEmpty
+                  ? 'Wohin? Ziel wählen …'
+                  : 'Anderes Ziel …',
+              style: VText.bodySStrong,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text('Oder erst der Zug:', style: VText.caption),
           if (next.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text('Gerade keine Abfahrt in Sicht. Alle Abfahrten zeigen auch Busse und Bahnen.', style: VText.caption),
+              child: Text(
+                'Gerade keine Abfahrt in Sicht. Alle Abfahrten zeigen auch Busse und Bahnen.',
+                style: VText.caption,
+              ),
             )
           else
-            for (final d in next) DepartureRow(departure: d, onTap: () => onDeparture(d)),
+            for (final d in next)
+              DepartureRow(departure: d, onTap: () => onDeparture(d)),
         ],
       ),
     );
@@ -483,14 +706,28 @@ class _StationCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            VSheetHeader(title: 'Diesen Bahnhof nie?', subtitle: '${station.name} stumm schalten: kein Hinweis mehr, wenn du hier stehst. Einchecken geht weiter.'),
+            VSheetHeader(
+              title: 'Diesen Bahnhof nie?',
+              subtitle:
+                  '${station.name} stumm schalten: kein Hinweis mehr, wenn du hier stehst. Einchecken geht weiter.',
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
               child: Row(
                 children: [
-                  Expanded(child: VOutlineButton(label: 'Stumm schalten', onTap: () => Navigator.of(ctx).pop(true))),
+                  Expanded(
+                    child: VOutlineButton(
+                      label: 'Stumm schalten',
+                      onTap: () => Navigator.of(ctx).pop(true),
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: VGhostButton(label: 'Abbrechen', onTap: () => Navigator.of(ctx).pop(false))),
+                  Expanded(
+                    child: VGhostButton(
+                      label: 'Abbrechen',
+                      onTap: () => Navigator.of(ctx).pop(false),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -503,20 +740,31 @@ class _StationCard extends StatelessWidget {
 }
 
 class _RidingBlock extends StatelessWidget {
-  const _RidingBlock({required this.live});
+  const _RidingBlock({required this.live, this.journey});
   final ApiRideLive live;
+  final ApiJourney? journey;
 
   @override
   Widget build(BuildContext context) {
     final r = live.ride;
     final stops = live.stops;
-    final nextName = stops.isEmpty ? null : stops[(r.passedStops + 1).clamp(0, stops.length - 1)].name;
+    final nextName = stops.isEmpty
+        ? null
+        : stops[(r.passedStops + 1).clamp(0, stops.length - 1)].name;
+    final j = journey;
+    final dest = j?.destinationStationName ?? r.exitStationName;
+    final transferAhead = j != null && j.currentLeg < j.legs.length
+        ? j.legs[(j.currentLeg - 1).clamp(0, j.legs.length - 1)].toStationName
+        : null;
     return InkWell(
       onTap: () => context.push(Routes.unterwegs),
       borderRadius: BorderRadius.circular(4),
       child: Container(
         padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(border: Border.all(color: VColors.ink, width: 1.5), borderRadius: BorderRadius.circular(4)),
+        decoration: BoxDecoration(
+          border: Border.all(color: VColors.ink, width: 1.5),
+          borderRadius: BorderRadius.circular(4),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -526,21 +774,49 @@ class _RidingBlock extends StatelessWidget {
               children: [
                 LineBadge(r.line, large: true),
                 const SizedBox(width: 12),
-                Expanded(child: Text('nach ${r.exitStationName}', style: VText.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                VDelay(r.liveDelayMinutes, size: VDelaySize.medium, cancelled: r.cancelled),
+                Expanded(
+                  child: Text(
+                    'nach $dest',
+                    style: VText.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                VDelay(
+                  r.liveDelayMinutes,
+                  size: VDelaySize.medium,
+                  cancelled: r.cancelled,
+                ),
               ],
             ),
             const SizedBox(height: 10),
             Text(
-              [if (nextName != null) 'Nächster Halt $nextName', 'Ausstieg ${r.exitStationName}', if (live.eta != null) 'an ${fmtLocal(live.eta)}'].join(' · '),
+              [
+                if (nextName != null) 'Nächster Halt $nextName',
+                if (transferAhead != null)
+                  'Umstieg $transferAhead'
+                else
+                  'Ausstieg ${r.exitStationName}',
+                if (live.eta != null) 'an ${fmtLocal(live.eta)}',
+              ].join(' · '),
               style: VText.caption,
             ),
             const SizedBox(height: 10),
             Row(
               children: [
-                Expanded(child: VOutlineButton(label: 'Zur Fahrt', onTap: () => context.push(Routes.unterwegs))),
+                Expanded(
+                  child: VOutlineButton(
+                    label: 'Zur Fahrt',
+                    onTap: () => context.push(Routes.unterwegs),
+                  ),
+                ),
                 const SizedBox(width: 10),
-                Expanded(child: VGhostButton(label: 'Zug wechseln', onTap: () => context.push(Routes.unterwegs))),
+                Expanded(
+                  child: VGhostButton(
+                    label: 'Zug wechseln',
+                    onTap: () => context.push(Routes.unterwegs),
+                  ),
+                ),
               ],
             ),
           ],
@@ -551,17 +827,28 @@ class _RidingBlock extends StatelessWidget {
 }
 
 class _ArrivedBlock extends StatelessWidget {
-  const _ArrivedBlock({required this.live, required this.onDismiss});
+  const _ArrivedBlock({
+    required this.live,
+    this.journey,
+    required this.onDismiss,
+  });
   final ApiRideLive live;
+  final ApiJourney? journey;
   final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
     final r = live.ride;
-    final delay = r.finalDelayMinutes ?? 0;
+    final j = journey;
+    final delay = j?.finalDelayMin ?? r.finalDelayMinutes ?? 0;
+    final where = j?.destinationStationName ?? r.exitStationName;
+    final points = j?.points ?? r.points;
     return Container(
       padding: const EdgeInsets.all(VSpace.m),
-      decoration: BoxDecoration(border: Border.all(color: VColors.rule), borderRadius: BorderRadius.circular(4)),
+      decoration: BoxDecoration(
+        border: Border.all(color: VColors.rule),
+        borderRadius: BorderRadius.circular(4),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -569,11 +856,15 @@ class _ArrivedBlock extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              VDelay(delay, size: VDelaySize.large, cancelled: r.cancelled),
+              VDelay(
+                delay,
+                size: VDelaySize.large,
+                cancelled: j?.cancelled ?? r.cancelled,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
-                  '${r.exitStationName}\n${r.points} Geduldspunkte',
+                  '$where\n$points Geduldspunkte${j?.missedConnection == true ? ' · Anschluss verpasst' : ''}',
                   style: VText.bodyS.copyWith(color: VColors.ink2),
                 ),
               ),
@@ -582,10 +873,113 @@ class _ArrivedBlock extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: VOutlineButton(label: 'Ansehen', onTap: () => context.push(Routes.angekommen))),
+              Expanded(
+                child: VOutlineButton(
+                  label: 'Ansehen',
+                  onTap: () => context.push(Routes.angekommen),
+                ),
+              ),
               const SizedBox(width: 10),
-              Expanded(child: VGhostButton(label: 'Fertig', onTap: onDismiss)),
+              Expanded(
+                child: VGhostButton(label: 'Fertig', onTap: onDismiss),
+              ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Between two legs: the connection to confirm with one tap ("Ich bin drin").
+class _TransferBlock extends StatelessWidget {
+  const _TransferBlock({
+    required this.live,
+    required this.busy,
+    required this.onConfirm,
+  });
+  final ApiJourneyLive live;
+  final bool busy;
+  final ValueChanged<ApiLeg> onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final j = live.journey;
+    final next = live.nextLeg ?? j.nextLeg;
+    final missed = j.missedConnection || next?.replanned == true;
+    return Container(
+      padding: const EdgeInsets.all(VSpace.m),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: missed ? VColors.red : VColors.ink,
+          width: 1.5,
+        ),
+        borderRadius: BorderRadius.circular(4),
+        color: missed ? VColors.redSoft : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            missed ? 'ANSCHLUSS VERPASST' : 'UMSTEIGEN',
+            style: VText.eyebrow.copyWith(
+              color: missed ? VColors.red : VColors.ink2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${j.transferStationName ?? next?.fromStationName ?? ''} · weiter nach ${j.destinationStationName}',
+            style: VText.caption,
+          ),
+          const SizedBox(height: 10),
+          if (next == null)
+            Text(
+              'Keine Verbindung gefunden. Sag uns, wenn du da bist.',
+              style: VText.bodyS,
+            )
+          else ...[
+            Row(
+              children: [
+                LineBadge(next.line, large: true, cancelled: next.cancelled),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'nach ${next.headsign.isNotEmpty ? next.headsign : next.toStationName}',
+                        style: VText.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        [
+                          fmtLocal(next.liveDeparture ?? next.plannedDeparture),
+                          if (next.platform != null &&
+                              next.platform!.isNotEmpty)
+                            'Gl. ${next.platform}',
+                          if (missed) 'nächste Möglichkeit',
+                        ].join(' · '),
+                        style: VText.caption,
+                      ),
+                    ],
+                  ),
+                ),
+                if (next.delayMin > 0)
+                  VDelay(next.delayMin, size: VDelaySize.small),
+              ],
+            ),
+            const SizedBox(height: 12),
+            VPrimaryButton(
+              label: busy ? 'Einen Moment …' : 'Ich bin drin',
+              icon: Icons.check,
+              onTap: busy ? null : () => onConfirm(next),
+            ),
+          ],
+          const SizedBox(height: 8),
+          VGhostButton(
+            label: 'Zur Fahrt',
+            onTap: () => context.push(Routes.unterwegs),
           ),
         ],
       ),
@@ -617,7 +1011,12 @@ class _Momentum extends StatelessWidget {
             if (quiet) ...[
               Text('Diese Woche noch keine Fahrt', style: VText.title),
               const SizedBox(height: 2),
-              Text(st.pointsLastWeek > 0 ? 'Letzte Woche ${fmtInt(st.pointsLastWeek)} Geduldspunkte' : 'Jede Minute Verspätung wird ein Geduldspunkt.', style: VText.caption),
+              Text(
+                st.pointsLastWeek > 0
+                    ? 'Letzte Woche ${fmtInt(st.pointsLastWeek)} Geduldspunkte'
+                    : 'Jede Minute Verspätung wird ein Geduldspunkt.',
+                style: VText.caption,
+              ),
             ] else ...[
               Row(
                 crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -640,7 +1039,9 @@ class _Momentum extends StatelessWidget {
               VProgress(confirmed: lvl.progress),
               const SizedBox(height: 6),
               Text(
-                lvl.pointsToNext > 0 ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“' : '${lvl.name} · höchste Stufe erreicht',
+                lvl.pointsToNext > 0
+                    ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“'
+                    : '${lvl.name} · höchste Stufe erreicht',
                 style: VText.caption,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -658,7 +1059,12 @@ class _Momentum extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _Money extends StatelessWidget {
-  const _Money({required this.standing, required this.busy, required this.onOpen, this.onClaim});
+  const _Money({
+    required this.standing,
+    required this.busy,
+    required this.onOpen,
+    this.onClaim,
+  });
   final ApiStanding standing;
   final bool busy;
   final VoidCallback onOpen;
@@ -672,7 +1078,10 @@ class _Money extends StatelessWidget {
         onTap: onOpen,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: VSpace.m),
-          child: Text('Noch keine Verspätung ab 60 Minuten. Die erste zählt 1,50 €.', style: VText.caption),
+          child: Text(
+            'Noch keine Verspätung ab 60 Minuten. Die erste zählt 1,50 €.',
+            style: VText.caption,
+          ),
         ),
       );
     }
@@ -682,7 +1091,13 @@ class _Money extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            VPrimaryButton(label: busy ? 'Einen Moment …' : '${fmtEuro(m.openCents / 100)} beantragen', icon: Icons.edit_outlined, onTap: busy ? null : onClaim),
+            VPrimaryButton(
+              label: busy
+                  ? 'Einen Moment …'
+                  : '${fmtEuro(m.openCents / 100)} beantragen',
+              icon: Icons.edit_outlined,
+              onTap: busy ? null : onClaim,
+            ),
             const SizedBox(height: 6),
             Text('Bündel bereit · geht an ${m.ngoName}', style: VText.caption),
           ],
@@ -702,7 +1117,9 @@ class _Money extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                first ? 'bis zum ersten Antrag · jede Verspätung ab 60 Minuten zählt' : 'bis zum Antrag · ${fmtEuro(m.openCents / 100)} gesammelt für ${m.ngoName}',
+                first
+                    ? 'bis zum ersten Antrag · jede Verspätung ab 60 Minuten zählt'
+                    : 'bis zum Antrag · ${fmtEuro(m.openCents / 100)} gesammelt für ${m.ngoName}',
                 style: VText.caption,
                 maxLines: 2,
               ),
@@ -759,7 +1176,11 @@ class _Standing extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _Community extends StatelessWidget {
-  const _Community({required this.standing, required this.tick, required this.onTap});
+  const _Community({
+    required this.standing,
+    required this.tick,
+    required this.onTap,
+  });
   final ApiStanding standing;
   final int tick;
   final VoidCallback onTap;
@@ -772,7 +1193,10 @@ class _Community extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: VSpace.m),
         child: c == null
-            ? Text('Wir haben zusammen gewartet. Zahlen folgen.', style: VText.caption)
+            ? Text(
+                'Wir haben zusammen gewartet. Zahlen folgen.',
+                style: VText.caption,
+              )
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -782,10 +1206,15 @@ class _Community extends StatelessWidget {
                       children: [
                         TextSpan(
                           text: '${fmtInt(c.minutesTotal + tick)} Minuten',
-                          style: VText.bodyStrong.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
+                          style: VText.bodyStrong.copyWith(
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
                         ),
                         const TextSpan(text: ' haben wir gewartet'),
-                        if (c.myMinutes > 0) TextSpan(text: ' · ${fmtInt(c.myMinutes)} davon deine'),
+                        if (c.myMinutes > 0)
+                          TextSpan(
+                            text: ' · ${fmtInt(c.myMinutes)} davon deine',
+                          ),
                         const TextSpan(text: '.'),
                       ],
                     ),
@@ -841,9 +1270,19 @@ class _NextThing extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(next.title.toUpperCase(), style: VText.eyebrow.copyWith(color: urgent ? VColors.red : VColors.ink2)),
+                  Text(
+                    next.title.toUpperCase(),
+                    style: VText.eyebrow.copyWith(
+                      color: urgent ? VColors.red : VColors.ink2,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(next.body, style: VText.bodySStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  Text(
+                    next.body,
+                    style: VText.bodySStrong,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
             ),

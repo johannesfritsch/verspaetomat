@@ -5,6 +5,7 @@ import '../../mock/mock_data.dart' show Mock;
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../claims/claims_widgets.dart';
+import '../ride/ride_widgets.dart' show fmtLocal;
 import 'community_widgets.dart';
 
 /// All rides, grouped by day, filterable by line.
@@ -20,16 +21,16 @@ class _HistorieScreenState extends State<HistorieScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Loader<List<ApiRide>>(
-      load: (repo) => repo.rides(),
+    return Loader<List<ApiJourney>>(
+      load: (repo) => repo.journeys(),
       builder: (context, all, refresh) {
-        final lines = all.map((r) => r.line).toSet().toList()..sort();
-        final rides = all.where((r) => _line == null || r.line == _line).toList();
-        final groups = <String, List<ApiRide>>{};
-        for (final r in rides) {
-          groups.putIfAbsent(Mock.shortDate(r.date), () => []).add(r);
+        final lines = all.expand((j) => j.legs.map((l) => l.line)).where((l) => l.isNotEmpty).toSet().toList()..sort();
+        final journeys = all.where((j) => _line == null || j.legs.any((l) => l.line == _line)).toList();
+        final groups = <String, List<ApiJourney>>{};
+        for (final j in journeys) {
+          groups.putIfAbsent(Mock.shortDate(j.date), () => []).add(j);
         }
-        final total = rides.fold(0, (s, r) => s + (r.finalDelayMinutes ?? 0));
+        final total = journeys.fold(0, (s, j) => s + (j.finalDelayMin ?? 0));
 
         return VScreen(
           title: 'Alle Fahrten',
@@ -40,56 +41,92 @@ class _HistorieScreenState extends State<HistorieScreen> {
               const VGap.s(),
               FilterChips(options: lines, selected: _line, onSelect: (v) => setState(() => _line = v)),
               const VGap.m(),
-              Text('${rides.length} Fahrten · ${fmtInt(total)} Minuten gewartet', style: VText.caption),
+              Text('${journeys.length} Fahrten · ${fmtInt(total)} Minuten gewartet', style: VText.caption),
               const VGap.m(),
               for (final entry in groups.entries) ...[
                 VSection(entry.key),
-                for (final r in entry.value) _rideRow(r),
+                for (final j in entry.value) _JourneyRow(journey: j),
                 const VGap.m(),
               ],
-              if (rides.isEmpty) Text(all.isEmpty ? 'Noch keine Fahrten.' : 'Keine Fahrten für diesen Filter.', style: VText.body.copyWith(color: VColors.ink2)),
+              if (journeys.isEmpty) Text(all.isEmpty ? 'Noch keine Fahrten.' : 'Keine Fahrten für diesen Filter.', style: VText.body.copyWith(color: VColors.ink2)),
             ],
           ),
         );
       },
     );
   }
+}
 
-  Widget _rideRow(ApiRide r) {
-    final riding = r.status == ApiRideStatus.riding;
+/// One journey: the lines, origin → destination, the delay at the destination. Legs unfold on tap.
+class _JourneyRow extends StatefulWidget {
+  const _JourneyRow({required this.journey});
+  final ApiJourney journey;
+
+  @override
+  State<_JourneyRow> createState() => _JourneyRowState();
+}
+
+class _JourneyRowState extends State<_JourneyRow> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final j = widget.journey;
+    final open = j.riding || j.inTransfer;
+    final chips = <Widget>[
+      if (open) const VChip('unterwegs', tone: VTone.ink),
+      if (j.cancelled) const VChip('Ausfall', tone: VTone.red),
+      if (j.missedConnection) const VChip('Anschluss verpasst', tone: VTone.red),
+      if (j.incomplete) const VChip('unvollständig'),
+      if (j.status == ApiJourneyStatus.abandoned) const VChip('abgebrochen'),
+      if (j.transfers > 0) VChip('${j.transfers}× umsteigen'),
+    ];
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Row(
-            children: [
-              SizedBox(width: 64, child: Text(r.line, style: VText.bodyStrong)),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${r.fromStationName} → ${r.exitStationName}', style: VText.bodyS, overflow: TextOverflow.ellipsis),
-                    if (r.cancelled || !r.locationVerified || r.nachtrag || riding) ...[
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          if (riding) const VChip('unterwegs', tone: VTone.ink),
-                          if (r.cancelled) const VChip('Ausfall', tone: VTone.red),
-                          if (r.nachtrag) const VChip('Nachtrag'),
-                          if (!r.locationVerified) const VChip('nicht verifiziert'),
-                        ],
-                      ),
+        InkWell(
+          onTap: j.legs.length > 1 ? () => setState(() => _open = !_open) : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              children: [
+                SizedBox(width: 64, child: Text(j.legs.isEmpty ? '–' : j.legs.first.line, style: VText.bodyStrong, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${j.originStationName} → ${j.destinationStationName}', style: VText.bodyS, overflow: TextOverflow.ellipsis),
+                      if (chips.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Wrap(spacing: 6, runSpacing: 4, children: chips),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              VDelay(r.finalDelayMinutes ?? r.liveDelayMinutes, size: VDelaySize.small),
-            ],
+                const SizedBox(width: 12),
+                VDelay(j.finalDelayMin ?? 0, size: VDelaySize.small, cancelled: j.cancelled),
+              ],
+            ),
           ),
         ),
+        if (_open)
+          Padding(
+            padding: const EdgeInsets.only(left: 64, bottom: 8),
+            child: Column(
+              children: [
+                for (final l in j.legs)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        SizedBox(width: 56, child: Text(l.line, style: VText.captionInk)),
+                        Expanded(child: Text('${l.fromStationName} ${fmtLocal(l.plannedDeparture)} → ${l.toStationName} ${fmtLocal(l.plannedArrival)}', style: VText.caption, overflow: TextOverflow.ellipsis)),
+                        if (l.finalDelayMin != null) VDelay(l.finalDelayMin!, size: VDelaySize.small, cancelled: l.cancelled),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
         const VRule.soft(),
       ],
     );

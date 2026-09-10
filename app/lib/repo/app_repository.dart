@@ -39,6 +39,19 @@ abstract class AppRepository {
   Future<void> dismissRide();
   Future<ApiArrivalResult> nachtrag(NachtragRequest request);
 
+  // -- journeys (docs/17) ---------------------------------------------------
+  /// Predicted and recent destinations; `from` is the station the customer stands at.
+  Future<ApiDestinations> destinations({String? from});
+  /// Itineraries from one station to another; `firstTrip` keeps only those starting with that train.
+  Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip});
+  Future<ApiJourneyLive> startJourney(StartJourneyRequest request);
+  /// The current journey (riding, in transfer, or arrived in the last two hours), else null.
+  Future<ApiJourneyLive?> currentJourney();
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId);
+  /// "Ich bin da" (arrived: true) or "Abbrechen" (arrived: false).
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived});
+  Future<List<ApiJourney>> journeys();
+
   // -- ledger and claims ----------------------------------------------------
   Future<ApiIncidents> incidents();
   Future<List<ApiClaim>> claims();

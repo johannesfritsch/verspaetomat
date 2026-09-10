@@ -451,8 +451,19 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse, withCompletionHandler h: @escaping () -> Void) {
     let info = r.notification.request.content.userInfo
+    var payload: [String: String]? = nil
     if let id = info["stationId"] as? String {
-      let payload = ["stationId": id, "stationName": info["stationName"] as? String ?? ""]
+      payload = ["kind": "station", "stationId": id, "stationName": info["stationName"] as? String ?? ""]
+    } else if let v = info["verspaetomat"] as? [String: Any], let kind = v["kind"] as? String {
+      // A server push (docs/17): kind "journey" with {journey_id, transfer|arrived}, "mail", "incident", …
+      let data = v["data"] as? [String: Any] ?? [:]
+      var p = ["kind": kind]
+      for (k, val) in data {
+        if let str = val as? String { p[k] = str } else if let b = val as? Bool { p[k] = b ? "true" : "false" } else if let n = val as? NSNumber { p[k] = n.stringValue }
+      }
+      payload = p
+    }
+    if let payload = payload {
       if let cb = onNudgeTapped { cb(payload) } else { pendingNudge = payload }
     }
     h()

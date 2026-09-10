@@ -24,6 +24,41 @@ String? claimSubLabelFor(TicketType ticket, TrainCategory category, int delay, {
 
 enum TripPhase { idle, riding, arrived }
 
+/// Demo journey phase (docs/17): between two legs the journey is in `transfer`.
+enum JourneyPhase { riding, transfer, arrived, abandoned }
+
+/// One leg of a demo journey: a departure, boarded at [from], left at [exit].
+class DemoLeg {
+  DemoLeg({required this.departure, required this.from, required this.exit});
+  final Departure departure;
+  final String from;
+  final Stop exit;
+  int? finalDelay;
+  bool cancelled = false;
+}
+
+/// A demo journey: destination first, legs confirmed one at a time.
+class DemoJourney {
+  DemoJourney({required this.id, required this.origin, required this.destination, required this.legs, required this.startedAt});
+  final String id;
+  final String origin;
+  final String destination;
+  final List<DemoLeg> legs;
+  final DateTime startedAt;
+  int currentLeg = 1;
+  JourneyPhase phase = JourneyPhase.riding;
+  bool missedConnection = false;
+  /// The re-planned next leg after a missed connection (null = the planned one still works).
+  Departure? proposal;
+  int? finalDelay;
+  DateTime date = DateTime.now();
+
+  DemoLeg get current => legs[(currentLeg - 1).clamp(0, legs.length - 1)];
+  DemoLeg? get next => currentLeg < legs.length ? legs[currentLeg] : null;
+  bool get onLastLeg => currentLeg >= legs.length;
+  Stop get plannedArrivalStop => legs.last.exit;
+}
+
 /// One in-memory state for the whole showcase. No persistence.
 class DemoState extends ChangeNotifier {
   DemoState() {
@@ -140,7 +175,92 @@ class DemoState extends ChangeNotifier {
 
   bool get hasClaimFromLastRide => finalDelay != null && finalDelay! >= 60;
 
+  // -- Journey (docs/17) ------------------------------------------------------
+  DemoJourney? journey;
+  final List<DemoJourney> journeyHistory = [];
+
+  /// Destination first: the itinerary's legs become the journey, leg 1 rides now.
+  void startJourney({required String origin, required String destination, required List<DemoLeg> legs, bool locationVerified = true}) {
+    final j = DemoJourney(id: 'j-${DateTime.now().millisecondsSinceEpoch}', origin: origin, destination: destination, legs: legs, startedAt: DateTime.now());
+    journey = j;
+    _board(j.legs.first, locationVerified: locationVerified);
+  }
+
+  /// The transfer confirmed ("Ich bin drin"): the given train becomes the next leg.
+  void confirmLeg(Departure departure) {
+    final j = journey;
+    if (j == null || j.phase != JourneyPhase.transfer) return;
+    final planned = j.next;
+    final exitName = planned?.exit.name ?? j.destination;
+    final exit = departure.stops.firstWhere((s) => s.name == exitName, orElse: () => departure.stops.last);
+    final leg = DemoLeg(departure: departure, from: j.current.exit.name, exit: exit);
+    if (planned != null) {
+      j.legs[j.currentLeg] = leg;
+    } else {
+      j.legs.add(leg);
+    }
+    j.currentLeg += 1;
+    j.phase = JourneyPhase.riding;
+    j.proposal = null;
+    _board(leg, locationVerified: true);
+  }
+
+  /// "Ich bin da" / "Abbrechen" while a journey is open.
+  void finishJourney({required bool arrived}) {
+    final j = journey;
+    if (j == null) return;
+    if (!arrived) {
+      j.phase = JourneyPhase.abandoned;
+      journeyHistory.insert(0, j);
+      journey = null;
+      phase = TripPhase.idle;
+      trip = null;
+      notifyListeners();
+      return;
+    }
+    if (j.phase == JourneyPhase.transfer) {
+      // Ended at the transfer stop: the delay there counts, marked incomplete by the backend.
+      j.phase = JourneyPhase.arrived;
+      j.finalDelay = j.current.finalDelay ?? liveDelay;
+      finalDelay = j.finalDelay;
+      phase = TripPhase.arrived;
+      journeyHistory.insert(0, j);
+      _refreshReady();
+      notifyListeners();
+      return;
+    }
+    simulateArrival(minutes: liveDelay);
+  }
+
+  void _board(DemoLeg leg, {required bool locationVerified}) {
+    trip = Trip(
+      departure: leg.departure,
+      fromStation: leg.from,
+      exitStop: leg.exit,
+      ticket: ticket,
+      checkedInAt: DateTime.now(),
+      locationVerified: locationVerified,
+    );
+    phase = TripPhase.riding;
+    liveDelay = leg.departure.delay;
+    liveCause = leg.departure.cause;
+    passedStops = 0;
+    finalDelay = null;
+    finalCancelled = leg.departure.cancelled;
+    finalSelfEntered = false;
+    newBadge = null;
+    notifyListeners();
+  }
+
+  /// A single train, destination = its exit stop: a one-leg journey.
   void checkIn({required Departure departure, required Stop exitStop, required String fromStation, bool locationVerified = true}) {
+    journey = DemoJourney(
+      id: 'j-${DateTime.now().millisecondsSinceEpoch}',
+      origin: fromStation,
+      destination: exitStop.name,
+      legs: [DemoLeg(departure: departure, from: fromStation, exit: exitStop)],
+      startedAt: DateTime.now(),
+    );
     trip = Trip(
       departure: departure,
       fromStation: fromStation,
@@ -175,7 +295,38 @@ class DemoState extends ChangeNotifier {
 
   /// Demo: jump to arrival with a chosen delay. 60+ creates a claim.
   void simulateArrival({int? minutes, bool cancelled = false, bool selfEntered = false}) {
-    finalDelay = minutes ?? (liveDelay < 60 ? 68 : liveDelay);
+    final j = journey;
+    final legDelay = minutes ?? (liveDelay < 60 ? 68 : liveDelay);
+    if (j != null && j.phase == JourneyPhase.riding && !j.onLastLeg) {
+      // Leg done, journey not: the transfer. Missed when we arrive after the next leg leaves.
+      final leg = j.current;
+      leg.finalDelay = legDelay;
+      leg.cancelled = cancelled;
+      final next = j.next!;
+      final arrivalMin = leg.exit.planned.hour * 60 + leg.exit.planned.minute + legDelay;
+      final nextDep = next.departure.planned.hour * 60 + next.departure.planned.minute;
+      if (arrivalMin > nextDep || cancelled) {
+        j.missedConnection = true;
+        j.proposal = Mock.allDepartures
+            .where((d) => d.line == next.departure.line && d.id != next.departure.id && d.planned.hour * 60 + d.planned.minute > arrivalMin)
+            .firstOrNull;
+      }
+      j.phase = JourneyPhase.transfer;
+      phase = TripPhase.idle;
+      finalDelay = legDelay;
+      notifyListeners();
+      return;
+    }
+    if (j != null) {
+      j.current.finalDelay = legDelay;
+      j.phase = JourneyPhase.arrived;
+      // The delay that counts: at the destination, including what a missed connection cost.
+      final plannedArrival = j.plannedArrivalStop.planned.hour * 60 + j.plannedArrivalStop.planned.minute;
+      final actualArrival = j.current.exit.planned.hour * 60 + j.current.exit.planned.minute + legDelay;
+      j.finalDelay = cancelled ? 60 : (actualArrival - plannedArrival).clamp(legDelay, 24 * 60);
+      journeyHistory.insert(0, j);
+    }
+    finalDelay = j?.finalDelay ?? legDelay;
     finalCancelled = cancelled;
     finalSelfEntered = selfEntered;
     phase = TripPhase.arrived;
@@ -192,9 +343,9 @@ class DemoState extends ChangeNotifier {
       final inc = Incident(
         id: 'i-live-${DateTime.now().millisecondsSinceEpoch}',
         date: DateTime.now(),
-        line: t.departure.line,
-        from: t.fromStation,
-        to: t.exitStop.name,
+        line: j == null ? t.departure.line : j.legs.map((l) => l.departure.line).join(' · '),
+        from: j?.origin ?? t.fromStation,
+        to: j?.destination ?? t.exitStop.name,
         delayMinutes: finalDelay!,
         amount: amount,
         ticket: t.ticket,
@@ -266,6 +417,7 @@ class DemoState extends ChangeNotifier {
   void dismissArrival() {
     phase = TripPhase.idle;
     trip = null;
+    journey = null;
     finalDelay = null;
     newBadge = null;
     notifyListeners();
@@ -460,6 +612,8 @@ class DemoState extends ChangeNotifier {
       ..addAll(Mock.rides);
     phase = TripPhase.idle;
     trip = null;
+    journey = null;
+    journeyHistory.clear();
     finalDelay = null;
     newBadge = null;
     incidents

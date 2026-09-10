@@ -4,14 +4,19 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 /// One event from the backend's per-customer stream (`GET /v1/events`).
-/// Kinds: hello, location, ride, incident, claim, mail, clock, reset, resync.
+/// Kinds: hello, location, ride, journey, incident, claim, mail, clock, reset, resync.
 class AppEvent {
   const AppEvent(this.kind, this.data);
   final String kind;
   final Map<String, dynamic> data;
 
-  bool get touchesRide => kind == 'ride' || kind == 'reset' || kind == 'clock' || kind == 'resync';
-  bool get touchesLedger => kind == 'incident' || kind == 'claim' || kind == 'mail' || kind == 'ride' || kind == 'reset' || kind == 'clock' || kind == 'resync';
+  bool get touchesRide => kind == 'ride' || kind == 'journey' || kind == 'reset' || kind == 'clock' || kind == 'resync';
+  bool get touchesLedger => kind == 'incident' || kind == 'claim' || kind == 'mail' || kind == 'ride' || kind == 'journey' || kind == 'reset' || kind == 'clock' || kind == 'resync';
+
+  /// A journey event (docs/17): transfer, arrived, finished.
+  bool get isJourney => kind == 'journey';
+  bool get journeyTransfer => isJourney && data['transfer'] == true;
+  bool get journeyArrived => isJourney && (data['arrived'] == true || data['finished'] == true);
   bool get touchesLocation => kind == 'location' || kind == 'reset' || kind == 'resync';
 
   @override

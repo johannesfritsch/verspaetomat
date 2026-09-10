@@ -21,7 +21,9 @@ const tour = <(String, String)>[
   ('setup', Routes.setup),
   ('bahnsteig', Routes.bahnsteig),
   ('checkin', '${Routes.checkin}?station=koeln-hbf'),
-  ('exit', '${Routes.exitStop}?departure=re7-0747'),
+  ('wohin', '${Routes.wohin}?station=koeln-hbf&name=K%C3%B6ln%20Hbf'),
+  ('wohin-zug', '${Routes.wohin}?station=koeln-hbf&name=K%C3%B6ln%20Hbf&departure=re7-0747&line=RE%207'),
+  ('welcher-zug', '${Routes.welcherZug}?from=koeln-hbf&fromName=K%C3%B6ln%20Hbf&to=mock%3Ad-sseldorf-hbf&toName=D%C3%BCsseldorf%20Hbf'),
   ('unterwegs', Routes.unterwegs),
   ('angekommen-68', '${Routes.angekommen}?variant=68'),
   ('angekommen-14', '${Routes.angekommen}?variant=14'),
@@ -95,6 +97,39 @@ void main() {
     await wait(tester, 600);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
     await shot('bahnsteig-arrived');
+    demo.reset();
+
+    // Journeys with a connection (docs/17): transfer, missed connection, arrival with the journey delay.
+    void go(String route) => GoRouter.of(tester.element(find.byType(Scaffold).first)).go(route);
+    DemoLeg leg(String tripId, String from, String to) {
+      final d = Mock.allDepartures.firstWhere((x) => x.id == tripId);
+      return DemoLeg(departure: d, from: from, exit: d.stops.firstWhere((s) => s.name == to));
+    }
+    demo.startJourney(origin: 'Köln Hbf', destination: 'Lüdenscheid', legs: [leg('re7-0747', 'Köln Hbf', 'Hagen Hbf'), leg('rb52-0855', 'Hagen Hbf', 'Lüdenscheid')]);
+    go(Routes.unterwegs);
+    await shot('unterwegs-journey');
+    demo.simulateArrival(minutes: 5); // in time for the RB 52
+    go(Routes.wir);
+    await wait(tester, 600);
+    go(Routes.unterwegs);
+    await shot('unterwegs-transfer');
+    go(Routes.bahnsteig);
+    await shot('bahnsteig-transfer');
+    demo.confirmLeg(Mock.allDepartures.firstWhere((x) => x.id == 'rb52-0855'));
+    demo.simulateArrival(minutes: 12);
+    go(Routes.angekommen);
+    await shot('angekommen-journey');
+    demo.reset();
+    demo.startJourney(origin: 'Köln Hbf', destination: 'Lüdenscheid', legs: [leg('re7-0747', 'Köln Hbf', 'Hagen Hbf'), leg('rb52-0855', 'Hagen Hbf', 'Lüdenscheid')]);
+    demo.simulateArrival(minutes: 68); // the RB 52 is gone: missed connection, next one proposed
+    go(Routes.unterwegs);
+    await shot('unterwegs-verpasst');
+    demo.confirmLeg(Mock.allDepartures.firstWhere((x) => x.id == 'rb52-0955'));
+    demo.simulateArrival(minutes: 0);
+    go(Routes.angekommen);
+    await shot('angekommen-verpasst');
+    go(Routes.historie);
+    await shot('historie-journeys');
     demo.reset();
 
     // One pushed sub-screen, so the header with the back arrow is in the set too.

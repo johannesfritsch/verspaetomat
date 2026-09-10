@@ -86,6 +86,37 @@ class HttpRepository implements AppRepository {
   @override
   Future<ApiArrivalResult> nachtrag(NachtragRequest request) => client.nachtrag(request);
 
+  // Journeys: an older backend without the routes answers 404 → empty, never an error.
+  @override
+  Future<ApiDestinations> destinations({String? from}) async {
+    try {
+      return await client.destinations(from: from);
+    } on ApiException catch (e) {
+      if (e.status == 404) return ApiDestinations.empty;
+      rethrow;
+    }
+  }
+
+  @override
+  Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip}) => client.planJourney(from: from, to: to, firstTrip: firstTrip);
+  @override
+  Future<ApiJourneyLive> startJourney(StartJourneyRequest request) => client.startJourney(request);
+  @override
+  Future<ApiJourneyLive?> currentJourney() => client.currentJourney();
+  @override
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) => client.confirmLeg(journeyId, tripId);
+  @override
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived}) => client.finishJourney(journeyId, arrived: arrived);
+  @override
+  Future<List<ApiJourney>> journeys() async {
+    try {
+      return await client.journeys();
+    } on ApiException catch (e) {
+      if (e.status == 404) return const [];
+      rethrow;
+    }
+  }
+
   @override
   Future<ApiIncidents> incidents() => client.incidents();
   @override

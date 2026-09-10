@@ -25,6 +25,7 @@ class AngekommenScreen extends StatefulWidget {
 
 class _AngekommenScreenState extends State<AngekommenScreen> {
   ApiArrivalResult? _result;
+  ApiJourney? _journey;
   ApiIncidents? _incidents;
   bool _loading = true;
   String? _error;
@@ -50,6 +51,12 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       if (result == null && v != null && !session.isLocal) {
         result = await _demoVariant(repo, v);
       }
+      // The journey behind the arrival (docs/17): its delay at the destination is the one that counts.
+      ApiJourney? journey;
+      try {
+        final jl = await repo.currentJourney();
+        if (jl != null && jl.journey.arrived) journey = jl.journey;
+      } catch (_) {}
       if (result == null) {
         final live = await repo.currentRide();
         if (live != null && live.ride.status == ApiRideStatus.arrived) {
@@ -62,6 +69,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       if (!mounted) return;
       setState(() {
         _result = result;
+        _journey = journey;
         _incidents = inc;
       });
     } catch (e) {
@@ -145,12 +153,18 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     }
 
     final r = result.ride;
-    final cancelled = r.cancelled;
-    final delay = r.finalDelayMinutes ?? 0;
-    final points = r.points > 0 ? r.points : (cancelled ? 60 : delay);
-    final planned = r.plannedArrival;
-    final actual = planned?.add(Duration(minutes: delay));
-    final incident = result.incident;
+    final j = _journey;
+    final cancelled = j?.cancelled ?? r.cancelled;
+    final delay = j?.finalDelayMin ?? r.finalDelayMinutes ?? 0;
+    final points = (j?.points ?? r.points) > 0 ? (j?.points ?? r.points) : (cancelled ? 60 : delay);
+    final planned = j?.plannedArrival ?? r.plannedArrival;
+    final actual = j?.actualArrival ?? planned?.add(Duration(minutes: delay));
+    final where = j?.destinationStationName ?? r.exitStationName;
+    final lineLabel = j != null && j.legs.isNotEmpty ? j.lineLabel : r.line;
+    final origin = j?.originStationName ?? r.fromStationName;
+    // The ledger row for this journey, when the arrival result carried none.
+    final incident = result.incident ??
+        (j == null ? null : _incidents?.incidents.where((i) => (i.journeyId != null && i.journeyId == j.id) || (i.rideId != null && i.rideId == r.id)).firstOrNull);
     final ticket = r.ticket;
     final ngoId = incident?.ngoId ?? session.me?.settings.ngoId;
     final ngo = session.ngos.where((n) => n.id == ngoId).firstOrNull;
@@ -178,7 +192,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
                 child: VGhostButton(
                   label: 'Teilen',
                   icon: Icons.ios_share,
-                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Karte geteilt: „${r.line}, +$delay, ${r.exitStationName}“. (Demo)'))),
+                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Karte geteilt: „$lineLabel, +$delay, $where“. (Demo)'))),
                 ),
               ),
               Expanded(child: VGhostButton(label: 'Fertig', onTap: _finish)),
@@ -189,7 +203,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${r.line} · ${r.fromStationName} → ${r.exitStationName}', style: VText.bodyStrong),
+          Text('$lineLabel · $origin → $where', style: VText.bodyStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
           const VGap.l(),
           CountUpDelay(delay, cancelled: cancelled),
           const VGap.m(),
@@ -198,9 +212,16 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
           Text(
             cancelled
                 ? 'Reise nicht angetreten. 60 Minuten angerechnet.'
-                : 'Ankunft ${fmtLocal(actual)} statt ${fmtLocal(planned)}${r.cause != null ? ' · ${r.cause}' : ''}${r.selfEntered ? ' · selbst eingetragen' : ''}',
+                : 'Ankunft $where ${fmtLocal(actual)} statt ${fmtLocal(planned)}${r.cause != null ? ' · ${r.cause}' : ''}${r.selfEntered ? ' · selbst eingetragen' : ''}',
             style: VText.bodyS.copyWith(color: VColors.ink2),
           ),
+          if (j != null && j.missedConnection) ...[
+            const VGap.xs(),
+            Text('Anschluss verpasst in ${j.transferStationName ?? (j.legs.length > 1 ? j.legs.first.toStationName : '')}. Zählt am Ziel, nicht pro Zug.', style: VText.bodySStrong.copyWith(color: VColors.red)),
+          ] else if (j != null && j.incomplete) ...[
+            const VGap.xs(),
+            Text('Beendet unterwegs: die Verspätung bis ${j.transferStationName ?? where} zählt.', style: VText.caption),
+          ],
           const VGap.l(),
           const VRule.red(),
           if (result.newBadge != null) ...[

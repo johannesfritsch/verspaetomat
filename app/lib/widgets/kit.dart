@@ -313,7 +313,9 @@ class VDelay extends StatelessWidget {
       return Text('Ausfall', style: _style().copyWith(color: VColors.red));
     }
     if (minutes <= 0) {
-      return Text('pünktlich', style: _style().copyWith(color: VColors.green, fontWeight: FontWeight.w600));
+      final word = Text('pünktlich', style: _style().copyWith(color: VColors.green, fontWeight: FontWeight.w600), maxLines: 1, softWrap: false);
+      // At hero sizes the word must stay on one line; shrink it instead of wrapping.
+      return size == VDelaySize.display || size == VDelaySize.large ? FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: word) : word;
     }
     final s = _style();
     return RichText(

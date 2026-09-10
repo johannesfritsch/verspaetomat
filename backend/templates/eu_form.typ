@@ -29,7 +29,7 @@
 ]
 
 #section("1. Grund/Gründe für Ihren Antrag")
-#box_(d.delay) Verspätung #h(1.5em) #box_(d.cancellation) Ausfall #h(1.5em) #box_(false) Verpasster Anschluss aufgrund einer Verspätung oder eines Ausfalls
+#box_(d.delay) Verspätung #h(1.5em) #box_(d.cancellation) Ausfall #h(1.5em) #box_(d.missed) Verpasster Anschluss aufgrund einer Verspätung oder eines Ausfalls
 
 #section("3. Angaben zu Ihrer Fahrt")
 #grid(columns: (1fr, 1fr), column-gutter: 12pt, row-gutter: 7pt,
@@ -90,6 +90,13 @@
 ] else [
   Fahrpreis #d.fare, Anspruch *#d.total*. #if d.first.self_entered [Ankunftszeit vom Fahrgast selbst eingetragen.]
 ]
+#let legs_of(i) = if i.legs.len() > 1 [
+  #v(3pt)
+  #text(size: 8pt)[Teilstrecken der Fahrt am #i.date, #i.from – #i.to#if i.missed [, Anschluss verpasst]:
+    #for l in i.legs [ #l.line #l.from – #l.to (Plan #l.planned_departure – #l.planned, Ist #l.actual)#if l != i.legs.last() [;] ]
+  ]
+]
+#for i in d.incidents [ #legs_of(i) ]
 #if d.notes != "" [ #v(4pt) #d.notes ]
 
 #v(6pt)

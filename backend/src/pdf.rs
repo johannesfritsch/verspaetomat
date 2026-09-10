@@ -48,7 +48,30 @@ fn hhmm(v: Option<&Value>) -> String {
 
 fn incident_json(i: &IncidentRow) -> Value {
     let ev = i.evidence.as_ref();
+    let journey = ev.and_then(|e| e.get("journey"));
+    let legs: Vec<Value> = journey
+        .and_then(|j| j.get("legs"))
+        .and_then(|l| l.as_array())
+        .map(|legs| {
+            legs.iter()
+                .map(|l| {
+                    json!({
+                        "line": l.get("line").and_then(|v| v.as_str()).unwrap_or(""),
+                        "from": l.get("from").and_then(|v| v.as_str()).unwrap_or(""),
+                        "to": l.get("to").and_then(|v| v.as_str()).unwrap_or(""),
+                        "planned_departure": hhmm(l.get("planned_departure")),
+                        "planned": hhmm(l.get("planned_arrival")),
+                        "actual": if l.get("cancelled").and_then(|v| v.as_bool()).unwrap_or(false) { "Ausfall".to_string() } else { hhmm(l.get("actual_arrival")) },
+                        "confirmed": l.get("confirmed").and_then(|v| v.as_bool()).unwrap_or(false),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let missed = journey.and_then(|j| j.get("missed_connection")).and_then(|v| v.as_bool()).unwrap_or(false);
     json!({
+        "legs": legs,
+        "missed": missed,
         "date": i.ride_date.format("%d.%m.%Y").to_string(),
         "line": i.line,
         "from": i.from_name,
@@ -99,6 +122,7 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
         "created": berlin(claim.created_at).format("%d.%m.%Y").to_string(),
         "delay": doc.incidents.iter().any(|i| !i.cancelled),
         "cancellation": doc.incidents.iter().any(|i| i.cancelled),
+        "missed": doc.incidents.iter().any(|i| i.evidence.as_ref().and_then(|e| e.get("journey")).and_then(|j| j.get("missed_connection")).and_then(|v| v.as_bool()).unwrap_or(false)),
         "operator": doc.incidents.first().map(|i| i.operator.clone()).unwrap_or_default(),
         "kind": kind,
         "ticket_type": ticket_type,
@@ -220,6 +244,7 @@ mod tests {
             legal_deadline: NaiveDate::from_ymd_opt(2026, 12, d).unwrap(),
             evidence: Some(json!({ "planned_arrival": "2026-09-01T10:00:00Z", "actual_arrival": "2026-09-01T11:08:00Z" })),
             created_at: Utc::now(),
+            journey_id: None,
         };
         let incidents = vec![incident(1, 68), incident(3, 75), incident(5, 130)];
         let pdf = render(&ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png: None }).expect("render");
@@ -231,6 +256,26 @@ mod tests {
         let signed = render(&signed_doc).expect("render with signature");
         assert!(signed.starts_with(b"%PDF"));
         std::fs::write(std::env::temp_dir().join("verspaetomat-test.pdf"), &signed).ok();
+
+        // A journey with a missed connection: the reason is ticked, the legs are listed, one page.
+        let mut j = incident(7, 70);
+        j.line = "IC 2006 + RE 10".into();
+        j.to_name = "Kleve".into();
+        j.evidence = Some(json!({
+            "planned_arrival": "2026-09-07T16:05:00Z", "actual_arrival": "2026-09-07T17:15:00Z",
+            "journey": { "origin": "Köln Hbf", "destination": "Kleve", "missed_connection": true, "incomplete": false, "legs": [
+                { "line": "IC 2006", "from": "Köln Hbf", "to": "Düsseldorf Hbf", "planned_departure": "2026-09-07T13:46:00Z", "planned_arrival": "2026-09-07T14:08:00Z", "actual_arrival": "2026-09-07T14:40:00Z", "delay_min": 32, "cancelled": false, "confirmed": true },
+                { "line": "RE 10", "from": "Düsseldorf Hbf", "to": "Kleve", "planned_departure": "2026-09-07T14:38:00Z", "planned_arrival": "2026-09-07T16:05:00Z", "actual_arrival": "2026-09-07T17:15:00Z", "delay_min": 70, "cancelled": false, "confirmed": true }
+            ] }
+        }));
+        let with_connection = vec![j];
+        let doc = ClaimDocument { claim: &claim, incidents: &with_connection, customer: &customer, signature_png: None };
+        let inputs = claim_inputs(&doc);
+        assert_eq!(inputs["missed"], json!(true));
+        assert_eq!(inputs["first"]["legs"].as_array().unwrap().len(), 2);
+        assert_eq!(compile(&doc).expect("compile journey").pages().len(), 1, "a journey claim fits on one page");
+        let pdf = render(&doc).expect("render journey");
+        std::fs::write(std::env::temp_dir().join("verspaetomat-journey.pdf"), &pdf).ok();
     }
 
     fn signature_png() -> Vec<u8> {

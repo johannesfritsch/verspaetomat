@@ -172,6 +172,37 @@ class ApiClient {
 
   Future<ApiArrivalResult> nachtrag(NachtragRequest n) async => ApiArrivalResult.fromJson(_map(await _post('/v1/rides/nachtrag', n.toJson())));
 
+  // -- journeys (docs/17) ---------------------------------------------------
+
+  Future<ApiDestinations> destinations({String? from}) async =>
+      ApiDestinations.fromJson(_map(await _get('/v1/me/destinations', {if (from != null) 'from': from})));
+
+  Future<ApiPlan> planJourney({required String from, required String to, DateTime? time, String? firstTrip}) async => ApiPlan.fromJson(_map(await _get('/v1/journeys/plan', {
+        'from': from,
+        'to': to,
+        if (time != null) 'time': time.toUtc().toIso8601String(),
+        if (firstTrip != null) 'first_trip': firstTrip,
+      })));
+
+  Future<ApiJourneyLive> startJourney(StartJourneyRequest r) async => ApiJourneyLive.fromJson(_map(await _post('/v1/journeys', r.toJson())));
+
+  Future<ApiJourneyLive?> currentJourney() async {
+    try {
+      return ApiJourneyLive.fromJson(_map(await _get('/v1/journeys/current')));
+    } on ApiException catch (e) {
+      if (e.status == 404) return null;
+      rethrow;
+    }
+  }
+
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) async =>
+      ApiJourneyLive.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/legs', {'trip_id': tripId})));
+
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived}) async =>
+      ApiJourney.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/finish', {'arrived': arrived})));
+
+  Future<List<ApiJourney>> journeys() async => _list(await _get('/v1/journeys')).map(ApiJourney.fromJson).toList();
+
   // -- ledger and claims ----------------------------------------------------
 
   Future<ApiIncidents> incidents() async => ApiIncidents.fromJson(_map(await _get('/v1/incidents')));

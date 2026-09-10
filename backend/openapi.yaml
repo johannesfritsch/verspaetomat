@@ -91,7 +91,61 @@ paths:
       responses: { "200": { description: "{stored: true, platform}" }, "400": { description: bad platform or token } }
     delete: { summary: Clear the push token, responses: { "200": { description: "{stored: false}" } } }
 
+  /v1/me/destinations:
+    get:
+      summary: Predicted destinations for the check-in (docs/17)
+      parameters: [{ name: from, in: query, schema: { type: string }, description: stop id of the current station }]
+      responses: { '200': { description: '{home, predicted[≤3], recent[≤5]}' } }
+  /v1/journeys/plan:
+    get:
+      summary: Rail itineraries from one stop to another (Transitous plan), preferred = next departure
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string } }
+        - { name: to, in: query, required: true, schema: { type: string } }
+        - { name: time, in: query, schema: { type: string, format: date-time } }
+        - { name: first_trip, in: query, schema: { type: string }, description: keep only itineraries starting with this trip }
+      responses: { '200': { description: '{from, to, itineraries[]}' } }
+  /v1/journeys:
+    get:
+      summary: Journey history, newest first; rides from before journeys appear as single-leg journeys
+      responses: { '200': { description: '[Journey]' } }
+    post:
+      summary: Start a journey (destination first); creates the itinerary snapshot and leg 1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_station_id, from_station_name, to_station_id, to_station_name, legs]
+              properties:
+                from_station_id: { type: string }
+                from_station_name: { type: string }
+                to_station_id: { type: string }
+                to_station_name: { type: string }
+                legs: { type: array, items: { type: object, required: [trip_id, from_station_id, to_station_id], properties: { trip_id: { type: string }, from_station_id: { type: string }, to_station_id: { type: string }, from_station_name: { type: string }, to_station_name: { type: string } } } }
+                ticket: { type: string, enum: [deutschlandticket, zeitkarte, einzelfahrkarte] }
+                location: { type: object, properties: { lat: { type: number }, lon: { type: number }, accuracy_m: { type: number } } }
+                from_lat: { type: number }
+                from_lon: { type: number }
+      responses: { '200': { description: the journeys/current shape }, '409': { description: already on a journey } }
+  /v1/journeys/current:
+    get:
+      summary: The journey in progress (riding or at a transfer with the proposed next leg), or the arrival of the last two hours
+      responses: { '200': { description: '{journey, ride, stops, eta, next_leg, just_arrived, claim_from_minute}' }, '404': { description: nothing current } }
+  /v1/journeys/{id}/legs:
+    post:
+      summary: Confirm the next leg at a transfer (the proposal, or any trip from there that reaches the destination or the next transfer)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { trip_id: { type: string } } } } } }
+      responses: { '200': { description: the journeys/current shape }, '409': { description: not at a transfer } }
+  /v1/journeys/{id}/finish:
+    post:
+      summary: '"Ich bin da" (arrived: true, finalises with the delay now) or abort (arrived: false, no incident)'
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { arrived: { type: boolean, default: true } } } } } }
+      responses: { '200': { description: Journey } }
   /v1/rides:
+    # Since docs/17 a single-train check-in creates a one-leg journey behind the scenes.
     get: { summary: Ride history (newest first), responses: { "200": { description: "[Ride]" } } }
     post:
       summary: Check in. The follower polls the trip from now on.

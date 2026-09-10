@@ -128,9 +128,9 @@ pub async fn cancel(State(s): State<AppState>, _a: Admin, Path(key): Path<String
     o.cancelled = true;
     s.train.set_override(&s.pool, o.clone()).await.map_err(internal)?;
     let _ = crate::train::follower::poll_once(&s.pool, &s.train, &tokio::sync::broadcast::channel(1).0).await;
-    let fin = handlers::on_ride_finalised(&s.pool, r.id).await.map_err(internal)?;
+    let fin = handlers::on_ride_finalised(&s, r.id).await.map_err(internal)?;
     let r: RideRow = sqlx::query_as("select * from rides where id = $1").bind(r.id).fetch_one(&s.pool).await.map_err(internal)?;
-    s.events.publish(c.id, "ride", json!({ "ride_id": r.id, "status": r.status, "cancelled": true }));
+    s.events.publish(c.id, "ride", json!({ "ride_id": r.id, "status": r.status, "cancelled": true, "silent": fin.silent_ride, "journey_id": r.journey_id }));
     Ok(Json(json!({ "override": o, "ride": r, "incident": fin.incident, "new_badge": fin.new_badge })))
 }
 
@@ -152,9 +152,13 @@ pub async fn fast_forward(State(s): State<AppState>, _a: Admin, Path(key): Path<
     if r2.status != RideStatus::Arrived {
         return Err(err(StatusCode::CONFLICT, "follower did not finalise the ride; check the exit stop"));
     }
-    let fin = handlers::on_ride_finalised(&s.pool, r.id).await.map_err(internal)?;
-    s.events.publish(c.id, "ride", json!({ "ride_id": r2.id, "status": "arrived", "final_delay_min": r2.final_delay_min, "incident": fin.incident.as_ref().map(|i| i.id) }));
-    Ok(Json(json!({ "ride": r2, "incident": fin.incident, "new_badge": fin.new_badge, "override": o })))
+    let fin = handlers::on_ride_finalised(&s, r.id).await.map_err(internal)?;
+    s.events.publish(c.id, "ride", handlers::ride_arrived_payload(r2.id, r2.final_delay_min.unwrap_or(0) as i64, &fin));
+    let journey = match &fin.journey {
+        Some(j) => Some(crate::journeys::journey_json(&s.pool, j).await.map_err(internal)?),
+        None => None,
+    };
+    Ok(Json(json!({ "ride": r2, "incident": fin.incident, "new_badge": fin.new_badge, "override": o, "journey": journey })))
 }
 
 pub async fn poll(State(s): State<AppState>, _a: Admin) -> ApiResult {
@@ -162,8 +166,8 @@ pub async fn poll(State(s): State<AppState>, _a: Admin) -> ApiResult {
     crate::train::follower::poll_once(&s.pool, &s.train, &tx).await.map_err(internal)?;
     let mut finalised = Vec::new();
     while let Ok(ev) = rx.try_recv() {
-        let fin = handlers::on_ride_finalised(&s.pool, ev.ride_id).await.map_err(internal)?;
-        s.events.publish(ev.customer_id, "ride", json!({ "ride_id": ev.ride_id, "status": "arrived", "final_delay_min": ev.final_delay_min, "incident": fin.incident.as_ref().map(|i| i.id) }));
+        let fin = handlers::on_ride_finalised(&s, ev.ride_id).await.map_err(internal)?;
+        s.events.publish(ev.customer_id, "ride", handlers::ride_arrived_payload(ev.ride_id, ev.final_delay_min, &fin));
         finalised.push(json!({ "ride_id": ev.ride_id, "delay": ev.final_delay_min, "incident": fin.incident.map(|i| i.id) }));
     }
     Ok(Json(json!({ "finalised": finalised, "now": clock::now() })))
@@ -237,7 +241,7 @@ pub async fn reset(State(s): State<AppState>, _a: Admin, Path(key): Path<String>
     for t in &trips {
         let _ = s.train.clear_override(&s.pool, t).await;
     }
-    for table in ["mails", "claims", "incidents", "uploads", "rides", "badge_awards", "sim_customer_location"] {
+    for table in ["mails", "claims", "incidents", "uploads", "rides", "journeys", "badge_awards", "sim_customer_location"] {
         sqlx::query(&format!("delete from {table} where customer_id = $1")).bind(c.id).execute(&s.pool).await.map_err(internal)?;
     }
     s.events.publish(c.id, "reset", json!({}));
@@ -529,6 +533,39 @@ mod tests {
         assert_eq!(parse_report_amount("4,5 €"), Some(450));
         assert_eq!(parse_report_amount("4,505"), None);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Journeys (docs/17): the Stellwerk's view and the confirmation the phone would send.
+// ---------------------------------------------------------------------------
+
+/// `GET /admin/customers/{key}/journey`: the current (or last) journey with legs and the proposal.
+pub async fn journey(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let j: Option<JourneyRow> = sqlx::query_as("select * from journeys where customer_id = $1 order by (status in ('riding','transfer')) desc, created_at desc limit 1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(j) = j else { return Ok(Json(json!({ "customer": c.nickname, "journey": Value::Null }))) };
+    let mut v = crate::journeys::current_payload(&s, &j, false).await.map_err(internal)?;
+    v["customer"] = json!(c.nickname);
+    v["now"] = json!(clock::now());
+    Ok(Json(v))
+}
+
+#[derive(Deserialize, Default)]
+pub struct ConfirmBody {
+    #[serde(default)]
+    pub trip_id: Option<String>,
+}
+
+/// `POST /admin/customers/{key}/confirm`: confirms the proposed next leg (or a given trip) as the phone would.
+pub async fn confirm(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, body: Option<Json<ConfirmBody>>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let j: Option<JourneyRow> = sqlx::query_as("select * from journeys where customer_id = $1 and status = 'transfer' order by created_at desc limit 1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(j) = j else { return Err(err(StatusCode::CONFLICT, "customer is not waiting at a transfer")) };
+    let trip_id = body.and_then(|b| b.0.trip_id);
+    let updated = crate::journeys::confirm(&s, &c, &j, trip_id.as_deref()).await?;
+    let mut v = crate::journeys::current_payload(&s, &updated, false).await.map_err(internal)?;
+    v["customer"] = json!(c.nickname);
+    Ok(Json(v))
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 //! Live train data: the Transitous (MOTIS) adapter and the trip follower.
 //!
 //! Public surface used by main.rs and handlers:
-//! - `transitous::TransitousClient::new()` then `nearby_stops`, `search_stops`, `departures`, `trip`
+//! - `transitous::TransitousClient::new()` then `nearby_stops`, `search_stops`, `departures`, `trip`, `plan`
 //! - `follower::spawn(pool, client, interval)` returns a broadcast sender of `RideFinalised`
 //! - `follower::finalise_ride(...)` for manual arrivals (E3) and demo controls
 //! - `agency_to_operator`, `normalise_station_name`, `station_names_match`
@@ -77,6 +77,57 @@ pub struct TripStop {
     pub scheduled_departure: Option<DateTime<Utc>>,
     pub live_departure: Option<DateTime<Utc>>,
     pub cancelled: bool,
+}
+
+/// One rail leg of a planned itinerary (docs/17 "Leg").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanLeg {
+    pub trip_id: String,
+    pub line: String,
+    #[serde(default)]
+    pub train_number: Option<String>,
+    pub headsign: String,
+    #[serde(default)]
+    pub agency_name: String,
+    pub operator: String,
+    pub category: TrainCategory,
+    #[serde(default)]
+    pub mode: String,
+    pub from_station_id: String,
+    pub from_station_name: String,
+    pub to_station_id: String,
+    pub to_station_name: String,
+    pub planned_departure: DateTime<Utc>,
+    pub planned_arrival: DateTime<Utc>,
+    pub live_departure: Option<DateTime<Utc>>,
+    pub live_arrival: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub cancelled: bool,
+    #[serde(default)]
+    pub realtime: bool,
+    /// Live arrival delay at the leg's exit stop, minutes.
+    #[serde(default)]
+    pub delay_min: i64,
+}
+
+/// A planned journey from A to B: rail legs only, walks between platforms folded away.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Itinerary {
+    pub id: String,
+    pub transfers: i64,
+    pub planned_departure: DateTime<Utc>,
+    pub planned_arrival: DateTime<Utc>,
+    pub live_arrival: Option<DateTime<Utc>>,
+    pub duration_min: i64,
+    pub legs: Vec<PlanLeg>,
+}
+
+impl Itinerary {
+    pub fn transfer_stations(&self) -> Vec<String> {
+        self.legs.iter().take(self.legs.len().saturating_sub(1)).map(|l| l.to_station_name.clone()).collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

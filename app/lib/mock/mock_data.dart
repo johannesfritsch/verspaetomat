@@ -261,6 +261,71 @@ class Mock {
     const Stop(name: 'Rheine', planned: TimeOfDay(hour: 10, minute: 5)),
   ];
 
+  /// Second legs at Hagen Hbf for the connecting itineraries (docs/17 demo).
+  static final departuresHagenHbf = <Departure>[
+    Departure(
+      id: 're4-0850',
+      line: 'RE 4',
+      destination: 'Düsseldorf Hbf',
+      planned: const TimeOfDay(hour: 8, minute: 50),
+      platform: '3',
+      category: TrainCategory.re,
+      operator: 'DB Regio NRW',
+      stops: const [
+        Stop(name: 'Hagen Hbf', planned: TimeOfDay(hour: 8, minute: 50)),
+        Stop(name: 'Wuppertal Hbf', planned: TimeOfDay(hour: 9, minute: 12)),
+        Stop(name: 'Düsseldorf Hbf', planned: TimeOfDay(hour: 9, minute: 41)),
+      ],
+    ),
+    Departure(
+      id: 'rb52-0855',
+      line: 'RB 52',
+      destination: 'Lüdenscheid',
+      planned: const TimeOfDay(hour: 8, minute: 55),
+      platform: '6',
+      category: TrainCategory.rb,
+      operator: 'DB Regio NRW',
+      stops: const [
+        Stop(name: 'Hagen Hbf', planned: TimeOfDay(hour: 8, minute: 55)),
+        Stop(name: 'Rummenohl', planned: TimeOfDay(hour: 9, minute: 12)),
+        Stop(name: 'Brügge (Westf)', planned: TimeOfDay(hour: 9, minute: 27)),
+        Stop(name: 'Lüdenscheid', planned: TimeOfDay(hour: 9, minute: 38)),
+      ],
+    ),
+    Departure(
+      id: 'rb52-0955',
+      line: 'RB 52',
+      destination: 'Lüdenscheid',
+      planned: const TimeOfDay(hour: 9, minute: 55),
+      platform: '6',
+      category: TrainCategory.rb,
+      operator: 'DB Regio NRW',
+      stops: const [
+        Stop(name: 'Hagen Hbf', planned: TimeOfDay(hour: 9, minute: 55)),
+        Stop(name: 'Rummenohl', planned: TimeOfDay(hour: 10, minute: 12)),
+        Stop(name: 'Brügge (Westf)', planned: TimeOfDay(hour: 10, minute: 27)),
+        Stop(name: 'Lüdenscheid', planned: TimeOfDay(hour: 10, minute: 38)),
+      ],
+    ),
+    Departure(
+      id: 're4-0950',
+      line: 'RE 4',
+      destination: 'Düsseldorf Hbf',
+      planned: const TimeOfDay(hour: 9, minute: 50),
+      platform: '3',
+      category: TrainCategory.re,
+      operator: 'DB Regio NRW',
+      stops: const [
+        Stop(name: 'Hagen Hbf', planned: TimeOfDay(hour: 9, minute: 50)),
+        Stop(name: 'Wuppertal Hbf', planned: TimeOfDay(hour: 10, minute: 12)),
+        Stop(name: 'Düsseldorf Hbf', planned: TimeOfDay(hour: 10, minute: 41)),
+      ],
+    ),
+  ];
+
+  /// Every mocked departure, whatever the station: the demo looks trips up by id.
+  static List<Departure> get allDepartures => [...departuresKoelnHbf, ...departuresHagenHbf];
+
   static final departuresKoelnHbf = <Departure>[
     Departure(
       id: 're7-0747',
@@ -355,6 +420,22 @@ class Mock {
       ],
       cancelled: true,
       cause: 'Kurzfristiger Personalausfall',
+    ),
+    Departure(
+      id: 'rb26-0805',
+      line: 'RB 26',
+      destination: 'Koblenz Hbf',
+      planned: const TimeOfDay(hour: 8, minute: 5),
+      platform: '1',
+      category: TrainCategory.rb,
+      operator: 'DB Regio NRW',
+      stops: const [
+        Stop(name: 'Köln Hbf', planned: TimeOfDay(hour: 8, minute: 5)),
+        Stop(name: 'Köln Süd', planned: TimeOfDay(hour: 8, minute: 9)),
+        Stop(name: 'Bonn Hbf', planned: TimeOfDay(hour: 8, minute: 31)),
+        Stop(name: 'Remagen', planned: TimeOfDay(hour: 8, minute: 49)),
+        Stop(name: 'Koblenz Hbf', planned: TimeOfDay(hour: 9, minute: 22)),
+      ],
     ),
     Departure(
       id: 're9-0804',

@@ -47,7 +47,21 @@ pub struct Facts {
     pub ride: Option<RideFacts>,
     pub claim: Option<ClaimFacts>,
     pub incident: Option<IncidentFacts>,
+    pub journey: Option<JourneyFacts>,
     pub ngo_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JourneyFacts {
+    pub origin: String,
+    pub destination: String,
+    pub delay_min: i64,
+    pub points: i64,
+    pub cancelled: bool,
+    pub missed_connection: bool,
+    pub incomplete: bool,
+    pub transfer_station: Option<String>,
+    pub claim_cents: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +111,40 @@ pub fn compose(kind: &str, payload: &Value, facts: &Facts) -> Option<Notificatio
     let b = |k: &str| payload.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
     let ngo = facts.ngo_name.clone().unwrap_or_else(|| "deinen Verein".to_string());
     match kind {
+        // A leg of a multi-leg journey stays quiet: the journey's own push says it all.
+        "ride" if b("silent") => None,
+        "journey" if b("transfer") => {
+            let next = payload.get("next_leg")?;
+            let line = next.get("line").and_then(|v| v.as_str()).unwrap_or("Anschluss");
+            let headsign = next.get("headsign").and_then(|v| v.as_str()).unwrap_or("");
+            let dep = next.get("live_departure").or(next.get("planned_departure")).and_then(|v| v.as_str()).and_then(|v| v.parse::<chrono::DateTime<chrono::Utc>>().ok());
+            let hhmm = dep.map(|d| d.with_timezone(&chrono_tz::Europe::Berlin).format("%H:%M").to_string()).unwrap_or_default();
+            let platform = next.get("platform").and_then(|v| v.as_str()).map(|p| format!(", Gleis {p}")).unwrap_or_default();
+            let replanned = next.get("replanned").and_then(|v| v.as_bool()).unwrap_or(false);
+            let title = if headsign.is_empty() { format!("Anschluss {line}") } else { format!("Anschluss {line} nach {headsign}") };
+            let body = if replanned { format!("Anschluss verpasst. Nächste Möglichkeit {hhmm}{platform} · Bist du drin?") } else { format!("{hhmm}{platform} · Bist du drin?") };
+            Some(Notification { title, body, kind: "journey", data: json!({ "journey_id": s("journey_id"), "transfer": true }) })
+        }
+        "journey" if b("finished") => {
+            let j = facts.journey.as_ref()?;
+            if s("status").as_deref() == Some("abandoned") || b("silent") {
+                return None;
+            }
+            let route = format!("{} → {}", j.origin, j.destination);
+            let (title, mut body) = if j.incomplete {
+                ("Fahrt beendet".to_string(), format!("Ohne Ankunft am Ziel gewertet: +{} bis {}. {} Geduldspunkte. {}", j.delay_min, j.transfer_station.clone().unwrap_or_else(|| "zum letzten Halt".into()), j.points, claim_line(j.claim_cents, &ngo)))
+            } else if j.cancelled {
+                (format!("Ausfall · {route}"), format!("{} Geduldspunkte. {}", j.points, claim_line(j.claim_cents, &ngo)))
+            } else if j.delay_min <= 0 {
+                (format!("Pünktlich · {route}"), format!("Angekommen in {}. Kein Punkt heute, dafür kein Ärger.", j.destination))
+            } else {
+                (format!("+{} · {route}", j.delay_min), format!("{} Geduldspunkte. {}", j.points, claim_line(j.claim_cents, &ngo)))
+            };
+            if j.missed_connection && !j.incomplete {
+                body = format!("{} Anschluss in {} verpasst.", body.trim(), j.transfer_station.clone().unwrap_or_else(|| "unterwegs".into()));
+            }
+            Some(Notification { title, body: body.trim().to_string(), kind: "journey", data: json!({ "journey_id": s("journey_id"), "arrived": true }) })
+        }
         "ride" if s("status").as_deref() == Some("arrived") => {
             let r = facts.ride.as_ref()?;
             let (title, body) = if r.cancelled {
@@ -192,6 +240,34 @@ pub async fn facts(pool: &PgPool, customer: Uuid, kind: &str, payload: &Value) -
                 delay_min: delay.unwrap_or(0) as i64,
                 points: points as i64,
                 cancelled,
+                claim_cents: cents,
+            });
+        }
+    }
+    if kind == "journey" {
+        if let Some(journey_id) = id("journey_id") {
+            let row: Option<(String, String, Option<i32>, i32, bool, bool, bool, Option<i64>)> = sqlx::query_as(
+                "select j.origin_station_name, j.destination_station_name, j.final_delay_min, j.points, j.cancelled, j.missed_connection, j.incomplete, i.amount_cents
+                 from journeys j left join incidents i on i.journey_id = j.id where j.id = $1",
+            )
+            .bind(journey_id)
+            .fetch_optional(pool)
+            .await?;
+            let transfer: Option<String> = sqlx::query_scalar(
+                "select case when cancelled then from_station_name else exit_station_name end from rides where journey_id = $1 and status = 'arrived' order by leg_no desc limit 1",
+            )
+            .bind(journey_id)
+            .fetch_optional(pool)
+            .await?;
+            f.journey = row.map(|(origin, destination, delay, points, cancelled, missed, incomplete, cents)| JourneyFacts {
+                origin,
+                destination,
+                delay_min: delay.unwrap_or(0) as i64,
+                points: points as i64,
+                cancelled,
+                missed_connection: missed,
+                incomplete,
+                transfer_station: transfer,
                 claim_cents: cents,
             });
         }
@@ -518,6 +594,27 @@ mod tests {
         assert_eq!(n.body, "68 Geduldspunkte. Anspruch entstanden: 1,50 € für Bahnhofsmission Köln.");
         assert_eq!(n.kind, "ride");
         assert_eq!(n.data["ride_id"], "r1");
+    }
+
+    #[test]
+    fn journey_pushes() {
+        let mut f = facts_with("Bahnhofsmission Köln");
+        // Transfer: the proposal speaks, with platform and time.
+        let n = compose("journey", &json!({ "journey_id": "j1", "transfer": true, "next_leg": { "line": "RE 10", "headsign": "Kleve", "planned_departure": "2026-09-10T14:38:00Z", "platform": "3", "replanned": false } }), &f).unwrap();
+        assert_eq!(n.title, "Anschluss RE 10 nach Kleve");
+        assert_eq!(n.body, "16:38, Gleis 3 · Bist du drin?");
+        assert_eq!(n.kind, "journey");
+        let n = compose("journey", &json!({ "journey_id": "j1", "transfer": true, "next_leg": { "line": "RE 10", "headsign": "Kleve", "planned_departure": "2026-09-10T15:07:00Z", "replanned": true } }), &f).unwrap();
+        assert!(n.body.starts_with("Anschluss verpasst. Nächste Möglichkeit 17:07 · "));
+        // Arrival with a missed connection.
+        f.journey = Some(JourneyFacts { origin: "Köln Hbf".into(), destination: "Kleve".into(), delay_min: 70, points: 70, cancelled: false, missed_connection: true, incomplete: false, transfer_station: Some("Düsseldorf Hbf".into()), claim_cents: Some(150) });
+        let n = compose("journey", &json!({ "journey_id": "j1", "finished": true, "arrived": true, "status": "arrived" }), &f).unwrap();
+        assert_eq!(n.title, "+70 · Köln Hbf → Kleve");
+        assert_eq!(n.body, "70 Geduldspunkte. Anspruch entstanden: 1,50 € für Bahnhofsmission Köln. Anschluss in Düsseldorf Hbf verpasst.");
+        // A leg of a multi-leg journey is silent; an abandoned journey too.
+        f.ride = Some(RideFacts { line: "RE 7".into(), exit_station: "Hagen".into(), delay_min: 25, points: 0, cancelled: false, claim_cents: None });
+        assert!(compose("ride", &json!({ "ride_id": "r1", "status": "arrived", "silent": true }), &f).is_none());
+        assert!(compose("journey", &json!({ "journey_id": "j1", "finished": true, "status": "abandoned" }), &f).is_none());
     }
 
     #[test]

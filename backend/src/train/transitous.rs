@@ -9,18 +9,22 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tokio::task::JoinSet;
 
-use super::{agency_to_operator, category_for, haversine_m, is_rail_mode, parse_line, DepartureInfo, StopInfo, TripInfo, TripStop};
+use super::{agency_to_operator, category_for, haversine_m, is_rail_mode, parse_line, DepartureInfo, Itinerary, PlanLeg, StopInfo, TripInfo, TripStop};
 
 const DEFAULT_BASE: &str = "https://api.transitous.org";
 const USER_AGENT: &str = "verspaetomat-api/0.1 (+https://verspaetomat.de)";
 const DEPARTURE_CACHE_TTL: Duration = Duration::from_secs(30);
+const PLAN_CACHE_TTL: Duration = Duration::from_secs(60);
 const NEARBY_CANDIDATES: usize = 8;
+/// MOTIS transit modes that are railway service (docs/17); the plan never proposes bus or tram legs.
+const RAIL_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,SUBURBAN";
 
 #[derive(Clone)]
 pub struct TransitousClient {
     http: reqwest::Client,
     base: String,
     departure_cache: Arc<Mutex<HashMap<String, (Instant, Vec<DepartureInfo>)>>>,
+    plan_cache: Arc<Mutex<HashMap<String, (Instant, Vec<Itinerary>)>>>,
 }
 
 impl Default for TransitousClient {
@@ -40,7 +44,7 @@ impl TransitousClient {
             .timeout(Duration::from_secs(10))
             .build()
             .expect("reqwest client");
-        Self { http, base: base.into(), departure_cache: Arc::new(Mutex::new(HashMap::new())) }
+        Self { http, base: base.into(), departure_cache: Arc::new(Mutex::new(HashMap::new())), plan_cache: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
@@ -148,6 +152,35 @@ impl TransitousClient {
             .map(|(_, v)| v.clone())
     }
 
+    /// Rail itineraries from one stop to another at (or after) `time`. Walks between platforms
+    /// are folded into the transfer; an itinerary with a bus or tram leg is dropped. Cached for
+    /// 60 s per (from, to, minute) so a burst of app requests is one call to Transitous.
+    pub async fn plan(&self, from: &str, to: &str, time: DateTime<Utc>, n: usize) -> Result<Vec<Itinerary>> {
+        let key = format!("{from}|{to}|{}", time.format("%Y-%m-%dT%H:%M"));
+        if let Some((at, v)) = self.plan_cache.lock().unwrap().get(&key) {
+            if at.elapsed() < PLAN_CACHE_TTL {
+                return Ok(v.clone());
+            }
+        }
+        let resp: PlanResponse = self
+            .get_json(
+                "/api/v1/plan",
+                &[
+                    ("fromPlace", from.to_string()),
+                    ("toPlace", to.to_string()),
+                    ("time", time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+                    ("numItineraries", n.max(1).to_string()),
+                    ("transitModes", RAIL_MODES.to_string()),
+                ],
+            )
+            .await?;
+        let mut out: Vec<Itinerary> = resp.itineraries.into_iter().filter_map(itinerary_from).collect();
+        out.sort_by_key(|i| i.planned_departure);
+        out.dedup_by(|a, b| a.legs.iter().map(|l| l.trip_id.as_str()).eq(b.legs.iter().map(|l| l.trip_id.as_str())));
+        self.plan_cache.lock().unwrap().insert(key, (Instant::now(), out.clone()));
+        Ok(out)
+    }
+
     /// One trip with all its stops and live times.
     pub async fn trip(&self, trip_id: &str) -> Result<TripInfo> {
         let resp: TripResponse = self.get_json("/api/v1/trip", &[("tripId", trip_id.to_string())]).await?;
@@ -206,6 +239,57 @@ fn departure_from(st: StopTime) -> Option<DepartureInfo> {
         platform: st.place.track.or(st.place.scheduled_track),
         cancelled: st.cancelled.unwrap_or(false) || st.trip_cancelled.unwrap_or(false) || st.place.cancelled.unwrap_or(false),
         realtime: st.real_time.unwrap_or(false),
+    })
+}
+
+/// A MOTIS itinerary → ours, or None when a leg is not railway service.
+fn itinerary_from(it: PlanItinerary) -> Option<Itinerary> {
+    let mut legs = Vec::new();
+    for l in it.legs.into_iter().filter(|l| l.mode != "WALK") {
+        if !is_rail_mode(&l.mode) {
+            return None;
+        }
+        let (line, train_number) = parse_line(l.route_short_name.as_deref().unwrap_or(""));
+        let agency_name = l.agency_name.clone().unwrap_or_default();
+        let planned_departure = l.from.scheduled_departure.or(l.scheduled_start_time).or(l.from.departure)?;
+        let planned_arrival = l.to.scheduled_arrival.or(l.scheduled_end_time).or(l.to.arrival)?;
+        let realtime = l.real_time.unwrap_or(false);
+        let live_departure = if realtime { l.from.departure.or(l.start_time) } else { None };
+        let live_arrival = if realtime { l.to.arrival.or(l.end_time) } else { None };
+        let cancelled = l.cancelled.unwrap_or(false) || l.from.cancelled.unwrap_or(false) || l.to.cancelled.unwrap_or(false);
+        legs.push(PlanLeg {
+            trip_id: l.trip_id.clone()?,
+            category: category_for(&l.mode, &line),
+            operator: agency_to_operator(&agency_name),
+            line,
+            train_number,
+            headsign: l.headsign.clone().unwrap_or_default(),
+            agency_name,
+            mode: l.mode.clone(),
+            from_station_id: l.from.stop_id.clone()?,
+            from_station_name: crate::train::display_station_name(l.from.name.as_deref().unwrap_or("")),
+            to_station_id: l.to.stop_id.clone()?,
+            to_station_name: crate::train::display_station_name(l.to.name.as_deref().unwrap_or("")),
+            planned_departure,
+            planned_arrival,
+            live_departure,
+            live_arrival,
+            platform: l.from.track.clone().or(l.from.scheduled_track.clone()),
+            cancelled,
+            realtime,
+            delay_min: live_arrival.map(|a| (a - planned_arrival).num_minutes()).unwrap_or(0),
+        });
+    }
+    let first = legs.first()?;
+    let last = legs.last()?;
+    Some(Itinerary {
+        id: it.id.unwrap_or_default(),
+        transfers: (legs.len() as i64 - 1).max(0),
+        planned_departure: first.planned_departure,
+        planned_arrival: last.planned_arrival,
+        live_arrival: last.live_arrival,
+        duration_min: (last.planned_arrival - first.planned_departure).num_minutes(),
+        legs,
     })
 }
 
@@ -272,6 +356,21 @@ struct TripPlace {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct PlanResponse {
+    #[serde(default)]
+    itineraries: Vec<PlanItinerary>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanItinerary {
+    id: Option<String>,
+    #[serde(default)]
+    legs: Vec<Leg>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TripResponse {
     #[serde(default)]
     legs: Vec<Leg>,
@@ -291,6 +390,10 @@ struct Leg {
     agency_name: Option<String>,
     trip_id: Option<String>,
     route_short_name: Option<String>,
+    scheduled_start_time: Option<DateTime<Utc>>,
+    scheduled_end_time: Option<DateTime<Utc>>,
+    start_time: Option<DateTime<Utc>>,
+    end_time: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]
@@ -320,6 +423,28 @@ mod tests {
         let leg = &resp.legs[0];
         let stop = trip_stop_from(&leg.intermediate_stops[0]);
         assert_eq!((stop.live_arrival.unwrap() - stop.scheduled_arrival.unwrap()).num_minutes(), 33);
+    }
+
+    #[test]
+    fn plan_shape_parses_and_folds_walks() {
+        let raw = r#"{"itineraries":[{"id":"it1","transfers":1,"legs":[
+          {"mode":"LONG_DISTANCE","from":{"name":"Köln Hbf","stopId":"a","scheduledDeparture":"2026-09-10T15:46:00Z","departure":"2026-09-10T16:01:00Z","track":"4"},"to":{"name":"Düsseldorf Hbf","stopId":"b","scheduledArrival":"2026-09-10T16:08:00Z","arrival":"2026-09-10T16:23:00Z"},"realTime":true,"agencyName":"DB Fernverkehr AG","routeShortName":"IC 2006","headsign":"Emden","tripId":"t1"},
+          {"mode":"WALK","from":{"name":"Düsseldorf Hbf","stopId":"b"},"to":{"name":"Düsseldorf Hbf","stopId":"b2"}},
+          {"mode":"REGIONAL_RAIL","from":{"name":"Düsseldorf Hbf","stopId":"b2","scheduledDeparture":"2026-09-10T16:38:00Z"},"to":{"name":"Kleve Bahnhof","stopId":"c","scheduledArrival":"2026-09-10T18:05:00Z"},"realTime":false,"agencyName":"NordWestBahn GmbH","routeShortName":"RE10 (82294)","headsign":"Kleve","tripId":"t2"}]},
+          {"id":"it2","transfers":0,"legs":[{"mode":"BUS","from":{"name":"x","stopId":"x","scheduledDeparture":"2026-09-10T16:00:00Z"},"to":{"name":"y","stopId":"y","scheduledArrival":"2026-09-10T17:00:00Z"},"tripId":"t3"}]}]}"#;
+        let resp: PlanResponse = serde_json::from_str(raw).unwrap();
+        let its: Vec<Itinerary> = resp.itineraries.into_iter().filter_map(itinerary_from).collect();
+        assert_eq!(its.len(), 1, "the bus itinerary is dropped");
+        let it = &its[0];
+        assert_eq!(it.legs.len(), 2, "the walk is folded");
+        assert_eq!(it.transfers, 1);
+        assert_eq!(it.transfer_stations(), vec!["Düsseldorf Hbf".to_string()]);
+        assert_eq!(it.legs[0].line, "IC 2006");
+        assert_eq!(it.legs[0].delay_min, 15);
+        assert_eq!(it.legs[0].platform.as_deref(), Some("4"));
+        assert_eq!(it.legs[1].line, "RE 10");
+        assert_eq!(it.legs[1].operator, "NordWestBahn");
+        assert_eq!(it.duration_min, 139);
     }
 
     /// Live API. Run with `cargo test -- --ignored`.

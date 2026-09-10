@@ -462,7 +462,7 @@ pub async fn delete_push_token(State(s): State<AppState>, c: Customer) -> ApiRes
 // Rides
 // ---------------------------------------------------------------------------
 
-fn map_operator(ops: &[OperatorRow], agency: &str) -> String {
+pub fn map_operator(ops: &[OperatorRow], agency: &str) -> String {
     let a = agency_to_operator(agency);
     if let Some(o) = ops.iter().find(|o| o.name == a || o.aliases.iter().any(|x| x == agency || x == &a)) {
         return o.name.clone();
@@ -560,7 +560,10 @@ pub async fn check_in(State(s): State<AppState>, c: Customer, Json(ci): Json<Che
     .map_err(internal)?;
     let _ = sqlx::query("insert into ride_snapshots (ride_id, source, payload) values ($1, 'transitous', $2)").bind(id).bind(json!(t)).execute(&s.pool).await;
     rules::audit(&s.pool, "ride", id, None, "riding", "check-in").await.map_err(internal)?;
-    Ok(Json(json!({ "ride": row, "stops": t.stops })))
+    // Every ride is a leg of a journey (docs/17); the single-train check-in is a one-leg journey.
+    let journey = crate::journeys::create_single_leg(&s.pool, &row, &t).await.map_err(internal)?;
+    let row: RideRow = sqlx::query_as("select * from rides where id = $1").bind(id).fetch_one(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({ "ride": row, "stops": t.stops, "journey_id": journey.id })))
 }
 
 pub async fn current_ride(State(s): State<AppState>, c: Customer) -> ApiResult {
@@ -607,7 +610,7 @@ pub async fn arrival(State(s): State<AppState>, c: Customer, Json(a): Json<Arriv
     };
     let actual = a.actual_arrival.unwrap_or(r.planned_arrival + Duration::minutes(delay));
     crate::train::follower::finalise_ride(&s.pool, r.id, delay, a.cancelled || r.cancelled, Some(actual), a.self_entered).await.map_err(internal)?;
-    let created = on_ride_finalised(&s.pool, r.id).await.map_err(internal)?;
+    let created = on_ride_finalised(&s, r.id).await.map_err(internal)?;
     let ride: RideRow = sqlx::query_as("select * from rides where id = $1").bind(r.id).fetch_one(&s.pool).await.map_err(internal)?;
     Ok(Json(json!({
         "ride": ride,
@@ -620,11 +623,22 @@ pub async fn arrival(State(s): State<AppState>, c: Customer, Json(a): Json<Arriv
 pub struct Finalised {
     pub incident: Option<IncidentRow>,
     pub new_badge: Option<BadgeRow>,
+    /// The journey this ride was a leg of, after the transition.
+    pub journey: Option<JourneyRow>,
+    /// True when the ride's own arrival push should stay silent because the journey speaks.
+    pub silent_ride: bool,
 }
 
-/// Called after a ride is finalised (by the follower or manually): incident, badges.
-pub async fn on_ride_finalised(pool: &PgPool, ride_id: Uuid) -> anyhow::Result<Finalised> {
+/// Called after a ride is finalised (by the follower or manually). A leg of a journey moves the
+/// journey on (transfer or arrival, docs/17); a ride without a journey (Nachtrag, old rows) gets
+/// its incident directly.
+pub async fn on_ride_finalised(s: &AppState, ride_id: Uuid) -> anyhow::Result<Finalised> {
+    let pool = &s.pool;
     let r: RideRow = sqlx::query_as("select * from rides where id = $1").bind(ride_id).fetch_one(pool).await?;
+    if r.journey_id.is_some() {
+        let out = crate::journeys::on_leg_finalised(s, &r).await?;
+        return Ok(Finalised { incident: out.incident, new_badge: out.new_badge, journey: Some(out.journey), silent_ride: out.silent_ride });
+    }
     let c: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(r.customer_id).fetch_one(pool).await?;
     let delay = r.final_delay_min.unwrap_or(0) as i64;
     let existing: Option<IncidentRow> = sqlx::query_as("select * from incidents where ride_id = $1").bind(ride_id).fetch_optional(pool).await?;
@@ -669,27 +683,41 @@ pub async fn on_ride_finalised(pool: &PgPool, ride_id: Uuid) -> anyhow::Result<F
     }
     let rows = rules::refresh_statuses(pool, r.customer_id, today()).await?;
     let incident = incident.and_then(|i| rows.into_iter().find(|x| x.id == i.id));
+    let new_badge = award_badges(pool, r.customer_id, r.id, delay).await?;
+    Ok(Finalised { incident, new_badge, journey: None, silent_ride: false })
+}
 
-    // Badges: first hour, short delays, first delay.
+/// The `ride` event after an arrival. `silent` keeps the leg's push quiet when the journey speaks.
+pub fn ride_arrived_payload(ride_id: Uuid, final_delay_min: i64, fin: &Finalised) -> Value {
+    json!({
+        "ride_id": ride_id, "status": "arrived", "final_delay_min": final_delay_min,
+        "incident": fin.incident.as_ref().map(|i| i.id), "silent": fin.silent_ride,
+        "journey_id": fin.journey.as_ref().map(|j| j.id),
+    })
+}
+
+/// Badges: first hour, short delays, first delay. Returns the first badge newly awarded.
+pub async fn award_badges(pool: &PgPool, customer_id: Uuid, ride_id: Uuid, delay: i64) -> anyhow::Result<Option<BadgeRow>> {
     let mut new_badge = None;
     let candidates: Vec<&str> = if delay >= 60 { vec!["stunde", "erste"] } else if (1..10).contains(&delay) { vec!["gegenzug", "erste"] } else if delay > 0 { vec!["erste"] } else { vec![] };
     for b in candidates {
         let inserted: Option<(String,)> = sqlx::query_as("insert into badge_awards (customer_id, badge_id, ride_id) values ($1, $2, $3) on conflict do nothing returning badge_id")
-            .bind(r.customer_id)
+            .bind(customer_id)
             .bind(b)
-            .bind(r.id)
+            .bind(ride_id)
             .fetch_optional(pool)
             .await?;
         if inserted.is_some() && new_badge.is_none() {
             new_badge = sqlx::query_as::<_, BadgeRow>("select * from badges where id = $1").bind(b).fetch_optional(pool).await?;
         }
     }
-    Ok(Finalised { incident, new_badge })
+    Ok(new_badge)
 }
 
 pub async fn dismiss(State(s): State<AppState>, c: Customer) -> ApiResult {
     // Acknowledge the arrival summary; abandon a stale ride if any.
     sqlx::query("update rides set dismissed_at = now() where customer_id = $1 and status = 'arrived' and dismissed_at is null").bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
+    sqlx::query("update journeys set dismissed_at = now() where customer_id = $1 and status = 'arrived' and dismissed_at is null").bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
     sqlx::query("update rides set status = 'abandoned' where customer_id = $1 and status = 'riding' and checked_in_at < now() - interval '12 hours'").bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -741,7 +769,7 @@ pub async fn nachtrag(State(s): State<AppState>, c: Customer, Json(n): Json<Nach
     .await
     .map_err(internal)?;
     rules::audit(&s.pool, "ride", id, None, "arrived", "nachtrag").await.map_err(internal)?;
-    let created = on_ride_finalised(&s.pool, id).await.map_err(internal)?;
+    let created = on_ride_finalised(&s, id).await.map_err(internal)?;
     Ok(Json(json!({ "ride": row, "incident": created.incident })))
 }
 

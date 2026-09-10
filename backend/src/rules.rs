@@ -227,6 +227,7 @@ mod tests {
             legal_deadline: NaiveDate::from_ymd_opt(2026, 12, day).unwrap(),
             evidence: None,
             created_at: chrono::Utc::now(),
+            journey_id: None,
         }
     }
 

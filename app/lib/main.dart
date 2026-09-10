@@ -46,7 +46,20 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
     // Keeps the phone's station regions in step with the account; a tapped nudge opens the check-in.
     _geofence = GeofenceSync(
       session: widget.session,
-      onNudge: (n) => router.go('${Routes.checkin}?station=${Uri.encodeComponent(n.stationId)}&name=${Uri.encodeComponent(n.stationName)}'),
+      onNudge: (n) {
+        // A station nudge opens the check-in; a journey push (docs/17) the transfer card or the arrival;
+        // mail opens the reply, the rest lands on the Konto.
+        if (n.isStation) {
+          router.go('${Routes.checkin}?station=${Uri.encodeComponent(n.stationId)}&name=${Uri.encodeComponent(n.stationName)}');
+        } else if (n.isJourney) {
+          router.go(n.journeyArrived ? Routes.angekommen : Routes.unterwegs);
+        } else if (n.kind == 'mail') {
+          router.go(Routes.bahnsteig);
+          router.push(Routes.antwort);
+        } else if (n.kind != 'station') {
+          router.go(Routes.konto);
+        }
+      },
     )..start();
   }
 
