@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
+import '../../platform/geofence.dart';
 import '../../platform/geofence_sync.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
@@ -57,9 +58,12 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
             VOutlineButton(
               label: 'Mitteilungen erlauben',
               icon: Icons.notifications_none,
-              onTap: () {
-                session.updateSettings(const MePatch(notifications: true));
-                setState(() => _notifications = true);
+              onTap: () async {
+                // Asks iOS/Android for notification permission and registers with the push
+                // service; the token reaches the server through GeofenceSync.
+                final granted = GeofenceSync.automation ? true : await Geofence.instance.registerPush();
+                await session.updateSettings(MePatch(notifications: granted));
+                if (mounted) setState(() => _notifications = granted);
               },
             ),
           const VGap.xl(),

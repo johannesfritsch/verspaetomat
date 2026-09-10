@@ -267,6 +267,8 @@ class MockRepository implements AppRepository {
 
   @override
   Future<void> deleteMe() async => state.reset();
+  @override
+  Future<void> putPushToken({required String platform, required String token}) async {}
 
   @override
   Future<String> exportMe() async => jsonEncode({'demo': true, 'incidents': state.incidents.length, 'rides': state.rides.length});

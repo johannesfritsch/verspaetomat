@@ -23,8 +23,10 @@ class GeofenceSync with WidgetsBindingObserver {
   final Geofence _geofence;
   Timer? _debounce;
   StreamSubscription<GeofenceNudge>? _taps;
+  StreamSubscription<PushToken>? _tokens;
   bool _started = false;
   String? _lastFingerprint;
+  static const _pushKey = 'push_token_sent';
 
   /// Screenshots and the E2E must never trigger the OS permission dialog; the sync itself is harmless.
   static const bool automation = String.fromEnvironment('NO_LOCATION') == '1' || String.fromEnvironment('NO_LOCATION') == 'true' || String.fromEnvironment('E2E') == 'true';
@@ -35,6 +37,7 @@ class GeofenceSync with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     session.addListener(scheduleSync);
     _taps = _geofence.onNudgeTapped.listen(onNudge);
+    _tokens = _geofence.onPushToken.listen(_sendPushToken);
     _checkPending();
     scheduleSync();
   }
@@ -42,6 +45,7 @@ class GeofenceSync with WidgetsBindingObserver {
   void dispose() {
     _debounce?.cancel();
     _taps?.cancel();
+    _tokens?.cancel();
     session.removeListener(scheduleSync);
     if (_started) WidgetsBinding.instance.removeObserver(this);
   }
@@ -60,10 +64,53 @@ class GeofenceSync with WidgetsBindingObserver {
     _debounce = Timer(const Duration(seconds: 2), () => sync());
   }
 
+  bool _repaired = false;
+
   Future<void> _checkPending() async {
     final status = await _geofence.status();
     final pending = status.pendingNudge;
     if (pending != null && pending.stationId.isNotEmpty) onNudge(pending);
+    if (status.pushToken != null) _sendPushToken(status.pushToken!);
+    if (!_repaired) {
+      _repaired = true;
+      _repairPermissions(status);
+    }
+  }
+
+  /// Once per launch: an account that said yes to notifications or background location
+  /// while the OS was never asked (an older build skipped the prompt) gets asked now.
+  Future<void> _repairPermissions(GeofenceStatus status) async {
+    if (automation) return;
+    for (var i = 0; i < 20 && session.me == null; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    final settings = session.me?.settings;
+    if (settings == null || !session.isLocal) return;
+    if (settings.notifications && !status.notifications) {
+      await _geofence.registerPush();
+    }
+    if (settings.locationMode == LocationMode.always && status.permission == GeofencePermission.notDetermined) {
+      await requestFor(LocationMode.always);
+    }
+  }
+
+  /// Sends the push token to the server once per account and token. Waits for the
+  /// session when it arrives before /v1/me has loaded.
+  Future<void> _sendPushToken(PushToken t) async {
+    if (t.token.isEmpty) return;
+    for (var i = 0; i < 20 && (session.me == null || session.healthy != true); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    final me = session.me;
+    if (me == null || !session.isLocal) return;
+    final stamp = '${me.id}:${t.platform}:${t.token}';
+    if (session.prefs.getString(_pushKey) == stamp) return;
+    try {
+      await session.repo.putPushToken(platform: t.platform, token: t.token);
+      await session.prefs.setString(_pushKey, stamp);
+    } catch (_) {
+      // Next launch or resume tries again.
+    }
   }
 
   /// One `configure` with the current account state. Never throws.

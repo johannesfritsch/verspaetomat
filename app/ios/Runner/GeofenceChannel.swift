@@ -12,6 +12,9 @@ final class GeofenceChannel {
     manager.onNudgeTapped = { [channel] payload in
       DispatchQueue.main.async { channel.invokeMethod("nudgeTapped", arguments: payload) }
     }
+    manager.onPushToken = { [channel] token in
+      DispatchQueue.main.async { channel.invokeMethod("pushToken", arguments: ["platform": "ios", "token": token]) }
+    }
     channel.setMethodCallHandler { call, result in
       let args = call.arguments as? [String: Any] ?? [:]
       switch call.method {
@@ -21,6 +24,8 @@ final class GeofenceChannel {
         manager.requestPermission(always: args["always"] as? Bool ?? false) { result($0) }
       case "status":
         manager.status { result($0) }
+      case "registerPush":
+        manager.registerPush { result($0) }
       case "stop":
         manager.stop()
         result(nil)

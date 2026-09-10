@@ -18,6 +18,8 @@ abstract class AppRepository {
   Future<ApiCustomer> putPersonalData(ApiPersonalData data);
   Future<String> recoveryCode();
   Future<void> deleteMe();
+  /// Stores the phone's push token on the device row; a no-op in Demo mode.
+  Future<void> putPushToken({required String platform, required String token});
   Future<String> exportMe();
 
   // -- reference ------------------------------------------------------------

@@ -102,7 +102,47 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   }
 
   /// Called at launch. Without a stored config (fresh install, debug run before Dart configured) nothing happens.
-  func start() { _ = config }
+  /// APNs tokens can rotate, so an authorised app re-registers on every launch.
+  func start() {
+    _ = config
+    center.getNotificationSettings { s in
+      guard s.authorizationStatus == .authorized || s.authorizationStatus == .provisional else { return }
+      DispatchQueue.main.async {
+        NSLog("[push] registering with APNs")
+        UIApplication.shared.registerForRemoteNotifications()
+      }
+    }
+  }
+
+  // MARK: push token
+
+  /// Dart's listener for a fresh APNs token (hex). Set by the channel.
+  var onPushToken: ((String) -> Void)?
+  private(set) var pushToken: String? {
+    get { defaults.string(forKey: "push.token") }
+    set { defaults.set(newValue, forKey: "push.token") }
+  }
+
+  func pushRegistrationFailed(_ reason: String) {
+    lastEvent = "APNs registration failed: \(reason)"
+  }
+
+  func pushTokenArrived(_ hex: String) {
+    pushToken = hex
+    lastEvent = "push token \(hex.prefix(8))…"
+    onPushToken?(hex)
+  }
+
+  /// Asks for notification permission and, when granted, registers with APNs. Replies with the grant.
+  func registerPush(reply: @escaping (Bool) -> Void) {
+    center.requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, _ in
+      DispatchQueue.main.async {
+        self?.lastEvent = granted ? "notifications granted, registering with APNs" : "notifications denied"
+        if granted { UIApplication.shared.registerForRemoteNotifications() }
+        reply(granted)
+      }
+    }
+  }
 
   private var config: GeofenceConfig? {
     get { defaults.data(forKey: "geofence.config").flatMap { try? JSONDecoder().decode(GeofenceConfig.self, from: $0) } }
@@ -143,7 +183,9 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   }
 
   func requestPermission(always: Bool, reply: @escaping (String) -> Void) {
-    center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+      if granted { DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() } }
+    }
     let status = authStatus
     switch (status, always) {
     case (.notDetermined, _):
@@ -169,6 +211,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         "permission": Self.permissionString(authStatus),
         "notifications": s.authorizationStatus == .authorized || s.authorizationStatus == .provisional,
         "registered": manager.monitoredRegions.count,
+        "pushToken": pushToken as Any,
       ]
       if let e = lastEvent { out["lastEvent"] = e }
       if let p = pendingNudge {

@@ -14,16 +14,33 @@ class Geofence {
   static const _channel = MethodChannel('de.verspaetomat/geofence');
 
   final _nudges = StreamController<GeofenceNudge>.broadcast();
+  final _pushTokens = StreamController<PushToken>.broadcast();
 
   /// The customer tapped a station notification.
   Stream<GeofenceNudge> get onNudgeTapped => _nudges.stream;
 
+  /// The OS handed the app a (new) push token; the session sends it to the server.
+  Stream<PushToken> get onPushToken => _pushTokens.stream;
+
   Future<dynamic> _fromNative(MethodCall call) async {
+    final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? const {};
     if (call.method == 'nudgeTapped') {
-      final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? const {};
       _nudges.add(GeofenceNudge(stationId: '${args['stationId'] ?? ''}', stationName: '${args['stationName'] ?? ''}'));
+    } else if (call.method == 'pushToken') {
+      _pushTokens.add(PushToken(platform: '${args['platform'] ?? 'ios'}', token: '${args['token'] ?? ''}'));
     }
     return null;
+  }
+
+  /// Asks for notification permission and registers with the push service. True when granted.
+  Future<bool> registerPush() async {
+    try {
+      return await _channel.invokeMethod<bool>('registerPush') ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
   }
 
   /// Registers the station set and the umbrella. Returns how many regions native registered.
@@ -58,6 +75,7 @@ class Geofence {
       return GeofenceStatus(
         permission: GeofencePermission.parse('${m['permission'] ?? 'notDetermined'}'),
         notifications: m['notifications'] == true,
+        pushToken: m['pushToken'] is String && (m['pushToken'] as String).isNotEmpty ? PushToken(platform: 'ios', token: m['pushToken'] as String) : null,
         registered: (m['registered'] as num?)?.toInt() ?? 0,
         lastEvent: m['lastEvent']?.toString(),
         pendingNudge: pending == null ? null : GeofenceNudge(stationId: '${pending['stationId'] ?? ''}', stationName: '${pending['stationName'] ?? ''}'),
@@ -95,18 +113,26 @@ enum GeofencePermission {
 }
 
 class GeofenceStatus {
-  const GeofenceStatus({required this.permission, required this.notifications, required this.registered, this.lastEvent, this.pendingNudge});
+  const GeofenceStatus({required this.permission, required this.notifications, required this.registered, this.lastEvent, this.pendingNudge, this.pushToken});
   const GeofenceStatus.unavailable()
       : permission = GeofencePermission.notDetermined,
         notifications = false,
         registered = 0,
         lastEvent = null,
-        pendingNudge = null;
+        pendingNudge = null,
+        pushToken = null;
   final GeofencePermission permission;
   final bool notifications;
   final int registered;
   final String? lastEvent;
   final GeofenceNudge? pendingNudge;
+  final PushToken? pushToken;
+}
+
+class PushToken {
+  const PushToken({required this.platform, required this.token});
+  final String platform; // ios | android
+  final String token;
 }
 
 class GeofenceNudge {

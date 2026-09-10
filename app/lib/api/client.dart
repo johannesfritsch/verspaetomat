@@ -147,6 +147,7 @@ class ApiClient {
   Future<ApiCustomer> putPersonalData(ApiPersonalData d) async => ApiCustomer.fromJson(_map(await _put('/v1/me/personal-data', d.toJson())));
 
   Future<void> deleteMe() async => _delete('/v1/me');
+  Future<void> putPushToken({required String platform, required String token}) async => _put('/v1/me/push-token', {'platform': platform, 'token': token});
 
   Future<String> exportMe() async => jsonEncode(await _get('/v1/me/export'));
 

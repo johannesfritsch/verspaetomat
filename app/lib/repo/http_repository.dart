@@ -37,6 +37,9 @@ class HttpRepository implements AppRepository {
   @override
   Future<String> recoveryCode() => client.recoveryCode();
   @override
+  Future<void> putPushToken({required String platform, required String token}) => client.putPushToken(platform: platform, token: token);
+
+  @override
   Future<void> deleteMe() async {
     await client.deleteMe();
     await tokens.clear();
