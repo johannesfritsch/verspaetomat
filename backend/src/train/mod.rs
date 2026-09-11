@@ -200,6 +200,17 @@ pub fn is_journey_mode(mode: &str, line: &str) -> bool {
     is_rail_mode(mode) || is_rail_replacement(mode, line)
 }
 
+/// **The one gate every row from the feed passes through** (docs/29).
+///
+/// Takes the raw shape — a mode and whatever the feed calls the line — so no caller has to
+/// remember to parse the line first. Four places used to do that dance separately, and the fifth
+/// would have forgotten: the departures board went a whole release without the rule the planner
+/// already had, which is how a replacement bus showed up in one check-in path and not another.
+pub fn feed_row_belongs(mode: &str, route_short_name: Option<&str>) -> bool {
+    let (line, _) = parse_line(route_short_name.unwrap_or(""));
+    is_journey_mode(mode, &line)
+}
+
 /// "RE7 (17429)" -> ("RE 7", Some("17429")); "S12" -> ("S 12", None); "ICE 26" -> ("ICE 26", None); "18" -> ("18", None)
 pub fn parse_line(route_short_name: &str) -> (String, Option<String>) {
     let raw = route_short_name.trim();

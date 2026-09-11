@@ -187,22 +187,14 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     );
   }
 
-  void _openStation(ApiStation s) {
-    context.push(
-      '${Routes.checkin}?station=${Uri.encodeComponent(s.id)}&name=${Uri.encodeComponent(s.name)}',
-    );
-  }
+  /// A station chosen by hand, from the away box or the search: the same flow the square runs,
+  /// entered at "Wohin?" because the station is already settled (docs/29).
+  void _openStation(ApiStation s) => runCheckinFlow(context, from: s);
 
-  /// A destination first: straight to "Welcher Zug?".
-  void _toWelcherZug(ApiStation s, ApiDestination d) => context.push(
-    welcherZugRoute(
-      fromId: s.id,
-      fromName: s.name,
-      to: d.station,
-      lat: s.lat,
-      lon: s.lon,
-    ),
-  );
+  /// The one-tap path: the card knows where you are and where you are going, so the flow opens
+  /// at its last step. The same sheets, the same plan, the same trains as every other way in
+  /// (docs/29).
+  void _toWelcherZug(ApiStation s, ApiDestination d) => runCheckinFlow(context, from: s, to: d.station);
 
   /// "Standort erlauben" (docs/23 §1): the tap always resolves to something. The monitor
   /// does the asking; this only says out loud what came back.

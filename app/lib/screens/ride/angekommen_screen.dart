@@ -91,22 +91,10 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
   Future<ApiArrivalResult> _demoVariant(AppRepository repo, String v) async {
     final live = await repo.currentRide();
     if (live == null || live.ride.status != ApiRideStatus.riding) {
-      final stations = (await repo.nearbyStations()).stations;
-      final deps = await repo.departures(stations.first.id);
-      final d = deps.firstWhere((x) => !x.cancelled, orElse: () => deps.first);
-      final trip = await repo.trip(d.tripId);
-      var exitIdx = trip.stops.indexWhere((s) => s.name.startsWith('Münster'));
-      if (exitIdx < 1) exitIdx = trip.stops.length - 1;
-      final exit = trip.stops[exitIdx];
-      await repo.checkIn(CheckInRequest(
-        tripId: d.tripId,
-        fromStationId: stations.first.id,
-        fromStationName: stations.first.name,
-        exitStationId: exit.stationId ?? exit.name,
-        exitStationName: exit.name,
-        fromLat: stations.first.lat != 0 ? stations.first.lat : null,
-        fromLon: stations.first.lon != 0 ? stations.first.lon : null,
-      ));
+      // Through plan + startJourney, the way a passenger's ride is made (docs/29). Building one
+      // by hand here meant the arrival screen was demonstrated on a ride of a shape the app no
+      // longer creates.
+      await demoStartJourney(repo);
     }
     return switch (v) {
       '68' => repo.arrival(const ArrivalRequest(delayMinutes: 68)),

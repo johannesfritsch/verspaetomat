@@ -179,7 +179,6 @@ class ApiClient {
 
   Future<List<ApiRide>> rides() async => _list(await _get('/v1/rides')).map(ApiRide.fromJson).toList();
 
-  Future<ApiRide> checkIn(CheckInRequest r) async => ApiRide.fromJson(_map(await _post('/v1/rides', r.toJson())));
 
   Future<ApiRideLive?> currentRide() async {
     try {

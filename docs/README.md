@@ -58,6 +58,7 @@ number wins.
 | [26-fahrt-lesen-und-blaetter.md](26-fahrt-lesen-und-blaetter.md) | build 15 | Home stops ranking, sheets pull down again, Dein Zweck opens the choice, the ride reads as one journey |
 | [27-teilen.md](27-teilen.md) | build 15 | Teilen: the Fahrkarte, five faces, the four lines, Lochzangen-Konfetti |
 | [28-schienenersatzverkehr.md](28-schienenersatzverkehr.md) | build 17 | A bus running under a train's line number is part of the journey; the planner was dropping every one |
+| [29-ein-einchecken.md](29-ein-einchecken.md) | build 17 | Five ways to start a ride became one; nothing legacy left in the backend |
 
 Two numbers are used twice: `20-backend.md` and `21-data-requirements.md` came first, the decision
 series later walked into the same numbers. In prose and in code comments a bare **docs/20** or

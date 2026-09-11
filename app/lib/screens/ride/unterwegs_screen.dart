@@ -10,6 +10,7 @@ import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'angekommen_screen.dart';
 import 'change_train_sheet.dart';
+import 'checkin_flow.dart';
 import 'ride_widgets.dart';
 
 /// The journey (docs/17), shown inside the ride sheet (docs/19). Glanced at, not read.
@@ -121,14 +122,15 @@ class RideSheetBody extends StatelessWidget {
     final fromName = j.transferStationName ?? j.originStationName;
     final fromId = j.legs.isEmpty ? j.originStationId : (j.currentLegInfo?.toStationId ?? j.originStationId);
     monitor.closeSheet();
-    final earliest = j.earliestOnwardArrival;
-    final counted = j.countedCeilingMinutes;
-    context.push(
-      '${Routes.welcherZug}?from=${Uri.encodeComponent(fromId)}&fromName=${Uri.encodeComponent(fromName)}'
-      '&to=${Uri.encodeComponent(j.destinationStationId)}&toName=${Uri.encodeComponent(j.destinationStationName)}'
-      '&continue=${Uri.encodeComponent(j.id)}'
-      '${earliest == null ? '' : '&earliest=${Uri.encodeComponent(earliest.toIso8601String())}'}'
-      '${counted == null ? '' : '&counted=$counted'}',
+    // The same sheet every other train choice uses (docs/29); the journey id is what makes it
+    // a Weiterfahrt rather than a new check-in.
+    showWelcherZugSheet(
+      context,
+      from: ApiStation(id: fromId, name: fromName),
+      to: ApiStation(id: j.destinationStationId, name: j.destinationStationName),
+      continueJourneyId: j.id,
+      earliestOnwardArrival: j.earliestOnwardArrival,
+      countedMinutes: j.countedCeilingMinutes,
     );
   }
 

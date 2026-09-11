@@ -27,17 +27,29 @@ import 'wohin_screen.dart';
 /// The square always starts at step 1, even when the detection is right: one tap on the
 /// preselected station moves on, and the passenger sees what the app thinks before committing
 /// to it. The one-tap path for the common case lives on the Home card instead, whose `Nach`
-/// row starts at step 3. [from] skips step 1 for a caller that already knows the station —
-/// a station nudge or a deep link.
-Future<void> runCheckinFlow(BuildContext context, {ApiStation? from}) async {
+/// row starts at step 3.
+///
+/// **This is the only way into a check-in.** Every entry point comes here: the square, a station
+/// nudge, the Home card, the away box. Before docs/29 there were three different journeys — the
+/// square ran these sheets while a nudge and the Home card still ran the train-first board from
+/// before docs/17, so the same station could offer different trains depending on which button
+/// you pressed.
+///
+/// [from] skips step 1 (a nudge knows the station); [to] skips step 2 as well (the Home card's
+/// destination buttons know both, and only the train is left to choose).
+Future<void> runCheckinFlow(BuildContext context, {ApiStation? from, ApiStation? to}) async {
   final near = NearbyScope.read(context);
   // A fix may still be in flight when the square is tapped right after a cold start.
   if (from == null && near != null && near.station == null) await near.refresh();
   if (!context.mounted) return;
 
   var source = from;
-  ApiStation? destination;
-  var step = source == null ? 0 : 1;
+  var destination = to;
+  var step = source == null
+      ? 0
+      : destination == null
+          ? 1
+          : 2;
 
   while (context.mounted) {
     switch (step) {
@@ -320,29 +332,53 @@ class _WohinSheetState extends State<_WohinSheet> {
 
 /// The itineraries as a sheet rather than a screen, so a wrong choice above is one swipe away
 /// instead of a back-navigation (docs/24 §1).
+/// [continueJourneyId] makes this the Weiterfahrt (docs/21 §2) instead of a check-in: the
+/// journey is already running and this confirms its next leg, with the delay ceiling from the
+/// interruption still in force.
 Future<StepResult<void>?> showWelcherZugSheet(
   BuildContext context, {
   required ApiStation from,
   required ApiStation to,
+  String? continueJourneyId,
+  DateTime? earliestOnwardArrival,
+  int? countedMinutes,
 }) {
   return showVSheet<StepResult<void>>(
     context,
     expand: true,
-    builder: (ctx) => _WelcherZugSheet(from: from, to: to),
+    builder: (ctx) => _WelcherZugSheet(
+      from: from,
+      to: to,
+      continueJourneyId: continueJourneyId,
+      earliestOnwardArrival: earliestOnwardArrival,
+      countedMinutes: countedMinutes,
+    ),
   );
 }
 
 class _WelcherZugSheet extends StatelessWidget {
-  const _WelcherZugSheet({required this.from, required this.to});
+  const _WelcherZugSheet({
+    required this.from,
+    required this.to,
+    this.continueJourneyId,
+    this.earliestOnwardArrival,
+    this.countedMinutes,
+  });
   final ApiStation from;
   final ApiStation to;
+  final String? continueJourneyId;
+  final DateTime? earliestOnwardArrival;
+  final int? countedMinutes;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const VSheetHeader(title: 'Welcher Zug?'),
+        VSheetHeader(
+          title: 'Welcher Zug?',
+          subtitle: continueJourneyId == null ? null : 'Deine Fahrt läuft weiter. Die Verspätung zählt am Ziel.',
+        ),
         _Breadcrumb(
           label: '${from.name} → ${to.name}',
           onTap: () => Navigator.of(context).pop(const StepResult<void>.back()),
@@ -357,6 +393,9 @@ class _WelcherZugSheet extends StatelessWidget {
               toStationName: to.name,
               fromLat: from.lat,
               fromLon: from.lon,
+              continueJourneyId: continueJourneyId,
+              earliestOnwardArrival: earliestOnwardArrival,
+              countedMinutes: countedMinutes,
               onStarted: () {
                 Navigator.of(context).pop(const StepResult<void>.value(null));
                 context.go(Routes.unterwegs);

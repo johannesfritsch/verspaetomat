@@ -33,7 +33,6 @@ abstract class AppRepository {
 
   // -- rides ----------------------------------------------------------------
   Future<List<ApiRide>> rides();
-  Future<ApiRide> checkIn(CheckInRequest request);
   Future<ApiRideLive?> currentRide();
   Future<ApiArrivalResult> arrival(ArrivalRequest request);
   Future<void> dismissRide();

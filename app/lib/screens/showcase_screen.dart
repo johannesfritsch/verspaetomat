@@ -63,8 +63,6 @@ class ShowcaseScreen extends StatelessWidget {
             ('Berechtigungen', 'Mitteilungen, Standort', Routes.permissions),
             ('Dein Ticket, dein Zweck', 'Setup', Routes.setup),
             ('Bahnsteig', 'Home', Routes.bahnsteig),
-            ('Einchecken', 'Abfahrten am Köln Hbf', '${Routes.checkin}?station=koeln-hbf'),
-            ('Wo steigst du aus?', 'RE 7 nach Rheine', '${Routes.exitStop}?departure=re7-0747'),
             ('Unterwegs', 'die Fahrt', Routes.unterwegs),
             ('Angekommen +68', 'Anspruch, Bündel bereit', '${Routes.angekommen}?variant=68'),
             ('Angekommen +14', 'kein Anspruch, Punkte', '${Routes.angekommen}?variant=14'),

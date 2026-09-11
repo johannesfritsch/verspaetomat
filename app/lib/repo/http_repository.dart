@@ -66,8 +66,6 @@ class HttpRepository implements AppRepository {
   @override
   Future<List<ApiRide>> rides() => client.rides();
   @override
-  Future<ApiRide> checkIn(CheckInRequest request) => client.checkIn(request);
-  @override
   Future<ApiGeofence> geofence() async {
     try {
       return await client.geofence();

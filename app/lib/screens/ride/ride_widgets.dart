@@ -738,28 +738,42 @@ class _StationSearchSheetState extends State<_StationSearchSheet> {
   }
 }
 
-/// Demo shortcut: check in to the first regional train at the nearest station
-/// and go to the ride screen. Works in both modes.
+/// The one way a demo starts a ride: nearest station, a destination this account knows, the
+/// first workable itinerary, `startJourney` (docs/29).
+Future<void> demoStartJourney(AppRepository repo) async {
+  final stations = (await repo.nearbyStations()).stations;
+  if (stations.isEmpty) throw StateError('Kein Bahnhof gefunden.');
+  final from = stations.first;
+  final dest = await repo.destinations(from: from.id).catchError((_) => ApiDestinations.empty);
+  final to = dest.predicted.firstOrNull?.station ??
+      dest.recent.firstOrNull?.station ??
+      stations.where((s) => s.id != from.id).firstOrNull;
+  if (to == null) throw StateError('Kein Ziel gefunden.');
+  final plan = await repo.planJourney(from: from.id, to: to.id);
+  if (plan.itineraries.isEmpty) throw StateError('Keine Verbindung gefunden.');
+  final it = plan.itineraries.firstWhere((i) => !i.first.cancelled, orElse: () => plan.itineraries.first);
+  await repo.startJourney(StartJourneyRequest(
+    fromStationId: from.id,
+    fromStationName: from.name,
+    toStationId: to.id,
+    toStationName: to.name,
+    legs: it.legs,
+    fromLat: from.lat != 0 ? from.lat : null,
+    fromLon: from.lon != 0 ? from.lon : null,
+  ));
+}
+
+/// Demo shortcut: one tap to a running ride, for a showcase or a screenshot.
+///
+/// It goes through **the same two calls a real check-in makes** — plan, then `startJourney`
+/// (docs/29). It used to build a ride by hand out of `departures` and a guessed exit stop, which
+/// made it a third way to start a ride: it exercised code no passenger touches and produced rides
+/// of a shape the app no longer creates. A shortcut may skip the screens; it must not skip the
+/// path.
 Future<void> demoCheckIn(BuildContext context) async {
   final repo = RepoScope.read(context).repo;
   try {
-    final stations = (await repo.nearbyStations()).stations;
-    if (stations.isEmpty) throw StateError('Kein Bahnhof gefunden.');
-    final station = stations.first;
-    final deps = await repo.departures(station.id);
-    final d = deps.firstWhere((x) => !x.cancelled && (x.category == ApiCategory.re || x.category == ApiCategory.rb || x.category == ApiCategory.s), orElse: () => deps.first);
-    final trip = await repo.trip(d.tripId);
-    final from = fromIndex(trip.stops, station.id, station.name);
-    var exitIdx = trip.stops.indexWhere((s) => s.name.startsWith('Münster'));
-    if (exitIdx <= from) exitIdx = (from + 2).clamp(from + 1, trip.stops.length - 1);
-    final exit = trip.stops[exitIdx];
-    await repo.checkIn(CheckInRequest(
-      tripId: d.tripId,
-      fromStationId: station.id,
-      fromStationName: station.name,
-      exitStationId: exit.stationId ?? exit.name,
-      exitStationName: exit.name,
-    ));
+    await demoStartJourney(repo);
     if (context.mounted) context.go(Routes.unterwegs);
   } catch (e) {
     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Check-in nicht möglich: ${shortError(e)}')));

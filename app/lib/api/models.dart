@@ -560,39 +560,6 @@ class ApiLocation {
   Map<String, dynamic> toJson() => {'lat': lat, 'lon': lon, if (accuracyM != null) 'accuracy_m': accuracyM};
 }
 
-class CheckInRequest {
-  const CheckInRequest({
-    required this.tripId,
-    required this.fromStationId,
-    required this.fromStationName,
-    required this.exitStationId,
-    required this.exitStationName,
-    this.ticket,
-    this.location,
-    this.fromLat,
-    this.fromLon,
-  });
-  final String tripId;
-  final String fromStationId;
-  final String fromStationName;
-  final String exitStationId;
-  final String exitStationName;
-  final TicketType? ticket;
-  final ApiLocation? location;
-  /// The from-station's own coordinates (not the phone's): feed the geofence set.
-  final double? fromLat;
-  final double? fromLon;
-  Map<String, dynamic> toJson() => {
-        'trip_id': tripId,
-        'from_station_id': fromStationId,
-        'from_station_name': fromStationName,
-        'exit_station_id': exitStationId,
-        'exit_station_name': exitStationName,
-        if (ticket != null) 'ticket': ticketToWire(ticket!),
-        if (location != null) 'location': location!.toJson(),
-        if (fromLat != null && fromLon != null) ...{'from_lat': fromLat, 'from_lon': fromLon},
-      };
-}
 
 class ArrivalRequest {
   const ArrivalRequest({this.delayMinutes, this.actualArrival, this.cancelled = false, this.selfEntered = false});

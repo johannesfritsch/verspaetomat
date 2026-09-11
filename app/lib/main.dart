@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'api/models.dart';
 import 'platform/diagnose_log.dart';
 import 'platform/geofence_sync.dart';
 import 'repo/repo_scope.dart';
 import 'router.dart';
+import 'screens/ride/checkin_flow.dart';
 import 'state/demo_state.dart';
 import 'theme/app_theme.dart';
 import 'theme/tokens.dart';
@@ -56,7 +58,14 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
         if (n.kind == 'snooze') {
           widget.session.snoozeNudges(Duration(hours: int.tryParse(n.data['hours'] ?? '') ?? 3));
         } else if (n.isStation) {
-          router.go('${Routes.checkin}?station=${Uri.encodeComponent(n.stationId)}&name=${Uri.encodeComponent(n.stationName)}');
+          // docs/29: a nudge opens the same check-in as every other entry, at "Wohin?" — it
+          // already knows the station. It used to open the train-first board from before
+          // docs/17, which is why a nudge and the Einchecken square disagreed about the trains.
+          router.go(Routes.bahnsteig);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final ctx = router.routerDelegate.navigatorKey.currentContext;
+            if (ctx != null) runCheckinFlow(ctx, from: ApiStation(id: n.stationId, name: n.stationName));
+          });
         } else if (n.isJourney) {
           router.go(n.journeyArrived ? Routes.angekommen : Routes.unterwegs);
         } else if (n.kind == 'mail') {

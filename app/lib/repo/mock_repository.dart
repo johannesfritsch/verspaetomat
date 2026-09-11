@@ -687,16 +687,6 @@ class MockRepository implements AppRepository {
   }
 
   @override
-  Future<ApiRide> checkIn(CheckInRequest r) async {
-    final d = _findDeparture(r.tripId);
-    if (d == null) throw StateError('unknown trip ${r.tripId}');
-    final stop = d.stops.firstWhere((s) => s.name == r.exitStationName, orElse: () => d.stops.last);
-    if (r.ticket != null) state.setTicket(r.ticket!);
-    state.checkIn(departure: d, exitStop: stop, fromStation: r.fromStationName, locationVerified: r.location != null);
-    return _ride(state.trip!, status: ApiRideStatus.riding);
-  }
-
-  @override
   Future<ApiRideLive?> currentRide() async {
     final t = state.trip;
     if (t == null) return null;

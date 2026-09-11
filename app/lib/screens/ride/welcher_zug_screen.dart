@@ -1,70 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../mock/mock_data.dart' show TicketTypeX;
 import '../../repo/app_repository.dart';
 import '../../repo/repo_scope.dart';
-import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'ride_widgets.dart';
 
-/// "Welcher Zug?" (docs/17) as a full screen: still the target of a deep link and of the
-/// Weiterfahrt from the ride sheet. The check-in flow shows [WelcherZugList] in a sheet
-/// instead (docs/24 §1), so a wrong choice above is one swipe away.
-class WelcherZugScreen extends StatelessWidget {
-  const WelcherZugScreen({
-    super.key,
-    required this.fromStationId,
-    required this.fromStationName,
-    required this.toStationId,
-    required this.toStationName,
-    this.fromLat,
-    this.fromLon,
-    this.firstTripId,
-    this.continueJourneyId,
-    this.earliestOnwardArrival,
-    this.countedMinutes,
-  });
-  final String fromStationId;
-  final String fromStationName;
-  final String toStationId;
-  final String toStationName;
-  final double? fromLat;
-  final double? fromLon;
-  final String? firstTripId;
-
-  /// Weiterfahrt (docs/21 §2): confirm this train as the next leg of a journey that is
-  /// already running, instead of starting a new one. The planned arrival stays.
-  final String? continueJourneyId;
-
-  /// The arrival of the earliest onward connection, and the minutes it is worth. Anything
-  /// later is the passenger's own pause and adds nothing to the claim.
-  final DateTime? earliestOnwardArrival;
-  final int? countedMinutes;
-
-  @override
-  Widget build(BuildContext context) {
-    return VScreen(
-      eyebrow: '$fromStationName → $toStationName',
-      title: 'Welcher Zug?',
-      child: WelcherZugList(
-        fromStationId: fromStationId,
-        fromStationName: fromStationName,
-        toStationId: toStationId,
-        toStationName: toStationName,
-        fromLat: fromLat,
-        fromLon: fromLon,
-        firstTripId: firstTripId,
-        continueJourneyId: continueJourneyId,
-        earliestOnwardArrival: earliestOnwardArrival,
-        countedMinutes: countedMinutes,
-        onStarted: () => context.go(Routes.unterwegs),
-      ),
-    );
-  }
-}
+// The full screen that used to live here is gone: every train choice is a sheet now
+// (docs/29). `WelcherZugList` below is the shared body it always was.
 
 /// The itineraries themselves: the list, the ticket row and the tap that starts the journey.
 /// Shared by [WelcherZugScreen] and the check-in sheet (docs/24 §1).

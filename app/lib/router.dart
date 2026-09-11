@@ -28,10 +28,6 @@ class Routes {
   static const wir = '/wir';
   static const ich = '/ich';
 
-  static const checkin = '/checkin'; // ?station=koeln-hbf
-  static const exitStop = '/checkin/exit'; // ?departure=re7-0747  (legacy; the journey flow derives the exit stop)
-  static const wohin = '/wohin'; // ?station=<id>&name=<name>[&lat=&lon=][&departure=<trip id>&line=RE 7]
-  static const welcherZug = '/welcher-zug'; // ?from=<id>&fromName=&to=<id>&toName=[&lat=&lon=][&departure=<trip id>]
   static const unterwegs = '/unterwegs'; // redirects to Home with the ride sheet open (docs/19)
   static const bahnsteigWithSheet = '/bahnsteig?ride=1';
   static const angekommen = '/angekommen'; // ?variant=68|14|59|ausfall|nodata (absent = use DemoState)

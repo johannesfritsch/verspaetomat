@@ -576,23 +576,6 @@ pub struct LocationFix {
     pub accuracy_m: Option<f64>,
 }
 
-#[derive(Deserialize)]
-pub struct CheckIn {
-    pub trip_id: String,
-    pub from_station_id: String,
-    pub from_station_name: String,
-    pub exit_station_id: String,
-    pub exit_station_name: String,
-    #[serde(default)]
-    pub ticket: Option<TicketType>,
-    #[serde(default)]
-    pub location: Option<LocationFix>,
-    /// Coordinates of the from-station (the app has them from nearby/search); feed the geofence set.
-    #[serde(default)]
-    pub from_lat: Option<f64>,
-    #[serde(default)]
-    pub from_lon: Option<f64>,
-}
 
 fn find_stop<'a>(t: &'a TripInfo, id: &str, name: &str) -> Option<&'a crate::train::TripStop> {
     let n = normalise_station_name(name);
@@ -606,57 +589,6 @@ fn find_stop<'a>(t: &'a TripInfo, id: &str, name: &str) -> Option<&'a crate::tra
         }))
 }
 
-pub async fn check_in(State(s): State<AppState>, c: Customer, Json(ci): Json<CheckIn>) -> ApiResult {
-    let riding: bool = sqlx::query_scalar("select exists(select 1 from rides where customer_id = $1 and status = 'riding')").bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?;
-    if riding {
-        return Err(err(StatusCode::CONFLICT, "already riding; arrive or dismiss first"));
-    }
-    let t = s.train.trip(&ci.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip: {e}")))?;
-    let from = find_stop(&t, &ci.from_station_id, &ci.from_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "from station not on this trip"))?;
-    let exit = find_stop(&t, &ci.exit_station_id, &ci.exit_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "exit stop not on this trip"))?;
-    let planned_departure = from.scheduled_departure.or(from.scheduled_arrival).ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled departure"))?;
-    let planned_arrival = exit.scheduled_arrival.or(exit.scheduled_departure).ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled arrival"))?;
-    let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
-    let operator = map_operator(&ops, &t.agency_name);
-    let live_delay = exit.live_arrival.zip(exit.scheduled_arrival).map(|(l, p)| (l - p).num_minutes()).unwrap_or(0);
-    let id = Uuid::new_v4();
-    let row: RideRow = sqlx::query_as(
-        "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name,
-            exit_station_id, exit_station_name, planned_departure, planned_arrival, ticket, live_delay_min, cancelled,
-            location_verified, location_lat, location_lon, from_lat, from_lon)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) returning *",
-    )
-    .bind(id)
-    .bind(c.0.id)
-    .bind(&t.trip_id)
-    .bind(&t.line)
-    .bind(&t.headsign)
-    .bind(&operator)
-    .bind(row_category(t.category))
-    .bind(&ci.from_station_id)
-    .bind(&ci.from_station_name)
-    .bind(exit.stop_id.clone().unwrap_or_else(|| ci.exit_station_id.clone()))
-    .bind(&exit.name)
-    .bind(planned_departure)
-    .bind(planned_arrival)
-    .bind(ci.ticket.unwrap_or(c.0.ticket))
-    .bind(live_delay as i32)
-    .bind(t.cancelled || exit.cancelled)
-    .bind(ci.location.is_some())
-    .bind(ci.location.as_ref().map(|l| l.lat))
-    .bind(ci.location.as_ref().map(|l| l.lon))
-    .bind(ci.from_lat)
-    .bind(ci.from_lon)
-    .fetch_one(&s.pool)
-    .await
-    .map_err(internal)?;
-    let _ = sqlx::query("insert into ride_snapshots (ride_id, source, payload) values ($1, 'transitous', $2)").bind(id).bind(json!(t)).execute(&s.pool).await;
-    rules::audit(&s.pool, "ride", id, None, "riding", "check-in").await.map_err(internal)?;
-    // Every ride is a leg of a journey (docs/17); the single-train check-in is a one-leg journey.
-    let journey = crate::journeys::create_single_leg(&s.pool, &row, &t).await.map_err(internal)?;
-    let row: RideRow = sqlx::query_as("select * from rides where id = $1").bind(id).fetch_one(&s.pool).await.map_err(internal)?;
-    Ok(Json(json!({ "ride": row, "stops": t.stops, "journey_id": journey.id })))
-}
 
 pub async fn current_ride(State(s): State<AppState>, c: Customer) -> ApiResult {
     let ride: Option<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 and status = 'riding' order by checked_in_at desc limit 1").bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;

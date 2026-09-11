@@ -19,17 +19,15 @@ import 'package:verspaetomat/screens/community/community_widgets.dart' show Badg
 import 'package:verspaetomat/screens/ride/wohin_screen.dart' show DestinationButton;
 import 'package:verspaetomat/widgets/kit.dart' show VGhostButton, VListRow, VOutlineButton, VPrimaryButton;
 
+// docs/29: there is one check-in and it is the sheets in `checkin_flow.dart`. The screens that
+// used to be listed here — the departures board, "Wo steigst du aus?", the Wohin? and
+// Welcher Zug? pages — are gone, and the flow's own shots (`einchecken-*`) cover what is left.
 const tour = <(String, String)>[
   ('showcase', Routes.showcase),
   ('welcome', Routes.welcome),
   ('permissions', Routes.permissions),
   ('setup', Routes.setup),
   ('bahnsteig', Routes.bahnsteig),
-  ('checkin', '${Routes.checkin}?station=koeln-hbf'),
-  ('exit-stop', '${Routes.exitStop}?departure=re7-0747&station=koeln-hbf&name=K%C3%B6ln%20Hbf'),
-  ('wohin', '${Routes.wohin}?station=koeln-hbf&name=K%C3%B6ln%20Hbf'),
-  ('wohin-zug', '${Routes.wohin}?station=koeln-hbf&name=K%C3%B6ln%20Hbf&departure=re7-0747&line=RE%207'),
-  ('welcher-zug', '${Routes.welcherZug}?from=koeln-hbf&fromName=K%C3%B6ln%20Hbf&to=mock%3Ad-sseldorf-hbf&toName=D%C3%BCsseldorf%20Hbf'),
   ('unterwegs', Routes.unterwegs),
   ('angekommen-68', '${Routes.angekommen}?variant=68'),
   ('angekommen-14', '${Routes.angekommen}?variant=14'),

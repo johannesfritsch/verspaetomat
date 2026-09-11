@@ -204,10 +204,7 @@ impl TransitousClient {
             .into_iter()
             // The same rule as the planner: a replacement runs under the train's own line
             // number and belongs on the board; an ordinary bus does not (docs/28).
-            .filter(|st| {
-                let (line, _) = parse_line(st.route_short_name.as_deref().unwrap_or(""));
-                crate::train::is_journey_mode(&st.mode, &line)
-            })
+            .filter(|st| crate::train::feed_row_belongs(&st.mode, st.route_short_name.as_deref()))
             .filter_map(departure_from)
             .collect();
         out.sort_by_key(|d| d.planned_departure);
@@ -263,12 +260,7 @@ impl TransitousClient {
             .legs
             .iter()
             .find(|l| l.trip_id.as_deref() == Some(trip_id))
-            .or_else(|| {
-                resp.legs.iter().find(|l| {
-                    let (line, _) = parse_line(l.route_short_name.as_deref().unwrap_or(""));
-                    crate::train::is_journey_mode(&l.mode, &line)
-                })
-            })
+            .or_else(|| resp.legs.iter().find(|l| crate::train::feed_row_belongs(&l.mode, l.route_short_name.as_deref())))
             .or_else(|| resp.legs.first())
             .ok_or_else(|| anyhow!("trip {trip_id}: no legs"))?;
         let (line, train_number) = parse_line(leg.route_short_name.as_deref().unwrap_or(""));
@@ -378,12 +370,12 @@ fn departure_from(st: StopTime) -> Option<DepartureInfo> {
 fn itinerary_from(it: PlanItinerary) -> Option<Itinerary> {
     let mut legs = Vec::new();
     for l in it.legs.into_iter().filter(|l| l.mode != "WALK") {
-        let (line, train_number) = parse_line(l.route_short_name.as_deref().unwrap_or(""));
         // A bus under a train's line number is a replacement and belongs to the journey; any
         // other bus means this itinerary is not a rail journey at all (docs/28).
-        if !crate::train::is_journey_mode(&l.mode, &line) {
+        if !crate::train::feed_row_belongs(&l.mode, l.route_short_name.as_deref()) {
             return None;
         }
+        let (line, train_number) = parse_line(l.route_short_name.as_deref().unwrap_or(""));
         let agency_name = l.agency_name.clone().unwrap_or_default();
         let planned_departure = l.from.scheduled_departure.or(l.scheduled_start_time).or(l.from.departure)?;
         let planned_arrival = l.to.scheduled_arrival.or(l.scheduled_end_time).or(l.to.arrival)?;
@@ -543,10 +535,7 @@ mod tests {
         let deps: Vec<DepartureInfo> = resp
             .stop_times
             .into_iter()
-            .filter(|s| {
-                let (line, _) = parse_line(s.route_short_name.as_deref().unwrap_or(""));
-                crate::train::is_journey_mode(&s.mode, &line)
-            })
+            .filter(|s| crate::train::feed_row_belongs(&s.mode, s.route_short_name.as_deref()))
             .filter_map(departure_from)
             .collect();
         assert_eq!(deps.len(), 1);

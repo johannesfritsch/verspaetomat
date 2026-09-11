@@ -422,51 +422,6 @@ async fn insert_leg_ride(
     Ok(row)
 }
 
-/// The legacy single-train check-in creates a journey around its ride, so the ledger has one path.
-pub async fn create_single_leg(pool: &PgPool, ride: &RideRow, trip: &TripInfo) -> anyhow::Result<JourneyRow> {
-    let leg = PlanLeg {
-        trip_id: ride.trip_id.clone(),
-        line: ride.line.clone(),
-        train_number: trip.train_number.clone(),
-        headsign: ride.headsign.clone(),
-        agency_name: trip.agency_name.clone(),
-        operator: ride.operator.clone(),
-        category: trip.category,
-        mode: trip.mode.clone(),
-        from_station_id: ride.from_station_id.clone(),
-        from_station_name: ride.from_station_name.clone(),
-        to_station_id: ride.exit_station_id.clone(),
-        to_station_name: ride.exit_station_name.clone(),
-        planned_departure: ride.planned_departure,
-        planned_arrival: ride.planned_arrival,
-        live_departure: None,
-        live_arrival: None,
-        platform: None,
-        cancelled: ride.cancelled,
-        realtime: trip.realtime,
-        delay_min: ride.live_delay_min as i64,
-    };
-    let legs = json!([leg]);
-    let j: JourneyRow = sqlx::query_as(
-        "insert into journeys (id, customer_id, origin_station_id, origin_station_name, destination_station_id, destination_station_name,
-            itinerary, plan, planned_departure, planned_arrival, ticket)
-         values ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9,$10) returning *",
-    )
-    .bind(Uuid::new_v4())
-    .bind(ride.customer_id)
-    .bind(&ride.from_station_id)
-    .bind(&ride.from_station_name)
-    .bind(&ride.exit_station_id)
-    .bind(&ride.exit_station_name)
-    .bind(&legs)
-    .bind(ride.planned_departure)
-    .bind(ride.planned_arrival)
-    .bind(ride.ticket)
-    .fetch_one(pool)
-    .await?;
-    sqlx::query("update rides set journey_id = $2, leg_no = 1 where id = $1").bind(ride.id).bind(j.id).execute(pool).await?;
-    Ok(j)
-}
 
 async fn open_journey(pool: &PgPool, customer: Uuid) -> anyhow::Result<Option<JourneyRow>> {
     Ok(sqlx::query_as("select * from journeys where customer_id = $1 and status in ('riding','transfer') order by created_at desc limit 1").bind(customer).fetch_optional(pool).await?)
