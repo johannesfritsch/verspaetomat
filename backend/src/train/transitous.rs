@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tokio::task::JoinSet;
 
-use super::{agency_to_operator, category_for, haversine_m, is_rail_mode, parse_line, DepartureInfo, Itinerary, PlanLeg, StopInfo, TripInfo, TripStop};
+use super::{agency_to_operator, category_for, haversine_m, parse_line, DepartureInfo, Itinerary, PlanLeg, StopInfo, TripInfo, TripStop};
 
 const DEFAULT_BASE: &str = "https://api.transitous.org";
 const USER_AGENT: &str = "verspaetomat-api/0.1 (+https://verspaetomat.de)";
@@ -29,8 +29,6 @@ const RANK_CACHE_TTL: Duration = Duration::from_secs(300);
 /// SUBWAY do, because only the line name can tell an S-Bahn from a U-Bahn.
 const RANK_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,SUBURBAN,METRO,SUBWAY";
 /// MOTIS transit modes that are railway service (docs/17); the plan never proposes bus or tram legs.
-const RAIL_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,SUBURBAN";
-
 /// What we ask the planner for. `BUS` is in here only so a Schienenersatzverkehr can be found;
 /// `itinerary_from` throws away every bus that is not standing in for a train, so an ordinary
 /// city bus never becomes a leg of a journey (docs/28).
@@ -188,7 +186,8 @@ impl TransitousClient {
             .collect())
     }
 
-    /// Rail departures at a stop, soonest first. Cached for 30 s per stop.
+    /// Rail departures at a stop, soonest first — including a bus standing in for a train
+    /// (docs/28). Cached for 30 s per stop.
     pub async fn departures(&self, stop_id: &str, n: usize) -> Result<Vec<DepartureInfo>> {
         if let Some(hit) = self.cached(stop_id) {
             return Ok(hit.into_iter().take(n).collect());
@@ -203,7 +202,12 @@ impl TransitousClient {
         let mut out: Vec<DepartureInfo> = resp
             .stop_times
             .into_iter()
-            .filter(|st| is_rail_mode(&st.mode))
+            // The same rule as the planner: a replacement runs under the train's own line
+            // number and belongs on the board; an ordinary bus does not (docs/28).
+            .filter(|st| {
+                let (line, _) = parse_line(st.route_short_name.as_deref().unwrap_or(""));
+                crate::train::is_journey_mode(&st.mode, &line)
+            })
             .filter_map(departure_from)
             .collect();
         out.sort_by_key(|d| d.planned_departure);
@@ -259,7 +263,12 @@ impl TransitousClient {
             .legs
             .iter()
             .find(|l| l.trip_id.as_deref() == Some(trip_id))
-            .or_else(|| resp.legs.iter().find(|l| is_rail_mode(&l.mode)))
+            .or_else(|| {
+                resp.legs.iter().find(|l| {
+                    let (line, _) = parse_line(l.route_short_name.as_deref().unwrap_or(""));
+                    crate::train::is_journey_mode(&l.mode, &line)
+                })
+            })
             .or_else(|| resp.legs.first())
             .ok_or_else(|| anyhow!("trip {trip_id}: no legs"))?;
         let (line, train_number) = parse_line(leg.route_short_name.as_deref().unwrap_or(""));
@@ -531,7 +540,15 @@ mod tests {
     fn stoptime_shape_parses() {
         let raw = r#"{"stopTimes":[{"place":{"name":"Köln Hbf","stopId":"be-sncb_8015458","scheduledDeparture":"2026-09-09T18:11:00Z","departure":"2026-09-09T18:31:00Z","track":"7"},"mode":"HIGHSPEED_RAIL","realTime":true,"headsign":"Dortmund Hbf","agencyName":"DB Fernverkehr AG","routeShortName":"ICE 26","tripId":"t1","cancelled":false,"tripCancelled":false},{"place":{"name":"Köln Hbf","scheduledDeparture":"2026-09-09T18:30:00Z","departure":"2026-09-09T18:31:00Z"},"mode":"TRAM","realTime":true,"routeShortName":"18","tripId":"t2"}]}"#;
         let resp: StopTimesResponse = serde_json::from_str(raw).unwrap();
-        let deps: Vec<DepartureInfo> = resp.stop_times.into_iter().filter(|s| is_rail_mode(&s.mode)).filter_map(departure_from).collect();
+        let deps: Vec<DepartureInfo> = resp
+            .stop_times
+            .into_iter()
+            .filter(|s| {
+                let (line, _) = parse_line(s.route_short_name.as_deref().unwrap_or(""));
+                crate::train::is_journey_mode(&s.mode, &line)
+            })
+            .filter_map(departure_from)
+            .collect();
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].line, "ICE 26");
         assert_eq!(deps[0].delay_min, 20);
