@@ -1,0 +1,13 @@
+[package]
+name = "verspaetomat-site"
+version = "0.1.0"
+edition = "2021"
+description = "Generates the static site at verspaetomat.de. A build tool, not a server (docs/31)."
+license = "AGPL-3.0-only"
+
+[dependencies]
+anyhow = "1"
+minijinja = { version = "2", features = ["loader"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"

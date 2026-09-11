@@ -48,6 +48,7 @@ services:
       - api
     environment:
       API_DOMAIN: ${API_DOMAIN:-api.verspaetomat.de}
+      SITE_DOMAIN: ${SITE_DOMAIN:-verspaetomat.de}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
     ports:
       - "80:80"
@@ -55,6 +56,8 @@ services:
     volumes:
       # A directory, not a single file: git replaces files by inode and a file mount would keep the old one.
       - ./caddy:/etc/caddy:ro
+      # Die fertige Website, im Git mitgeliefert (docs/31 §6): nichts zu bauen auf dem Server.
+      - ../site/dist:/srv/site:ro
       - caddy_data:/data
       - caddy_config:/config
 

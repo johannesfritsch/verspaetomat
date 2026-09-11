@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block inhalt %}
+<article class="doc">
+  <div class="sec-kopf">
+    <p class="eyebrow">{{ doc.eyebrow }}</p>
+    <h1>{{ doc.title }}</h1>
+    <p class="doc-lead">{{ doc.lead }}</p>
+  </div>
+
+  {% if placeholder_warning %}
+  <p class="platzhalter-warnung">Dieser Text enthält noch Platzhalter in eckigen Klammern. Vor der Veröffentlichung ausfüllen: <code>app/lib/content/legal.dart</code>.</p>
+  {% endif %}
+
+  {% for s in doc.sections %}
+  <section class="doc-abschnitt">
+    <h2>{{ s.heading }}</h2>
+    {% for p in s.paragraphs %}<p>{{ p }}</p>{% endfor %}
+  </section>
+  {% endfor %}
+
+  {% if doc.stand %}<p class="stand">Stand: {{ doc.stand }}</p>{% endif %}
+</article>
+{% endblock %}

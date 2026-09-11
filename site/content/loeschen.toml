@@ -1,0 +1,27 @@
+# Play verlangt eine öffentliche URL zum Löschen von Daten (docs/40). Die App kann das längst,
+# nur gab es keine Seite, auf die man zeigen konnte. Dieser Text steht deshalb hier und nicht
+# in legal.dart — es ist eine Anleitung, kein Rechtstext.
+id = "loeschen"
+eyebrow = "Deine Daten"
+title = "Daten löschen"
+lead = "In der App, sofort, ohne uns zu fragen."
+
+[[sections]]
+heading = "In der App"
+paragraphs = [
+  "Einstellungen → Deine Daten → „Alles löschen“. Das löscht dein Konto und alles, was daran hängt: Fahrten, Verspätungen, Geduldspunkte, Anträge, hochgeladene Fahrkarten, deine Unterschrift, deine Adressdaten und deine Verspätomat-Mailadresse. Der Vorgang läuft sofort und ist nicht rückgängig zu machen.",
+  "Es gibt kein Konto bei uns, das danach noch übrig wäre: Verspätomat kennt dich nur über dein Gerätekonto.",
+]
+
+[[sections]]
+heading = "Ohne die App"
+paragraphs = [
+  "Wenn du die App nicht mehr installiert hast, schreib uns an j@jfritsch.de. Wir löschen das Konto von Hand. Damit wir wissen, welches: schick die Mailadresse mit, von der deine Anträge abgeschickt wurden (fahrgast-…@users.verspaetomat.de), oder den Wiederherstellungscode.",
+]
+
+[[sections]]
+heading = "Was wir vorher kurz aufheben müssen"
+paragraphs = [
+  "Ein bereits abgeschickter Antrag liegt auch beim Eisenbahnunternehmen; darauf haben wir keinen Zugriff. Was bei uns bleibt, wenn du löschst, ist nichts, was auf dich zeigt.",
+  "Vor dem Löschen kannst du alles mitnehmen: Einstellungen → Deine Daten → „Alles exportieren“ gibt dir deine Fahrten, Anträge und Antworten als Datei.",
+]

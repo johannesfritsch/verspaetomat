@@ -1,0 +1,175 @@
+# Every word on the front page (docs/31 §2). Nothing here is rendered anywhere else.
+# The three legal documents are not in this file: they come from the app, see content/legal.json.
+
+[meta]
+title = "Verspätomat"
+description = "Verspätomat merkt sich deine Zugverspätungen, füllt den Fahrgastrechte-Antrag aus und schickt ihn ab. Die Entschädigung geht an einen Verein, den du wählst."
+
+[hero]
+eyebrow = "Fahrgastrechte, ohne Papierkrieg"
+headline = "Die Bahn war zu spät. Diesmal zahlt sie dafür."
+lead = "Verspätomat merkt sich deine Verspätungen, füllt den Antrag aus und schickt ihn ab. Das Geld geht an einen Verein, den du wählst. Nicht an uns."
+cta = "Im App Store laden"
+cta_secondary = "So funktioniert’s ↓"
+
+# Ein Beispiel, und es steht auch so auf der Karte. Erfundene Zahlen als echte auszugeben
+# ist das Einzige, was diese Seite nicht tun darf.
+[hero.karte]
+fahrgast = "Johannes"
+strecke = "Köln Hbf → Rheine"
+am = "Fr, 11. September 2026"
+minuten = 204
+ngo = "Bahnhofsmission Köln"
+betrag = "12,00 €"
+zitat = "„Ich habe die Bahn dazu gebracht, an die Bahnhofsmission Köln zu zahlen. Weil sie mich 204 Minuten warten ließ.“"
+hinweis = "Beispiel. Deine Karte trägt deine Zahlen."
+
+[fahrplan]
+eyebrow = "Der Fahrplan"
+title = "Einchecken, warten, kassieren lassen."
+
+[[fahrplan.halt]]
+label = "Einchecken"
+text = "Am Bahnsteig ein Tipp. Dein Zug steht schon in der Liste, weil das Handy weiß, wo du stehst."
+
+[[fahrplan.halt]]
+label = "Fahren"
+text = "Leg das Handy weg. Die Verspätung holt unser Server aus den öffentlichen Fahrplandaten — nicht aus deinem Standort."
+
+[[fahrplan.halt]]
+label = "Ankommen"
+text = "Jede Minute wird gezählt. Unter 60 Minuten gibt es Geduldspunkte. Ab 60 Minuten einen Anspruch."
+
+[[fahrplan.halt]]
+label = "Antrag stellen"
+text = "Das EU-Formular ist ausgefüllt. Du unterschreibst mit dem Finger, der Antrag geht von deiner eigenen Adresse an die Fahrgastrechte-Stelle."
+
+[[fahrplan.halt]]
+label = "Die Bahn zahlt"
+text = "An den Verein, den du gewählt hast. Direkt auf sein Konto. Wir sehen das Geld nie."
+
+[bilder]
+eyebrow = "Fünf Bilder"
+title = "Die ganze App."
+
+# Die Bilder kommen aus app/tools/tour.sh, ein Schuss pro Screen, auf 640 px verkleinert.
+# Kein Gerätrahmen, keine Perspektive, kein Schatten: in der App gibt es auch keine.
+
+[[bilder.schuss]]
+src = "shots/bahnsteig.png"
+alt = "Der Home-Screen: die gemeinsame Wartezeit aller Fahrgäste, darunter die Karte zum Einchecken mit Startbahnhof und Ziel."
+caption = "Einchecken in zwei Tipps"
+width = 640
+height = 1387
+
+[[bilder.schuss]]
+src = "shots/unterwegs.png"
+alt = "Eine laufende Fahrt: RE 7 nach Rheine, drei Minuten Verspätung, die Haltestellenliste mit Zustieg und Umstieg."
+caption = "Unterwegs, mit Umstieg"
+width = 640
+height = 1387
+
+[[bilder.schuss]]
+src = "shots/antraege.png"
+alt = "Der Antragsschalter: vier gesammelte Verspätungen, zusammen 6,00 Euro für die Bahnhofsmission Köln."
+caption = "Der Antrag, fertig"
+width = 640
+height = 1387
+
+[[bilder.schuss]]
+src = "shots/karte.png"
+alt = "Die Fahrkarte zum Teilen: 68 Minuten Verspätung als große rote Zahl, mit Strecke und Datum."
+caption = "Die Fahrkarte zum Teilen"
+width = 640
+height = 1387
+
+[[bilder.schuss]]
+src = "shots/wir.png"
+alt = "Wir: 1.208.316 gemeinsam gewartete Minuten und was bei den Vereinen angekommen ist."
+caption = "Wir alle zusammen"
+width = 640
+height = 1387
+
+[nicht]
+eyebrow = "Was wir nicht sind"
+title = "Fünf Dinge, die hier fehlen."
+
+[[nicht.punkt]]
+title = "Keine Provision."
+text = "Andere behalten 20 bis 30 Prozent. Wir behalten nichts — wir bekommen nichts."
+
+[[nicht.punkt]]
+title = "Kein Konto."
+text = "Keine E-Mail, kein Passwort. Ein anonymes Gerätekonto und zwölf Wörter, falls du das Handy wechselst."
+
+[[nicht.punkt]]
+title = "Kein Tracking."
+text = "Keine Analyse-SDKs, keine Werbung, kein Datenverkauf. Diese Seite lädt nichts von Dritten."
+
+[[nicht.punkt]]
+title = "Kein Standortverlauf."
+text = "Die App schaut einmal am Bahnsteig und einmal beim Einchecken. Den Zug verfolgt der Fahrplan, nicht dein Handy."
+
+[[nicht.punkt]]
+title = "Bote, kein Vertreter."
+text = "Der Antrag ist deiner, er trägt deinen Namen und deine Unterschrift. Wir füllen aus und leiten weiter."
+link = "/bote"
+link_text = "Wie das geht"
+
+[fragen]
+eyebrow = "Fragen"
+title = "Was Leute zuerst wissen wollen."
+
+[[fragen.frage]]
+q = "Was kostet das?"
+a = "Nichts. Keine Gebühr, keine Provision, keine Werbung, keine In-App-Käufe."
+
+[[fragen.frage]]
+q = "Wer bekommt das Geld?"
+a = "Der Verein, den du in der App wählst. Auf dem Antrag steht seine Kontoverbindung, nie unsere. Die Bahn überweist direkt."
+
+[[fragen.frage]]
+q = "Ab wann gibt es überhaupt Geld?"
+a = "Ab 60 Minuten Verspätung am Ziel: 25 % des Fahrpreises. Ab 120 Minuten: 50 %. Darunter gibt es keinen gesetzlichen Anspruch — dafür Geduldspunkte."
+
+[[fragen.frage]]
+q = "Und mit dem Deutschlandticket?"
+a = "Da sind es pauschal 1,50 € im Nahverkehr. Auszahlen muss die Bahn erst ab 4 €, deshalb sammelt Verspätomat, bis drei Verspätungen zusammenkommen, und schickt sie als einen Antrag."
+
+[[fragen.frage]]
+q = "Muss ich mich anmelden?"
+a = "Nein. Beim ersten Antrag brauchst du Name und Adresse, weil das Formular sie verlangt. Vorher nichts."
+
+[[fragen.frage]]
+q = "Was macht die App mit meinem Standort?"
+a = "Sie fragt den Bahnhof ab, an dem du stehst, und merkt sich beim Einchecken einen Fixpunkt als Nachweis. Kein Standort während der Fahrt, kein Verlauf. Ohne Standortfreigabe tippst du den Bahnhof ein und alles andere funktioniert."
+
+[[fragen.frage]]
+q = "Vertritt Verspätomat mich gegenüber der Bahn?"
+a = "Nein, und das ist Absicht. Du stellst den Antrag, wir füllen ihn aus und leiten ihn weiter."
+
+[[fragen.frage]]
+q = "Welche Züge?"
+a = "Alle, die in den offenen Fahrplandaten stehen: Fern- und Nahverkehr, jedes Eisenbahnunternehmen in Deutschland, und auch der Schienenersatzverkehr, wenn der Bus unter der Zugnummer fährt."
+
+[[fragen.frage]]
+q = "Was, wenn die Bahn ablehnt?"
+a = "Die Antwort landet in der App, im Klartext. Wenn du sie für falsch hältst, ist die Schlichtungsstelle söp kostenlos zuständig — zwischen dir und der Bahn, ohne uns."
+
+[holen]
+eyebrow = "Holen"
+title = "Noch nicht ganz da."
+
+# state: soon | testflight | live. Am Tag der Freigabe ist das hier die einzige Änderung:
+# Apple erlaubt das Store-Abzeichen erst, wenn die App wirklich zu laden ist.
+[[holen.laden]]
+platform = "iPhone"
+state = "soon"
+label = "Bald im App Store"
+note = "Die App liegt zur Prüfung bereit."
+
+[[holen.laden]]
+platform = "Android"
+state = "soon"
+label = "Bald bei Google Play"
+note = "Die App ist fertig, der Store noch nicht."

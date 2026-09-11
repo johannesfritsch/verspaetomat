@@ -1,0 +1,316 @@
+/* verspaetomat.de — die Bahnhofsuhr auf einem breiteren Schirm.
+   Die Farben und Abstände sind die der App (app/lib/theme/tokens.dart, app/STYLE.md).
+   Hand geschrieben, kein Framework, keine Anfrage an Dritte. */
+
+/* Archivo ist eine Variable Font mit Breitenachse: die Überschriften laufen leicht breit,
+   die Etiketten schmal und gesperrt, wie die Felder auf einer gedruckten Fahrkarte.
+   Selbst gehostet (SIL Open Font License, siehe fonts/OFL.txt) — ein deutscher Auftritt,
+   der Google Fonts einbindet, reicht die IP jeder Besucherin an einen Dritten weiter. */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400 700;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url(/fonts/archivo-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400 700;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url(/fonts/archivo-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  --paper: #F3F3F0;
+  --paper-elevated: #FFFFFF;
+  --ink: #111111;
+  --ink2: #6B6B66;
+  --ink3: #9C9C96;
+  --rule: #D2D2CC;
+  --rule-soft: #E6E6E1;
+  --red: #D92B1E;
+  --green: #2E7D4F;
+
+  --measure: 40rem;
+  --page: 1.5rem;
+
+  /* Die Bahnhofsuhr ist ein weißes Emailzifferblatt. Eine dunkle Fassung davon wäre ein
+     anderer Gegenstand, also gibt es hier nur einen Modus — und jede Farbe steht explizit. */
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Archivo', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-variation-settings: 'wdth' 100;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+.wrap { max-width: 61rem; margin: 0 auto; padding-inline: var(--page); }
+
+h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; }
+
+.eyebrow {
+  font-variation-settings: 'wdth' 70;
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink2);
+  margin: 0;
+}
+
+.rule { height: 1px; background: var(--rule); border: 0; margin: 0; }
+.rule--red { height: 2px; background: var(--red); }
+.rule--soft { background: var(--rule-soft); }
+
+a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--rule); }
+a:hover { border-bottom-color: var(--ink); }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
+
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.875em; }
+
+/* ── Kopf ─────────────────────────────────────────────────────── */
+
+.kopf { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1.125rem; }
+.wordmark {
+  font-variation-settings: 'wdth' 70;
+  font-weight: 700;
+  font-size: 0.9375rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  border-bottom: 0;
+}
+
+/* Der Sekundenzeiger läuft in 58,5 s um und wartet oben — wie auf dem Bahnsteig. */
+.clock { display: block; width: 34px; height: 34px; flex: none; }
+.clock .second { transform-origin: 50px 50px; animation: sweep 60s linear infinite; }
+@keyframes sweep {
+  0%    { transform: rotate(0deg); }
+  97.5% { transform: rotate(360deg); }
+  100%  { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) { .clock .second { animation: none; } }
+
+/* ── Der Held ─────────────────────────────────────────────────── */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 3.5rem;
+  align-items: start;
+  padding-block: 4.5rem 5rem;
+}
+.hero h1 {
+  font-variation-settings: 'wdth' 112;
+  font-size: clamp(2.5rem, 6.2vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  margin-block: 1.25rem 1.5rem;
+}
+.hero .lead { font-size: 1.1875rem; color: var(--ink2); max-width: 26rem; margin: 0; }
+
+.cta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1.5rem; margin-top: 2.25rem; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 56px; padding-inline: 1.75rem;
+  background: var(--ink); color: var(--paper-elevated);
+  border: 0; border-radius: 4px;
+  font: inherit; font-weight: 600; font-size: 1.0625rem;
+}
+.btn:hover { background: #000; border-bottom: 0; }
+.ghost { border-bottom: 1px solid var(--rule); color: var(--ink2); }
+.ghost:hover { color: var(--ink); border-bottom-color: var(--ink); }
+
+/* Die Fahrkarte: ein Stück Papier, oben und unten perforiert, einmal gelocht. */
+
+.fahrkarte-halter { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; }
+.fahrkarte {
+  width: 100%; max-width: 23rem;
+  background: var(--paper-elevated);
+  border-left: 1px solid var(--rule-soft);
+  border-right: 1px solid var(--rule-soft);
+  padding: 1.75rem 1.5rem;
+  position: relative;
+}
+/* Halbkreise in Papierfarbe, aus den beiden Schnittkanten gebissen. */
+.fahrkarte::before, .fahrkarte::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 10px;
+  background-repeat: repeat-x; background-size: 14px 10px;
+}
+.fahrkarte::before { top: 0; background-image: radial-gradient(circle 5px at 5px 0, var(--paper) 5px, transparent 5.5px); }
+.fahrkarte::after { bottom: 0; background-image: radial-gradient(circle 5px at 5px 10px, var(--paper) 5px, transparent 5.5px); }
+
+.fk-kopf { display: flex; justify-content: space-between; gap: 1rem; }
+.fk-felder { margin: 1.25rem 0 1.125rem; }
+.fk-felder--unten { margin-bottom: 0; }
+.fk-feld { display: grid; grid-template-columns: 5.75rem 1fr; gap: 0.5rem; padding-block: 0.1875rem; }
+.fk-feld dt {
+  font-variation-settings: 'wdth' 70;
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink3); padding-top: 0.15rem;
+}
+.fk-feld dd { margin: 0; font-size: 0.9375rem; }
+.fk-oben { margin-top: 1.125rem; }
+.fk-held { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; padding-block: 1.125rem 1.25rem; }
+/* Rot, wie auf der Karte in der App: die Verspätung ist das eine, was hier schreit. */
+.fk-zahl { font-size: 5.5rem; line-height: 0.85; font-weight: 600; letter-spacing: -0.04em; color: var(--red); }
+.fk-einheit {
+  font-variation-settings: 'wdth' 70;
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink2); margin-top: 0.5rem;
+}
+/* Wo die Lochzange durch war. */
+.loch {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(17, 17, 17, 0.10);
+  box-shadow: inset 0 0 0 2px var(--ink2);
+  flex: none; margin-bottom: 0.5rem;
+}
+.fk-zitat { font-size: 0.9375rem; line-height: 1.45; margin: 1.125rem 0 0; }
+.ngo { display: inline-flex; align-items: center; gap: 0.5rem; }
+.ngo-mark { width: 14px; height: 14px; background: var(--ink); flex: none; }
+.beispiel { font-size: 0.75rem; color: var(--ink3); text-align: center; margin: 0; }
+
+/* ── Abschnitte ───────────────────────────────────────────────── */
+
+section { padding-block: 4rem; }
+.sec-kopf { margin-bottom: 2.5rem; }
+.sec-kopf h1, .sec-kopf h2 {
+  font-variation-settings: 'wdth' 108;
+  font-size: clamp(1.75rem, 3.4vw, 2.375rem);
+  line-height: 1.1; letter-spacing: -0.015em;
+  margin-top: 0.625rem;
+}
+
+/* ── Der Fahrplan ─────────────────────────────────────────────── */
+
+.halte { list-style: none; margin: 0; padding: 0; max-width: var(--measure); }
+.halt { display: grid; grid-template-columns: 2.25rem 1fr; gap: 1.25rem; padding-bottom: 2.25rem; position: relative; }
+.halt:last-child { padding-bottom: 0; }
+.halt:not(:last-child)::before {
+  content: ""; position: absolute; left: 0.5rem; top: 1.125rem; bottom: -0.375rem;
+  width: 1px; background: var(--rule);
+}
+.punkt {
+  width: 17px; height: 17px; border-radius: 50%;
+  background: var(--paper); box-shadow: inset 0 0 0 2px var(--ink);
+  margin-top: 0.3125rem; position: relative; z-index: 1;
+}
+.halt--ziel .punkt { box-shadow: inset 0 0 0 2px var(--red); background: var(--red); }
+.halt h3 {
+  font-size: 0.75rem; font-variation-settings: 'wdth' 70; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+}
+.halt p { margin: 0.375rem 0 0; color: var(--ink2); }
+
+/* ── Bildstreifen ─────────────────────────────────────────────── */
+
+.streifen { display: flex; gap: 1.25rem; overflow-x: auto; padding-bottom: 1rem; scroll-snap-type: x mandatory; }
+.schuss { flex: none; width: 15rem; scroll-snap-align: start; margin: 0; }
+.schuss img {
+  display: block; width: 100%; height: auto; max-width: 100%;
+  background: var(--paper-elevated);
+  border: 1px solid var(--rule);
+}
+.schuss figcaption { font-size: 0.8125rem; color: var(--ink2); margin-top: 0.625rem; }
+
+/* ── Was wir nicht sind ───────────────────────────────────────── */
+
+.nicht { max-width: var(--measure); }
+.nicht > div { padding-block: 1.375rem; border-top: 1px solid var(--rule); }
+.nicht > div:last-child { border-bottom: 1px solid var(--rule); }
+.nicht h3 { display: inline; font-size: 1.0625rem; }
+.nicht p { display: inline; margin: 0; color: var(--ink2); }
+
+/* ── Fragen ───────────────────────────────────────────────────── */
+
+.fragen { max-width: var(--measure); }
+.fragen details { border-top: 1px solid var(--rule); }
+.fragen details:last-of-type { border-bottom: 1px solid var(--rule); }
+.fragen summary {
+  cursor: pointer; list-style: none;
+  padding-block: 1.25rem; padding-right: 2rem;
+  font-weight: 600; position: relative;
+}
+.fragen summary::-webkit-details-marker { display: none; }
+/* Ein Plus, das beim Öffnen zum Minus wird. Beide Striche hängen an der Mitte der Zeile,
+   damit sie sich wirklich kreuzen — nicht fast. */
+.fragen summary::after {
+  content: ""; position: absolute; right: 0.5rem; top: 50%;
+  width: 11px; height: 1px; background: var(--ink);
+  transform: translateY(-50%);
+}
+.fragen summary::before {
+  content: ""; position: absolute; right: calc(0.5rem + 5px); top: 50%;
+  width: 1px; height: 11px; background: var(--ink);
+  transform: translateY(-50%);
+  transition: opacity 0.12s linear;
+}
+.fragen details[open] summary::before { opacity: 0; }
+.fragen details p { margin: 0 0 1.375rem; color: var(--ink2); max-width: 34rem; }
+
+/* ── Holen ────────────────────────────────────────────────────── */
+
+.holen { display: flex; flex-wrap: wrap; gap: 2.5rem; align-items: flex-start; }
+.laden { min-width: 13rem; }
+.laden .zustand { font-size: 1.375rem; font-weight: 600; margin: 0.5rem 0 0; }
+.laden .zustand.wartet { color: var(--ink3); }
+.laden p { margin: 0.375rem 0 0; color: var(--ink2); font-size: 0.9375rem; }
+
+/* ── Rechtstexte ──────────────────────────────────────────────── */
+
+.doc { max-width: var(--measure); padding-block: 3.5rem 4rem; }
+.doc-lead { color: var(--ink2); margin: 0.75rem 0 0; }
+.doc-abschnitt { padding-block: 0 0; border-top: 1px solid var(--rule); }
+.doc-abschnitt h2 {
+  font-variation-settings: 'wdth' 70;
+  font-size: 0.75rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink2); margin-block: 1.75rem 0.75rem;
+}
+/* Die Anschrift im Impressum steht mit Zeilenumbrüchen im Text der App; sie bleiben stehen. */
+.doc-abschnitt p { margin: 0 0 0.875rem; white-space: pre-line; }
+.doc-abschnitt p:last-child { margin-bottom: 1.75rem; }
+.stand { color: var(--ink3); font-size: 0.875rem; border-top: 1px solid var(--rule); padding-top: 1.25rem; }
+.platzhalter-warnung {
+  border-left: 2px solid var(--red);
+  padding: 0.75rem 0 0.75rem 1rem;
+  color: var(--red);
+  font-size: 0.9375rem;
+}
+
+/* ── Fuß ──────────────────────────────────────────────────────── */
+
+footer { padding-block: 2rem 4rem; }
+.fuss-oben { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding-block: 1.5rem; }
+.fuss-zeilen { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; align-items: center; font-size: 0.9375rem; color: var(--ink2); }
+.fuss-zeilen a { color: var(--ink2); }
+.clock--still .second { animation: none; }
+
+/* ── Schmal ───────────────────────────────────────────────────── */
+
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; gap: 3rem; padding-block: 3rem 3.5rem; }
+  .fahrkarte-halter { align-items: stretch; }
+  .fahrkarte { max-width: 26rem; }
+}
+@media (max-width: 420px) {
+  :root { --page: 1rem; }
+  .fk-zahl { font-size: 4.5rem; }
+  .fk-feld { grid-template-columns: 5rem 1fr; }
+  section { padding-block: 3rem; }
+}

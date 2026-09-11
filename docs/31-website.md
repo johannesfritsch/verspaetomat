@@ -202,7 +202,7 @@ binary in the repo.** Here is the comparison honestly:
 |---|---|---|
 | What the visitor gets | 5 HTML files, 1 CSS, 2 fonts, 6 images | The same, if configured right (`output: 'export'`) |
 | New languages in the repo | none (Rust and Dart are already here) | JavaScript/TypeScript — a third |
-| New dependency tree | 2 crates (`minijinja`, `pulldown-cmark`) | ~300 npm packages for React + Next, patched forever |
+| New dependency tree | 4 crates (`minijinja`, `serde`, `serde_json`, `toml`) | ~300 npm packages for React + Next, patched forever |
 | Build on the VPS | `cargo build`, already installed for the API | Node toolchain to install and keep current |
 | Runtime on the VPS | none — Caddy serves files | none in export mode, a Node server otherwise |
 | CI | the `cargo test` we already run | a second pipeline |
@@ -225,23 +225,28 @@ Concretely:
 
 ```
 site/
-  Cargo.toml            minijinja, pulldown-cmark, anyhow. Member of the existing workspace.
-  src/main.rs           read content/, render templates/, write dist/. ~300 lines.
-  templates/            base.html, index.html, legal.html, plain.html
+  Cargo.toml            minijinja, serde, serde_json, toml, anyhow. Its own crate, not a
+                        member of backend/ — the API's dependency tree has no business here.
+  src/lib.rs            read content/, render templates/, write dist/.
+  src/main.rs           the flags: --strict, --out.
+  templates/            base.html (Kopf, Fuß, Bahnhofsuhr), index.html, doc.html
   content/
-    index.md            the copy of §2, as front-matter blocks
-    loeschen.md
-    stores.toml         the §2.6 state
+    index.toml          the copy of §2, including the §2.6 store state
+    loeschen.toml       the deletion page, in the same shape as a legal document
     legal.json          generated from the app
   static/
-    verspaetomat.css    the tokens of §3, ~400 lines, hand-written
-    archivo-*.woff2
-    shots/*.png         copied out of the tour
-    og.png
-  tests/legal.rs        the drift test of §4
+    verspaetomat.css    the tokens of §3, hand-written
+    fonts/archivo-*.woff2 + OFL.txt
+    shots/*.png         out of the tour
+    og.png, favicon.svg
+  og/og.html            the source of og.png, rendered once in a browser
+  tests/legal.rs        the drift tests of §4
+  dist/                 the result, committed (see §6)
 ```
 
-`cargo run -p site` writes `dist/`. That is the whole toolchain.
+`cargo run` writes `dist/`. That is the whole toolchain. No Markdown renderer: the deletion page
+turned out to be a document with headings and paragraphs like the other four, so it goes through
+the same template, and `pulldown-cmark` was never needed.
 
 ## 6. Serving it
 
@@ -259,14 +264,18 @@ www.verspaetomat.de {
 }
 ```
 
-plus one read-only volume in `deploy/docker-compose.yml` and one `cargo run -p site` in
-`deploy/deploy.sh` before the Caddy reload. No new container, no new port, no new process to
-monitor, and Caddy fetches the two certificates by itself, as it did for the API.
+plus one read-only volume in `deploy/docker-compose.yml` (`../site/dist:/srv/site:ro`) and a
+`docker compose up -d caddy` in `deploy/deploy.sh`, so a changed mount actually takes effect.
+No new container, no new port, no new process to monitor, and Caddy fetches the two certificates
+by itself, as it did for the API.
 
-Risk on the deploy path: `deploy.sh` currently rebuilds only the API. Adding the site build means
-a failing site build could stop a deploy that was meant for the backend. So the site build gets
-its own step that logs and continues on failure — the API's availability must not depend on a
-typo in a Markdown file.
+**`dist/` is committed.** The server builds the API from source but has neither Rust nor Node for
+a website, so the site is built on the laptop and the result is checked in; deploying it is a
+`git pull`. That was also the answer to the risk I was worried about here — that a failing site
+build could stop a deploy meant for the backend. It cannot now: there is no site build on the
+deploy path at all. The price is a generated directory in version control, and the test
+`dist_ist_aktuell` pays it: it renders fresh and compares, so forgetting `cargo run` is a red
+test rather than a website that says something the repository no longer says.
 
 ## 7. In and out
 
@@ -287,3 +296,25 @@ later in one build-time fetch.
    true in a way an invented Musterfahrt does not — or an anonymous one if you would rather not.
 3. **iOS state in §2.6**: „Bald im App Store", or a public TestFlight link so the page can already
    hand somebody the app.
+
+---
+
+## Gebaut am 11. September 2026
+
+Alles oben, mit diesen Abweichungen — und einer Überraschung:
+
+- **Die Bilder sind echt.** `app/tools/tour.sh` lief durch (74 Aufnahmen, alle Tests grün), fünf
+  davon liegen auf 640 px verkleinert in `site/static/shots/`: Home mit Einchecken-Karte, eine
+  laufende Fahrt mit Umstieg, der Antragsschalter, die Fahrkarte im Teilen-Blatt, und Wir.
+- **Die große Zahl ist rot.** Auf dem Schirm der App ist sie das auch — das war beim Vergleich von
+  Entwurf und Aufnahme zu sehen, nicht vorher zu wissen.
+- **Die Löschseite ist ein Dokument wie die drei anderen**, nur eben hier geschrieben. Damit
+  entfällt der Markdown-Renderer aus §5.
+- **`--strict` hat mehr gefunden als erwartet.** Nicht nur `[Name]`, `[Straße Nr]`, `[PLZ Ort]` im
+  Impressum: die Datenschutzerklärung wartet außerdem auf den Mail-Dienstleister mitsamt Sitz und
+  auf das `[Bundesland]` der zuständigen Aufsichtsbehörde. Vier Lücken, nicht drei — und die App
+  zeigt diese Platzhalter heute schon jedem, der in den Einstellungen nachliest.
+- **Die Schriften liegen selbst gehostet** (`static/fonts/`, 90 KB + 86 KB, SIL OFL). Die Seite
+  lädt nichts von Dritten; deshalb braucht sie auch kein Einwilligungsbanner.
+- **Ungeprüft:** dass Caddy die beiden Zertifikate (Apex und www) wirklich bekommt. Das lässt sich
+  erst auf dem Server sehen. Die Konfiguration selbst ist mit `caddy validate` geprüft.

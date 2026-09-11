@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block inhalt %}
+
+<div class="hero">
+  <div>
+    <p class="eyebrow">{{ hero.eyebrow }}</p>
+    <h1>{{ hero.headline }}</h1>
+    <p class="lead">{{ hero.lead }}</p>
+    <div class="cta-row">
+      <a class="btn" href="#holen">{{ hero.cta }}</a>
+      <a class="ghost" href="#fahrplan">{{ hero.cta_secondary }}</a>
+    </div>
+  </div>
+
+  <div class="fahrkarte-halter">
+    <div class="fahrkarte">
+      <div class="fk-kopf">
+        <span class="eyebrow">Verspätomat</span>
+        <span class="eyebrow">Fahrgastrechte</span>
+      </div>
+      <dl class="fk-felder">
+        <div class="fk-feld"><dt>Fahrgast</dt><dd>{{ hero.karte.fahrgast }}</dd></div>
+        <div class="fk-feld"><dt>Strecke</dt><dd>{{ hero.karte.strecke }}</dd></div>
+        <div class="fk-feld"><dt>Am</dt><dd>{{ hero.karte.am }}</dd></div>
+      </dl>
+      <hr class="rule rule--red">
+      <p class="eyebrow fk-oben">Verspätung</p>
+      <div class="fk-held">
+        <div>
+          <div class="fk-zahl">{{ hero.karte.minuten }}</div>
+          <div class="fk-einheit">Minuten</div>
+        </div>
+        <div class="loch" aria-hidden="true"></div>
+      </div>
+      <hr class="rule rule--soft">
+      <dl class="fk-felder fk-felder--unten">
+        <div class="fk-feld"><dt>Zahlt an</dt><dd><span class="ngo"><span class="ngo-mark" aria-hidden="true"></span>{{ hero.karte.ngo }}</span></dd></div>
+        <div class="fk-feld"><dt>Betrag</dt><dd>{{ hero.karte.betrag }}</dd></div>
+      </dl>
+      <p class="fk-zitat">{{ hero.karte.zitat }}</p>
+    </div>
+    <p class="beispiel">{{ hero.karte.hinweis }}</p>
+  </div>
+</div>
+
+<hr class="rule">
+
+<section id="fahrplan">
+  <div class="sec-kopf">
+    <p class="eyebrow">{{ fahrplan.eyebrow }}</p>
+    <h2>{{ fahrplan.title }}</h2>
+  </div>
+  <ol class="halte">
+    {% for h in fahrplan.halt %}
+    <li class="halt{% if loop.last %} halt--ziel{% endif %}">
+      <span class="punkt" aria-hidden="true"></span>
+      <div>
+        <h3>{{ h.label }}</h3>
+        <p>{{ h.text }}</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+
+<hr class="rule">
+
+<section>
+  <div class="sec-kopf">
+    <p class="eyebrow">{{ bilder.eyebrow }}</p>
+    <h2>{{ bilder.title }}</h2>
+  </div>
+  <div class="streifen">
+    {% for s in bilder.schuss %}
+    <figure class="schuss">
+      <img src="/{{ s.src | safe }}" alt="{{ s.alt }}" width="{{ s.width }}" height="{{ s.height }}" loading="lazy" decoding="async">
+      <figcaption>{{ s.caption }}</figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+</section>
+
+<hr class="rule">
+
+<section>
+  <div class="sec-kopf">
+    <p class="eyebrow">{{ nicht.eyebrow }}</p>
+    <h2>{{ nicht.title }}</h2>
+  </div>
+  <div class="nicht">
+    {% for p in nicht.punkt %}
+    <div><h3>{{ p.title }}</h3> <p>{{ p.text }}{% if p.link %} <a href="{{ p.link | safe }}">{{ p.link_text }}</a>{% endif %}</p></div>
+    {% endfor %}
+  </div>
+</section>
+
+<hr class="rule">
+
+<section>
+  <div class="sec-kopf">
+    <p class="eyebrow">{{ fragen.eyebrow }}</p>
+    <h2>{{ fragen.title }}</h2>
+  </div>
+  <div class="fragen">
+    {% for f in fragen.frage %}
+    <details{% if loop.first %} open{% endif %}>
+      <summary>{{ f.q }}</summary>
+      <p>{{ f.a }}</p>
+    </details>
+    {% endfor %}
+  </div>
+</section>
+
+<hr class="rule">
+
+<section id="holen">
+  <div class="sec-kopf">
+    <p class="eyebrow">{{ holen.eyebrow }}</p>
+    <h2>{{ holen.title }}</h2>
+  </div>
+  <div class="holen">
+    {% for l in holen.laden %}
+    <div class="laden">
+      <p class="eyebrow">{{ l.platform }}</p>
+      {% if l.state == "live" %}
+      <p class="zustand"><a class="btn" href="{{ l.url | safe }}">{{ l.label }}</a></p>
+      {% else %}
+      <p class="zustand{% if l.state == "soon" %} wartet{% endif %}">{{ l.label }}</p>
+      {% endif %}
+      <p>{{ l.note }}{% if l.url and l.state != "live" %} <a href="{{ l.url | safe }}">{{ l.link_text }}</a>{% endif %}</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

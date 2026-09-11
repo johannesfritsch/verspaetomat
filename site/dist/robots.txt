@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://verspaetomat.de/sitemap.xml

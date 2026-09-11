@@ -1,0 +1,72 @@
+<!doctype html>
+<!-- Die Quelle für static/og.png, 1200 × 630. Einmal gerendert, dann als PNG eingecheckt:
+     ein Vorschaubild braucht keinen Browser im Bauprozess.
+
+       cd site && cargo run                                  # dist/ bauen
+       cp og/og.html dist/_og.html                           # daneben legen
+       python3 -m http.server 4321 -d dist                   # ausliefern
+       # im Browser 1200 × 630 aufziehen, /_og.html aufnehmen, als static/og.png ablegen
+       rm dist/_og.html
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="/verspaetomat.css">
+<style>
+  body { margin: 0; }
+  .og {
+    width: 1200px; height: 630px;
+    display: grid; grid-template-columns: 1fr 420px;
+    gap: 64px; align-items: center;
+    padding: 0 72px;
+    background: var(--paper);
+  }
+  .og h1 {
+    font-variation-settings: 'wdth' 112;
+    font-size: 66px; line-height: 1.02; letter-spacing: -0.02em;
+    margin: 20px 0 28px;
+  }
+  .og .marke {
+    font-variation-settings: 'wdth' 70;
+    font-weight: 700; font-size: 17px; letter-spacing: 0.24em; text-transform: uppercase;
+  }
+  .og .netz { color: var(--ink2); font-size: 21px; }
+  .og .fahrkarte { max-width: 420px; padding: 30px 28px; }
+  .og .fk-zahl { font-size: 118px; }
+  .og .fk-zitat { display: none; }
+</style>
+</head>
+<body>
+<div class="og">
+  <div>
+    <div class="marke">Verspätomat</div>
+    <h1>Die Bahn war zu spät. Diesmal zahlt sie dafür.</h1>
+    <div class="netz">verspaetomat.de</div>
+  </div>
+  <div class="fahrkarte">
+    <div class="fk-kopf">
+      <span class="eyebrow">Verspätomat</span>
+      <span class="eyebrow">Fahrgastrechte</span>
+    </div>
+    <dl class="fk-felder">
+      <div class="fk-feld"><dt>Strecke</dt><dd>Köln Hbf → Rheine</dd></div>
+      <div class="fk-feld"><dt>Am</dt><dd>Fr, 11. September 2026</dd></div>
+    </dl>
+    <hr class="rule rule--red">
+    <p class="eyebrow fk-oben">Verspätung</p>
+    <div class="fk-held">
+      <div>
+        <div class="fk-zahl">204</div>
+        <div class="fk-einheit">Minuten</div>
+      </div>
+      <div class="loch"></div>
+    </div>
+    <hr class="rule rule--soft">
+    <dl class="fk-felder fk-felder--unten">
+      <div class="fk-feld"><dt>Zahlt an</dt><dd>Bahnhofsmission Köln</dd></div>
+      <div class="fk-feld"><dt>Betrag</dt><dd>12,00 €</dd></div>
+    </dl>
+  </div>
+</div>
+</body>
+</html>

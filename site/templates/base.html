@@ -1,0 +1,66 @@
+{# Die Bahnhofsuhr, einmal beschrieben. Im Kopf läuft der Sekundenzeiger, im Fuß steht er. #}
+{% macro bahnhofsuhr(still=false) %}
+    <svg class="clock{% if still %} clock--still{% endif %}" viewBox="0 0 100 100"{% if still %} aria-hidden="true"{% else %} role="img" aria-label="Bahnhofsuhr"{% endif %}>
+      <circle cx="50" cy="50" r="48" fill="#FFFFFF" stroke="#111111" stroke-width="3"></circle>
+      <g stroke="#111111" stroke-width="4">
+        <line x1="50" y1="8" x2="50" y2="17"></line>
+        <line x1="92" y1="50" x2="83" y2="50"></line>
+        <line x1="50" y1="92" x2="50" y2="83"></line>
+        <line x1="8" y1="50" x2="17" y2="50"></line>
+      </g>
+      <line x1="50" y1="50" x2="50" y2="24" stroke="#111111" stroke-width="7" stroke-linecap="square"></line>
+      <line x1="50" y1="50" x2="68" y2="62" stroke="#111111" stroke-width="7" stroke-linecap="square"></line>
+      <g class="second">
+        <line x1="50" y1="56" x2="50" y2="20" stroke="#D92B1E" stroke-width="3"></line>
+        <circle cx="50" cy="22" r="7" fill="none" stroke="#D92B1E" stroke-width="3"></circle>
+      </g>
+      <circle cx="50" cy="50" r="4" fill="#111111"></circle>
+    </svg>
+{% endmacro %}
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ meta.title }}</title>
+<meta name="description" content="{{ meta.description }}">
+<link rel="canonical" href="{{ canonical | safe }}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Verspätomat">
+<meta property="og:locale" content="de_DE">
+<meta property="og:title" content="{{ meta.title }}">
+<meta property="og:description" content="{{ meta.description }}">
+<meta property="og:url" content="{{ canonical | safe }}">
+<meta property="og:image" content="https://verspaetomat.de/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#F3F3F0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/verspaetomat.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="kopf">
+    <a class="wordmark" href="/">Verspätomat</a>
+    {{ bahnhofsuhr() }}
+  </header>
+  <hr class="rule">
+
+  {% block inhalt %}{% endblock %}
+
+  <hr class="rule">
+  <footer>
+    <div class="fuss-oben">
+      <nav class="fuss-zeilen">
+        {% for d in nav %}<a href="/{{ d.id }}">{{ d.title }}</a>{% endfor %}
+        <a href="mailto:{{ contact }}">{{ contact }}</a>
+      </nav>
+      {{ bahnhofsuhr(true) }}
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

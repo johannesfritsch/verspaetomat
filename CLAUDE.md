@@ -8,6 +8,7 @@ Gamified train check-in app for Germany. Delays earn Geduldspunkte; delays of 60
 |---|---|
 | `backend/` | Rust (axum, sqlx/Postgres 17). Migrations and fixtures embedded. `src/bin/stellwerk.rs` is the admin CLI. |
 | `app/` | Flutter. Demo mode (mock, no server) and local mode (HTTP). Native geofence layers in `ios/Runner/Geofence.swift` and `android/.../GeofenceManager.kt`. |
+| `site/` | The website at verspaetomat.de: a Rust generator (`cargo run`) that writes the committed `site/dist`, which Caddy serves. The legal texts come from `app/lib/content/legal.dart`. |
 | `deploy/` | docker compose for one VPS (Postgres, API, Caddy), `.env.example`, README with DNS and Postmark steps. |
 | `docs/` | Research 01–08, product 10–15, backend 20–21, plans and runbooks 30, 40, 41, 42. |
 

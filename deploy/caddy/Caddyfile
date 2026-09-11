@@ -15,3 +15,23 @@
 		format console
 	}
 }
+
+# Die Website (docs/31). Caddy liefert fertige Dateien aus ../site/dist aus; gebaut wird auf
+# dem Laptop, nicht hier — der Server braucht dafür kein Rust und keinen Node.
+{$SITE_DOMAIN:verspaetomat.de} {
+	encode zstd gzip
+	root * /srv/site
+	file_server
+	# Schriften ändern sich nie, Bilder selten, HTML jedes Mal.
+	header /fonts/* Cache-Control "public, max-age=31536000, immutable"
+	header /shots/* Cache-Control "public, max-age=604800"
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Auf jeder geteilten Fahrkarte steht www.verspaetomat.de (docs/27): die Adresse muss ankommen.
+www.{$SITE_DOMAIN:verspaetomat.de} {
+	redir https://{$SITE_DOMAIN:verspaetomat.de}{uri} permanent
+}

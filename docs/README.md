@@ -60,7 +60,7 @@ number wins.
 | [28-schienenersatzverkehr.md](28-schienenersatzverkehr.md) | build 17 | A bus running under a train's line number is part of the journey; the planner was dropping every one |
 | [29-ein-einchecken.md](29-ein-einchecken.md) | build 17 | Five ways to start a ride became one; nothing legacy left in the backend |
 | [30-home-und-bahnhofsnamen.md](30-home-und-bahnhofsnamen.md) | build 18 | Wir at the top of Home, Deine Woche in the same box, and one station with two names |
-| [31-website.md](31-website.md) | — | The website at verspaetomat.de: one page shaped like a Fahrkarte, four legal documents generated from the app. Concept and tech choice; not built yet |
+| [31-website.md](31-website.md) | — | The website at verspaetomat.de: one page shaped like a Fahrkarte, four legal documents generated from the app so they cannot drift |
 
 Two numbers are used twice: `20-backend.md` and `21-data-requirements.md` came first, the decision
 series later walked into the same numbers. In prose and in code comments a bare **docs/20** or
