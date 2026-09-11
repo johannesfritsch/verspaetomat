@@ -121,21 +121,22 @@ pub async fn ngos(State(s): State<AppState>) -> ApiResult {
 }
 
 async fn ngo_totals(pool: &PgPool) -> anyhow::Result<Vec<Value>> {
-    let rows: Vec<(String, String, String, Value, String, String, String, Option<NaiveDate>, i64, i64, i64, i64)> = sqlx::query_as(
+    let rows: Vec<(String, String, String, Value, String, String, String, Option<NaiveDate>, i64, i64, i64, i64, Option<String>)> = sqlx::query_as(
         "select n.id, n.name, n.tagline, n.story, n.account_holder, n.iban, n.donation_url, n.last_report,
                 n.seed_confirmed_cents, n.seed_submitted_cents,
                 coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'bestaetigt'), 0)::bigint,
-                coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'eingereicht'), 0)::bigint
+                coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'eingereicht'), 0)::bigint,
+                n.logo
          from ngos n where n.active order by n.name",
     )
     .fetch_all(pool)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, name, tagline, story, holder, iban, url, last_report, sc, ss, c, sub)| {
+        .map(|(id, name, tagline, story, holder, iban, url, last_report, sc, ss, c, sub, logo)| {
             json!({
                 "id": id, "name": name, "tagline": tagline, "story": story, "account_holder": holder, "iban": iban,
-                "donation_url": url, "last_report": last_report,
+                "donation_url": url, "last_report": last_report, "logo": logo,
                 "confirmed_total_cents": sc + c, "submitted_total_cents": ss + sub,
             })
         })

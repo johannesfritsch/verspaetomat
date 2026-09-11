@@ -165,6 +165,10 @@ enum NgoCmd {
         /// Date of the written consent to appear as payee (YYYY-MM-DD)
         #[arg(long)]
         consent: Option<String>,
+        /// The NGO's own logo as a PNG or SVG file; stored inline and printed on shared tickets
+        /// (docs/27). Pass an empty path to remove it.
+        #[arg(long = "logo")]
+        logo: Option<String>,
         #[arg(long, conflicts_with = "inactive")]
         active: bool,
         #[arg(long)]
@@ -601,7 +605,7 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
             }
-            NgoCmd::Set { id, name, tagline, story, holder, iban, donation_url, consent, active, inactive } => {
+            NgoCmd::Set { id, name, tagline, story, holder, iban, donation_url, consent, logo, active, inactive } => {
                 let mut body = serde_json::Map::new();
                 if let Some(v) = name { body.insert("name".into(), json!(v)); }
                 if let Some(v) = tagline { body.insert("tagline".into(), json!(v)); }
@@ -610,6 +614,21 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(v) = iban { body.insert("iban".into(), json!(v)); }
                 if let Some(v) = donation_url { body.insert("donation_url".into(), json!(v)); }
                 if let Some(v) = consent { body.insert("consent_date".into(), json!(v)); }
+                if let Some(path) = logo {
+                    // Inline, because the card is drawn on a phone that may be underground and
+                    // there is nowhere to host partner logos (docs/27 §5).
+                    if path.is_empty() {
+                        body.insert("logo".into(), Value::Null);
+                    } else {
+                        let bytes = std::fs::read(&path)?;
+                        let mime = if path.to_lowercase().ends_with(".svg") { "image/svg+xml" } else { "image/png" };
+                        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                        if bytes.len() > 200_000 {
+                            anyhow::bail!("{path} is {} KB; keep a logo under 200 KB — it rides along with every NGO fetch", bytes.len() / 1024);
+                        }
+                        body.insert("logo".into(), json!(format!("data:{mime};base64,{b64}")));
+                    }
+                }
                 if active { body.insert("active".into(), json!(true)); }
                 if inactive { body.insert("active".into(), json!(false)); }
                 let v = api.put(&format!("/admin/ngos/{id}"), Value::Object(body)).await?;

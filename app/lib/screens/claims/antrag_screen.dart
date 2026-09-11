@@ -7,6 +7,10 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../../widgets/konfetti.dart';
+import '../../widgets/ticket.dart';
+import '../share/share_lines.dart';
+import '../share/share_sheet.dart';
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
 
@@ -189,7 +193,15 @@ class _AntragScreenState extends State<AntragScreen> {
   @override
   Widget build(BuildContext context) {
     final session = RepoScope.of(context);
-    if (_sent != null) return _Sent(desk: widget.desk, dryRun: _sentDryRun, mail: _sent!.mail);
+    if (_sent != null) {
+      return _Sent(
+        desk: widget.desk,
+        dryRun: _sentDryRun,
+        mail: _sent!.mail,
+        claim: _claim,
+        incidents: _incidents,
+      );
+    }
     if (_loading) return const VScreen(title: 'Antrag', child: LoadingLine());
     if (_error != null || _draft == null) {
       return VScreen(
@@ -829,39 +841,88 @@ class _Senden extends StatelessWidget {
   }
 }
 
-class _Sent extends StatelessWidget {
-  const _Sent({required this.desk, required this.dryRun, required this.mail});
+/// The moment the Antrag is out. The one place in this app that celebrates, because it is the
+/// one thing that was the passenger's own doing (docs/27 §4).
+class _Sent extends StatefulWidget {
+  const _Sent({required this.desk, required this.dryRun, required this.mail, required this.claim, required this.incidents});
   final String desk;
   final bool dryRun;
   final ApiMail mail;
+  final ApiClaim? claim;
+  final List<ApiIncident> incidents;
+
+  @override
+  State<_Sent> createState() => _SentState();
+}
+
+class _SentState extends State<_Sent> {
+  bool _konfetti = true;
 
   @override
   Widget build(BuildContext context) {
+    final session = RepoScope.of(context);
+    final c = widget.claim;
+    final cases = widget.incidents.isNotEmpty ? widget.incidents.length : c?.incidentIds.length ?? 0;
+    final minutes = widget.incidents.fold<int>(0, (a, i) => a + i.delayMinutes);
+    final cents = c?.amountClaimedCents ?? widget.incidents.fold<int>(0, (a, i) => a + i.amountCents);
+    final ngo = session.ngos.where((n) => n.id == (c?.ngoId ?? session.me?.settings.ngoId)).firstOrNull;
+    final ngoName = ngo?.name ?? 'deinen Zweck';
+    final canShare = cases > 0 && minutes > 0;
+
     return Scaffold(
       backgroundColor: VColors.paper,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(VSpace.page),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Spacer(),
-              const VStationClock(size: 56),
-              const VGap.xl(),
-              Text('Abgeschickt.', style: VText.h1),
-              const VGap.s(),
-              Text(Mock.longDate(DateTime.now()), style: VText.h2.copyWith(color: VColors.ink2, fontWeight: FontWeight.w400)),
-              const VGap.m(),
-              Text('An ${mail.to}, von deiner Adresse. Die Kopie ist in deinem Postfach.', style: VText.body.copyWith(color: VColors.ink2)),
-              if (dryRun) ...[
-                const VGap.s(),
-                Text('Testlauf: keine echte Mail hat das Haus verlassen.', style: VText.caption),
-              ],
-              const Spacer(),
-              VPrimaryButton(label: 'Zu den Anträgen', onTap: () => (context.canPop() ? context.pop() : context.go(Routes.antraege))),
-            ],
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(VSpace.page),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Spacer(),
+                  const VStationClock(size: 56),
+                  const VGap.xl(),
+                  Text('Abgeschickt.', style: VText.h1),
+                  const VGap.s(),
+                  Text(Mock.longDate(DateTime.now()), style: VText.h2.copyWith(color: VColors.ink2, fontWeight: FontWeight.w400)),
+                  const VGap.m(),
+                  Text('An ${widget.mail.to}, von deiner Adresse. Die Kopie ist in deinem Postfach.', style: VText.body.copyWith(color: VColors.ink2)),
+                  if (widget.dryRun) ...[
+                    const VGap.s(),
+                    Text('Testlauf: keine echte Mail hat das Haus verlassen.', style: VText.caption),
+                  ],
+                  const Spacer(),
+                  if (canShare) ...[
+                    VPrimaryButton(
+                      label: 'Teilen',
+                      icon: Icons.ios_share,
+                      onTap: () => showShareSheet(
+                        context,
+                        date: DateTime.now(),
+                        lines: ShareLines.antrag(minutes: minutes, cases: cases, cents: cents, ngo: ngoName),
+                        build: ({fahrgast, strecke, date, line}) => TicketData.antrag(
+                          minutes: minutes,
+                          cases: cases,
+                          euro: fmtCents(cents),
+                          ngoName: ngoName,
+                          ngoLogo: ngo?.logo,
+                          fahrgast: fahrgast,
+                          date: date,
+                          line: line,
+                        ),
+                      ),
+                    ),
+                    const VGap.s(),
+                    VGhostButton(label: 'Zu den Anträgen', onTap: () => (context.canPop() ? context.pop() : context.go(Routes.antraege))),
+                  ] else
+                    VPrimaryButton(label: 'Zu den Anträgen', onTap: () => (context.canPop() ? context.pop() : context.go(Routes.antraege))),
+                ],
+              ),
+            ),
           ),
-        ),
+          if (_konfetti)
+            Positioned.fill(child: Konfetti(onDone: () => setState(() => _konfetti = false))),
+        ],
       ),
     );
   }

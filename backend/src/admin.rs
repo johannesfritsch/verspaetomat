@@ -597,6 +597,18 @@ pub struct NgoUpsert {
     pub consent_date: Option<chrono::NaiveDate>,
     #[serde(default)]
     pub last_report: Option<chrono::NaiveDate>,
+    /// docs/27 §5: the NGO's mark as a data URI. Explicit null removes it, which is why this is
+    /// a nested Option — absent and null are different instructions.
+    #[serde(default, deserialize_with = "crate::admin::double_option")]
+    pub logo: Option<Option<String>>,
+}
+
+/// Distinguishes "field absent" from "field set to null" for a patch-style body.
+pub fn double_option<'de, D>(d: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde::Deserialize::deserialize(d).map(Some)
 }
 
 /// IBAN normalised to groups of four, or an error. Checks length per country prefix loosely and the mod-97 checksum.
@@ -669,11 +681,13 @@ pub async fn ngo_upsert(State(s): State<AppState>, _a: Admin, Path(id): Path<Str
         sqlx::query(
             "update ngos set name = coalesce($2, name), tagline = coalesce($3, tagline), story = coalesce($4, story),
                 account_holder = coalesce($5, account_holder), iban = coalesce($6, iban), donation_url = coalesce($7, donation_url),
-                active = coalesce($8, active), consent_date = coalesce($9, consent_date), last_report = coalesce($10, last_report)
+                active = coalesce($8, active), consent_date = coalesce($9, consent_date), last_report = coalesce($10, last_report),
+                logo = case when $11 then $12 else logo end
              where id = $1",
         )
         .bind(&id).bind(&b.name).bind(&b.tagline).bind(&story).bind(&b.account_holder).bind(&iban).bind(&b.donation_url)
         .bind(b.active).bind(b.consent_date).bind(b.last_report)
+        .bind(b.logo.is_some()).bind(b.logo.clone().flatten())
         .execute(&s.pool).await.map_err(internal)?;
         crate::rules::audit(&s.pool, "ngo", Uuid::nil(), None, &id, "updated via admin").await.map_err(internal)?;
     } else {
@@ -681,11 +695,12 @@ pub async fn ngo_upsert(State(s): State<AppState>, _a: Admin, Path(id): Path<Str
             return Err(err(StatusCode::BAD_REQUEST, "a new NGO needs name, account_holder and iban"));
         };
         sqlx::query(
-            "insert into ngos (id, name, tagline, story, account_holder, iban, donation_url, last_report, active, consent_date)
-             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            "insert into ngos (id, name, tagline, story, account_holder, iban, donation_url, last_report, active, consent_date, logo)
+             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(&id).bind(name).bind(b.tagline.clone().unwrap_or_default()).bind(story.unwrap_or(json!([]))).bind(holder).bind(iban)
         .bind(b.donation_url.clone().unwrap_or_default()).bind(b.last_report).bind(b.active.unwrap_or(true)).bind(b.consent_date)
+        .bind(b.logo.clone().flatten())
         .execute(&s.pool).await.map_err(internal)?;
         crate::rules::audit(&s.pool, "ngo", Uuid::nil(), None, &id, "created via admin").await.map_err(internal)?;
     }

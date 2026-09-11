@@ -12,6 +12,9 @@ import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
+import '../../widgets/ticket.dart';
+import '../share/share_lines.dart';
+import '../share/share_sheet.dart';
 
 class _WirData {
   const _WirData(this.community, this.standing, this.boards);
@@ -122,7 +125,24 @@ class _WirScreenState extends State<WirScreen> {
                   ),
                 ),
               ),
-              const VGap.l(),
+              const VGap.s(),
+              // docs/27 §2: the collective number, which nobody's own ego is in — which is
+              // exactly why it is the one people pass on.
+              VGhostButton(
+                label: 'Teilen',
+                icon: Icons.ios_share,
+                color: VColors.ink2,
+                onTap: () => showShareSheet(
+                  context,
+                  lines: ShareLines.wir(minutes: c.minutes + _extraMinutes),
+                  build: ({fahrgast, strecke, date, line}) => TicketData.wir(
+                    minutes: c.minutes + _extraMinutes,
+                    people: c.users,
+                    line: line,
+                  ),
+                ),
+              ),
+              const VGap.s(),
               const VRule.red(),
               const VGap.l(),
 

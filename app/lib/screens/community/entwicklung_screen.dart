@@ -55,9 +55,11 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
       _error = null;
     });
     try {
+      // The repo is taken before the first await: the context must not be read across one.
+      final repo = RepoScope.read(context).repo;
       final status = await Geofence.instance.status();
       final native = await Geofence.instance.readLog();
-      final geo = await RepoScope.read(context).repo.geofence().catchError((_) => ApiGeofence.empty);
+      final geo = await repo.geofence().catchError((_) => ApiGeofence.empty);
       if (!mounted) return;
       setState(() {
         _status = status;

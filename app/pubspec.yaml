@@ -41,6 +41,9 @@ dependencies:
   shared_preferences: ^2.5.5
   geolocator: ^14.0.3
   pdfx: ^2.11.0
+  # docs/27: the native share sheet, and a place to put the rendered ticket on the way to it.
+  share_plus: ^13.3.0
+  path_provider: ^2.1.5
 
 dev_dependencies:
   integration_test:

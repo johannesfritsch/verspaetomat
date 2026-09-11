@@ -15,6 +15,7 @@ import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/state/ride_monitor.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow;
+import 'package:verspaetomat/screens/community/community_widgets.dart' show BadgeIcon;
 import 'package:verspaetomat/screens/ride/wohin_screen.dart' show DestinationButton;
 import 'package:verspaetomat/widgets/kit.dart' show VGhostButton, VListRow, VOutlineButton, VPrimaryButton;
 
@@ -208,6 +209,36 @@ void main() {
       const Offset(0, -220),
     );
     await shot('debug-log');
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    await wait(tester, 600);
+    // docs/27: the shareable Fahrkarte. The arrival card, the punctual one (which is a
+    // different face, not the same card with a zero in it), and a badge.
+    demo.reset();
+    demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
+    await wait(tester, 600);
+    demo.simulateArrival(minutes: 68);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.angekommen);
+    await wait(tester, 1000);
+    await tester.tap(find.widgetWithText(VGhostButton, 'Teilen').first, warnIfMissed: false);
+    await shot('karte-angekommen');
+    await dismissSheet(tester);
+    demo.reset();
+    demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
+    await wait(tester, 600);
+    demo.simulateArrival(minutes: 0);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.angekommen);
+    await wait(tester, 1000);
+    await tester.tap(find.widgetWithText(VGhostButton, 'Teilen').first, warnIfMissed: false);
+    await shot('karte-puenktlich');
+    await dismissSheet(tester);
+    demo.reset();
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.ich);
+    await wait(tester, 900);
+    await tester.tap(find.byType(BadgeIcon).first, warnIfMissed: false);
+    await wait(tester, 900);
+    await tester.tap(find.widgetWithText(VGhostButton, 'Als Karte teilen').first, warnIfMissed: false);
+    await shot('karte-abzeichen');
+    await dismissSheet(tester);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
     await wait(tester, 600);
     // "Ich fahre weiter" (docs/21 §2): the passenger gives up on this train at Hagen and

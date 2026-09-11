@@ -7,6 +7,9 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../../widgets/ticket.dart';
+import '../share/share_lines.dart';
+import '../share/share_sheet.dart';
 import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
 
@@ -194,7 +197,21 @@ class IchScreen extends StatelessWidget {
                       icon: Icons.ios_share,
                       onTap: () {
                         Navigator.of(ctx).pop();
-                        showSnack(context, 'Karte erstellt. Teilen öffnet sich in der echten App.');
+                        // docs/27 §1: the badge card leads with the fact that earned it, because
+                        // a badge name alone is readable only by people who have the app.
+                        showShareSheet(
+                          context,
+                          date: DateTime.now(),
+                          lines: ShareLines.abzeichen(name: b.name),
+                          build: ({fahrgast, strecke, date, line}) => TicketData.abzeichen(
+                            name: b.name,
+                            rule: b.rule,
+                            asset: BadgeIcon.assetFor(b.id, earned: true),
+                            fahrgast: fahrgast,
+                            date: date,
+                            line: line,
+                          ),
+                        );
                       },
                     ),
                   ],

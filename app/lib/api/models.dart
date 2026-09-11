@@ -251,6 +251,7 @@ class ApiNgo {
     required this.accountHolder,
     required this.iban,
     this.donationUrl = '',
+    this.logo,
     this.lastReport,
     this.confirmedTotalCents = 0,
     this.submittedTotalCents = 0,
@@ -262,6 +263,10 @@ class ApiNgo {
   final String accountHolder;
   final String iban;
   final String donationUrl;
+
+  /// docs/27 §5: the NGO's own mark as a `data:image/…;base64,…` URI, printed on a shared
+  /// ticket beside its name. Null where a partner has sent nothing yet; the name carries it.
+  final String? logo;
   final DateTime? lastReport;
   final int confirmedTotalCents;
   final int submittedTotalCents;
@@ -274,6 +279,7 @@ class ApiNgo {
         accountHolder: _s(j['account_holder']),
         iban: _s(j['iban']),
         donationUrl: _s(j['donation_url']),
+        logo: _sn(j['logo']),
         lastReport: _date(j['last_report']),
         confirmedTotalCents: _i(j['confirmed_total_cents']),
         submittedTotalCents: _i(j['submitted_total_cents']),

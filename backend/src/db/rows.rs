@@ -200,6 +200,9 @@ pub struct NgoRow {
     pub account_holder: String,
     pub iban: String,
     pub donation_url: String,
+    /// docs/27 §5: `data:image/…;base64,…`, or null where a partner has sent nothing yet.
+    #[serde(default)]
+    pub logo: Option<String>,
     pub last_report: Option<NaiveDate>,
     pub active: bool,
     pub seed_confirmed_cents: i64,

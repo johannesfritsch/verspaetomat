@@ -7,6 +7,9 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../share/share_lines.dart';
+import '../share/share_sheet.dart';
+import '../../widgets/ticket.dart';
 import '../community/community_widgets.dart' show BadgeIcon;
 import 'ride_widgets.dart';
 
@@ -197,7 +200,31 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
               child: VGhostButton(
                 label: 'Teilen',
                 icon: Icons.ios_share,
-                onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Karte geteilt: „$lineLabel, +$delay, $where“. (Demo)'))),
+                // docs/27: the arrival is the first of the four faces, and a punctual ride is
+                // its own card — rare enough to be the joke, and the joke travels.
+                onTap: () => showShareSheet(
+                  context,
+                  strecke: '$origin → $where',
+                  date: actual ?? planned ?? DateTime.now(),
+                  lines: delay > 0
+                      ? ShareLines.angekommen(minutes: delay, to: where)
+                      : ShareLines.puenktlich(to: where),
+                  build: ({fahrgast, strecke, date, line}) => delay > 0
+                      ? TicketData.angekommen(
+                          minutes: delay,
+                          points: points,
+                          strecke: strecke,
+                          fahrgast: fahrgast,
+                          date: date,
+                          line: line,
+                        )
+                      : TicketData.puenktlich(
+                          strecke: strecke,
+                          fahrgast: fahrgast,
+                          date: date,
+                          line: line,
+                        ),
+                ),
               ),
             ),
             Expanded(child: VGhostButton(label: 'Fertig', onTap: _finish)),
