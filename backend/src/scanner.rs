@@ -23,7 +23,7 @@ pub fn spawn(state: AppState) {
         tokio::time::sleep(FIRST_RUN_AFTER).await;
         loop {
             match run_once(&state).await {
-                Ok(v) => tracing::info!(warned = %v["warned"], expired = %v["expired"], nudged = %v["nudged"], retained = %v["retained"], "deadline scanner pass"),
+                Ok(v) => tracing::info!(warned = %v["warned"], expired = %v["expired"], nudged = %v["nudged"], asked = %v["asked"], retained = %v["retained"], "deadline scanner pass"),
                 Err(e) => tracing::error!("deadline scanner: {e}"),
             }
             tokio::time::sleep(INTERVAL).await;
@@ -37,8 +37,28 @@ pub async fn run_once(s: &AppState) -> anyhow::Result<Value> {
     let expired = expire(s, today).await?;
     let warned = warn(s, today).await?;
     let nudged = nudge(s, today).await?;
+    let asked = ask_stale(s).await?;
     let retained = sweep_retention(&s.pool).await?;
-    Ok(json!({ "today": today, "expired": expired, "warned": warned, "nudged": nudged, "retained": retained }))
+    Ok(json!({ "today": today, "expired": expired, "warned": warned, "nudged": nudged, "asked": asked, "retained": retained }))
+}
+
+/// (e) A journey still `riding` or `transfer` three hours past its planned arrival: ask once
+/// whether the passenger has arrived (docs/23 §3). Nothing is decided for them — the journey
+/// keeps running until they answer or the existing rules finalise it.
+pub async fn ask_stale(s: &AppState) -> anyhow::Result<usize> {
+    let cutoff = clock::now() - chrono::Duration::hours(crate::journeys::STALE_AFTER_HOURS);
+    let due: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        "update journeys set stale_asked_at = now()
+         where status in ('riding','transfer') and stale_asked_at is null and planned_arrival <= $1
+         returning id, customer_id",
+    )
+    .bind(cutoff)
+    .fetch_all(&s.pool)
+    .await?;
+    for (id, customer) in &due {
+        s.events.publish(*customer, "journey", json!({ "journey_id": id, "stale": true }));
+    }
+    Ok(due.len())
 }
 
 /// (b) Open incidents past their deadline become `verfallen`, for every customer that has one.

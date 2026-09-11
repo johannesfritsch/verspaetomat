@@ -45,6 +45,11 @@ pub struct StopInfo {
     pub lat: f64,
     pub lon: f64,
     pub distance_m: Option<i64>,
+    /// How much of a railway station this stop is (docs/23 §1): 3 long distance, 2 rail or
+    /// regional, 1 suburban only or a station by its name, 0 nothing rail-like. Only the
+    /// nearby list ranks; a searched station carries None.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rail_rank: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

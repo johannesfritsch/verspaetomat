@@ -5,7 +5,7 @@ use chrono::{Duration, Months, NaiveDate};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::rows::{IncidentRow, IncidentStatus, TicketType, TrainCategory};
+use crate::db::rows::{ClaimStatus, IncidentRow, IncidentStatus, TicketType, TrainCategory};
 
 pub type Cents = i64;
 
@@ -84,6 +84,39 @@ pub fn bundle_ready(open_for_desk: &[&IncidentRow]) -> bool {
         return true;
     }
     open_for_desk.iter().map(|i| i.amount_cents).sum::<Cents>() >= MIN_PAYOUT_CENTS
+}
+
+/// What a draft claim becomes when one of its cases leaves it — discarded (docs/21 §4) or
+/// deleted with its ride (docs/23 §2). Below the minimum the draft has nothing left to ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftAfterRemoval {
+    /// Nothing sendable is left: the draft goes, and its cases are free again.
+    Dropped,
+    /// The draft stays and asks for this much.
+    Reduced(Cents),
+}
+
+/// The rule both the discard and the delete apply to a draft claim (docs/23 §2).
+pub fn draft_after_removal(rest: &[&IncidentRow]) -> DraftAfterRemoval {
+    if rest.is_empty() || !bundle_ready(rest) {
+        return DraftAfterRemoval::Dropped;
+    }
+    DraftAfterRemoval::Reduced(rest.iter().map(|i| i.amount_cents).sum())
+}
+
+/// What the passenger is told when a ride cannot be deleted (docs/23 §2).
+pub const DELETE_IN_SENT_CLAIM: &str = "Diese Fahrt steckt in einem eingereichten Antrag.";
+
+/// May this ride be deleted? Once its case has left the house — in a claim that is no longer a
+/// draft, or with a status that says it was submitted — the ride is evidence and stays.
+pub fn delete_refusal(claims: &[ClaimStatus], incidents: &[IncidentStatus]) -> Option<&'static str> {
+    let gone = claims.iter().any(|s| *s != ClaimStatus::Draft)
+        || incidents.iter().any(|s| matches!(s, IncidentStatus::Eingereicht | IncidentStatus::Bestaetigt));
+    if gone {
+        Some(DELETE_IN_SENT_CLAIM)
+    } else {
+        None
+    }
 }
 
 /// Recompute `gesammelt` / `bereit` for a customer's open incidents and expire what is
@@ -263,6 +296,32 @@ mod tests {
         assert!(!bundle_ready(&refs), "taking one out drops the rest to 3,00 €: the draft goes");
         let refs: Vec<&IncidentRow> = Vec::new();
         assert!(!bundle_ready(&refs), "an empty remainder is never ready");
+    }
+
+    /// docs/23 §2: a ride logged by accident can go — unless it is already out of the house.
+    #[test]
+    fn deleting_a_ride() {
+        // Nothing holds it: the incident goes with the ride.
+        assert_eq!(delete_refusal(&[], &[IncidentStatus::Gesammelt]), None);
+        assert_eq!(delete_refusal(&[ClaimStatus::Draft], &[IncidentStatus::Bereit]), None, "a draft can still be corrected");
+
+        // A claim that left the house refuses, whatever else is true.
+        assert_eq!(delete_refusal(&[ClaimStatus::Sent], &[IncidentStatus::Eingereicht]), Some(DELETE_IN_SENT_CLAIM));
+        assert_eq!(delete_refusal(&[ClaimStatus::Accepted], &[IncidentStatus::Bestaetigt]), Some(DELETE_IN_SENT_CLAIM));
+        assert_eq!(delete_refusal(&[ClaimStatus::Draft, ClaimStatus::Sent], &[]), Some(DELETE_IN_SENT_CLAIM), "one sent bundle is enough");
+        assert_eq!(delete_refusal(&[], &[IncidentStatus::Eingereicht]), Some(DELETE_IN_SENT_CLAIM), "submitted without a claim row we can see: still evidence");
+        // A rejected or expired case is over, not out: deleting it takes nothing back from anyone.
+        assert_eq!(delete_refusal(&[], &[IncidentStatus::Abgelehnt]), None);
+        assert_eq!(delete_refusal(&[], &[IncidentStatus::Verfallen]), None);
+
+        // The draft is recomputed exactly as a discard does it: 3 × 1,50 € stays, 2 × 1,50 € goes.
+        let three: Vec<IncidentRow> = (1..=3).map(|d| incident(d, IncidentStatus::Bereit, 150)).collect();
+        let rest: Vec<&IncidentRow> = three.iter().take(2).collect();
+        assert_eq!(draft_after_removal(&rest), DraftAfterRemoval::Dropped, "3,00 € is below the 4 € minimum: the draft goes with it");
+        let four: Vec<IncidentRow> = (1..=4).map(|d| incident(d, IncidentStatus::Bereit, 150)).collect();
+        let rest: Vec<&IncidentRow> = four.iter().take(3).collect();
+        assert_eq!(draft_after_removal(&rest), DraftAfterRemoval::Reduced(450), "what is left still reaches the minimum and asks for less");
+        assert_eq!(draft_after_removal(&[]), DraftAfterRemoval::Dropped, "the last case out empties the draft");
     }
 
     #[test]

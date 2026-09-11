@@ -882,7 +882,7 @@ pub async fn incident_discard(State(s): State<AppState>, c: Customer, Path(id): 
     for cl in &claims {
         let rest: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1").bind(cl.id).fetch_all(&s.pool).await.map_err(internal)?;
         let refs: Vec<&IncidentRow> = rest.iter().collect();
-        if rest.is_empty() || !rules::bundle_ready(&refs) {
+        if rules::draft_after_removal(&refs) == rules::DraftAfterRemoval::Dropped {
             sqlx::query("delete from claim_attachments where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
             sqlx::query("delete from claim_incidents where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
             sqlx::query("update incidents set claim_id = null where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;

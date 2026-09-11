@@ -93,6 +93,14 @@ class ApiNearby {
   bool get simulated => source == 'stellwerk';
   bool get none => source == 'none';
 
+  /// The phone is still being asked where it is (docs/23 §1): no station is shown yet, and
+  /// never the last one. Only the demo answers with this source; in local mode the screen
+  /// knows it from its own pending fix.
+  bool get checking => source == 'locating';
+
+  /// A list that does not depend on a fresh fix from this phone.
+  bool get independentOfFix => simulated || source == 'demo';
+
   factory ApiNearby.fromJson(dynamic j) {
     if (j is List) return ApiNearby(stations: j.map((e) => ApiStation.fromJson(e as Map<String, dynamic>)).toList(), source: 'gps');
     final m = j as Map<String, dynamic>;
@@ -102,13 +110,17 @@ class ApiNearby {
 }
 
 class ApiStation {
-  const ApiStation({required this.id, required this.name, this.lat = 0, this.lon = 0, this.distanceM, this.eva});
+  const ApiStation({required this.id, required this.name, this.lat = 0, this.lon = 0, this.distanceM, this.eva, this.railRank});
   final String id;
   final String name;
   final double lat;
   final double lon;
   final int? distanceM;
   final String? eva;
+
+  /// How much of a railway station this stop is (docs/23 §1): 3 long distance, 2 rail or
+  /// regional, 1 S-Bahn only or a station by its name. Set on nearby stations only.
+  final int? railRank;
 
   String get distanceLabel {
     final d = distanceM;
@@ -117,7 +129,7 @@ class ApiStation {
   }
 
   factory ApiStation.fromJson(Map<String, dynamic> j) =>
-      ApiStation(id: _s(j['id']), name: _s(j['name']), lat: _f(j['lat']), lon: _f(j['lon']), distanceM: _in(j['distance_m']), eva: _sn(j['eva']));
+      ApiStation(id: _s(j['id']), name: _s(j['name']), lat: _f(j['lat']), lon: _f(j['lon']), distanceM: _in(j['distance_m']), eva: _sn(j['eva']), railRank: _in(j['rail_rank']));
 }
 
 class ApiStop {
@@ -1319,6 +1331,10 @@ class ApiJourney {
     this.replanned = false,
     this.transferReason,
     this.earliestOnwardArrival,
+    this.deletable = true,
+    this.deleteRefusal,
+    this.stale = false,
+    this.legacy = false,
     required this.createdAt,
     this.finalisedAt,
   });
@@ -1373,6 +1389,17 @@ class ApiJourney {
     return liveMinutes < ceiling ? liveMinutes : ceiling;
   }
 
+  /// May the passenger throw this ride away (docs/23 §2)? False once its case is out of
+  /// the house; [deleteRefusal] then says why, so the action is never silently absent.
+  final bool deletable;
+  final String? deleteRefusal;
+
+  /// Still under way three hours past the planned arrival (docs/23 §3): the bar asks.
+  final bool stale;
+
+  /// A ride from before journeys existed: it is deleted through its own route.
+  final bool legacy;
+
   final DateTime createdAt;
   final DateTime? finalisedAt;
 
@@ -1418,6 +1445,10 @@ class ApiJourney {
         replanned: _b(j['replanned']),
         transferReason: _sn(j['transfer_reason']),
         earliestOnwardArrival: _dt(j['earliest_onward_arrival']),
+        deletable: j['deletable'] == null ? true : _b(j['deletable']),
+        deleteRefusal: _sn(j['delete_refusal']),
+        stale: _b(j['stale']),
+        legacy: _b(j['legacy']),
         createdAt: _dt(j['created_at']) ?? DateTime.now().toUtc(),
         finalisedAt: _dt(j['finalised_at']),
       );

@@ -75,6 +75,13 @@ async fn main() -> anyhow::Result<()> {
                 Ok(_) => {}
                 Err(e) => tracing::warn!(error = %e, "transfer timeout pass failed"),
             }
+            // The same minute asks about journeys that are long overdue (docs/23 §3); the
+            // hourly scanner repeats the pass, and both are idempotent through `stale_asked_at`.
+            match scanner::ask_stale(&state_for_transfers).await {
+                Ok(n) if n > 0 => tracing::info!(journeys = n, "stale journeys: asked whether they arrived"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "stale journey pass failed"),
+            }
         }
     });
 
@@ -108,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/journeys", get(journeys::list).post(journeys::create))
         .route("/v1/journeys/plan", get(journeys::plan))
         .route("/v1/journeys/current", get(journeys::current))
+        .route("/v1/journeys/{id}", delete(journeys::delete))
         .route("/v1/journeys/{id}/legs", post(journeys::confirm_leg))
         .route("/v1/journeys/{id}/finish", post(journeys::finish))
         .route("/v1/journeys/{id}/replan", post(journeys::replan))
@@ -117,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/rides/current/arrival", post(handlers::arrival))
         .route("/v1/rides/current/dismiss", post(handlers::dismiss))
         .route("/v1/rides/nachtrag", post(handlers::nachtrag))
+        .route("/v1/rides/{id}", delete(journeys::delete_ride))
         // ledger and claims
         .route("/v1/incidents", get(handlers::incidents))
         .route("/v1/incidents/{id}/discard", post(handlers::incident_discard))

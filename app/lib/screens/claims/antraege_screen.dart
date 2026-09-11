@@ -97,6 +97,28 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
     }
   }
 
+  /// docs/23 §2: the ride behind a case, deleted for good. The case, its points and any
+  /// draft that held it follow; the backend owns the rules and the refusal.
+  Future<void> _deleteRide(BuildContext context, ApiIncident i) async {
+    final session = RepoScope.read(context);
+    final journeyId = i.journeyId;
+    final rideId = i.rideId;
+    try {
+      if (journeyId != null) {
+        await session.repo.deleteJourney(journeyId);
+      } else if (rideId != null) {
+        await session.repo.deleteRide(rideId);
+      } else {
+        throw 'Zu diesem Fall gibt es keine Fahrt mehr.';
+      }
+      await session.refresh();
+      _loader.refresh();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ging nicht: $e')));
+    }
+  }
+
   Future<void> _restore(BuildContext context, String id) async {
     final session = RepoScope.read(context);
     try {
@@ -178,10 +200,12 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
                 discarded: discarded,
                 onDiscard: (id, reason) => _discard(context, id, reason),
                 onRestore: (id) => _restore(context, id),
+                onDelete: (i) => _deleteRide(context, i),
                 onPrepare: d.ready ? () => _prepare(context, d.desk) : null,
               ),
           // Cases taken out while no bundle is collecting still need a way back.
-          if (desks.isEmpty && discarded.isNotEmpty) _DiscardedCard(incidents: discarded, onRestore: (id) => _restore(context, id)),
+          if (desks.isEmpty && discarded.isNotEmpty)
+            _DiscardedCard(incidents: discarded, onRestore: (id) => _restore(context, id), onDelete: (i) => _deleteRide(context, i)),
           // Then every claim, newest first, status in words.
           for (final c in claims)
             _ClaimCard(
@@ -355,6 +379,7 @@ class _CollectingCard extends StatelessWidget {
     required this.discarded,
     required this.onDiscard,
     required this.onRestore,
+    required this.onDelete,
     required this.onPrepare,
   });
   final ApiDeskSummary desk;
@@ -367,6 +392,9 @@ class _CollectingCard extends StatelessWidget {
   final bool busy;
   final List<ApiIncident> discarded;
   final Future<void> Function(String id, String reason) onDiscard;
+
+  /// docs/23 §2: "Fahrt löschen" in the "Nicht eingereicht" list.
+  final Future<void> Function(ApiIncident incident) onDelete;
   final Future<void> Function(String id) onRestore;
   final VoidCallback? onPrepare;
 
@@ -424,7 +452,7 @@ class _CollectingCard extends StatelessWidget {
             ],
             if (discarded.isNotEmpty) ...[
               const VGap.s(),
-              _DiscardedLine(incidents: discarded, onRestore: onRestore),
+              _DiscardedLine(incidents: discarded, onRestore: onRestore, onDelete: onDelete),
             ],
             if (onPrepare != null) ...[
               const VGap.m(),
@@ -487,9 +515,12 @@ class _EmptyAntraege extends StatelessWidget {
 
 /// "1 Fall nicht eingereicht · anzeigen": the way back for a case taken out (docs/21 §4).
 class _DiscardedLine extends StatefulWidget {
-  const _DiscardedLine({required this.incidents, required this.onRestore});
+  const _DiscardedLine({required this.incidents, required this.onRestore, required this.onDelete});
   final List<ApiIncident> incidents;
   final Future<void> Function(String id) onRestore;
+
+  /// docs/23 §2: the ride itself, gone.
+  final Future<void> Function(ApiIncident incident) onDelete;
 
   @override
   State<_DiscardedLine> createState() => _DiscardedLineState();
@@ -522,7 +553,7 @@ class _DiscardedLineState extends State<_DiscardedLine> {
             IncidentRow(
               incident: i,
               note: discardReasons[i.discardReason] ?? 'Nicht eingereicht',
-              onTap: () => showEvidenceSheet(context, i, onRestore: () => widget.onRestore(i.id)),
+              onTap: () => showEvidenceSheet(context, i, onRestore: () => widget.onRestore(i.id), onDelete: () => widget.onDelete(i)),
             ),
       ],
     );
@@ -531,9 +562,10 @@ class _DiscardedLineState extends State<_DiscardedLine> {
 
 /// Cases taken out while nothing is collecting: their own small card, so they are never lost.
 class _DiscardedCard extends StatelessWidget {
-  const _DiscardedCard({required this.incidents, required this.onRestore});
+  const _DiscardedCard({required this.incidents, required this.onRestore, required this.onDelete});
   final List<ApiIncident> incidents;
   final Future<void> Function(String id) onRestore;
+  final Future<void> Function(ApiIncident incident) onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -553,7 +585,7 @@ class _DiscardedCard extends StatelessWidget {
               IncidentRow(
                 incident: i,
                 note: discardReasons[i.discardReason] ?? 'Nicht eingereicht',
-                onTap: () => showEvidenceSheet(context, i, onRestore: () => onRestore(i.id)),
+                onTap: () => showEvidenceSheet(context, i, onRestore: () => onRestore(i.id), onDelete: () => onDelete(i)),
               ),
           ],
         ),

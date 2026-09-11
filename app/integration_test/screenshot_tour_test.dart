@@ -14,6 +14,7 @@ import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/state/ride_monitor.dart';
+import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow;
 import 'package:verspaetomat/widgets/kit.dart' show VGhostButton, VOutlineButton, VPrimaryButton;
 
 const tour = <(String, String)>[
@@ -151,6 +152,10 @@ void main() {
     demo.awayFromStation = true;
     await home('bahnsteig-away-wir'); // the away box and the Wir block above the fold
     demo.awayFromStation = false;
+    // docs/23 §1: no fix yet, so the card says so instead of naming the last station.
+    demo.locatingStation = true;
+    await home('bahnsteig-locating');
+    demo.locatingStation = false;
     demo.reset();
     // "Ich fahre weiter" (docs/21 §2): the passenger gives up on this train at Hagen and
     // picks the next one onward; only the delay up to that earliest train counts.
@@ -191,6 +196,19 @@ void main() {
     demo.mails.clear();
     demo.discardIncident(demo.openIncidents.first.id, 'nicht_gefahren');
     await tab(Routes.antraege, 'antraege-discarded');
+    // The row's own sheet: "Doch einreichen" and, beside it, "Fahrt löschen" (docs/23 §2).
+    await tester.tap(find.text('anzeigen').first);
+    await wait(tester, 800);
+    // The discarded row itself, found by its reason line: `.last` would hit the next desk's card.
+    final discardedRow = find.ancestor(of: find.textContaining('gar nicht mitgefahren').first, matching: find.byType(IncidentRow)).first;
+    await tester.ensureVisible(discardedRow);
+    await wait(tester, 400);
+    await tester.tap(discardedRow);
+    await shot('antraege-discarded-loeschen');
+    // The sheet may already have closed itself; popping the last page would tear the router down.
+    final nav = Navigator.of(tester.element(find.byType(Scaffold).last));
+    if (nav.canPop()) nav.pop();
+    await wait(tester, 600);
     demo.reset();
     // Nothing at all: the explainer instead of an empty box (docs/21 §5).
     demo.incidents.clear();
@@ -244,6 +262,18 @@ void main() {
     await shot('angekommen-verpasst');
     go(Routes.historie);
     await shot('historie-journeys');
+    // Every row opens the ride in full, with "Fahrt löschen" at the bottom (docs/23 §2).
+    await tester.tap(find.byWidgetPredicate((w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('journey-row-')).first);
+    await shot('historie-loeschen');
+    Navigator.of(tester.element(find.byType(Scaffold).last)).pop();
+    await wait(tester, 600);
+    demo.reset();
+    // docs/23 §3: a journey nobody closed. The bar stops reporting and asks.
+    demo.startJourney(origin: 'Köln Hbf', destination: 'Rheine', legs: [leg('re7-0747', 'Köln Hbf', 'Rheine')]);
+    demo.staleRide = true;
+    go(Routes.antraege);
+    await shot('bar-stale');
+    demo.staleRide = false;
     demo.reset();
 
     // One pushed sub-screen, so the header with the back arrow is in the set too.

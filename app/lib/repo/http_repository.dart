@@ -121,6 +121,11 @@ class HttpRepository implements AppRepository {
   }
 
   @override
+  Future<bool> deleteJourney(String id) => client.deleteJourney(id);
+  @override
+  Future<bool> deleteRide(String id) => client.deleteRide(id);
+
+  @override
   Future<ApiIncidents> incidents() => client.incidents();
   @override
   Future<bool> discardIncident(String id, String reason) => client.discardIncident(id, reason);

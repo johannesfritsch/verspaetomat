@@ -113,6 +113,17 @@ pub fn compose(kind: &str, payload: &Value, facts: &Facts) -> Option<Notificatio
     match kind {
         // A leg of a multi-leg journey stays quiet: the journey's own push says it all.
         "ride" if b("silent") => None,
+        // docs/23 §3: a journey nobody closed, three hours past its planned arrival. One question,
+        // once; the passenger answers in the ride bar, and nothing is decided for them.
+        "journey" if b("stale") => {
+            let j = facts.journey.as_ref()?;
+            Some(Notification {
+                title: "Bist du angekommen?".to_string(),
+                body: format!("Deine Fahrt nach {} läuft noch. Sag kurz Bescheid.", j.destination),
+                kind: "journey",
+                data: json!({ "journey_id": s("journey_id"), "stale": true }),
+            })
+        }
         "journey" if b("transfer") => {
             let next = payload.get("next_leg")?;
             let line = next.get("line").and_then(|v| v.as_str()).unwrap_or("Anschluss");
@@ -615,6 +626,12 @@ mod tests {
         f.ride = Some(RideFacts { line: "RE 7".into(), exit_station: "Hagen".into(), delay_min: 25, points: 0, cancelled: false, claim_cents: None });
         assert!(compose("ride", &json!({ "ride_id": "r1", "status": "arrived", "silent": true }), &f).is_none());
         assert!(compose("journey", &json!({ "journey_id": "j1", "finished": true, "status": "abandoned" }), &f).is_none());
+        // docs/23 §3: the journey nobody closed asks one question.
+        f.journey = Some(JourneyFacts { origin: "Köln Hbf".into(), destination: "Rheine".into(), delay_min: 0, points: 0, cancelled: false, missed_connection: false, incomplete: false, transfer_station: None, claim_cents: None });
+        let n = compose("journey", &json!({ "journey_id": "j1", "stale": true }), &f).unwrap();
+        assert_eq!(n.title, "Bist du angekommen?");
+        assert_eq!(n.body, "Deine Fahrt nach Rheine läuft noch. Sag kurz Bescheid.");
+        assert_eq!(n.data["journey_id"], "j1");
     }
 
     #[test]

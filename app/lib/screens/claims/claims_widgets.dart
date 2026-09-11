@@ -221,9 +221,49 @@ const discardReasons = <String, String>{
   'sonst': 'Anderer Grund',
 };
 
+/// "Fahrt löschen": the ride, its points and its claim go, and nothing comes back (docs/23 §2).
+/// Returns true when the passenger confirmed.
+Future<bool> confirmDeleteRide(BuildContext context) async {
+  final yes = await showVSheet<bool>(
+    context,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.l),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const VSheetHeader(
+            title: 'Fahrt löschen?',
+            subtitle: 'Die Fahrt, ihre Punkte und der Anspruch verschwinden. Das lässt sich nicht rückgängig machen.',
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            child: Column(
+              children: [
+                const VGap.s(),
+                VOutlineButton(
+                  key: const Key('delete-ride-confirm'),
+                  label: 'Fahrt löschen',
+                  icon: Icons.delete_outline,
+                  onTap: () => Navigator.of(ctx).pop(true),
+                ),
+                const VGap.xs(),
+                VGhostButton(label: 'Behalten', color: VColors.ink2, onTap: () => Navigator.of(ctx).pop(false)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+  return yes == true;
+}
+
 /// The evidence sheet behind an incident. [onDiscard] adds "Nicht einreichen" (and, for a
 /// case already taken out, "Doch einreichen"); it is offered only while the bundle is open.
-Future<void> showEvidenceSheet(BuildContext context, ApiIncident i, {Future<void> Function(String reason)? onDiscard, Future<void> Function()? onRestore}) {
+/// [onDelete] adds "Fahrt löschen" beside it (docs/23 §2), behind its own confirm.
+Future<void> showEvidenceSheet(BuildContext context, ApiIncident i,
+    {Future<void> Function(String reason)? onDiscard, Future<void> Function()? onRestore, Future<void> Function()? onDelete}) {
   final ev = i.evidence;
   return showVSheet(
     context,
@@ -302,6 +342,21 @@ Future<void> showEvidenceSheet(BuildContext context, ApiIncident i, {Future<void
                     onTap: () async {
                       Navigator.of(ctx).pop();
                       await showDiscardReasonSheet(context, onDiscard);
+                    },
+                  ),
+                ],
+                // The ride itself, not just the case (docs/23 §2). Beside "Doch einreichen",
+                // because this is the other thing you may want with a ride you never took.
+                if (onDelete != null) ...[
+                  const VGap.xs(),
+                  VGhostButton(
+                    key: const Key('delete-ride'),
+                    label: 'Fahrt löschen',
+                    icon: Icons.delete_outline,
+                    color: VColors.red,
+                    onTap: () async {
+                      Navigator.of(ctx).pop();
+                      if (await confirmDeleteRide(context)) await onDelete();
                     },
                   ),
                 ],

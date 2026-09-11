@@ -54,6 +54,14 @@ abstract class AppRepository {
   Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName});
   Future<List<ApiJourney>> journeys();
 
+  /// Deletes a ride the passenger never wanted (docs/23 §2): the journey, its legs and the
+  /// case it produced. True when a draft claim fell below the 4 € minimum and went with it.
+  /// Refused while the case sits in a claim that is no longer a draft.
+  Future<bool> deleteJourney(String id);
+
+  /// The same for a ride from before journeys existed.
+  Future<bool> deleteRide(String id);
+
   // -- ledger and claims ----------------------------------------------------
   Future<ApiIncidents> incidents();
   /// Takes one case out of every open bundle; [restoreIncident] puts it back (docs/21 §4).

@@ -41,7 +41,52 @@ DateTime? plannedAt(ApiStop s) => s.scheduledArrival ?? s.scheduledDeparture;
 /// Live arrival at a stop when known.
 DateTime? liveAt(ApiStop s) => s.arrival ?? s.departure;
 
-/// One-shot position. Null when the platform, the permission or the time budget says no.
+/// What the phone says about location right now (docs/23 §1). The Bahnsteig asks before it
+/// asks for a fix, so a refusal leads somewhere instead of failing silently.
+enum LocationAccess {
+  /// A fix can be taken.
+  granted,
+
+  /// Never asked: the system dialog is still to come.
+  notAsked,
+
+  /// Refused for good: only the system settings can change it.
+  denied,
+
+  /// Location is off for the whole phone.
+  serviceOff,
+
+  /// `--dart-define=NO_LOCATION=1`: demos and screenshots never ask.
+  suppressed,
+}
+
+Future<LocationAccess> locationAccess() async {
+  const noLocation = String.fromEnvironment('NO_LOCATION', defaultValue: '');
+  if (noLocation == '1' || noLocation == 'true') return LocationAccess.suppressed;
+  try {
+    if (!await Geolocator.isLocationServiceEnabled()) return LocationAccess.serviceOff;
+    return switch (await Geolocator.checkPermission()) {
+      LocationPermission.denied => LocationAccess.notAsked,
+      LocationPermission.deniedForever => LocationAccess.denied,
+      _ => LocationAccess.granted,
+    };
+  } catch (_) {
+    return LocationAccess.denied;
+  }
+}
+
+/// Opens the phone's settings for this app, so a permanent refusal has a way back.
+Future<void> openLocationSettings() async {
+  try {
+    await Geolocator.openAppSettings();
+  } catch (_) {
+    // Nothing to open: the line above the button has already said what is missing.
+  }
+}
+
+/// One-shot position, always a fresh fix — never a cached one, so the card can never fill in
+/// with where the phone was an hour ago (docs/23 §1). Null when the platform, the permission
+/// or the time budget says no.
 Future<ApiLocation?> currentPosition({Duration timeout = const Duration(seconds: 4)}) async {
   // `--dart-define=NO_LOCATION=1` keeps the OS permission dialog out of demos and screenshots.
   const noLocation = String.fromEnvironment('NO_LOCATION', defaultValue: '');

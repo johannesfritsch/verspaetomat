@@ -46,6 +46,11 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
   /// Riding or waiting at a transfer: the bar and the sheet have something to show.
   bool get active => riding || transfer;
 
+  /// Three hours past the planned arrival and still open (docs/23 §3). The backend decides
+  /// when that is; the bar turns into the question. Not to be confused with [stale], which
+  /// says the last refresh failed.
+  bool get overdue => active && journey?.journey.stale == true;
+
   /// The current leg as the ride screens consume it.
   ApiRideLive? get rideLive => live ?? journey?.asRideLive;
 

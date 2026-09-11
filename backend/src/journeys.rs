@@ -129,6 +129,7 @@ fn next_leg_of(j: &JourneyRow) -> Option<PlanLeg> {
 /// The journey with its legs merged with the rides that confirmed them.
 pub async fn journey_json(pool: &PgPool, j: &JourneyRow) -> anyhow::Result<Value> {
     let rides: Vec<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 order by leg_no").bind(j.id).fetch_all(pool).await?;
+    let refusal = delete_refusal_for(pool, &cases_of_journey(pool, j.id).await?).await?;
     let legs: Vec<Value> = plan_legs(j)
         .iter()
         .enumerate()
@@ -187,8 +188,22 @@ pub async fn journey_json(pool: &PgPool, j: &JourneyRow) -> anyhow::Result<Value
         "transfer_reason": if transfer_reason.is_empty() { Value::Null } else { json!(transfer_reason) },
         "end_reason": j.end_reason,
         "earliest_onward_arrival": j.earliest_onward_arrival,
+        // docs/23 §2: may the passenger throw this ride away, and if not, why not.
+        "deletable": refusal.is_none(),
+        "delete_refusal": refusal,
+        // docs/23 §3: still under way long after it should have arrived.
+        "stale": is_stale(j),
         "created_at": j.created_at, "finalised_at": j.finalised_at,
     }))
+}
+
+/// How long after its planned arrival a journey that is still open is almost certainly over
+/// (docs/23 §3). Nothing is decided for the passenger; they are asked.
+pub const STALE_AFTER_HOURS: i64 = 3;
+
+/// Is this journey still running long after it should have arrived? (docs/23 §3)
+pub fn is_stale(j: &JourneyRow) -> bool {
+    matches!(j.status, JourneyStatus::Riding | JourneyStatus::Transfer) && crate::clock::now() >= j.planned_arrival + Duration::hours(STALE_AFTER_HOURS)
 }
 
 /// A legacy ride (before journeys existed) shown as a single-leg journey in the history.
@@ -507,10 +522,134 @@ pub async fn list(State(s): State<AppState>, c: Customer) -> ApiResult {
     }
     let legacy: Vec<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 and journey_id is null and nachtrag = false order by checked_in_at desc limit 200").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
     for r in &legacy {
-        out.push((r.checked_in_at, legacy_ride_as_journey(r)));
+        let mut v = legacy_ride_as_journey(r);
+        // A legacy ride is deleted through its own route, under the same rule (docs/23 §2).
+        let incidents: Vec<IncidentRow> = sqlx::query_as("select * from incidents where ride_id = $1").bind(r.id).fetch_all(&s.pool).await.map_err(internal)?;
+        let refusal = delete_refusal_for(&s.pool, &incidents).await.map_err(internal)?;
+        v["deletable"] = json!(refusal.is_none());
+        v["delete_refusal"] = json!(refusal);
+        out.push((r.checked_in_at, v));
     }
     out.sort_by(|a, b| b.0.cmp(&a.0));
     Ok(Json(json!(out.into_iter().map(|(_, v)| v).collect::<Vec<_>>())))
+}
+
+// ---------------------------------------------------------------------------
+// Deleting a ride (docs/23 §2)
+// ---------------------------------------------------------------------------
+
+/// The cases a journey produced: the one from the journey, plus anything still hanging off
+/// its legs from before journeys created the incident.
+async fn cases_of_journey(pool: &PgPool, journey: Uuid) -> anyhow::Result<Vec<IncidentRow>> {
+    Ok(sqlx::query_as("select * from incidents where journey_id = $1 or ride_id in (select id from rides where journey_id = $1)")
+        .bind(journey)
+        .fetch_all(pool)
+        .await?)
+}
+
+async fn claims_holding(pool: &PgPool, ids: &[Uuid]) -> anyhow::Result<Vec<ClaimRow>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(sqlx::query_as("select distinct c.* from claims c join claim_incidents ci on ci.claim_id = c.id where ci.incident_id = any($1)")
+        .bind(ids)
+        .fetch_all(pool)
+        .await?)
+}
+
+/// Why these cases cannot be deleted, or None. The rule itself lives in `rules` (docs/23 §2).
+async fn delete_refusal_for(pool: &PgPool, incidents: &[IncidentRow]) -> anyhow::Result<Option<&'static str>> {
+    let ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
+    let claims = claims_holding(pool, &ids).await?;
+    let claim_statuses: Vec<ClaimStatus> = claims.iter().map(|c| c.status).collect();
+    let incident_statuses: Vec<IncidentStatus> = incidents.iter().map(|i| i.status).collect();
+    Ok(rules::delete_refusal(&claim_statuses, &incident_statuses))
+}
+
+/// Takes the cases out of every draft that holds them and deletes them, recomputing each draft
+/// exactly as a discard does (docs/21 §4). Returns whether a draft was dropped with them.
+async fn remove_cases(s: &AppState, incidents: &[IncidentRow], reason: &str) -> Result<bool, (StatusCode, Json<Value>)> {
+    let ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
+    if ids.is_empty() {
+        return Ok(false);
+    }
+    let claims = claims_holding(&s.pool, &ids).await.map_err(internal)?;
+    sqlx::query("delete from claim_incidents where incident_id = any($1)").bind(&ids).execute(&s.pool).await.map_err(internal)?;
+    let mut claim_deleted = false;
+    for cl in &claims {
+        let rest: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1")
+            .bind(cl.id)
+            .fetch_all(&s.pool)
+            .await
+            .map_err(internal)?;
+        let refs: Vec<&IncidentRow> = rest.iter().collect();
+        match rules::draft_after_removal(&refs) {
+            rules::DraftAfterRemoval::Dropped => {
+                sqlx::query("delete from claim_attachments where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
+                sqlx::query("delete from claim_incidents where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
+                sqlx::query("update incidents set claim_id = null where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
+                sqlx::query("delete from claims where id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
+                rules::audit(&s.pool, "claim", cl.id, Some("draft"), "deleted", "below the minimum after a ride was deleted").await.map_err(internal)?;
+                claim_deleted = true;
+            }
+            rules::DraftAfterRemoval::Reduced(amount) => {
+                sqlx::query("update claims set amount_claimed_cents = $2 where id = $1").bind(cl.id).bind(amount).execute(&s.pool).await.map_err(internal)?;
+            }
+        }
+    }
+    sqlx::query("delete from incidents where id = any($1)").bind(&ids).execute(&s.pool).await.map_err(internal)?;
+    for i in incidents {
+        rules::audit(&s.pool, "incident", i.id, Some(rules::from_label(i.status)), "geloescht", reason).await.map_err(internal)?;
+    }
+    Ok(claim_deleted)
+}
+
+/// `DELETE /v1/journeys/{id}` — a journey logged by accident goes, with its legs and its
+/// case (docs/23 §2). Points, standing and the boards follow, because the rows are gone.
+pub async fn delete(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
+    let j = journey_of(&s.pool, c.0.id, id).await?;
+    let incidents = cases_of_journey(&s.pool, j.id).await.map_err(internal)?;
+    if let Some(msg) = delete_refusal_for(&s.pool, &incidents).await.map_err(internal)? {
+        return Err(err(StatusCode::CONFLICT, msg));
+    }
+    let incident_ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
+    let claim_deleted = remove_cases(&s, &incidents, "die Fahrt wurde gelöscht").await?;
+    sqlx::query("delete from rides where journey_id = $1").bind(j.id).execute(&s.pool).await.map_err(internal)?;
+    sqlx::query("delete from journeys where id = $1").bind(j.id).execute(&s.pool).await.map_err(internal)?;
+    rules::audit(&s.pool, "journey", j.id, Some(journey_status_label(j.status)), "geloescht", "vom Fahrgast gelöscht").await.map_err(internal)?;
+    let _ = rules::refresh_statuses(&s.pool, c.0.id, crate::clock::today()).await.map_err(internal)?;
+    s.events.publish(c.0.id, "journey", json!({ "journey_id": j.id, "deleted": true, "incidents": incident_ids }));
+    Ok(Json(json!({ "deleted": true, "claim_deleted": claim_deleted })))
+}
+
+/// `DELETE /v1/rides/{id}` — the same for a ride from before journeys existed (docs/23 §2).
+/// A ride that belongs to a journey deletes the whole journey: one leg is not a ride.
+pub async fn delete_ride(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
+    let r: Option<RideRow> = sqlx::query_as("select * from rides where id = $1 and customer_id = $2").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(r) = r else { return Err(err(StatusCode::NOT_FOUND, "no such ride")) };
+    if let Some(journey_id) = r.journey_id {
+        return delete(State(s), c, Path(journey_id)).await;
+    }
+    let incidents: Vec<IncidentRow> = sqlx::query_as("select * from incidents where ride_id = $1").bind(r.id).fetch_all(&s.pool).await.map_err(internal)?;
+    if let Some(msg) = delete_refusal_for(&s.pool, &incidents).await.map_err(internal)? {
+        return Err(err(StatusCode::CONFLICT, msg));
+    }
+    let incident_ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
+    let claim_deleted = remove_cases(&s, &incidents, "die Fahrt wurde gelöscht").await?;
+    sqlx::query("delete from rides where id = $1").bind(r.id).execute(&s.pool).await.map_err(internal)?;
+    rules::audit(&s.pool, "ride", r.id, None, "geloescht", "vom Fahrgast gelöscht").await.map_err(internal)?;
+    let _ = rules::refresh_statuses(&s.pool, c.0.id, crate::clock::today()).await.map_err(internal)?;
+    s.events.publish(c.0.id, "ride", json!({ "ride_id": r.id, "deleted": true, "incidents": incident_ids }));
+    Ok(Json(json!({ "deleted": true, "claim_deleted": claim_deleted })))
+}
+
+fn journey_status_label(s: JourneyStatus) -> &'static str {
+    match s {
+        JourneyStatus::Riding => "riding",
+        JourneyStatus::Transfer => "transfer",
+        JourneyStatus::Arrived => "arrived",
+        JourneyStatus::Abandoned => "abandoned",
+    }
 }
 
 #[derive(Deserialize)]

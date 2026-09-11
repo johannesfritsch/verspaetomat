@@ -90,6 +90,10 @@ pub struct JourneyRow {
     /// the passenger's own time, not the railway's. Null on journeys that ran through.
     #[serde(default)]
     pub earliest_onward_arrival: Option<DateTime<Utc>>,
+    /// When we asked "Bist du angekommen?" about a journey that is still open three hours past
+    /// its planned arrival (docs/23 §3). Set once, so the question goes out once.
+    #[serde(default)]
+    pub stale_asked_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]

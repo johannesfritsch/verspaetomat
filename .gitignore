@@ -4,3 +4,6 @@ backend/target/
 deploy/.env
 deploy/secrets/*
 !deploy/secrets/.gitkeep
+
+# Codex copy of CLAUDE.md, recreated by tooling; not part of the project.
+AGENTS.md

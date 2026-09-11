@@ -125,6 +125,10 @@ class DemoState extends ChangeNotifier {
   bool awayFromStation = false;
   /// Demo: an account without journey history (the Einchecken card shows only the Wohin? field).
   bool noHistory = false;
+  /// Demo: the phone is still being asked where it is (docs/23 §1), so the card says so.
+  bool locatingStation = false;
+  /// Demo: the journey is hours past its planned arrival and nobody closed it (docs/23 §3).
+  bool staleRide = false;
   /// Demo: railway mails nobody opened yet; the Anträge tab badge (docs/18).
   int unreadMails = 2;
   /// Demo: what the last reply would have attached (docs/18 §5).
@@ -511,6 +515,27 @@ class DemoState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// docs/23 §2: a ride logged by accident. The journey (or the seeded record), its case and
+  /// its points go; nothing comes back. The id is a journey id, a seeded ride's id, or the
+  /// id of the case the ride produced.
+  void deleteRide(String id) {
+    incidents.removeWhere((i) => i.id == id);
+    discardedIncidents.remove(id);
+    journeyHistory.removeWhere((j) => j.id == id);
+    if (journey?.id == id) {
+      journey = null;
+      trip = null;
+      phase = TripPhase.idle;
+    }
+    const seeded = 'journey-hist-';
+    if (id.startsWith(seeded)) {
+      final n = int.tryParse(id.substring(seeded.length));
+      if (n != null && n >= 0 && n < rides.length) rides.removeAt(n);
+    }
+    _refreshReady();
+    notifyListeners();
+  }
+
   List<Incident> get openIncidents => incidents.where((i) => i.isOpen && !discardedIncidents.containsKey(i.id)).toList();
 
   /// Open incidents grouped by claims desk.
@@ -687,6 +712,8 @@ class DemoState extends ChangeNotifier {
     bonusPoints = 0;
     unreadMails = 2;
     noHistory = false;
+    locatingStation = false;
+    staleRide = false;
     rides
       ..clear()
       ..addAll(Mock.rides);

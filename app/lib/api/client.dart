@@ -211,6 +211,13 @@ class ApiClient {
 
   Future<List<ApiJourney>> journeys() async => _list(await _get('/v1/journeys')).map(ApiJourney.fromJson).toList();
 
+  /// Deletes a journey with its legs and its case (docs/23 §2). True when a draft claim fell
+  /// below the minimum and was dropped with it. 409 when the case is already out of the house.
+  Future<bool> deleteJourney(String id) async => _map(await _delete('/v1/journeys/${Uri.encodeComponent(id)}'))['claim_deleted'] == true;
+
+  /// The same for a ride from before journeys existed.
+  Future<bool> deleteRide(String id) async => _map(await _delete('/v1/rides/${Uri.encodeComponent(id)}'))['claim_deleted'] == true;
+
   // -- ledger and claims ----------------------------------------------------
 
   Future<ApiIncidents> incidents() async => ApiIncidents.fromJson(_map(await _get('/v1/incidents')));

@@ -18,7 +18,11 @@ class RideBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final m = monitor;
-    final content = m.transfer ? _transfer(context) : _riding(context);
+    final content = m.overdue
+        ? _stale(context)
+        : m.transfer
+            ? _transfer(context)
+            : _riding(context);
     return Material(
       color: VColors.paperElevated,
       child: InkWell(
@@ -67,6 +71,36 @@ class RideBar extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.right,
           ),
+      ],
+    );
+  }
+
+  /// Hours past the planned arrival and still under way (docs/23 §3): the bar stops reporting
+  /// and asks. Nothing is decided here — both answers are the passenger's.
+  Widget _stale(BuildContext context) {
+    final m = monitor;
+    return Row(
+      key: const Key('ride-bar-stale'),
+      children: [
+        // Expanded, not Flexible + Spacer: a Spacer would take half the free width and
+        // truncate the question to "Noch unter…".
+        Expanded(
+          child: Text('Noch unterwegs?', style: VText.bodySStrong, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+        const SizedBox(width: 8),
+        _SmallInkButton(
+          label: m.busy ? '…' : 'Ich bin da',
+          onTap: m.busy ? null : () => m.finish(arrived: true),
+        ),
+        const SizedBox(width: 8),
+        InkWell(
+          onTap: m.busy ? null : () => m.finish(arrived: false),
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            child: Text('Beenden', style: VText.bodySStrong.copyWith(color: VColors.ink2)),
+          ),
+        ),
       ],
     );
   }

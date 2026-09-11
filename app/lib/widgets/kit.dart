@@ -848,7 +848,15 @@ Future<T?> showVSheet<T>(BuildContext context, {required WidgetBuilder builder, 
     useSafeArea: true,
     builder: (ctx) => expand
         ? FractionallySizedBox(heightFactor: 0.92, child: builder(ctx))
-        : Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom), child: builder(ctx)),
+        // Not expanded: as tall as its content, but never taller than the screen. A sheet that
+        // grew an action (docs/23 §2) used to overflow instead of scrolling.
+        : ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.92),
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              child: builder(ctx),
+            ),
+          ),
   );
 }
 

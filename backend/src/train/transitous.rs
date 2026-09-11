@@ -16,6 +16,18 @@ const USER_AGENT: &str = "verspaetomat-api/0.1 (+https://verspaetomat.de)";
 const DEPARTURE_CACHE_TTL: Duration = Duration::from_secs(30);
 const PLAN_CACHE_TTL: Duration = Duration::from_secs(60);
 const NEARBY_CANDIDATES: usize = 8;
+/// How many stations the Bahnsteig is offered: the best one and two alternatives (docs/23 §1).
+const NEARBY_RESULTS: usize = 3;
+/// Inside one band the better station wins; beyond it distance decides again (docs/23 §1).
+const RANK_BAND_M: i64 = 300;
+/// Departures read per candidate when ranking it: enough to see past a burst of one mode.
+const RANK_DEPARTURES: usize = 20;
+/// A stop's rank changes with the timetable, not with the minute: cached for five minutes.
+const RANK_CACHE_TTL: Duration = Duration::from_secs(300);
+/// The modes a ranking query asks for (docs/23 §1): the rail modes, plus the two the German
+/// S-Bahn arrives as in this feed. Tram, bus and ferry never reach the classifier; METRO and
+/// SUBWAY do, because only the line name can tell an S-Bahn from a U-Bahn.
+const RANK_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,SUBURBAN,METRO,SUBWAY";
 /// MOTIS transit modes that are railway service (docs/17); the plan never proposes bus or tram legs.
 const RAIL_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,SUBURBAN";
 
@@ -25,6 +37,8 @@ pub struct TransitousClient {
     base: String,
     departure_cache: Arc<Mutex<HashMap<String, (Instant, Vec<DepartureInfo>)>>>,
     plan_cache: Arc<Mutex<HashMap<String, (Instant, Vec<Itinerary>)>>>,
+    /// What kind of station a stop is (docs/23 §1), per stop id.
+    rank_cache: Arc<Mutex<HashMap<String, (Instant, i32)>>>,
 }
 
 impl Default for TransitousClient {
@@ -44,7 +58,13 @@ impl TransitousClient {
             .timeout(Duration::from_secs(10))
             .build()
             .expect("reqwest client");
-        Self { http, base: base.into(), departure_cache: Arc::new(Mutex::new(HashMap::new())), plan_cache: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            http,
+            base: base.into(),
+            departure_cache: Arc::new(Mutex::new(HashMap::new())),
+            plan_cache: Arc::new(Mutex::new(HashMap::new())),
+            rank_cache: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
@@ -64,8 +84,10 @@ impl TransitousClient {
         resp.json::<T>().await.with_context(|| format!("decode {url}"))
     }
 
-    /// Railway stations near a point, nearest first. Cheap filter: a candidate stays when it has
-    /// at least one rail departure coming up, or its name says it is a station.
+    /// The best railway stations near a point (docs/23 §1). The eight nearest candidates are
+    /// classified by what actually departs there; a stop that is only tram, bus or subway is
+    /// dropped, and the rest are ordered so that inside a 300 m band the better station wins.
+    /// At most three come back: the one the card offers and two alternatives.
     pub async fn nearby_stops(&self, lat: f64, lon: f64) -> Result<Vec<StopInfo>> {
         let places: Vec<GeoPlace> = self
             .get_json("/api/v1/reverse-geocode", &[("place", format!("{lat},{lon}")), ("type", "STOP".into())])
@@ -79,6 +101,7 @@ impl TransitousClient {
                 name: crate::train::display_station_name(&p.name),
                 lat: p.lat,
                 lon: p.lon,
+                rail_rank: None,
             })
             .collect();
         candidates.sort_by_key(|s| s.distance_m.unwrap_or(i64::MAX));
@@ -87,22 +110,65 @@ impl TransitousClient {
         let mut set = JoinSet::new();
         for (idx, stop) in candidates.iter().enumerate() {
             let client = self.clone();
-            let id = stop.id.clone();
-            set.spawn(async move { (idx, client.departures(&id, 5).await.map(|d| !d.is_empty()).unwrap_or(false)) });
+            let (id, name) = (stop.id.clone(), stop.name.clone());
+            set.spawn(async move { (idx, client.rank_of(&id, &name).await) });
         }
-        let mut has_rail = vec![false; candidates.len()];
+        let mut ranks: Vec<i32> = vec![0; candidates.len()];
         while let Some(res) = set.join_next().await {
-            if let Ok((idx, rail)) = res {
-                has_rail[idx] = rail;
+            if let Ok((idx, rank)) = res {
+                ranks[idx] = rank;
             }
         }
-        let kept: Vec<StopInfo> = candidates
+        let mut kept: Vec<StopInfo> = candidates
             .into_iter()
-            .zip(has_rail)
-            .filter(|(s, rail)| *rail || looks_like_station(&s.name))
-            .map(|(s, _)| s)
+            .zip(ranks)
+            .filter_map(|(mut s, rank)| {
+                if rank == 0 {
+                    return None;
+                }
+                s.rail_rank = Some(rank);
+                Some(s)
+            })
             .collect();
+        kept.sort_by(|a, b| {
+            nearby_order(a.distance_m.unwrap_or(i64::MAX), a.rail_rank.unwrap_or(0), &a.name)
+                .cmp(&nearby_order(b.distance_m.unwrap_or(i64::MAX), b.rail_rank.unwrap_or(0), &b.name))
+        });
+        kept.truncate(NEARBY_RESULTS);
         Ok(kept)
+    }
+
+    /// What kind of station this stop is (docs/23 §1), from what really departs there.
+    ///
+    /// Deliberately **not** `departures`: that call passes `radius=300`, so every stop within
+    /// 300 m inherits its neighbours' departures — which is precisely how a tram stop at the
+    /// entrance of München Hbf passed for a railway station. Here the stop answers for itself.
+    /// A query that fails leaves the name to decide and is not cached.
+    async fn rank_of(&self, stop_id: &str, name: &str) -> i32 {
+        if let Some((at, rank)) = self.rank_cache.lock().unwrap().get(stop_id) {
+            if at.elapsed() < RANK_CACHE_TTL {
+                return *rank;
+            }
+        }
+        let resp: Result<StopTimesResponse> = self
+            .get_json(
+                "/api/v1/stoptimes",
+                &[("stopId", stop_id.to_string()), ("n", RANK_DEPARTURES.to_string()), ("mode", RANK_MODES.to_string())],
+            )
+            .await;
+        let Ok(resp) = resp else {
+            tracing::debug!(stop = stop_id, "ranking query failed; falling back to the name");
+            return rail_rank(&[], name);
+        };
+        let deps: Vec<(String, String)> = resp
+            .stop_times
+            .into_iter()
+            .map(|st| (st.mode, st.route_short_name.unwrap_or_default()))
+            .collect();
+        let pairs: Vec<(&str, &str)> = deps.iter().map(|(m, l)| (m.as_str(), l.as_str())).collect();
+        let rank = rail_rank(&pairs, name);
+        self.rank_cache.lock().unwrap().insert(stop_id.to_string(), (Instant::now(), rank));
+        rank
     }
 
     /// Station search by name.
@@ -113,7 +179,7 @@ impl TransitousClient {
         Ok(places
             .into_iter()
             .filter(|p| p.r#type.as_deref() == Some("STOP"))
-            .map(|p| StopInfo { id: p.id, name: crate::train::display_station_name(&p.name), lat: p.lat, lon: p.lon, distance_m: None })
+            .map(|p| StopInfo { id: p.id, name: crate::train::display_station_name(&p.name), lat: p.lat, lon: p.lon, distance_m: None, rail_rank: None })
             .collect())
     }
 
@@ -211,6 +277,58 @@ impl TransitousClient {
             stops,
         })
     }
+}
+
+/// What one departure says about the stop it leaves from (docs/23 §1).
+///
+/// The S-Bahn keeps a place: German S-Bahnen are Schienenpersonennahverkehr, their delays are
+/// claimable like a regional train's, and ranked lowest they can never beat a Hauptbahnhof in
+/// the same band. This feed reports them as `METRO`, which is also what the U-Bahn arrives as,
+/// so the line name decides: `S1` is rail, `U1` is not.
+pub fn mode_rank(mode: &str, line: &str) -> i32 {
+    match mode {
+        "LONG_DISTANCE" | "HIGHSPEED_RAIL" | "NIGHT_RAIL" => 3,
+        "RAIL" | "REGIONAL_RAIL" | "REGIONAL_FAST_RAIL" => 2,
+        "SUBURBAN" => 1,
+        "METRO" | "SUBWAY" => {
+            if is_s_bahn_line(line) {
+                1
+            } else {
+                0
+            }
+        }
+        _ => 0,
+    }
+}
+
+/// "S1", "S 8" — an S-Bahn line; "U2", "18", "X30" are not.
+fn is_s_bahn_line(line: &str) -> bool {
+    let mut cs = line.trim().chars();
+    matches!(cs.next(), Some('S') | Some('s')) && cs.find(|c| !c.is_whitespace()).is_some_and(|c| c.is_ascii_digit())
+}
+
+/// How much of a railway station a stop is, from what departs there (docs/23 §1), as
+/// `(mode, line)` pairs. A stop with no rail departure in the window still counts as a small
+/// station when its name says so — a Hauptbahnhof at midnight must not disappear.
+pub fn rail_rank(departures: &[(&str, &str)], name: &str) -> i32 {
+    let best = departures.iter().map(|(m, l)| mode_rank(m, l)).max().unwrap_or(0);
+    if best == 0 && looks_like_station(name) {
+        1
+    } else {
+        best
+    }
+}
+
+/// The order the nearby stations come back in (docs/23 §1): the 300 m band first, the better
+/// station inside it, then the one that carries a station's name, then distance. So a
+/// Hauptbahnhof at 250 m beats a stop at 60 m, and beyond the band distance decides again.
+///
+/// The name is a tiebreaker because feeds carry the same station under several ids: at München
+/// Hbf, Transitous also has an SNCF stop called plain "Munich", 90 m from the entrance and just
+/// as long-distance. Two stops of the same rank inside one 300 m band are in practice one
+/// station, and then the passenger should read the name they see on the building.
+pub fn nearby_order(distance_m: i64, rail_rank: i32, name: &str) -> (i64, i32, i32, i64) {
+    (distance_m / RANK_BAND_M, -rail_rank, if looks_like_station(name) { 0 } else { 1 }, distance_m)
 }
 
 fn looks_like_station(name: &str) -> bool {
@@ -447,6 +565,41 @@ mod tests {
         assert_eq!(it.duration_min, 139);
     }
 
+    /// docs/23 §1: München Hbf, not the Seidlstraße stop 60 m from the entrance.
+    #[test]
+    fn the_hauptbahnhof_wins_the_band() {
+        // What departs decides the rank. The modes and lines are the ones Transitous really
+        // returned for these stations on 11 September 2026.
+        let muenchen_hbf = [("METRO", "S2"), ("SUBWAY", "U5"), ("HIGHSPEED_RAIL", "ICE 880"), ("LONG_DISTANCE", "EC 113")];
+        assert_eq!(rail_rank(&muenchen_hbf, "München Hauptbahnhof"), 3);
+        assert_eq!(rail_rank(&[("REGIONAL_RAIL", "RB 58")], "Deisenhofen"), 2);
+        assert_eq!(rail_rank(&[("REGIONAL_FAST_RAIL", "RE 7")], "Rheine"), 2);
+
+        // The S-Bahn keeps its place, whichever mode the feed calls it by; the U-Bahn does not.
+        assert_eq!(rail_rank(&[("METRO", "S7"), ("METRO", "S2")], "Köln Hansaring"), 1, "an S-Bahn station is a station");
+        assert_eq!(rail_rank(&[("SUBURBAN", "S 12")], "Köln Hansaring"), 1, "other feeds say SUBURBAN for the same thing");
+        assert_eq!(rail_rank(&[("SUBWAY", "U2"), ("SUBWAY", "U5")], "Königsplatz"), 0, "a U-Bahn station is not a railway station");
+        assert_eq!(rail_rank(&[("TRAM", "18"), ("BUS", "X30")], "Elisenstraße"), 0);
+
+        // Seidlstraße, asked without a radius, has no rail departure and no station name: dropped.
+        assert_eq!(rail_rank(&[], "Seidlstraße"), 0, "the stop Johannes was offered disappears");
+        assert_eq!(rail_rank(&[], "München Hbf"), 1, "a station by name keeps a place when nothing departs in the window");
+
+        // Inside the same 300 m band the better station wins.
+        let hbf = nearby_order(250, 3, "München Hauptbahnhof");
+        let tram = nearby_order(60, 1, "Hackerbrücke");
+        assert!(hbf < tram, "München Hbf at 250 m beats an S-Bahn-only stop at 60 m");
+
+        // Beyond the band distance decides again.
+        let far_hbf = nearby_order(1200, 3, "München Hauptbahnhof");
+        let near_halt = nearby_order(280, 2, "Deisenhofen");
+        assert!(near_halt < far_hbf, "a regional station 280 m away beats a Hauptbahnhof 1,2 km away");
+
+        // Same band, same rank: the one that carries the station's name, then the nearer one.
+        assert!(nearby_order(190, 3, "München Hauptbahnhof") < nearby_order(97, 3, "Munich"), "the same station under two ids: the name on the building wins");
+        assert!(nearby_order(120, 3, "Köln Hbf") < nearby_order(280, 3, "Köln Hbf"));
+    }
+
     /// Live API. Run with `cargo test -- --ignored`.
     #[tokio::test]
     #[ignore]
@@ -458,6 +611,13 @@ mod tests {
         assert!(trip.stops.len() >= 2, "{trip:?}");
         let near = c.nearby_stops(50.9430, 6.9586).await.unwrap();
         assert!(near.iter().any(|s| s.name.contains("Köln")), "{near:?}");
+        // docs/23 §1: at the Munich main station's entrance, the Hauptbahnhof is offered, not
+        // the tram stop 60 m away. Three at most, best first.
+        let munich = c.nearby_stops(48.1402, 11.5600).await.unwrap();
+        assert!(munich.len() <= 3, "{munich:?}");
+        assert!(munich[0].name.contains("Hauptbahnhof") || munich[0].name.contains("Hbf"), "{munich:?}");
+        assert_eq!(munich[0].rail_rank, Some(3), "{munich:?}");
+        assert!(!munich.iter().any(|s| s.name.contains("Seidlstraße")), "the tram stop is gone: {munich:?}");
         let found = c.search_stops("Münster Hbf").await.unwrap();
         assert!(!found.is_empty());
     }

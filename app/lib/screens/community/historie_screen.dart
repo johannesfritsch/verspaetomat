@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../api/models.dart';
 import '../../mock/mock_data.dart' show Mock;
+import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../claims/claims_widgets.dart';
@@ -46,7 +47,7 @@ class _HistorieScreenState extends State<HistorieScreen> {
               const VGap.m(),
               for (final entry in groups.entries) ...[
                 VSection(entry.key),
-                for (final j in entry.value) _JourneyRow(journey: j),
+                for (final j in entry.value) _JourneyRow(journey: j, onDeleted: refresh),
                 const VGap.m(),
               ],
               if (journeys.isEmpty) Text(all.isEmpty ? 'Noch keine Fahrten.' : 'Keine Fahrten für diesen Filter.', style: VText.body.copyWith(color: VColors.ink2)),
@@ -58,21 +59,16 @@ class _HistorieScreenState extends State<HistorieScreen> {
   }
 }
 
-/// One journey: the lines, origin → destination, the delay at the destination. Legs unfold on tap.
-class _JourneyRow extends StatefulWidget {
-  const _JourneyRow({required this.journey});
+/// One journey: the lines, origin → destination, the delay at the destination. A tap opens
+/// the detail sheet, which is also where a ride is deleted (docs/23 §2).
+class _JourneyRow extends StatelessWidget {
+  const _JourneyRow({required this.journey, required this.onDeleted});
   final ApiJourney journey;
-
-  @override
-  State<_JourneyRow> createState() => _JourneyRowState();
-}
-
-class _JourneyRowState extends State<_JourneyRow> {
-  bool _open = false;
+  final VoidCallback onDeleted;
 
   @override
   Widget build(BuildContext context) {
-    final j = widget.journey;
+    final j = journey;
     final open = j.riding || j.inTransfer;
     final chips = <Widget>[
       if (open) const VChip('unterwegs', tone: VTone.ink),
@@ -87,7 +83,8 @@ class _JourneyRowState extends State<_JourneyRow> {
     return Column(
       children: [
         InkWell(
-          onTap: j.legs.length > 1 ? () => setState(() => _open = !_open) : null,
+          key: Key('journey-row-${j.id}'),
+          onTap: () => showJourneySheet(context, j, onDeleted: onDeleted),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
@@ -125,27 +122,90 @@ class _JourneyRowState extends State<_JourneyRow> {
             ),
           ),
         ),
-        if (_open)
-          Padding(
-            padding: const EdgeInsets.only(left: 64, bottom: 8),
-            child: Column(
-              children: [
-                for (final l in j.legs)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: [
-                        SizedBox(width: 56, child: Text(l.line, style: VText.captionInk)),
-                        Expanded(child: Text('${l.fromStationName} ${fmtLocal(l.plannedDeparture)} → ${l.toStationName} ${fmtLocal(l.plannedArrival)}', style: VText.caption, overflow: TextOverflow.ellipsis)),
-                        if (l.finalDelayMin != null) VDelay(l.finalDelayMin!, size: VDelaySize.small, cancelled: l.cancelled),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
         const VRule.soft(),
       ],
     );
   }
+}
+
+/// One ride in full: its legs with the times they promised, and the way to get rid of it
+/// (docs/23 §2). When the ride is in a sent Antrag the action is there but disabled, with
+/// the reason beside it, so it is never a silent absence.
+Future<void> showJourneySheet(BuildContext context, ApiJourney j, {required VoidCallback onDeleted}) {
+  return showVSheet(
+    context,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.l),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          VSheetHeader(title: '${j.originStationName} → ${j.destinationStationName}', subtitle: '${Mock.shortDate(j.date)} · ${j.lineLabel}'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const VGap.s(),
+                for (final l in j.legs) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      children: [
+                        SizedBox(width: 56, child: Text(l.line, style: VText.captionInk)),
+                        Expanded(
+                          child: Text(
+                            '${l.fromStationName} ${fmtLocal(l.plannedDeparture)} → ${l.toStationName} ${fmtLocal(l.plannedArrival)}',
+                            style: VText.caption,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (l.finalDelayMin != null) VDelay(l.finalDelayMin!, size: VDelaySize.small, cancelled: l.cancelled),
+                      ],
+                    ),
+                  ),
+                  const VRule.soft(),
+                ],
+                const VGap.xs(),
+                VKeyValue('Ankunft laut Fahrplan', fmtLocal(j.plannedArrival)),
+                const VRule(),
+                VKeyValue('Tatsächliche Ankunft', fmtLocal(j.actualArrival), strong: true),
+                const VRule(),
+                VKeyValue('Geduldspunkte', '${j.points}', strong: true),
+                const VGap.m(),
+                if (j.deletable)
+                  VGhostButton(
+                    key: const Key('delete-ride'),
+                    label: 'Fahrt löschen',
+                    icon: Icons.delete_outline,
+                    color: VColors.red,
+                    onTap: () async {
+                      final session = RepoScope.read(context);
+                      Navigator.of(ctx).pop();
+                      if (!await confirmDeleteRide(context)) return;
+                      try {
+                        if (j.legacy) {
+                          await session.repo.deleteRide(j.id);
+                        } else {
+                          await session.repo.deleteJourney(j.id);
+                        }
+                        await session.refresh();
+                        onDeleted();
+                      } catch (e) {
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ging nicht: $e')));
+                      }
+                    },
+                  )
+                else ...[
+                  VGhostButton(label: 'Fahrt löschen', icon: Icons.delete_outline, color: VColors.ink3, onTap: null),
+                  const SizedBox(height: 2),
+                  Text(j.deleteRefusal ?? 'Diese Fahrt steckt in einem eingereichten Antrag.', style: VText.caption),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

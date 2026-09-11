@@ -265,9 +265,26 @@ class MockRepository implements AppRepository {
       replanned: j.replanned,
       transferReason: j.phase == JourneyPhase.transfer ? (j.replanned ? 'weiterfahrt' : 'umstieg') : null,
       earliestOnwardArrival: j.earliestOnwardArrival == null ? null : _at(j.earliestOnwardArrival!),
+      // docs/23 §3: hours past the planned arrival and still open — the bar asks.
+      stale: state.staleRide && (j.phase == JourneyPhase.riding || j.phase == JourneyPhase.transfer),
+      deletable: _lockedByAClaim(j.date, j.legs.map((l) => l.departure.line)) == null,
+      deleteRefusal: _lockedByAClaim(j.date, j.legs.map((l) => l.departure.line)),
       createdAt: j.startedAt.toUtc(),
       finalisedAt: j.phase == JourneyPhase.arrived ? DateTime.now().toUtc() : null,
     );
+  }
+
+  /// docs/23 §2: in the demo a ride is locked when a case of the same day and line is already
+  /// out of the house. The real backend asks the claim's status instead.
+  String? _lockedByAClaim(DateTime date, Iterable<String> lines) {
+    final set = lines.toSet();
+    final sent = state.incidents.any((i) =>
+        (i.status == IncidentStatus.eingereicht || i.status == IncidentStatus.bestaetigt) &&
+        i.date.year == date.year &&
+        i.date.month == date.month &&
+        i.date.day == date.day &&
+        set.contains(i.line));
+    return sent ? 'Diese Fahrt steckt in einem eingereichten Antrag.' : null;
   }
 
   @override
@@ -312,6 +329,18 @@ class MockRepository implements AppRepository {
   }
 
   @override
+  Future<bool> deleteJourney(String id) async {
+    state.deleteRide(id);
+    return state.readyDesk == null;
+  }
+
+  @override
+  Future<bool> deleteRide(String id) async {
+    state.deleteRide(id);
+    return state.readyDesk == null;
+  }
+
+  @override
   Future<List<ApiJourney>> journeys() async {
     final list = <ApiJourney>[];
     if (state.journey != null && state.journey!.phase == JourneyPhase.arrived) list.add(_journey(state.journey!));
@@ -335,6 +364,9 @@ class MockRepository implements AppRepository {
         finalDelayMin: r.delay,
         cancelled: r.cancelled,
         points: r.cancelled ? 60 : r.delay,
+        legacy: true,
+        deletable: _lockedByAClaim(r.date, [r.line]) == null,
+        deleteRefusal: _lockedByAClaim(r.date, [r.line]),
         legs: [
           ApiLeg(tripId: '', line: r.line, fromStationId: _stationId(r.from), fromStationName: r.from, toStationId: _stationId(r.to), toStationName: r.to, legNo: 1, status: ApiLegStatus.arrived, finalDelayMin: r.delay, plannedDeparture: planned),
         ],
@@ -390,6 +422,8 @@ class MockRepository implements AppRepository {
 
   static ApiIncident _incident(Incident i, {DateTime? discardedAt, String? discardReason}) => ApiIncident(
         id: i.id,
+        // The demo has no separate ride row; the case answers for the ride it came from.
+        rideId: i.id,
         date: i.date,
         line: i.line,
         from: i.from,
@@ -557,12 +591,27 @@ class MockRepository implements AppRepository {
   // -- reference ------------------------------------------------------------
 
   @override
-  Future<ApiNearby> nearbyStations({double? lat, double? lon}) async => ApiNearby(
-        stations: Mock.nearbyStations
-            .map((s) => ApiStation(id: s.id, name: s.name, distanceM: state.awayFromStation ? s.distanceM + 2400 : s.distanceM, eva: s.evaNr, lat: s.lat, lon: s.lon))
-            .toList(),
-        source: 'demo',
-      );
+  Future<ApiNearby> nearbyStations({double? lat, double? lon}) async {
+    // docs/23 §1: while the phone is still being asked, no station is shown at all.
+    if (state.locatingStation) return const ApiNearby(stations: [], source: 'locating');
+    // The nearest station first, then the two the card offers as "Nicht hier?" (docs/23 §1).
+    // Köln Hbf is long distance, Messe/Deutz regional, the Hansaring S-Bahn only.
+    const ranks = {'koeln-hbf': 3, 'koeln-deutz': 2, 'koeln-hansaring': 1};
+    return ApiNearby(
+      stations: Mock.nearbyStations
+          .map((s) => ApiStation(
+                id: s.id,
+                name: s.name,
+                distanceM: state.awayFromStation ? s.distanceM + 2400 : s.distanceM,
+                eva: s.evaNr,
+                lat: s.lat,
+                lon: s.lon,
+                railRank: ranks[s.id] ?? 2,
+              ))
+          .toList(),
+      source: 'demo',
+    );
+  }
 
   @override
   Future<List<ApiStation>> searchStations(String query) async {
