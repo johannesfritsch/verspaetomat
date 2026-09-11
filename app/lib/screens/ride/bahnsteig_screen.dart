@@ -288,6 +288,17 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
               ),
             const VGap.s(),
 
+            // Wir first (docs/30): the collective minutes are the thing this app is for, and
+            // they are true whether or not anybody is travelling right now. The action follows.
+            const VSection('Wir'),
+            const VGap.m(),
+            _WirBlock(
+              standing: st,
+              tick: _minuteTick,
+              onTap: () => context.go(Routes.wir),
+            ),
+            const VGap.l(),
+
             // 1 · Action, sized by the moment. Under way, the ride card (docs/20 §2) opens the
             // sheet; the check-in card waits until the journey is over.
             if (_loading && ride.loading)
@@ -344,17 +355,9 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             ],
             const VGap.l(),
 
-            // Two things, nothing else (docs/19): the week, us.
             const VSection('Deine Woche'),
-            _Momentum(standing: st, onTap: () => context.go(Routes.ich)),
-            const VGap.l(),
-            const VSection('Wir'),
             const VGap.m(),
-            _WirBlock(
-              standing: st,
-              tick: _minuteTick,
-              onTap: () => context.go(Routes.wir),
-            ),
+            _Momentum(standing: st, onTap: () => context.go(Routes.ich)),
           ],
         ),
       ),
@@ -531,7 +534,10 @@ class _StationRow extends StatelessWidget {
     }
     for (final s in nearby.stations) {
       if (entries.length >= 5) break;
-      if (entries.any((e) => e.$1.id == s.id || e.$1.name == s.name)) continue;
+      // The frequent set comes from ride history and the nearby list from the feed, and the two
+      // name the same platform differently often enough that comparing ids and raw names left
+      // „Ab Kißlegg" on the card twice (docs/30).
+      if (entries.any((e) => e.$1.id == s.id || sameStation(e.$1.name, s.name))) continue;
       entries.add((s, s.distanceM == null ? null : _dist(s.distanceM!)));
     }
     // The same box as the station card, so the idle state reads as "no station yet" rather
@@ -897,41 +903,56 @@ class _Momentum extends StatelessWidget {
   Widget build(BuildContext context) {
     final st = standing;
     final quiet = st.pointsThisWeek == 0;
+    // The same box as Wir (docs/30): elevated paper, a hairline border, the big number on top
+    // and one quiet line under it. Two blocks that say the same kind of thing should look the
+    // same; this one used to be bare text next to a bordered box.
     return InkWell(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: VSpace.m),
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.all(VSpace.m),
+        decoration: BoxDecoration(
+          color: VColors.paperElevated,
+          border: Border.all(color: VColors.rule),
+          borderRadius: BorderRadius.circular(4),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (quiet) ...[
-              Text('Diese Woche noch keine Fahrt', style: VText.title),
-              const SizedBox(height: 2),
-              Text(
-                st.pointsLastWeek > 0
-                    ? 'Letzte Woche ${fmtInt(st.pointsLastWeek)} Geduldspunkte'
-                    : 'Jede Minute Verspätung wird ein Geduldspunkt.',
-                style: VText.caption,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                quiet ? '0' : '+${fmtInt(st.pointsThisWeek)}',
+                style: VText.display.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
               ),
-            ] else ...[
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text('+${fmtInt(st.pointsThisWeek)}', style: VText.numberM),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Geduldspunkte diese Woche · letzte Woche ${fmtInt(st.pointsLastWeek)}',
-                      style: VText.caption,
-                      maxLines: 2,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            // The level lives on Ich and nowhere else (docs/20 §5). Home says what happened
-            // this week; a rank and a countdown to the next one is a different conversation.
+            ),
+            const SizedBox(height: 2),
+            Text('Geduldspunkte diese Woche', style: VText.caption),
+            const SizedBox(height: 12),
+            // Last week as the bar, so the two numbers can be compared at a glance rather than
+            // read. A quiet week shows an empty track, which is the honest picture of it.
+            LayoutBuilder(
+              builder: (context, box) {
+                final last = st.pointsLastWeek;
+                final most = [st.pointsThisWeek, last, 1].reduce((a, b) => a > b ? a : b);
+                final share = (st.pointsThisWeek / most).clamp(0.0, 1.0);
+                final filled = (box.maxWidth * share).clamp(st.pointsThisWeek > 0 ? 6.0 : 0.0, box.maxWidth);
+                return Stack(
+                  children: [
+                    Container(height: 6, decoration: BoxDecoration(color: VColors.ruleSoft, borderRadius: BorderRadius.circular(3))),
+                    Container(height: 6, width: filled, decoration: BoxDecoration(color: VColors.red, borderRadius: BorderRadius.circular(3))),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 6),
+            Text(
+              st.pointsLastWeek > 0
+                  ? '${fmtInt(st.pointsLastWeek)} letzte Woche'
+                  : 'Jede Minute Verspätung wird ein Geduldspunkt.',
+              style: VText.caption,
+            ),
           ],
         ),
       ),

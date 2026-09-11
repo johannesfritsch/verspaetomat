@@ -165,6 +165,12 @@ void main() {
     // docs/24 §1: the check-in is three sheets, and the source is a question. Home's card
     // carries the Von row that opens the first of them.
     await home('bahnsteig-von-nach');
+    // docs/30: Wir is at the top now and Deine Woche wears the same box, which is below the
+    // fold — so the tour scrolls to it rather than leaving the change unphotographed.
+    await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -420));
+    await shot('bahnsteig-deine-woche');
+    await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, 420));
+    await wait(tester, 400);
     await tester.tap(find.byKey(const Key('von-row')));
     await wait(tester, 900);
     await shot('einchecken-von');

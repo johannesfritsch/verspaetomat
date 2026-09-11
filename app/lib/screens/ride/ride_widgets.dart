@@ -127,6 +127,22 @@ String normaliseStation(String name) => name
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
+/// Two names for the same platform. The feeds disagree about stations constantly — the same
+/// Kißlegg is „Kißlegg Bahnhof" in one and „Kißlegg" in another, and a ride checked in years ago
+/// carries whatever it was called then. Comparing ids is not enough, because one station can
+/// have an id per feed; comparing raw names is not enough either. This is the test to use
+/// wherever two lists of stations are merged (docs/30).
+bool sameStation(String a, String b) {
+  final x = normaliseStation(a), y = normaliseStation(b);
+  if (x == y) return true;
+  // „Kißlegg" against „Kißlegg Bahnhof": one is the other plus the word for the thing itself.
+  const tails = [' bahnhof', ' bf', ' hbf'];
+  for (final t in tails) {
+    if (x == y + t || y == x + t) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Loading and error lines
 // ---------------------------------------------------------------------------
