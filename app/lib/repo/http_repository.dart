@@ -111,6 +111,9 @@ class HttpRepository implements AppRepository {
   Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName}) =>
       client.replanJourney(journeyId, fromStationId: fromStationId, fromStationName: fromStationName);
   @override
+  Future<ApiJourneyLive> changeTrain(String journeyId, String tripId, {String? fromStationId, String? fromStationName}) =>
+      client.changeTrain(journeyId, tripId, fromStationId: fromStationId, fromStationName: fromStationName);
+  @override
   Future<List<ApiJourney>> journeys() async {
     try {
       return await client.journeys();

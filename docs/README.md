@@ -37,6 +37,29 @@ Status: research, product concept and a fully mocked Flutter showcase app (`app/
 
 The skeleton lives in `backend/` (see `backend/README.md`, `backend/openapi.yaml`).
 
+## Decisions (in the order we rode with them)
+
+Each of these was written after using a build on a real trip, and each says what changed and why. They
+are the living part of the product documentation: where one of them contradicts 10–15, the later
+number wins.
+
+| Doc | Written after | Content |
+|---|---|---|
+| [16-bahnsteig.md](16-bahnsteig.md) | 10 Sep | The Bahnsteig, second version: action by the moment, every number above the fold |
+| [17-journeys.md](17-journeys.md) | 10 Sep | Journeys: destination first, an itinerary snapshot, legs confirmed one tap at a time |
+| [18-home-antraege-wir.md](18-home-antraege-wir.md) | build 7 | Home says one thing, Anträge shows status, reply addresses belong to claims |
+| [19-ride-sheet.md](19-ride-sheet.md) | build 8 | The ride as a draggable sheet with a persistent bar, the Wir block, Welcher Zug? hierarchy |
+| [20-riding-home-zweck-ich.md](20-riding-home-zweck-ich.md) | build 9 | Riding on Home, no second check-in, the Zweck up front, Ich owns the level |
+| [21-abbruch-und-antraege.md](21-abbruch-und-antraege.md) | build 11 | Abbrechen asks why, a self-chosen pause is capped out of the claim, cases can leave a bundle |
+| [22-aufgeben-zaehlt-und-aufraeumen.md](22-aufgeben-zaehlt-und-aufraeumen.md) | build 12 | Giving up still earns Geduldspunkte, and four bits of tidying |
+| [23-standort-und-loeschen.md](23-standort-und-loeschen.md) | build 13 | Stations ranked by what departs there, deleting a ride, noticing a forgotten one |
+| [24-einchecken-flow-und-ruhe.md](24-einchecken-flow-und-ruhe.md) | build 13 | One live station source, the check-in asks where you are, Zug wechseln, a snooze |
+| [25-geofence-v2-und-diagnose.md](25-geofence-v2-und-diagnose.md) | build 13 | **Spec, not built.** Significant Location Change, a coverage disc, a 3-minute dwell, a diagnose page |
+
+Two numbers are used twice: `20-backend.md` and `21-data-requirements.md` came first, the decision
+series later walked into the same numbers. In prose and in code comments a bare **docs/20** or
+**docs/21** always means the decision doc; the backend pair is always named in full.
+
 ## Shipping
 
 | Doc | Content |

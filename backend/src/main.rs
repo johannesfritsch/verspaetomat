@@ -119,6 +119,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/journeys/{id}/legs", post(journeys::confirm_leg))
         .route("/v1/journeys/{id}/finish", post(journeys::finish))
         .route("/v1/journeys/{id}/replan", post(journeys::replan))
+        .route("/v1/journeys/{id}/change-train", post(journeys::change_train))
         // rides
         .route("/v1/rides", get(handlers::rides).post(handlers::check_in))
         .route("/v1/rides/current", get(handlers::current_ride))

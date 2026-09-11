@@ -44,6 +44,7 @@ class GeofenceSync with WidgetsBindingObserver {
 
   void dispose() {
     _debounce?.cancel();
+    _snoozeTimer?.cancel();
     _taps?.cancel();
     _tokens?.cancel();
     session.removeListener(scheduleSync);
@@ -139,9 +140,25 @@ class GeofenceSync with WidgetsBindingObserver {
       if (fp == _lastFingerprint) return;
       _lastFingerprint = fp;
       await _geofence.configure(config);
+      _scheduleSnoozeExpiry(geo.snoozeUntil);
     } catch (_) {
       // The nudge is a convenience; the app never fails because of it.
     }
+  }
+
+  Timer? _snoozeTimer;
+
+  /// A running pause (docs/24 §3) already reaches native as `enabled: false`; nothing tells
+  /// us when it runs out, so the sync wakes itself at that moment and configures again.
+  /// Lifting it early comes through the session listener like any other setting.
+  void _scheduleSnoozeExpiry(DateTime? until) {
+    _snoozeTimer?.cancel();
+    if (until == null) return;
+    final left = until.difference(DateTime.now());
+    // Beyond a day it is the open-ended choice, or far enough that a foreground resume will
+    // have synced long before; a timer that long is not worth holding.
+    if (left <= Duration.zero || left > const Duration(days: 1)) return;
+    _snoozeTimer = Timer(left + const Duration(seconds: 5), scheduleSync);
   }
 
   /// Ask for the OS permission that matches a location mode. No-op under automation.

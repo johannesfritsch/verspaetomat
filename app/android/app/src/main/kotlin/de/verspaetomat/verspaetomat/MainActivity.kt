@@ -37,6 +37,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        GeofenceManager.umbrellaExitListener = { channel?.invokeMethod("umbrellaExit", null) }
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).also { ch ->
             ch.setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -57,6 +58,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        GeofenceManager.umbrellaExitListener = null
         channel?.setMethodCallHandler(null)
         channel = null
         super.onDestroy()
@@ -77,6 +79,13 @@ class MainActivity : FlutterActivity() {
     // ---- notification tap -------------------------------------------------
 
     private fun handleNudgeIntent(intent: Intent?) {
+        // "3 Stunden Ruhe" from the notification's action (docs/24 §3): no screen opens.
+        val snooze = intent?.getIntExtra(NudgeNotification.EXTRA_SNOOZE_HOURS, 0) ?: 0
+        if (snooze > 0) {
+            intent?.removeExtra(NudgeNotification.EXTRA_SNOOZE_HOURS)
+            channel?.invokeMethod("nudgeTapped", mapOf("kind" to "snooze", "hours" to snooze.toString()))
+            return
+        }
         val id = intent?.getStringExtra(NudgeNotification.EXTRA_STATION_ID) ?: return
         val name = intent.getStringExtra(NudgeNotification.EXTRA_STATION_NAME) ?: ""
         intent.removeExtra(NudgeNotification.EXTRA_STATION_ID)

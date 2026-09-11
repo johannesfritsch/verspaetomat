@@ -52,6 +52,10 @@ abstract class AppRepository {
   Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason});
   /// "Ich fahre später weiter": the leg ends here, the journey waits for the next train (docs/21 §2).
   Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName});
+
+  /// "Zug wechseln" (docs/24 §2): another train to the same destination, from wherever the
+  /// passenger is now. Replaces the leg when nothing has happened yet, ends it otherwise.
+  Future<ApiJourneyLive> changeTrain(String journeyId, String tripId, {String? fromStationId, String? fromStationName});
   Future<List<ApiJourney>> journeys();
 
   /// Deletes a ride the passenger never wanted (docs/23 §2): the journey, its legs and the

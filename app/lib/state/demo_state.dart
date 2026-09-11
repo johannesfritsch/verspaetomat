@@ -142,6 +142,15 @@ class DemoState extends ChangeNotifier {
   }
   bool quietHours = true;
 
+  /// docs/24 §3: station nudges paused until this moment. Null means no pause. Demo models it
+  /// so the sheet, the Einstellungen row and the quiet line on Home work without a backend.
+  DateTime? nudgeSnoozeUntil;
+
+  void setNudgeSnoozeUntil(DateTime? t) {
+    nudgeSnoozeUntil = t;
+    notifyListeners();
+  }
+
   void setNudgeEnabled(bool v) {
     nudgeEnabled = v;
     notifyListeners();
@@ -238,6 +247,19 @@ class DemoState extends ChangeNotifier {
     j.phase = JourneyPhase.riding;
     j.proposal = null;
     _board(leg, locationVerified: true);
+  }
+
+  /// "Zug wechseln" before anything happened (docs/24 §2): a mis-tap, so the leg is swapped in
+  /// place. Nothing is earned and no interruption is recorded — the railway made nobody wait.
+  void replaceLeg(Departure departure) {
+    final j = journey;
+    if (j == null || j.phase != JourneyPhase.riding) return;
+    final old = j.current;
+    final exit = departure.stops.firstWhere((s) => s.name == old.exit.name, orElse: () => departure.stops.last);
+    j.legs[j.currentLeg - 1] = DemoLeg(departure: departure, from: old.from, exit: exit);
+    liveDelay = 0;
+    passedStops = 0;
+    _board(j.current, locationVerified: true);
   }
 
   /// "Ich fahre später weiter" (docs/21 §2): the leg ends here, no points, and the journey
@@ -713,6 +735,7 @@ class DemoState extends ChangeNotifier {
     unreadMails = 2;
     noHistory = false;
     locatingStation = false;
+    nudgeSnoozeUntil = null;
     staleRide = false;
     rides
       ..clear()

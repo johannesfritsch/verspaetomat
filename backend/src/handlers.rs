@@ -187,6 +187,7 @@ async fn customer_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value> 
             "nudge_enabled": c.nudge_enabled,
             "quiet_from": c.quiet_from.map(|t| t.format("%H:%M").to_string()),
             "quiet_to": c.quiet_to.map(|t| t.format("%H:%M").to_string()),
+            "nudge_snooze_until": c.nudge_snooze_until,
         },
         "points_total": points_total,
         "points_this_week": points_week,
@@ -235,6 +236,9 @@ pub struct MePatch {
     /// "HH:MM"; an empty string clears the quiet window.
     pub quiet_from: Option<String>,
     pub quiet_to: Option<String>,
+    /// docs/24 §3: nudges off until this moment, RFC 3339. An empty string lifts the snooze,
+    /// the same convention the quiet window uses.
+    pub nudge_snooze_until: Option<String>,
 }
 
 fn parse_quiet(s: &Option<String>) -> Result<Option<Option<chrono::NaiveTime>>, (StatusCode, Json<Value>)> {
@@ -253,9 +257,21 @@ pub struct MutedStation {
     pub name: String,
 }
 
+/// "" clears the snooze; anything else must be an RFC 3339 instant.
+fn parse_snooze(s: &Option<String>) -> Result<Option<Option<DateTime<Utc>>>, (StatusCode, Json<Value>)> {
+    match s.as_deref() {
+        None => Ok(None),
+        Some("") => Ok(Some(None)),
+        Some(v) => DateTime::parse_from_rfc3339(v)
+            .map(|t| Some(Some(t.with_timezone(&Utc))))
+            .map_err(|_| err(StatusCode::BAD_REQUEST, "nudge_snooze_until must be RFC 3339")),
+    }
+}
+
 pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePatch>) -> ApiResult {
     let quiet_from = parse_quiet(&p.quiet_from)?;
     let quiet_to = parse_quiet(&p.quiet_to)?;
+    let snooze = parse_snooze(&p.nudge_snooze_until)?;
     if let Some(n) = &p.ngo_id {
         let exists: bool = sqlx::query_scalar("select exists(select 1 from ngos where id = $1 and active)").bind(n).fetch_one(&s.pool).await.map_err(internal)?;
         if !exists {
@@ -272,7 +288,8 @@ pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePa
             muted_stations = coalesce($13, muted_stations),
             nudge_enabled = coalesce($14, nudge_enabled),
             quiet_from = case when $15 then $16 else quiet_from end,
-            quiet_to = case when $17 then $18 else quiet_to end
+            quiet_to = case when $17 then $18 else quiet_to end,
+            nudge_snooze_until = case when $19 then $20 else nudge_snooze_until end
          where id = $1 returning *",
     )
     .bind(c.0.id)
@@ -293,6 +310,8 @@ pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePa
     .bind(quiet_from.flatten())
     .bind(quiet_to.is_some())
     .bind(quiet_to.flatten())
+    .bind(snooze.is_some())
+    .bind(snooze.flatten())
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
@@ -332,11 +351,25 @@ pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
     let muted: Vec<MutedStation> = serde_json::from_value(c.0.muted_stations.clone()).unwrap_or_default();
     let stations = geofence_set(rows, home, &muted, 15);
     Ok(Json(json!({
-        "enabled": c.0.loc_mode == LocationMode::Always && c.0.nudge_enabled,
+        "enabled": nudges_enabled(&c.0),
         "stations": stations,
         "quiet_from": c.0.quiet_from.map(|t| t.format("%H:%M").to_string()),
         "quiet_to": c.0.quiet_to.map(|t| t.format("%H:%M").to_string()),
+        "snooze_until": c.0.nudge_snooze_until,
     })))
+}
+
+/// May a station nudge be scheduled at all? Background location and the switch, and no
+/// snooze running (docs/24 §3). While a snooze runs the layer is configured `enabled: false`,
+/// so nothing is scheduled and no notification can fire.
+pub fn nudges_enabled(c: &CustomerRow) -> bool {
+    if c.loc_mode != LocationMode::Always || !c.nudge_enabled {
+        return false;
+    }
+    match c.nudge_snooze_until {
+        Some(t) => t <= crate::clock::now(),
+        None => true,
+    }
 }
 
 #[derive(Debug, PartialEq, serde::Serialize)]
@@ -1995,6 +2028,26 @@ mod standing_tests {
 #[cfg(test)]
 mod inbound_tests {
     use super::*;
+
+    /// docs/24 §3: while a snooze runs the layer is configured `enabled: false`, so nothing
+    /// is scheduled and no notification can fire. A snooze in the past is no snooze.
+    #[test]
+    fn a_running_snooze_switches_the_nudges_off() {
+        let mut c = crate::pdf::test_customer();
+        c.loc_mode = LocationMode::Always;
+        c.nudge_enabled = true;
+        assert!(nudges_enabled(&c), "background location and the switch: nudges are on");
+
+        c.nudge_snooze_until = Some(crate::clock::now() + Duration::hours(2));
+        assert!(!nudges_enabled(&c), "a snooze two hours out silences them");
+
+        c.nudge_snooze_until = Some(crate::clock::now() - Duration::minutes(1));
+        assert!(nudges_enabled(&c), "an expired snooze is no snooze");
+
+        c.nudge_snooze_until = None;
+        c.nudge_enabled = false;
+        assert!(!nudges_enabled(&c), "the switch still wins on its own");
+    }
 
     #[test]
     fn geofence_set_home_first_muted_out_capped() {

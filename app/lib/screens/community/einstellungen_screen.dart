@@ -10,6 +10,8 @@ import '../../router.dart';
 import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../ride/ride_widgets.dart' show fmtLocal;
+import 'ruhe_sheet.dart';
 import '../../content/legal.dart';
 import 'community_widgets.dart';
 
@@ -70,6 +72,18 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             subtitle: (settings?.quietHours ?? state.quietHours) ? '${settings?.quietFrom ?? '22:00'} bis ${settings?.quietTo ?? '06:00'} kein Hinweis' : 'Hinweis rund um die Uhr',
             value: settings?.quietHours ?? state.quietHours,
             onChanged: (v) => session.updateSettings(MePatch(quietFrom: v ? '22:00' : '', quietTo: v ? '06:00' : '')),
+          ),
+          // The time-boxed global pause (docs/24 §3), next to the switch it suspends.
+          VListRow(
+            key: const Key('pausieren'),
+            title: 'Benachrichtigungen pausieren',
+            subtitle: session.nudgesSnoozed
+                ? (settings?.snoozedOpenEnded ?? false
+                    ? 'Pausiert, bis du sie wieder einschaltest'
+                    : 'Stumm bis ${fmtLocal(session.nudgeSnoozeUntil)}')
+                : 'Für ein paar Stunden Ruhe',
+            chevron: true,
+            onTap: () => showRuheSheet(context),
           ),
           VListRow(
             title: 'Stumme Bahnhöfe',

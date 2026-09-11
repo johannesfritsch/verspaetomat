@@ -7,9 +7,11 @@ import '../../repo/app_repository.dart';
 import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
+import '../../state/nearby_monitor.dart';
 import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import 'checkin_flow.dart';
 import 'ride_widgets.dart';
 import 'wohin_screen.dart';
 
@@ -25,19 +27,10 @@ class BahnsteigScreen extends StatefulWidget {
 
 class _BahnsteigScreenState extends State<BahnsteigScreen> {
   StreamSubscription<AppEvent>? _eventSub;
-  ApiLocation? _position;
 
-  /// When the fix in [_position] was taken. A station is only ever shown from a fix younger
-  /// than [_fixMaxAge]; an older one is not a guess we are willing to make (docs/23 §1).
-  DateTime? _positionAt;
-  static const _fixMaxAge = Duration(minutes: 5);
-
-  /// The phone is being asked where it is right now.
-  bool _locating = false;
-
-  /// The station picked from "Nicht hier?", which wins over the nearest one (docs/23 §1).
-  String? _pickedStationId;
-  ApiNearby _nearby = const ApiNearby(stations: [], source: 'none');
+  /// Where the passenger is and which stations are around them: one live source for Home,
+  /// the check-in and the away box (docs/24 §0). This screen no longer holds a fix.
+  NearbyMonitor? _near;
   ApiGeofence _frequent = ApiGeofence.empty;
   ApiDestinations _destinations = ApiDestinations.empty;
   ApiStanding _standing = ApiStanding.empty;
@@ -56,7 +49,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     _session = session;
     _eventSub = session.events.listen((e) {
       if (!mounted) return;
-      if (e.touchesLocation) _position = null;
+      // The monitor listens for the location itself; this is the rest of the screen.
       if (e.touchesLocation || e.touchesRide || e.touchesLedger) _load();
     });
     session.addListener(_onSession);
@@ -70,6 +63,11 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final near = NearbyScope.of(context);
+    if (!identical(near, _near)) {
+      _near?.removeListener(_onNearby);
+      _near = near..addListener(_onNearby);
+    }
     final repo = RepoScope.of(context).repo;
     if (!identical(repo, _lastRepo)) {
       _lastRepo = repo;
@@ -77,10 +75,34 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     }
   }
 
+  /// The station changed under us (a new fix, a Stellwerk move, a pick): the destinations
+  /// belong to that station, so they are fetched again for it.
+  String? _destinationsFor;
+
+  void _onNearby() {
+    if (!mounted) return;
+    final id = _near?.station?.id;
+    if (id != _destinationsFor) _loadDestinations();
+    setState(() {});
+  }
+
+  Future<void> _loadDestinations() async {
+    final near = _near?.station;
+    _destinationsFor = near?.id;
+    if (near == null) {
+      if (mounted) setState(() => _destinations = ApiDestinations.empty);
+      return;
+    }
+    final repo = RepoScope.read(context).repo;
+    final dest = await repo.destinations(from: near.id).catchError((_) => ApiDestinations.empty);
+    if (mounted && _destinationsFor == near.id) setState(() => _destinations = dest);
+  }
+
   @override
   void dispose() {
     _eventSub?.cancel();
     _ticker?.cancel();
+    _near?.removeListener(_onNearby);
     _session.removeListener(_onSession);
     super.dispose();
   }
@@ -114,42 +136,22 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
       _error = null;
     });
     try {
-      // A fix older than five minutes is no fix at all: ask again, and say so on the card
-      // while we wait (docs/23 §1).
-      if (!_fixFresh) {
-        if (mounted) setState(() => _locating = true);
-        final p = await currentPosition(timeout: const Duration(seconds: 5));
-        if (!mounted) return;
-        setState(() {
-          _position = p;
-          _positionAt = p == null ? null : DateTime.now();
-          _locating = false;
-        });
-      }
+      // The stations come from the monitor, which is the only thing that asks the phone
+      // (docs/24 §0); this screen loads what belongs to it alone.
       final results = await Future.wait<dynamic>([
-        repo.nearbyStations(lat: _position?.lat, lon: _position?.lon),
         _session.loadStanding().catchError((_) => ApiStanding.empty),
         repo.geofence().catchError((_) => ApiGeofence.empty),
       ]);
       if (!mounted) return;
-      final nearby = results[0] as ApiNearby;
-      // At a station: the destinations from this person's history come with the screen (docs/18).
-      final near = _stationOf(nearby);
-      var dest = ApiDestinations.empty;
-      if (near != null) {
-        dest = await repo
-            .destinations(from: near.id)
-            .catchError((_) => ApiDestinations.empty);
-      }
-      if (!mounted) return;
       setState(() {
-        _nearby = nearby;
-        _destinations = dest;
-        _standing = results[1] as ApiStanding;
-        _frequent = results[2] as ApiGeofence;
+        _standing = results[0] as ApiStanding;
+        _frequent = results[1] as ApiGeofence;
         _minuteTick = 0;
         _error = null;
       });
+      // At a station: the destinations from this person's history come with the screen
+      // (docs/18).
+      await _loadDestinations();
     } catch (e) {
       if (mounted) setState(() => _error = shortError(e));
     } finally {
@@ -157,54 +159,21 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     }
   }
 
-  static ApiStation? _nearestWithin(ApiNearby nearby, int metres) {
-    // Needs a position: the phone's, or a Stellwerk override. Never a guess.
-    if (nearby.none || nearby.stations.isEmpty) return null;
-    // The backend ranks: the first one is the best station in the nearest band (docs/23 §1).
-    final s = nearby.stations.first;
-    final d = s.distanceM;
-    return d != null && d <= metres ? s : null;
-  }
-
-  /// A fix we still believe in. Older than five minutes and the card says it is checking.
-  bool get _fixFresh => _positionAt != null && DateTime.now().difference(_positionAt!) < _fixMaxAge;
-
-  /// May a station be shown at all? Only from a list that does not depend on this phone
-  /// (Stellwerk, demo) or from a fresh fix (docs/23 §1).
-  bool get _stationTrustworthy => _nearby.independentOfFix || _fixFresh;
+  ApiNearby get _nearby => _near?.nearby ?? const ApiNearby(stations: [], source: 'none');
 
   /// The card is waiting for the phone: no station yet, and never the last one.
-  bool get _checkingLocation => _nearby.checking || (_locating && !_stationTrustworthy);
+  bool get _checkingLocation => _near?.checking ?? false;
 
-  /// The station the card offers: the one picked from "Nicht hier?", else the best one within
-  /// 300 m. Null while no fix is worth trusting.
-  ApiStation? _stationOf(ApiNearby nearby) {
-    if (!(nearby.independentOfFix || _fixFresh)) return null;
-    final picked = _pickedStationId;
-    if (picked != null) {
-      final s = nearby.stations.where((x) => x.id == picked).firstOrNull;
-      if (s != null) return s;
-    }
-    return _nearestWithin(nearby, 300);
-  }
+  /// The station the card offers, or null while no fix is worth trusting.
+  ApiStation? get _nearStation => _near?.station;
 
-  ApiStation? get _nearStation => _stationOf(_nearby);
-
-  /// The other stations the card offers under "Nicht hier?" (docs/23 §1), at most two.
-  List<ApiStation> get _otherStations {
-    final shown = _nearStation?.id;
-    return _nearby.stations.where((s) => s.id != shown).take(2).toList();
-  }
-
-  /// A chip from "Nicht hier?": the card switches over at once, without asking the phone again.
-  Future<void> _pickStation(ApiStation s) async {
-    setState(() {
-      _pickedStationId = s.id;
-      _destinations = ApiDestinations.empty;
-    });
-    final repo = RepoScope.read(context).repo;
-    final dest = await repo.destinations(from: s.id).catchError((_) => ApiDestinations.empty);
-    if (mounted) setState(() => _destinations = dest);
+  /// The `Von` row (docs/24 §1): the source is a question, not an assertion. The same sheet
+  /// the check-in flow opens, so there is one answer to "where am I" and one way to fix it;
+  /// the monitor's notification brings the destinations for the new station with it.
+  Future<void> _editSource() async {
+    final r = await showVonSheet(context, current: _nearStation);
+    final picked = r?.value;
+    if (picked != null) _near?.pick(picked);
   }
 
   Future<void> _muteStation(ApiStation s) async {
@@ -235,43 +204,12 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     ),
   );
 
-  /// "Standort erlauben" (docs/23 §1): the tap always resolves to something. A permission
-  /// that was never asked brings up the system dialog and then a fresh fix; one that was
-  /// refused for good opens the settings, with one line saying why. The card never keeps
-  /// the station it was showing before the tap.
+  /// "Standort erlauben" (docs/23 §1): the tap always resolves to something. The monitor
+  /// does the asking; this only says out loud what came back.
   Future<void> _locate() async {
-    setState(() {
-      _position = null;
-      _positionAt = null;
-      _pickedStationId = null;
-      _locating = true;
-    });
-    final access = await locationAccess();
-    if (!mounted) return;
-    if (access == LocationAccess.denied || access == LocationAccess.serviceOff) {
-      setState(() => _locating = false);
-      final off = access == LocationAccess.serviceOff;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            off
-                ? 'Der Standort ist am Telefon ausgeschaltet. Ohne ihn wissen wir nicht, ob du an einem Bahnhof stehst.'
-                : 'Der Standort ist für Verspätomat gesperrt. Ohne ihn wissen wir nicht, ob du an einem Bahnhof stehst.',
-          ),
-        ),
-      );
-      await openLocationSettings();
-      if (mounted) await _load();
-      return;
-    }
-    final p = await currentPosition(timeout: const Duration(seconds: 8));
-    if (!mounted) return;
-    setState(() {
-      _position = p;
-      _positionAt = p == null ? null : DateTime.now();
-      _locating = false;
-    });
-    await _load();
+    final message = await _near?.requestPermission();
+    if (!mounted || message == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _search() async {
@@ -330,6 +268,32 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
               OfflineBanner(stamp: null),
               ErrorLine(message: _error!, onRetry: _load),
             ],
+            // The one place a running pause is advertised (docs/24 §3), so it can never be
+            // forgotten silently. Tapping it lifts the pause.
+            if (session.nudgesSnoozed)
+              InkWell(
+                key: const Key('stumm-bis'),
+                onTap: session.unsnoozeNudges,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 6, bottom: 2),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.notifications_off_outlined, size: 15, color: VColors.ink2),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          me?.settings.snoozedOpenEnded == true
+                              ? 'Hinweise aus · aufheben'
+                              : 'Stumm bis ${fmtLocal(session.nudgeSnoozeUntil)} · aufheben',
+                          style: VText.caption,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             const VGap.s(),
 
             // 1 · Action, sized by the moment. Under way, the ride card (docs/20 §2) opens the
@@ -353,19 +317,18 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                 _StationCard(
                   station: near,
                   destinations: _destinations,
-                  others: _otherStations,
                   search: RepoScope.read(context).repo.searchStations,
                   onDestination: (d) => _toWelcherZug(near, d),
                   onMute: () => _muteStation(near),
-                  onPickStation: _pickStation,
-                  onSearchStation: _search,
+                  onEditSource: _editSource,
+                  caption: _near?.caption,
                 )
               else
                 _StationRow(
                   nearby: _nearby,
                   frequent: _frequent.stations,
                   homeStation: me?.homeStation ?? '',
-                  hasPosition: _position != null,
+                  hasPosition: _near?.position != null,
                   onStation: _openStation,
                   onSearch: _search,
                   onLocate: _locate,
@@ -708,23 +671,25 @@ class _StationCard extends StatelessWidget {
   const _StationCard({
     required this.station,
     required this.destinations,
-    required this.others,
     required this.search,
     required this.onDestination,
     required this.onMute,
-    required this.onPickStation,
-    required this.onSearchStation,
+    required this.onEditSource,
+    this.caption,
   });
   final ApiStation station;
   final ApiDestinations destinations;
 
-  /// The other stations nearby, offered under "Nicht hier?" (docs/23 §1).
-  final List<ApiStation> others;
   final Future<List<ApiStation>> Function(String query) search;
   final ValueChanged<ApiDestination> onDestination;
   final VoidCallback onMute;
-  final ValueChanged<ApiStation> onPickStation;
-  final VoidCallback onSearchStation;
+
+  /// The `Von` row: opens "Von wo?" so the source can be corrected without leaving Home.
+  final VoidCallback onEditSource;
+
+  /// How far away the station is, or — on a moving train — that we are keeping up with it
+  /// rather than asserting a platform (docs/24 §0).
+  final String? caption;
 
   @override
   Widget build(BuildContext context) {
@@ -742,6 +707,9 @@ class _StationCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // The source stops being an assertion: a row styled as a field, tappable, which
+          // opens "Von wo?" (docs/24 §1). It replaces the old "Nicht hier?" chip line and
+          // says the same thing better.
           GestureDetector(
             onLongPress: () => _muteSheet(context),
             child: Column(
@@ -749,52 +717,63 @@ class _StationCard extends StatelessWidget {
               children: [
                 Text('STARTBAHNHOF', style: VText.eyebrow),
                 const SizedBox(height: 2),
-                Text(
-                  'Ab ${station.name}',
-                  style: VText.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                InkWell(
+                  key: const Key('von-row'),
+                  onTap: onEditSource,
+                  child: Row(
+                    children: [
+                      SizedBox(width: 44, child: Text('Von', style: VText.caption)),
+                      Expanded(
+                        child: Text(
+                          station.name,
+                          style: VText.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const Icon(Icons.expand_more, size: 20, color: VColors.ink2),
+                    ],
+                  ),
                 ),
-                Text(
-                  station.distanceM == null
-                      ? 'Du bist hier'
-                      : 'Du bist hier · ${station.distanceM} m',
-                  style: VText.caption,
+                Padding(
+                  padding: const EdgeInsets.only(left: 44),
+                  child: Text(
+                    caption ?? 'Du bist hier',
+                    style: VText.caption,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          for (final d in history) ...[
-            DestinationButton(
-              destination: d,
-              primary: identical(d, history.first),
-              onTap: () => onDestination(d),
-            ),
-            const SizedBox(height: 8),
-          ],
-          _WohinField(
-            search: search,
-            exclude: station.id,
-            onPick: (s) => onDestination(
-              ApiDestination(stationId: s.id, stationName: s.name),
-            ),
-          ),
-          // The way out of a wrong guess, quiet and always there (docs/23 §1).
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           Row(
-            key: const Key('nicht-hier'),
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Nicht hier?', style: VText.caption),
-              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(top: 18),
+                child: SizedBox(width: 44, child: Text('Nach', style: VText.caption)),
+              ),
               Expanded(
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  alignment: WrapAlignment.end,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final s in others) _StationChip(label: s.name, onTap: () => onPickStation(s)),
-                    _StationChip(label: 'Anderer Bahnhof …', onTap: onSearchStation),
+                    for (final d in history) ...[
+                      DestinationButton(
+                        destination: d,
+                        primary: identical(d, history.first),
+                        onTap: () => onDestination(d),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    _WohinField(
+                      search: search,
+                      exclude: station.id,
+                      onPick: (s) => onDestination(
+                        ApiDestination(stationId: s.id, stationName: s.name),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -848,28 +827,6 @@ class _StationCard extends StatelessWidget {
 }
 
 /// A quiet chip under the destinations: another station, or the search (docs/23 §1).
-class _StationChip extends StatelessWidget {
-  const _StationChip({required this.label, required this.onTap});
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          border: Border.all(color: VColors.rule),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(label, style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-      ),
-    );
-  }
-}
-
 class _ArrivedBlock extends StatelessWidget {
   const _ArrivedBlock({
     required this.live,

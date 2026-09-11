@@ -16,6 +16,10 @@ object NudgeNotification {
     const val CHANNEL = "nudge"
     const val EXTRA_STATION_ID = "nudge.stationId"
     const val EXTRA_STATION_NAME = "nudge.stationName"
+
+    /** docs/24 §3: "3 Stunden Ruhe" straight from the notification. */
+    const val EXTRA_SNOOZE_HOURS = "nudge.snoozeHours"
+    private const val SNOOZE_HOURS = 3
     private const val NOTIFICATION_ID = 4711
 
     fun ensureChannel(ctx: Context) {
@@ -42,6 +46,14 @@ object NudgeNotification {
             .putExtra(EXTRA_STATION_NAME, station.name)
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
         val tap = PendingIntent.getActivity(ctx, station.id.hashCode(), open, flags)
+        // The pause is wanted at exactly the moment the notification arrives (docs/24 §3).
+        // It opens the app, which owns the account and does the patch.
+        val quiet = Intent(ctx, MainActivity::class.java)
+            .setAction(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_SNOOZE_HOURS, SNOOZE_HOURS)
+        val quietTap = PendingIntent.getActivity(ctx, station.id.hashCode() + 1, quiet, flags)
         val n = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_directions)
             .setContentTitle("Am ${station.name}?")
@@ -49,6 +61,7 @@ object NudgeNotification {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .setContentIntent(tap)
+            .addAction(0, "$SNOOZE_HOURS Stunden Ruhe", quietTap)
             .build()
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIFICATION_ID, n)

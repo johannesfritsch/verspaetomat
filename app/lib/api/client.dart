@@ -209,6 +209,15 @@ class ApiClient {
         if (fromStationName != null) 'from_station_name': fromStationName,
       })));
 
+  /// "Zug wechseln" (docs/24 §2): another train to the same destination. The backend decides
+  /// whether that replaces this leg (a mis-tap) or ends it and starts the next one.
+  Future<ApiJourneyLive> changeTrain(String journeyId, String tripId, {String? fromStationId, String? fromStationName}) async =>
+      ApiJourneyLive.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/change-train', {
+        'trip_id': tripId,
+        if (fromStationId != null) 'from_station_id': fromStationId,
+        if (fromStationName != null) 'from_station_name': fromStationName,
+      })));
+
   Future<List<ApiJourney>> journeys() async => _list(await _get('/v1/journeys')).map(ApiJourney.fromJson).toList();
 
   /// Deletes a journey with its legs and its case (docs/23 §2). True when a draft claim fell

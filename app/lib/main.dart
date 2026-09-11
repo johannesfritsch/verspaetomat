@@ -49,7 +49,11 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
       onNudge: (n) {
         // A station nudge opens the check-in; a journey push (docs/17) the transfer card or the arrival;
         // mail opens the reply, the rest lands on the Konto.
-        if (n.isStation) {
+        // "3 Stunden Ruhe" from the notification itself (docs/24 §3): no screen opens, the
+        // pause is simply set — that is the whole point of doing it from there.
+        if (n.kind == 'snooze') {
+          widget.session.snoozeNudges(Duration(hours: int.tryParse(n.data['hours'] ?? '') ?? 3));
+        } else if (n.isStation) {
           router.go('${Routes.checkin}?station=${Uri.encodeComponent(n.stationId)}&name=${Uri.encodeComponent(n.stationName)}');
         } else if (n.isJourney) {
           router.go(n.journeyArrived ? Routes.angekommen : Routes.unterwegs);

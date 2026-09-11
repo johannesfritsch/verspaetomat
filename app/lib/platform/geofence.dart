@@ -15,6 +15,7 @@ class Geofence {
 
   final _nudges = StreamController<GeofenceNudge>.broadcast();
   final _pushTokens = StreamController<PushToken>.broadcast();
+  final _umbrellaExits = StreamController<void>.broadcast();
 
   /// The customer tapped a station notification.
   Stream<GeofenceNudge> get onNudgeTapped => _nudges.stream;
@@ -22,10 +23,18 @@ class Geofence {
   /// The OS handed the app a (new) push token; the session sends it to the server.
   Stream<PushToken> get onPushToken => _pushTokens.stream;
 
+  /// Native left the umbrella and re-registered its stations (docs/15). The app has moved far
+  /// enough that whatever station it last showed is stale, so `NearbyMonitor` resolves again
+  /// and a card backgrounded across half of Germany is right the moment it is seen
+  /// (docs/24 §0).
+  Stream<void> get onUmbrellaExit => _umbrellaExits.stream;
+
   Future<dynamic> _fromNative(MethodCall call) async {
     final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? const {};
     if (call.method == 'nudgeTapped') {
       _nudges.add(GeofenceNudge.fromMap(args));
+    } else if (call.method == 'umbrellaExit') {
+      _umbrellaExits.add(null);
     } else if (call.method == 'pushToken') {
       _pushTokens.add(PushToken(platform: '${args['platform'] ?? 'ios'}', token: '${args['token'] ?? ''}'));
     }
@@ -135,8 +144,9 @@ class PushToken {
   final String token;
 }
 
-/// A tapped notification: a station nudge (`kind: station`) or a server push
-/// (`kind: journey | mail | incident | claim | ride`, with the push's data fields).
+/// A tapped notification: a station nudge (`kind: station`), the nudge's own "Ruhe" action
+/// (`kind: snooze`, with `hours`, docs/24 §3) or a server push (`kind: journey | mail |
+/// incident | claim | ride`, with the push's data fields).
 class GeofenceNudge {
   const GeofenceNudge({required this.stationId, required this.stationName, this.kind = 'station', this.data = const {}});
   final String stationId;

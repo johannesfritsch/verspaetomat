@@ -195,6 +195,38 @@ pub fn compile(doc: &ClaimDocument<'_>) -> anyhow::Result<typst_layout::PagedDoc
     compiled.output.map_err(|e| anyhow::anyhow!("typst compile: {e}"))
 }
 
+/// A plain customer for tests in any module: no claim data worth anything, every switch at
+/// its default.
+#[cfg(test)]
+pub fn test_customer() -> CustomerRow {
+    CustomerRow {
+        id: uuid::Uuid::new_v4(),
+        nickname: "Test".into(),
+        relay_address: Some("fahrgast-0000@users.verspaetomat.de".into()),
+        full_name: Some("Erika Mustermann".into()),
+        postal_address: Some("Musterstraße 1\n50667 Köln".into()),
+        email: Some("erika@example.org".into()),
+        ticket_number: Some("D-123456".into()),
+        first_class: false,
+        ticket: TicketType::Deutschlandticket,
+        ngo_id: "seenotrettung".into(),
+        loc_mode: LocationMode::WhileUsing,
+        notifications: true,
+        show_on_boards: true,
+        keep_correspondence: false,
+        traewelling_linked: false,
+        onboarding_done: true,
+        home_station_id: None,
+        home_station_name: None,
+        muted_stations: json!([]),
+        nudge_enabled: true,
+        nudge_snooze_until: None,
+        quiet_from: None,
+        quiet_to: None,
+        created_at: Utc::now(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,32 +235,8 @@ mod tests {
 
     #[test]
     fn renders_a_pdf() {
-        let cid = Uuid::new_v4();
-        let customer = CustomerRow {
-            id: cid,
-            nickname: "Test".into(),
-            relay_address: Some("fahrgast-0000@users.verspaetomat.de".into()),
-            full_name: Some("Erika Mustermann".into()),
-            postal_address: Some("Musterstraße 1\n50667 Köln".into()),
-            email: Some("erika@example.org".into()),
-            ticket_number: Some("D-123456".into()),
-            first_class: false,
-            ticket: TicketType::Deutschlandticket,
-            ngo_id: "seenotrettung".into(),
-            loc_mode: LocationMode::WhileUsing,
-            notifications: true,
-            show_on_boards: true,
-            keep_correspondence: false,
-            traewelling_linked: false,
-            onboarding_done: true,
-            home_station_id: None,
-            home_station_name: None,
-            muted_stations: json!([]),
-            nudge_enabled: true,
-            quiet_from: None,
-            quiet_to: None,
-            created_at: Utc::now(),
-        };
+        let customer = test_customer();
+        let cid = customer.id;
         let claim = ClaimRow {
             id: Uuid::new_v4(),
             customer_id: cid,

@@ -328,6 +328,25 @@ class MockRepository implements AppRepository {
     return (await currentJourney())!;
   }
 
+  /// docs/24 §2: the same decision the backend makes — a mis-tap swaps the leg, anything
+  /// later ends it and starts the next one.
+  @override
+  Future<ApiJourneyLive> changeTrain(String journeyId, String tripId, {String? fromStationId, String? fromStationName}) async {
+    final j = state.journey;
+    if (j == null) throw StateError('no journey');
+    final d = _findDeparture(tripId);
+    if (d == null) throw StateError('unknown trip $tripId');
+    // Still standing where the leg began: a mis-tap, so the leg is swapped in place.
+    final mistap = state.passedStops == 0 && (fromStationName == null || fromStationName == j.current.from);
+    if (mistap) {
+      state.replaceLeg(d);
+    } else {
+      state.replanJourney(at: fromStationName);
+      state.confirmLeg(d);
+    }
+    return (await currentJourney())!;
+  }
+
   @override
   Future<bool> deleteJourney(String id) async {
     state.deleteRide(id);
@@ -528,6 +547,7 @@ class MockRepository implements AppRepository {
           nudgeEnabled: state.nudgeEnabled,
           quietFrom: state.quietHours ? '22:00' : null,
           quietTo: state.quietHours ? '06:00' : null,
+          nudgeSnoozeUntil: state.nudgeSnoozeUntil,
         ),
         pointsTotal: Mock.pointsTotal + state.bonusPoints,
         pointsThisWeek: Mock.pointsThisWeek + state.bonusPoints,
@@ -553,6 +573,10 @@ class MockRepository implements AppRepository {
     if (p.mutedStations != null) state.setMutedStations([for (final m in p.mutedStations!) {'id': m.id, 'name': m.name}]);
     if (p.nudgeEnabled != null) state.setNudgeEnabled(p.nudgeEnabled!);
     if (p.quietFrom != null || p.quietTo != null) state.setQuietHours((p.quietFrom ?? p.quietTo ?? '').isNotEmpty);
+    // "" lifts the pause, the way the backend reads it (docs/24 §3).
+    if (p.nudgeSnoozeUntil != null) {
+      state.setNudgeSnoozeUntil(p.nudgeSnoozeUntil!.isEmpty ? null : DateTime.tryParse(p.nudgeSnoozeUntil!)?.toLocal());
+    }
     return getMe();
   }
 
@@ -560,14 +584,17 @@ class MockRepository implements AppRepository {
   @override
   Future<ApiGeofence> geofence() async {
     final muted = state.mutedStations.map((m) => m['id']).toSet();
+    // A running pause switches the layer off, exactly as the backend folds it in (docs/24 §3).
+    final snoozed = state.nudgeSnoozeUntil?.isAfter(DateTime.now()) ?? false;
     return ApiGeofence(
-      enabled: state.locationMode == LocationMode.always && state.nudgeEnabled,
+      enabled: state.locationMode == LocationMode.always && state.nudgeEnabled && !snoozed,
       stations: [
         for (final s in Mock.nearbyStations)
           if (!muted.contains(s.id)) ApiGeofenceStation(id: s.id, name: s.name, lat: s.lat, lon: s.lon, checkins: s.id == 'koeln-hbf' ? 12 : 1),
       ],
       quietFrom: state.quietHours ? '22:00' : null,
       quietTo: state.quietHours ? '06:00' : null,
+      snoozeUntil: state.nudgeSnoozeUntil,
     );
   }
 

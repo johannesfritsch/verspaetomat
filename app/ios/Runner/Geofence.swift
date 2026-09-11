@@ -74,10 +74,19 @@ enum GeofenceRules {
 final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotificationCenterDelegate {
   static let shared = GeofenceManager()
   static let umbrellaId = "umbrella"
+
+  /// The nudge's own category, so it can carry the "Ruhe" action (docs/24 §3): the pause is
+  /// wanted at exactly the moment the notification arrives, not three screens away.
+  static let nudgeCategory = "station-nudge"
+  static let snoozeAction = "nudge-snooze"
   static let stationPrefix = "station:"
 
   /// Set by the channel while a Flutter engine is alive.
   var onNudgeTapped: (([String: String]) -> Void)?
+
+  /// The umbrella was left and the station set re-registered around the new position. Dart
+  /// listens so a card backgrounded across half of Germany resolves again (docs/24 §0).
+  var onUmbrellaExit: (() -> Void)?
 
   private let manager = CLLocationManager(), defaults = UserDefaults.standard, center = UNUserNotificationCenter.current()
   private var lastEvent: String? {
@@ -138,7 +147,10 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     center.requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, _ in
       DispatchQueue.main.async {
         self?.lastEvent = granted ? "notifications granted, registering with APNs" : "notifications denied"
-        if granted { UIApplication.shared.registerForRemoteNotifications() }
+        if granted {
+          UIApplication.shared.registerForRemoteNotifications()
+          self?.registerNudgeCategory()
+        }
         reply(granted)
       }
     }
@@ -178,6 +190,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     let n = registerStations(c)
     lastEvent = "configure: \(n) stations, enabled=\(c.enabled), riding=\(c.riding), auth=\(Self.permissionString(authStatus))"
     configureReply = reply
+    registerNudgeCategory()
     beginMode(.configureFix, timeout: 10) { [weak self] in self?.configureReply?(["registered": n]); self?.configureReply = nil }
     manager.requestLocation()
   }
@@ -407,6 +420,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         }
         self.registerUmbrella(at: l, c)
         self.lastEvent = "umbrella recentred, nearest \(found?.count ?? 0)"
+        self.onUmbrellaExit?()
         if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
       }
     }
@@ -437,10 +451,19 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     content.body = "Einchecken, bevor der Zug kommt."
     content.sound = .default
     content.threadIdentifier = "nudge"
+    content.categoryIdentifier = Self.nudgeCategory
     content.userInfo = ["stationId": s.id, "stationName": s.name]
     let trigger = UNTimeIntervalNotificationTrigger(timeInterval: GeofenceRules.nudgeDelay, repeats: false)
     center.add(UNNotificationRequest(identifier: "nudge-\(s.id)", content: content, trigger: trigger))
     return true
+  }
+
+  /// Registers the nudge's action set. Cheap and idempotent; called alongside the permission
+  /// request and on every configure, so an app updated into docs/24 gets it without a reinstall.
+  func registerNudgeCategory() {
+    let snooze = UNNotificationAction(identifier: Self.snoozeAction, title: "3 Stunden Ruhe", options: [])
+    let category = UNNotificationCategory(identifier: Self.nudgeCategory, actions: [snooze], intentIdentifiers: [], options: [])
+    center.setNotificationCategories([category])
   }
 
   func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification, withCompletionHandler h: @escaping (UNNotificationPresentationOptions) -> Void) {
@@ -451,6 +474,13 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse, withCompletionHandler h: @escaping () -> Void) {
     let info = r.notification.request.content.userInfo
+    // "3 Stunden Ruhe" straight from the notification (docs/24 §3). Dart owns the account, so
+    // it does the patch; the app is launched into the background for it if it is not running.
+    if r.actionIdentifier == Self.snoozeAction {
+      let payload = ["kind": "snooze", "hours": "3"]
+      if let cb = onNudgeTapped { cb(payload) } else { pendingNudge = payload }
+      return h()
+    }
     var payload: [String: String]? = nil
     if let id = info["stationId"] as? String {
       payload = ["kind": "station", "stationId": id, "stationName": info["stationName"] as? String ?? ""]

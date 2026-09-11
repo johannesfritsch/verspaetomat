@@ -9,6 +9,7 @@ import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'angekommen_screen.dart';
+import 'change_train_sheet.dart';
 import 'ride_widgets.dart';
 
 /// The journey (docs/17), shown inside the ride sheet (docs/19). Glanced at, not read.
@@ -143,65 +144,32 @@ class RideSheetBody extends StatelessWidget {
   }
 
   /// E2: pick another departure from the same station.
+  /// "Zug wechseln" (docs/24 §2): the Welcher-Zug sheet from the current position to the
+  /// unchanged destination. Changing the destination is an abort plus a new check-in, and the
+  /// sheet says so.
   Future<void> _wrongTrain(BuildContext context, ApiRide r) async {
-    final repo = RepoScope.read(context).repo;
-    List<ApiDeparture> others = const [];
-    String? error;
-    try {
-      others = (await repo.departures(r.fromStationId)).where((d) => d.tripId != r.tripId && !d.cancelled).toList();
-    } catch (e) {
-      error = shortError(e);
-    }
+    final j = monitor.journey?.journey;
+    final stops = monitor.journey?.stops ?? const <ApiStop>[];
+    // Where they can actually board: the next stop the train still reaches, else where this
+    // leg began — never the exit stop, which on a direct journey is the destination itself.
+    final here = stops.isEmpty
+        ? null
+        : stops[(r.passedStops + fromIndex(stops, r.fromStationId, r.fromStationName)).clamp(0, stops.length - 1)];
+    final fromId = here?.stationId ?? r.fromStationId;
+    final fromName = here?.name ?? r.fromStationName;
+    final toId = j?.destinationStationId ?? r.exitStationId;
+    final toName = j?.destinationStationName ?? r.exitStationName;
     if (!context.mounted) return;
-    showVSheet(
+    await showChangeTrainSheet(
       context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.only(bottom: VSpace.l),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const VSheetHeader(title: 'Welcher Zug dann?', subtitle: 'Abfahrten am Startbahnhof. Punkte bleiben.'),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
-              child: Column(
-                children: [
-                  if (error != null) ErrorLine(message: error),
-                  for (final d in others.take(6))
-                    DepartureRow(
-                      departure: d,
-                      onTap: () async {
-                        Navigator.of(ctx).pop();
-                        await _changeTrain(context, r, d);
-                      },
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+      monitor: monitor,
+      fromStationId: fromId,
+      fromStationName: fromName,
+      toStationId: toId,
+      toStationName: toName,
     );
   }
 
-  Future<void> _changeTrain(BuildContext context, ApiRide r, ApiDeparture d) async {
-    final repo = RepoScope.read(context).repo;
-    try {
-      final trip = await repo.trip(d.tripId);
-      final exitIdx = fromIndex(trip.stops, r.exitStationId, r.exitStationName);
-      final exit = trip.stops.isEmpty ? null : trip.stops[exitIdx];
-      await repo.checkIn(CheckInRequest(
-        tripId: d.tripId,
-        fromStationId: r.fromStationId,
-        fromStationName: r.fromStationName,
-        exitStationId: exit?.stationId ?? r.exitStationId,
-        exitStationName: exit?.name ?? r.exitStationName,
-      ));
-      await monitor.refresh();
-    } catch (e) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Umbuchen nicht möglich: ${shortError(e)}')));
-    }
-  }
 }
 
 /// The sheet's title line: caption + h2, per state.
@@ -233,6 +201,8 @@ class _RidingView extends StatelessWidget {
   final ApiRideLive live;
   final bool stale;
   final String stamp;
+  /// "Zug wechseln" (docs/24 §2): another train to the same destination, from where the
+  /// passenger is now. What that means — a swapped leg or an ended one — is worked out, not asked.
   final VoidCallback onWrongTrain;
   final VoidCallback? onAbort;
 
@@ -349,7 +319,7 @@ class _RidingView extends StatelessWidget {
         const VGap.l(),
         Row(
           children: [
-            Expanded(child: VGhostButton(label: 'Falscher Zug?', color: VColors.ink2, onTap: onWrongTrain)),
+            Expanded(child: VGhostButton(label: 'Zug wechseln', color: VColors.ink2, onTap: onWrongTrain)),
             if (onAbort != null) Expanded(child: VGhostButton(label: 'Abbrechen', color: VColors.ink2, onTap: onAbort)),
           ],
         ),

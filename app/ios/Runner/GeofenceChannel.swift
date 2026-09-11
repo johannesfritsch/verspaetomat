@@ -12,6 +12,9 @@ final class GeofenceChannel {
     manager.onNudgeTapped = { [channel] payload in
       DispatchQueue.main.async { channel.invokeMethod("nudgeTapped", arguments: payload) }
     }
+    manager.onUmbrellaExit = { [channel] in
+      DispatchQueue.main.async { channel.invokeMethod("umbrellaExit", arguments: nil) }
+    }
     manager.onPushToken = { [channel] token in
       DispatchQueue.main.async { channel.invokeMethod("pushToken", arguments: ["platform": "ios", "token": token]) }
     }

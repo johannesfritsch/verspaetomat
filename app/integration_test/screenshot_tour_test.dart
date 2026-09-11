@@ -15,7 +15,8 @@ import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/state/ride_monitor.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow;
-import 'package:verspaetomat/widgets/kit.dart' show VGhostButton, VOutlineButton, VPrimaryButton;
+import 'package:verspaetomat/screens/ride/wohin_screen.dart' show DestinationButton;
+import 'package:verspaetomat/widgets/kit.dart' show VGhostButton, VListRow, VOutlineButton, VPrimaryButton;
 
 const tour = <(String, String)>[
   ('showcase', Routes.showcase),
@@ -82,6 +83,11 @@ void main() {
       // ignore: avoid_print
       print('SHOT $name');
       await wait(tester, 1500);
+    }
+    /// Closes the topmost bottom sheet the way a thumb does, above its top edge.
+    Future<void> dismissSheet(WidgetTester tester) async {
+      await tester.tapAt(const Offset(200, 60));
+      await wait(tester, 700);
     }
     RideMonitor monitor() => RideScope.read(tester.element(find.byType(Scaffold).first))!;
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
@@ -156,6 +162,39 @@ void main() {
     demo.locatingStation = true;
     await home('bahnsteig-locating');
     demo.locatingStation = false;
+    demo.reset();
+    // docs/24 §1: the check-in is three sheets, and the source is a question. Home's card
+    // carries the Von row that opens the first of them.
+    await home('bahnsteig-von-nach');
+    await tester.tap(find.byKey(const Key('von-row')));
+    await wait(tester, 900);
+    await shot('einchecken-von');
+    // Sheets are dismissed by tapping their barrier: these are modal routes on the shell's own
+    // navigator, and popping that directly trips go_router's "no pages left" assertion.
+    await dismissSheet(tester);
+    // The square runs all three; the itineraries are a sheet now, one swipe from the choice above.
+    await tester.tap(find.byIcon(Icons.train).first);
+    await wait(tester, 1200);
+    await shot('einchecken-von-square');
+    await tester.tap(find.byKey(const Key('von-detected')));
+    await wait(tester, 1400);
+    await shot('einchecken-wohin-sheet');
+    await tester.tap(find.byType(DestinationButton).last);
+    await wait(tester, 1800);
+    await shot('einchecken-zug-sheet');
+    await dismissSheet(tester);
+    demo.reset();
+    // docs/24 §3: the pause, and the one line on Home that says it is running.
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.einstellungen);
+    await shot('einstellungen-pausieren');
+    await tester.tap(find.byKey(const Key('pausieren')));
+    await wait(tester, 900);
+    await shot('ruhe-sheet');
+    await tester.tap(find.widgetWithText(VListRow, '3 Stunden').first);
+    await wait(tester, 1200);
+    await home('bahnsteig-stumm');
+    await session.unsnoozeNudges();
+    await wait(tester, 800);
     demo.reset();
     // "Ich fahre weiter" (docs/21 §2): the passenger gives up on this train at Hagen and
     // picks the next one onward; only the delay up to that earliest train counts.

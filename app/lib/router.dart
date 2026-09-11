@@ -10,6 +10,7 @@ import 'screens/ride/ride_sheet.dart';
 import 'repo/repo_scope.dart';
 import 'screens/showcase_screen.dart';
 import 'state/demo_state.dart';
+import 'state/nearby_monitor.dart';
 import 'state/ride_monitor.dart';
 import 'widgets/kit.dart';
 
@@ -85,7 +86,8 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
 
 /// The tab shell: Home · Anträge · [Einchecken] · Wir · Ich, plus the ride (docs/19):
 /// the persistent bar above the nav while a journey is under way, and the draggable sheet
-/// over the active tab. One [RideMonitor] feeds both and the Bahnsteig.
+/// over the active tab. One [RideMonitor] feeds both and the Bahnsteig, and one
+/// [NearbyMonitor] is the single live answer to "which station am I at" (docs/24 §0).
 class _TabShell extends StatefulWidget {
   const _TabShell({required this.location, required this.child});
   final String location;
@@ -99,6 +101,7 @@ class _TabShell extends StatefulWidget {
 
 class _TabShellState extends State<_TabShell> {
   RideMonitor? _monitor;
+  NearbyMonitor? _nearby;
   String? _consumedLocation;
 
   @override
@@ -110,8 +113,19 @@ class _TabShellState extends State<_TabShell> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _monitor ??= RideMonitor(RepoScope.of(context))..start();
+    if (_monitor == null) {
+      _monitor = RideMonitor(RepoScope.of(context))..start();
+      _monitor!.addListener(_syncRiding);
+    }
+    _nearby ??= NearbyMonitor(RepoScope.of(context))..start();
     _consumeSheetRequest();
+  }
+
+  /// Home hides the Einchecken card while a journey runs, so the position stream sleeps
+  /// with it (docs/24 §0). A setter, not a read during build: it starts and stops a stream.
+  void _syncRiding() {
+    final m = _monitor, n = _nearby;
+    if (m != null && n != null) n.riding = m.active;
   }
 
   /// The redirect fires during routing; open after the frame, never inside a build.
@@ -163,7 +177,9 @@ class _TabShellState extends State<_TabShell> {
   @override
   void dispose() {
     rideSheetRequests.removeListener(_onSheetRequest);
+    _monitor?.removeListener(_syncRiding);
     _monitor?.dispose();
+    _nearby?.dispose();
     super.dispose();
   }
 
@@ -174,35 +190,39 @@ class _TabShellState extends State<_TabShell> {
     if (location.startsWith(Routes.konto)) index = 1;
     final session = RepoScope.of(context);
     final monitor = _monitor!;
+    final nearby = _nearby!;
     return RideScope(
       monitor: monitor,
-      child: AnimatedBuilder(
-        animation: Listenable.merge([session, monitor]),
-        builder: (context, _) {
-          final showBar = monitor.active && !monitor.sheetOpen;
-          return Stack(
-            children: [
-              Scaffold(
-                body: widget.child,
-                bottomNavigationBar: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (showBar) RideBar(monitor: monitor),
-                    VBottomNav(
-                      index: index.clamp(0, 3),
-                      onTap: (i) => context.go(_TabShell._tabs[i]),
-                      // Under way, the square points at the journey you are on (docs/20 §1).
-                      onCheckin: () => monitor.active ? monitor.openSheet() : startCheckin(context),
-                      checkinEnabled: !monitor.active,
-                      badges: {1: session.unreadMails},
-                    ),
-                  ],
+      child: NearbyScope(
+        monitor: nearby,
+        child: AnimatedBuilder(
+          animation: Listenable.merge([session, monitor, nearby]),
+          builder: (context, _) {
+            final showBar = monitor.active && !monitor.sheetOpen;
+            return Stack(
+              children: [
+                Scaffold(
+                  body: widget.child,
+                  bottomNavigationBar: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showBar) RideBar(monitor: monitor),
+                      VBottomNav(
+                        index: index.clamp(0, 3),
+                        onTap: (i) => context.go(_TabShell._tabs[i]),
+                        // Under way, the square points at the journey you are on (docs/20 §1).
+                        onCheckin: () => monitor.active ? monitor.openSheet() : startCheckin(context),
+                        checkinEnabled: !monitor.active,
+                        badges: {1: session.unreadMails},
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              if (monitor.sheetOpen) Positioned.fill(child: RideSheetLayer(monitor: monitor)),
-            ],
-          );
-        },
+                if (monitor.sheetOpen) Positioned.fill(child: RideSheetLayer(monitor: monitor)),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

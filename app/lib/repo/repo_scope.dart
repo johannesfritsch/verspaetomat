@@ -232,6 +232,27 @@ class Session extends ChangeNotifier {
     await updateSettings(MePatch(mutedStations: mutedStations.where((m) => m.id != stationId).toList()));
   }
 
+  /// The time-boxed pause on station nudges (docs/24 §3). [_openEnded] years out is the
+  /// "bis ich sie wieder einschalte" choice: far enough that nothing else reaches it, and
+  /// still a real instant the backend and the header line can work with.
+  static const _openEnded = Duration(days: 3650);
+
+  /// docs/24 §3: [duration] null means open-ended. The geofence sync follows the account,
+  /// so the layer is reconfigured (and switched off) on the next notification.
+  Future<void> snoozeNudges(Duration? duration) async {
+    final until = DateTime.now().toUtc().add(duration ?? _openEnded);
+    await updateSettings(MePatch(nudgeSnoozeUntil: until.toIso8601String()));
+  }
+
+  /// Back to normal, from the settings row or the quiet line on Home.
+  Future<void> unsnoozeNudges() async {
+    await updateSettings(const MePatch(nudgeSnoozeUntil: ''));
+  }
+
+  /// A pause that is still running.
+  bool get nudgesSnoozed => me?.settings.snoozed ?? false;
+  DateTime? get nudgeSnoozeUntil => me?.settings.nudgeSnoozeUntil;
+
   Future<void> savePersonalData(ApiPersonalData data) async {
     try {
       me = await repo.putPersonalData(data);

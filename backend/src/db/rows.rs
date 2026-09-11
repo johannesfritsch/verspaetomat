@@ -173,6 +173,9 @@ pub struct CustomerRow {
     pub quiet_from: Option<chrono::NaiveTime>,
     #[serde(default)]
     pub quiet_to: Option<chrono::NaiveTime>,
+    /// docs/24 §3: nudges are off until this moment. Null means no snooze.
+    #[serde(default)]
+    pub nudge_snooze_until: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 

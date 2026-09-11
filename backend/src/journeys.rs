@@ -270,6 +270,29 @@ fn find_stop<'a>(t: &'a TripInfo, id: &str, name: &str) -> Option<(usize, &'a cr
 }
 
 /// A leg description from a live trip and its two stops (both must be on the trip, in order).
+/// Which railway ran this train, when the plan and the trip disagree about it.
+///
+/// Transitous answers the two questions from different places: for a through-service the
+/// `plan` reports the agency of the leg, the `trip` the agency of the whole run. A Köln →
+/// Düsseldorf ICE 200 continuing to Basel comes back as "DB Fernverkehr" from the plan and
+/// "SBB" from the trip, and the check-in re-reads the trip — so the ride was stored against a
+/// railway the directory has never heard of, and the claim had no desk to go to (docs/04: the
+/// claim goes to whoever ran the late train).
+///
+/// The trip is still the source of truth whenever it names a railway we know. Only when it
+/// does not, and the plan's answer does, does the plan's answer win. Anything else the client
+/// sends is ignored, so this can pick a desk out of the directory but never conjure one up.
+pub fn settle_operator(ops: &[OperatorRow], from_trip: &str, from_plan: Option<&str>) -> String {
+    let known = |n: &str| ops.iter().any(|o| o.name == n);
+    if known(from_trip) {
+        return from_trip.to_string();
+    }
+    match from_plan.map(|p| crate::handlers::map_operator(ops, p)) {
+        Some(p) if known(&p) => p,
+        _ => from_trip.to_string(),
+    }
+}
+
 fn leg_from_trip(t: &TripInfo, ops: &[OperatorRow], from_id: &str, from_name: &str, to_id: &str, to_name: &str) -> Result<PlanLeg, String> {
     let (fi, from) = find_stop(t, from_id, from_name).ok_or_else(|| format!("{from_name} liegt nicht auf diesem Zug"))?;
     let (ti, to) = find_stop(t, to_id, to_name).ok_or_else(|| format!("{to_name} liegt nicht auf diesem Zug"))?;
@@ -322,6 +345,11 @@ pub struct LegRef {
     pub from_station_name: Option<String>,
     #[serde(default)]
     pub to_station_name: Option<String>,
+    /// The operator the plan resolved for this leg, carried back so a check-in cannot end up
+    /// with a different one (see [`settle_operator`]). Only ever honoured when it names a
+    /// railway in the directory, so it can name a desk but never invent one.
+    #[serde(default)]
+    pub operator: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -464,7 +492,8 @@ pub async fn create(State(s): State<AppState>, c: Customer, Json(b): Json<Create
         let t = s.train.trip(&l.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip {}: {e}", l.trip_id)))?;
         let from_name = if i == 0 { b.from_station_name.as_str() } else { l.from_station_name.as_deref().unwrap_or("") };
         let to_name = if i == b.legs.len() - 1 { b.to_station_name.as_str() } else { l.to_station_name.as_deref().unwrap_or("") };
-        let leg = leg_from_trip(&t, &ops, &l.from_station_id, from_name, &l.to_station_id, to_name).map_err(|m| err(StatusCode::BAD_REQUEST, &m))?;
+        let mut leg = leg_from_trip(&t, &ops, &l.from_station_id, from_name, &l.to_station_id, to_name).map_err(|m| err(StatusCode::BAD_REQUEST, &m))?;
+        leg.operator = settle_operator(&ops, &leg.operator, l.operator.as_deref());
         legs.push(leg);
         trips.push(t);
     }
@@ -839,6 +868,33 @@ fn default_true() -> bool {
     true
 }
 
+/// Changing trains mid-journey (docs/24 §2). The passenger picked another train for the same
+/// destination; what that means depends on whether anything has happened yet.
+///
+/// A mis-tap — still at the boarding station, no stop passed — is not an interruption: the leg
+/// is *replaced*, nothing is earned and no `earliest_onward_arrival` is recorded, because the
+/// railway has not made anyone wait. Once the train has moved, the leg *ends* the way
+/// "Ich fahre später weiter" ends it (docs/21 §2): the Geduldspunkte stay (docs/22 §1), and the
+/// delay ceiling applies, so a later train than the earliest one does not inflate the claim.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum TrainChange {
+    /// Nothing happened: swap the leg in place.
+    Replace,
+    /// The journey moved on: end this leg, the chosen train becomes the next one.
+    EndAndContinue,
+}
+
+/// The decision itself, kept pure so it can be tested without a train in sight.
+/// `boarding_station` is where the current leg started, `new_from` where the chosen train is
+/// boarded, `passed_stops` how many stops the current leg has already put behind it.
+pub fn decide_train_change(passed_stops: i32, boarding_station: &str, new_from: &str) -> TrainChange {
+    if passed_stops == 0 && boarding_station == new_from {
+        TrainChange::Replace
+    } else {
+        TrainChange::EndAndContinue
+    }
+}
+
 /// How long a passenger who gave up on a train may take to pick the next one before the
 /// journey is finalised `incomplete`. Longer than the 2 h a real transfer gets (docs/21 §2).
 pub const REPLAN_WINDOW_HOURS: i64 = 6;
@@ -950,6 +1006,86 @@ async fn next_stop_of(s: AppState, r: &RideRow) -> Option<(String, String)> {
     let next = (from_idx + r.passed_stops.max(0) as usize + 1).min(exit_idx);
     let stop = t.stops.get(next)?;
     Some((stop.stop_id.clone().unwrap_or_else(|| r.exit_station_id.clone()), stop.name.clone()))
+}
+
+#[derive(Deserialize)]
+pub struct ChangeTrainBody {
+    /// The train the passenger is actually on now.
+    pub trip_id: String,
+    /// Where they board it. Defaults to the current leg's boarding station.
+    #[serde(default)]
+    pub from_station_id: Option<String>,
+    #[serde(default)]
+    pub from_station_name: Option<String>,
+}
+
+/// `POST /v1/journeys/{id}/change-train` — "Zug wechseln" (docs/24 §2).
+///
+/// The destination never changes here; changing that is an abort plus a new check-in. Whether
+/// the leg is replaced or ended follows [`decide_train_change`], so a mis-tap costs nothing and
+/// a real change is an interruption with everything docs/21 §2 attaches to one.
+pub async fn change_train(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(b): Json<ChangeTrainBody>) -> ApiResult {
+    let j = journey_of(&s.pool, c.0.id, id).await?;
+    if j.status != JourneyStatus::Riding {
+        return Err(err(StatusCode::CONFLICT, "journey is not riding"));
+    }
+    let riding: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 and status = 'riding' order by leg_no desc limit 1")
+        .bind(j.id)
+        .fetch_optional(&s.pool)
+        .await
+        .map_err(internal)?;
+    let Some(r) = riding else { return Err(err(StatusCode::CONFLICT, "no leg is riding")) };
+    let new_from_id = b.from_station_id.clone().unwrap_or_else(|| r.from_station_id.clone());
+    let new_from_name = b.from_station_name.clone().unwrap_or_else(|| r.from_station_name.clone());
+
+    match decide_train_change(r.passed_stops, &r.from_station_id, &new_from_id) {
+        TrainChange::Replace => {
+            // A mis-tap. The old leg never happened: it is dropped, not abandoned, so it earns
+            // nothing and leaves no interruption behind. The new train takes its place, with the
+            // same exit stop when it reaches it.
+            let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
+            let t = s.train.trip(&b.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip: {e}")))?;
+            let leg = leg_from_trip(&t, &ops, &new_from_id, &new_from_name, &r.exit_station_id, &r.exit_station_name)
+                .or_else(|_| leg_from_trip(&t, &ops, &new_from_id, &new_from_name, &j.destination_station_id, &j.destination_station_name))
+                .map_err(|m| err(StatusCode::BAD_REQUEST, &m))?;
+            // The effective plan carries the new train at the same position.
+            let mut legs = plan_legs(&j);
+            let leg_no = r.leg_no.unwrap_or(j.current_leg.max(1));
+            let idx = (leg_no - 1).max(0) as usize;
+            if idx < legs.len() {
+                legs[idx] = leg.clone();
+            } else {
+                legs.push(leg.clone());
+            }
+            let reaches_destination = leg.to_station_id == j.destination_station_id
+                || crate::train::station_names_match(&leg.to_station_name, &j.destination_station_name);
+            if reaches_destination {
+                legs.truncate(idx + 1);
+            }
+            let is_last = idx + 1 == legs.len();
+            sqlx::query("delete from rides where id = $1").bind(r.id).execute(&s.pool).await.map_err(internal)?;
+            let updated: JourneyRow = sqlx::query_as("update journeys set plan = $2 where id = $1 returning *")
+                .bind(j.id)
+                .bind(json!(legs))
+                .fetch_one(&s.pool)
+                .await
+                .map_err(internal)?;
+            let ride = insert_leg_ride(&s.pool, &c.0, &updated, &leg, leg_no, is_last, &t, None, None, None).await.map_err(internal)?;
+            rules::audit(&s.pool, "journey", j.id, Some("riding"), "riding", "train changed before departure").await.map_err(internal)?;
+            s.events.publish(c.0.id, "ride", json!({ "ride_id": ride.id, "status": "riding", "live_delay_min": ride.live_delay_min, "journey_id": j.id, "leg_no": leg_no }));
+            Ok(Json(current_payload(&s, &updated, false).await.map_err(internal)?))
+        }
+        TrainChange::EndAndContinue => {
+            // The journey moved on: exactly "Ich fahre später weiter", then the chosen train.
+            let body = ReplanBody { from_station_id: Some(new_from_id), from_station_name: Some(new_from_name) };
+            // Its payload is the transfer state, which the confirm below immediately replaces:
+            // we want the effect, not the answer.
+            let _ = replan(State(s.clone()), Customer(c.0.clone()), Path(id), Json(body)).await?;
+            let j = journey_of(&s.pool, c.0.id, id).await?;
+            let updated = confirm(&s, &c.0, &j, Some(&b.trip_id)).await?;
+            Ok(Json(current_payload(&s, &updated, false).await.map_err(internal)?))
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1317,6 +1453,50 @@ async fn create_journey_incident(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn op(name: &str, desk: &str) -> OperatorRow {
+        OperatorRow {
+            name: name.into(),
+            aliases: vec![format!("{name} AG")],
+            desk: desk.into(),
+            postal_address: String::new(),
+            email: None,
+            accepts_email: true,
+            last_verified: None,
+            notes: None,
+        }
+    }
+
+    /// The plan and the trip disagree about a through-service: the plan sees the leg's railway,
+    /// the trip the whole run's. The trip wins whenever it names one we know; only when it does
+    /// not does the plan's answer rescue the desk, and only if that one is in the directory.
+    #[test]
+    fn the_plan_settles_the_operator_only_when_the_trip_names_a_stranger() {
+        let ops = vec![op("DB Fernverkehr", "Servicecenter Fahrgastrechte"), op("eurobahn", "Servicecenter Fahrgastrechte")];
+
+        // The real case: ICE 200 to Basel, "SBB" from the trip, "DB Fernverkehr" from the plan.
+        assert_eq!(settle_operator(&ops, "SBB", Some("DB Fernverkehr")), "DB Fernverkehr");
+        // Through an alias, the way the plan spells it on a different day.
+        assert_eq!(settle_operator(&ops, "SBB", Some("DB Fernverkehr AG")), "DB Fernverkehr");
+        // A trip that names a railway we know is never second-guessed.
+        assert_eq!(settle_operator(&ops, "eurobahn", Some("DB Fernverkehr")), "eurobahn");
+        // Neither is known: the trip stays the record, and the claim gets the unknown-desk path.
+        assert_eq!(settle_operator(&ops, "SBB", Some("Trenitalia")), "SBB");
+        assert_eq!(settle_operator(&ops, "SBB", None), "SBB");
+    }
+
+    /// docs/24 §2: a mis-tap is not an interruption. Still at the boarding station with no stop
+    /// behind you, the leg is swapped and nothing is earned or claimed; once the train has moved,
+    /// or you board somewhere else, the leg ends and everything docs/21 §2 attaches applies.
+    #[test]
+    fn a_mistap_replaces_the_leg_and_a_real_change_ends_it() {
+        assert_eq!(decide_train_change(0, "de:05315:11", "de:05315:11"), TrainChange::Replace);
+        // One stop behind us: the journey happened, however briefly.
+        assert_eq!(decide_train_change(1, "de:05315:11", "de:05315:11"), TrainChange::EndAndContinue);
+        // Same standing start, but boarding somewhere else: that is a change of plan.
+        assert_eq!(decide_train_change(0, "de:05315:11", "de:05111:18"), TrainChange::EndAndContinue);
+        assert_eq!(decide_train_change(3, "de:05315:11", "de:05111:18"), TrainChange::EndAndContinue);
+    }
 
     fn t(s: &str) -> DateTime<Utc> {
         s.parse().unwrap()

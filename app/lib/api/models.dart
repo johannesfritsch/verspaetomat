@@ -329,6 +329,7 @@ class ApiSettings {
     this.nudgeEnabled = true,
     this.quietFrom = '22:00',
     this.quietTo = '06:00',
+    this.nudgeSnoozeUntil,
   });
   final TicketType ticket;
   final String ngoId;
@@ -346,6 +347,19 @@ class ApiSettings {
   final String? quietTo;
   bool get quietHours => quietFrom != null && quietTo != null;
 
+  /// docs/24 §3: station nudges are paused until this moment. Null means no pause. An
+  /// open-ended pause is a date far enough out that nothing else will ever reach it.
+  final DateTime? nudgeSnoozeUntil;
+
+  /// A pause that is still running. An expired one is no pause at all.
+  bool get snoozed {
+    final t = nudgeSnoozeUntil;
+    return t != null && t.isAfter(DateTime.now());
+  }
+
+  /// True when the pause has no end the passenger chose: "bis ich sie wieder einschalte".
+  bool get snoozedOpenEnded => snoozed && nudgeSnoozeUntil!.difference(DateTime.now()).inDays > 30;
+
   bool isMuted(String stationId) => mutedStations.any((m) => m.id == stationId);
 
   factory ApiSettings.fromJson(Map<String, dynamic> j) => ApiSettings(
@@ -361,6 +375,7 @@ class ApiSettings {
         nudgeEnabled: _b(j['nudge_enabled'], true),
         quietFrom: j.containsKey('quiet_from') ? _sn(j['quiet_from']) : '22:00',
         quietTo: j.containsKey('quiet_to') ? _sn(j['quiet_to']) : '06:00',
+        nudgeSnoozeUntil: DateTime.tryParse(_s(j['nudge_snooze_until']))?.toLocal(),
       );
 }
 
@@ -380,6 +395,7 @@ class MePatch {
     this.nudgeEnabled,
     this.quietFrom,
     this.quietTo,
+    this.nudgeSnoozeUntil,
   });
   final TicketType? ticket;
   final String? ngoId;
@@ -397,6 +413,9 @@ class MePatch {
   final String? quietFrom;
   final String? quietTo;
 
+  /// docs/24 §3: RFC 3339, or the empty string to lift the pause.
+  final String? nudgeSnoozeUntil;
+
   Map<String, dynamic> toJson() => {
         if (ticket != null) 'ticket': ticketToWire(ticket!),
         if (ngoId != null) 'ngo_id': ngoId,
@@ -411,16 +430,21 @@ class MePatch {
         if (nudgeEnabled != null) 'nudge_enabled': nudgeEnabled,
         if (quietFrom != null) 'quiet_from': quietFrom,
         if (quietTo != null) 'quiet_to': quietTo,
+        if (nudgeSnoozeUntil != null) 'nudge_snooze_until': nudgeSnoozeUntil,
       };
 }
 
 /// GET /v1/me/geofence: the stations the phone should watch (docs/15).
 class ApiGeofence {
-  const ApiGeofence({required this.enabled, required this.stations, this.quietFrom, this.quietTo});
+  const ApiGeofence({required this.enabled, required this.stations, this.quietFrom, this.quietTo, this.snoozeUntil});
   final bool enabled;
   final List<ApiGeofenceStation> stations;
   final String? quietFrom;
   final String? quietTo;
+
+  /// docs/24 §3: the backend already folds a running pause into [enabled]; this is only so
+  /// the app can say until when without a second call.
+  final DateTime? snoozeUntil;
 
   static const empty = ApiGeofence(enabled: false, stations: []);
 
@@ -429,6 +453,7 @@ class ApiGeofence {
         stations: (j['stations'] as List? ?? const []).whereType<Map<String, dynamic>>().map(ApiGeofenceStation.fromJson).toList(),
         quietFrom: _sn(j['quiet_from']),
         quietTo: _sn(j['quiet_to']),
+        snoozeUntil: DateTime.tryParse(_s(j['nudge_snooze_until'] ?? j['snooze_until']))?.toLocal(),
       );
 }
 
@@ -1251,7 +1276,16 @@ class ApiLeg {
         reason: _sn(j['reason']),
       );
 
-  Map<String, dynamic> toStartJson() => {'trip_id': tripId, 'from_station_id': fromStationId, 'to_station_id': toStationId};
+  /// The check-in re-reads every trip, so only the ids need to travel — plus the operator the
+  /// plan resolved, because for a through-service the trip names the whole run's railway and
+  /// the plan the leg's, and the claim's desk follows the leg (see `settle_operator` on the
+  /// backend). The backend ignores it unless it names a railway in its directory.
+  Map<String, dynamic> toStartJson() => {
+        'trip_id': tripId,
+        'from_station_id': fromStationId,
+        'to_station_id': toStationId,
+        if (operator.isNotEmpty) 'operator': operator,
+      };
 }
 
 /// One way to get there: rail legs only, transfers folded in between.

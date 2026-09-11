@@ -51,6 +51,14 @@ object GeofenceManager {
     private const val COOLDOWN_MS = 30L * 60 * 1000
     private const val FIX_BUDGET_MS = 10_000L
 
+    /**
+     * Set by MainActivity while it is alive: the umbrella was left and the station set
+     * re-registered around the new position, so Dart resolves its stations again
+     * (docs/24 §0). Null when the exit happened with no Activity, which needs nothing —
+     * the monitor refreshes on resume anyway.
+     */
+    var umbrellaExitListener: (() -> Unit)? = null
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun config(ctx: Context): JSONObject? = prefs(ctx).getString("config", null)?.let { JSONObject(it) }
@@ -202,7 +210,8 @@ object GeofenceManager {
                 }
                 Handler(Looper.getMainLooper()).post {
                     client(ctx).removeGeofences(pendingIntent(ctx)).addOnCompleteListener {
-                        if (hasBackgroundPermission(ctx) && cfg.optBoolean("enabled", false)) addAll(ctx, cfg, fix) { done() } else done()
+                        val finish = { umbrellaExitListener?.invoke(); done() }
+                        if (hasBackgroundPermission(ctx) && cfg.optBoolean("enabled", false)) addAll(ctx, cfg, fix) { finish() } else finish()
                     }
                 }
             }.start()
