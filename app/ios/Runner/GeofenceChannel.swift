@@ -29,6 +29,14 @@ final class GeofenceChannel {
         manager.status { result($0) }
       case "registerPush":
         manager.registerPush { result($0) }
+      case "readLog":
+        result(manager.readLog())
+      case "clearLog":
+        manager.clearLog()
+        result(nil)
+      case "clearIgnored":
+        manager.clearIgnored(args["stationId"] as? String ?? "")
+        result(nil)
       case "stop":
         manager.stop()
         result(nil)

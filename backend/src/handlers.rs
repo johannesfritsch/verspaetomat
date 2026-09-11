@@ -255,6 +255,21 @@ fn parse_quiet(s: &Option<String>) -> Result<Option<Option<chrono::NaiveTime>>, 
 pub struct MutedStation {
     pub id: String,
     pub name: String,
+    /// docs/25 §4: a mute that runs out. Set when three nudges in a row went ignored, so an
+    /// app nobody is using stops nudging without anyone having to say so. Null is the
+    /// deliberate mute a passenger set by hand, which never expires.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<DateTime<Utc>>,
+}
+
+impl MutedStation {
+    /// Still silent now. An expired automatic mute is no mute at all.
+    pub fn active(&self, now: DateTime<Utc>) -> bool {
+        match self.until {
+            Some(t) => t > now,
+            None => true,
+        }
+    }
 }
 
 /// "" clears the snooze; anything else must be an RFC 3339 instant.
@@ -348,16 +363,40 @@ pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
         .map_err(internal)?,
         None => None,
     };
-    let muted: Vec<MutedStation> = serde_json::from_value(c.0.muted_stations.clone()).unwrap_or_default();
+    let all_muted: Vec<MutedStation> = serde_json::from_value(c.0.muted_stations.clone()).unwrap_or_default();
+    // An automatic mute that has run out stops hiding its station (docs/25 §4).
+    let now = crate::clock::now();
+    let muted: Vec<MutedStation> = all_muted.into_iter().filter(|m| m.active(now)).collect();
     let stations = geofence_set(rows, home, &muted, 15);
+    // docs/25 §4: nobody should be nudged forever by an app they stopped using.
+    let last_checkin: Option<DateTime<Utc>> = sqlx::query_scalar("select max(checked_in_at) from rides where customer_id = $1")
+        .bind(c.0.id)
+        .fetch_one(&s.pool)
+        .await
+        .map_err(internal)?;
+    let idle = went_idle(last_checkin, c.0.created_at, now);
     Ok(Json(json!({
-        "enabled": nudges_enabled(&c.0),
+        "enabled": nudges_enabled(&c.0) && !idle,
+        "idle": idle,
+        "last_checkin": last_checkin,
         "stations": stations,
         "quiet_from": c.0.quiet_from.map(|t| t.format("%H:%M").to_string()),
         "quiet_to": c.0.quiet_to.map(|t| t.format("%H:%M").to_string()),
         "snooze_until": c.0.nudge_snooze_until,
     })))
 }
+
+/// docs/25 §4: has this account gone quiet for long enough to switch background scanning off?
+/// Measured from the last check-in, or from the account's own age when there has never been one
+/// — a fresh account gets its thirty days before anything is switched off. Nothing is deleted
+/// and no permission is revoked; the app offers it back the next time it is opened.
+pub fn went_idle(last_checkin: Option<DateTime<Utc>>, created_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    let since = last_checkin.unwrap_or(created_at);
+    now - since > Duration::days(IDLE_DAYS_BEFORE_OFF)
+}
+
+/// Matches `GeofenceRules.idleDaysBeforeOff` on the phone.
+pub const IDLE_DAYS_BEFORE_OFF: i64 = 30;
 
 /// May a station nudge be scheduled at all? Background location and the switch, and no
 /// snooze running (docs/24 §3). While a snooze runs the layer is configured `enabled: false`,
@@ -2029,6 +2068,38 @@ mod standing_tests {
 mod inbound_tests {
     use super::*;
 
+    /// docs/25 §4: an automatic mute runs out on its own; a mute a passenger set by hand does
+    /// not. That is the whole difference between the two, and the geofence set reads it.
+    #[test]
+    fn an_automatic_mute_expires_and_a_deliberate_one_does_not() {
+        let now = crate::clock::now();
+        let by_hand = MutedStation { id: "a".into(), name: "A".into(), until: None };
+        assert!(by_hand.active(now), "a mute set by hand has no end");
+
+        let running = MutedStation { id: "b".into(), name: "B".into(), until: Some(now + Duration::days(5)) };
+        assert!(running.active(now));
+
+        let over = MutedStation { id: "c".into(), name: "C".into(), until: Some(now - Duration::hours(1)) };
+        assert!(!over.active(now), "an expired mute stops hiding its station");
+    }
+
+    /// docs/25 §4: thirty quiet days switch background scanning off. A fresh account is measured
+    /// from when it was made, so it gets its thirty days before anything is taken away.
+    #[test]
+    fn thirty_quiet_days_switch_the_scanning_off() {
+        let now = crate::clock::now();
+        let long_ago = now - Duration::days(40);
+        let recently = now - Duration::days(3);
+
+        assert!(went_idle(Some(long_ago), long_ago, now), "no check-in for forty days");
+        assert!(!went_idle(Some(recently), long_ago, now), "rode three days ago");
+        // Never checked in: measured from the account's age, not treated as idle at once.
+        assert!(!went_idle(None, recently, now), "a three-day-old account is not idle");
+        assert!(went_idle(None, long_ago, now), "a forty-day-old account that never rode is");
+        // Exactly on the boundary is not yet over it.
+        assert!(!went_idle(Some(now - Duration::days(30)), long_ago, now));
+    }
+
     /// docs/24 §3: while a snooze runs the layer is configured `enabled: false`, so nothing
     /// is scheduled and no notification can fire. A snooze in the past is no snooze.
     #[test]
@@ -2058,7 +2129,7 @@ mod inbound_tests {
             ("c".into(), "C".into(), 50.3, 7.3, 1),
         ];
         let home = Some(("b".into(), "B".into(), 50.1, 7.1));
-        let muted = vec![MutedStation { id: "m".into(), name: "Muted".into() }];
+        let muted = vec![MutedStation { id: "m".into(), name: "Muted".into(), until: None }];
         let set = geofence_set(rows, home, &muted, 3);
         let ids: Vec<&str> = set.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, vec!["b", "a", "c"]);

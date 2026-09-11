@@ -88,11 +88,73 @@ class Geofence {
         registered: (m['registered'] as num?)?.toInt() ?? 0,
         lastEvent: m['lastEvent']?.toString(),
         pendingNudge: pending == null ? null : GeofenceNudge.fromMap(pending),
+        ignored: {
+          for (final e in (m['ignored'] as Map?)?.cast<String, dynamic>().entries ?? const <MapEntry<String, dynamic>>[])
+            e.key: (e.value as num?)?.toInt() ?? 0,
+        },
+        disc: m['discLat'] is num && m['discLon'] is num
+            ? GeofenceDisc(
+                lat: (m['discLat'] as num).toDouble(),
+                lon: (m['discLon'] as num).toDouble(),
+                radiusM: (m['discRadiusM'] as num?)?.toDouble() ?? 0,
+                at: m['discAt'] is num
+                    ? DateTime.fromMillisecondsSinceEpoch(((m['discAt'] as num).toDouble() * 1000).round())
+                    : null,
+              )
+            : null,
+        counters: {
+          for (final e in (m['counters'] as Map?)?.cast<String, dynamic>().entries ?? const <MapEntry<String, dynamic>>[])
+            e.key: (e.value as num?)?.toInt() ?? 0,
+        },
+        regions: [
+          for (final r in (m['regions'] as List? ?? const []).whereType<Map>())
+            GeofenceRegion(
+              id: '${r['id'] ?? ''}',
+              name: '${r['name'] ?? r['id'] ?? ''}',
+              distanceM: (r['distanceM'] as num?)?.toDouble(),
+              inside: r['inside'] == true,
+              radiusM: (r['radiusM'] as num?)?.toDouble() ?? 0,
+            ),
+        ],
       );
     } on MissingPluginException {
       return const GeofenceStatus.unavailable();
     } on PlatformException {
       return const GeofenceStatus.unavailable();
+    }
+  }
+
+  /// docs/25 §5: the native log, newest last, as `timestamp \t source \t text` lines. Written
+  /// while the app was suspended, which is where nearly all of it happens.
+  Future<List<String>> readLog() async {
+    try {
+      final r = await _channel.invokeMethod<dynamic>('readLog');
+      return (r as List?)?.map((e) => '$e').toList() ?? const [];
+    } on MissingPluginException {
+      return const [];
+    } on PlatformException {
+      return const [];
+    }
+  }
+
+  Future<void> clearLog() async {
+    try {
+      await _channel.invokeMethod<dynamic>('clearLog');
+    } on MissingPluginException {
+      // no native side
+    } on PlatformException {
+      // nothing to clear
+    }
+  }
+
+  /// docs/25 §4: the tally for this station has been turned into a mute, so it starts over.
+  Future<void> clearIgnored(String stationId) async {
+    try {
+      await _channel.invokeMethod<dynamic>('clearIgnored', {'stationId': stationId});
+    } on MissingPluginException {
+      // no native side
+    } on PlatformException {
+      // nothing to clear
     }
   }
 
@@ -122,20 +184,73 @@ enum GeofencePermission {
 }
 
 class GeofenceStatus {
-  const GeofenceStatus({required this.permission, required this.notifications, required this.registered, this.lastEvent, this.pendingNudge, this.pushToken});
+  const GeofenceStatus({
+    required this.permission,
+    required this.notifications,
+    required this.registered,
+    this.lastEvent,
+    this.pendingNudge,
+    this.pushToken,
+    this.ignored = const {},
+    this.disc,
+    this.counters = const {},
+    this.regions = const [],
+  });
   const GeofenceStatus.unavailable()
       : permission = GeofencePermission.notDetermined,
         notifications = false,
         registered = 0,
         lastEvent = null,
         pendingNudge = null,
-        pushToken = null;
+        pushToken = null,
+        ignored = const {},
+        disc = null,
+        counters = const {},
+        regions = const [];
   final GeofencePermission permission;
   final bool notifications;
   final int registered;
   final String? lastEvent;
   final GeofenceNudge? pendingNudge;
   final PushToken? pushToken;
+
+  /// docs/25 §4: station id → how many nudges in a row went unanswered there, for those that
+  /// have reached the threshold. The app mutes them for 30 days.
+  final Map<String, int> ignored;
+
+  /// docs/25 §1: where the station set was last drawn and how far it reaches.
+  final GeofenceDisc? disc;
+
+  /// docs/25 §5: counts since midnight — `requests`, `nearby`, `scheduled`, `fired`, `cancelled`.
+  final Map<String, int> counters;
+
+  /// Every monitored region, with whether the phone is inside it right now.
+  final List<GeofenceRegion> regions;
+}
+
+/// One registered region as the debug page lists it (docs/25 §5).
+class GeofenceRegion {
+  const GeofenceRegion({required this.id, required this.name, this.distanceM, this.inside = false, this.radiusM = 0});
+  final String id;
+  final String name;
+  final double? distanceM;
+  final bool inside;
+  final double radiusM;
+
+  /// The umbrella is a region too, but it is not a station.
+  bool get isUmbrella => id == 'umbrella';
+}
+
+/// The coverage disc as the debug page shows it (docs/25 §1, §5).
+class GeofenceDisc {
+  const GeofenceDisc({required this.lat, required this.lon, required this.radiusM, this.at});
+  final double lat;
+  final double lon;
+  final double radiusM;
+  final DateTime? at;
+
+  /// Which band of the speed table this radius came from, in the words docs/25 §1 uses.
+  String get band => radiusM <= 5000 ? 'zu Fuß oder lokal' : (radiusM <= 25000 ? 'Regionalzug' : 'Fernverkehr');
 }
 
 class PushToken {

@@ -50,6 +50,10 @@ class MainActivity : FlutterActivity() {
                         requestPermission(always, result)
                     }
                     "status" -> result.success(status())
+                    "clearIgnored" -> {
+                        GeofenceManager.clearIgnored(this, call.argument<String>("stationId") ?: "")
+                        result.success(null)
+                    }
                     "stop" -> GeofenceManager.stop(this) { result.success(null) }
                     else -> result.notImplemented()
                 }
@@ -70,6 +74,7 @@ class MainActivity : FlutterActivity() {
         m["notifications"] = NudgeNotification.allowed(this)
         m["registered"] = GeofenceManager.registeredCount(this)
         m["lastEvent"] = GeofenceManager.lastEvent(this)
+        m["ignored"] = GeofenceManager.ignoredTally(this)
         GeofenceManager.takePendingNudge(this)?.let {
             m["pendingNudge"] = mapOf("stationId" to it.optString("stationId"), "stationName" to it.optString("stationName"))
         }
@@ -91,6 +96,7 @@ class MainActivity : FlutterActivity() {
         intent.removeExtra(NudgeNotification.EXTRA_STATION_ID)
         val ch = channel
         if (ch != null) {
+            GeofenceManager.clearIgnored(this, id) // acted on, so never ignored (docs/25 §4)
             ch.invokeMethod("nudgeTapped", mapOf("stationId" to id, "stationName" to name))
         } else {
             GeofenceManager.setPendingNudge(this, id, name)

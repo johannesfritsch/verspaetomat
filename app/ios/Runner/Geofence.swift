@@ -15,13 +15,57 @@ struct GeofenceConfig: Codable {
   var apiUrl: String; var token: String; var enabled: Bool; var riding: Bool
   var stations: [GeofenceStation]; var umbrellaRadiusM: Double; var stationRadiusM: Double
   var quietFrom: String?; var quietTo: String?
+  /// How long the phone must stay in a region before the nudge fires (docs/25 §3). Tunable from
+  /// the debug page so it can be settled on real trips rather than argued about.
+  var nudgeDelay: TimeInterval = GeofenceRules.defaultNudgeDelay
 }
 
 /// Pure rules, kept free of CoreLocation state so they can be unit-tested.
 enum GeofenceRules {
-  static let maxFrequent = 16, maxNearest = 3
-  static let nudgeDelay: TimeInterval = 60, watchWindow: TimeInterval = 25, nudgeCooldown: TimeInterval = 30 * 60
-  static let vehicleSpeed: CLLocationSpeed = 8 // m/s: faster than a walk, the phone is passing through
+  /// The region budget (docs/25 §2). iOS allows 20 monitored regions. The frequent set is worth
+  /// its slots at home and worthless 300 km away, so it is spent on whichever matters here.
+  static let maxRegions = 20
+  static let maxFrequent = 16
+  static let nearestNearHome = 4
+  /// Beyond this from every frequent station, the frequent set is dropped and all 20 slots go
+  /// to what is actually around the passenger.
+  static let awayFromHomeM: CLLocationDistance = 50_000
+
+  /// The nudge fires only if the phone is still in the region three minutes later (docs/25 §3):
+  /// a train passing through is long gone by then, a passenger on a platform is not. Exit
+  /// cancels it, which is the honest signal — the old 25 s speed watch guessed at the same
+  /// thing and cancelled real arrivals.
+  static let defaultNudgeDelay: TimeInterval = 180
+  static let nudgeCooldown: TimeInterval = 30 * 60
+
+  /// How far the coverage disc reaches, by how fast the phone is moving (docs/25 §1). Drawn
+  /// around somewhere the passenger recently *was*, so a München → Memmingen trip costs two or
+  /// three `stations/nearby` calls instead of about twenty.
+  static func coverageRadius(speedMps: CLLocationSpeed) -> CLLocationDistance {
+    let kmh = max(0, speedMps) * 3.6
+    if kmh < 30 { return 5_000 }      // walking or local: be precise
+    if kmh <= 120 { return 25_000 }   // a regional train: one refresh every few stops
+    return 60_000                     // long distance: one refresh per leg, not per field
+  }
+
+  /// Inside the disc nothing happens and no network call is made.
+  static func insideDisc(_ fix: CLLocation, centre: CLLocation, radius: CLLocationDistance) -> Bool {
+    fix.distance(from: centre) <= radius
+  }
+
+  /// Speed between two fixes, in m/s. `CLLocation.speed` is -1 when the OS has none, and
+  /// significant-location updates usually do not carry one, so it is measured rather than read.
+  static func speedBetween(_ a: CLLocation, _ b: CLLocation) -> CLLocationSpeed {
+    let seconds = b.timestamp.timeIntervalSince(a.timestamp)
+    guard seconds > 1 else { return 0 }
+    return b.distance(from: a) / seconds
+  }
+
+  /// A nudge ignored this many times running mutes its station for 30 days (docs/25 §4).
+  static let ignoresBeforeMute = 3
+  static let stationMuteDays = 30
+  /// No check-in for this long switches background scanning off altogether.
+  static let idleDaysBeforeOff = 30
 
   /// "22:00"/"06:00" style window in local time; a window crossing midnight is allowed.
   static func isQuiet(now: Date, from: String?, to: String?, calendar: Calendar = .current) -> Bool {
@@ -38,23 +82,39 @@ enum GeofenceRules {
     return p[0] * 60 + p[1]
   }
 
-  /// Frequent stations first (capped), then nearest ones not already present (capped).
-  static func regionSet(frequent: [GeofenceStation], nearest: [GeofenceStation]) -> [GeofenceStation] {
+  /// The region set, spent on whoever is nearby (docs/25 §2). Within [`awayFromHomeM`] of any
+  /// frequent station the passenger is somewhere they live: 16 frequent plus 4 nearest. Beyond
+  /// it the frequent set buys nothing, so all 20 slots go to the nearest stations.
+  ///
+  /// `here` nil means we do not know where the phone is; the frequent set is then the better
+  /// guess, because it is at least somewhere this person has actually stood.
+  static func regionSet(frequent: [GeofenceStation], nearest: [GeofenceStation], here: CLLocation?) -> [GeofenceStation] {
     var out: [GeofenceStation] = []
-    for s in frequent where !out.contains(where: { $0.id == s.id }) && out.count < maxFrequent { out.append(s) }
-    var added = 0
-    for s in nearest where !out.contains(where: { $0.id == s.id }) && added < maxNearest {
-      out.append(s)
-      added += 1
+    if nearHome(frequent: frequent, here: here) {
+      for s in frequent where !out.contains(where: { $0.id == s.id }) && out.count < maxFrequent { out.append(s) }
+      var added = 0
+      for s in nearest where !out.contains(where: { $0.id == s.id }) && added < nearestNearHome {
+        out.append(s)
+        added += 1
+      }
+      return out
     }
+    for s in nearest where !out.contains(where: { $0.id == s.id }) && out.count < maxRegions { out.append(s) }
     return out
   }
 
-  /// A fix that proves the phone is not standing at the station: outside the
-  /// radius, or moving at vehicle speed through it.
+  /// Within [`awayFromHomeM`] of any frequent station. Unknown position counts as near home.
+  static func nearHome(frequent: [GeofenceStation], here: CLLocation?) -> Bool {
+    guard let here = here else { return true }
+    if frequent.isEmpty { return false }
+    return frequent.contains { $0.location.distance(from: here) <= awayFromHomeM }
+  }
+
+  /// A fix that proves the phone is not standing at the station: outside the radius. The speed
+  /// test went with docs/25 §3 — rolling in and stopping used to cancel a nudge that should
+  /// have fired, and exit already says the honest thing.
   static func fixCancelsNudge(_ fix: CLLocation, station: CLLocation, radius: Double) -> Bool {
-    if fix.distance(from: station) > radius { return true }
-    return fix.speed >= vehicleSpeed
+    fix.distance(from: station) > radius
   }
 
   /// `{stations:[{id,name,lat,lon,distance_m}], ...}` → the nearest three.
@@ -67,7 +127,7 @@ enum GeofenceRules {
       let d = (j["distance_m"] as? Double) ?? Double(j["distance_m"] as? Int ?? Int.max)
       return (GeofenceStation(id: id, name: name, lat: lat, lon: lon), d)
     }
-    return parsed.sorted { $0.1 < $1.1 }.prefix(maxNearest).map { $0.0 }
+    return parsed.sorted { $0.1 < $1.1 }.prefix(maxRegions).map { $0.0 }
   }
 }
 
@@ -90,12 +150,127 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   private let manager = CLLocationManager(), defaults = UserDefaults.standard, center = UNUserNotificationCenter.current()
   private var lastEvent: String? {
-    didSet { if let e = lastEvent { NSLog("[geofence] %@", e) } }
+    didSet { if let e = lastEvent { NSLog("[geofence] %@", e); appendLog(e) } }
+  }
+
+  // -- The log (docs/25 §5) --------------------------------------------------
+  //
+  // Nearly everything interesting here happens while the app is suspended, so the buffer is
+  // written natively and persisted; Dart reads it through the channel and merges its own lines
+  // in. It holds paths, not bodies, and no claim content — and nothing leaves the phone by
+  // itself. A ring of the last 500 entries, which is a long trip's worth.
+
+  static let logCap = 500
+  private let logKey = "geofence.log"
+
+  private func appendLog(_ text: String) {
+    var lines = defaults.stringArray(forKey: logKey) ?? []
+    let stamp = ISO8601DateFormatter().string(from: Date())
+    lines.append("\(stamp)\tgeofence\t\(text)")
+    if lines.count > Self.logCap { lines.removeFirst(lines.count - Self.logCap) }
+    defaults.set(lines, forKey: logKey)
+  }
+
+  func readLog() -> [String] { defaults.stringArray(forKey: logKey) ?? [] }
+
+  func clearLog() { defaults.removeObject(forKey: logKey) }
+
+  // -- Counters since midnight (docs/25 §5) ---------------------------------
+  //
+  // So "why no nudge at Memmingen?" can be answered from the phone, and so the expected-traffic
+  // table in the doc is falsifiable on a real trip rather than argued about.
+
+  private var countersDay: String {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    return f.string(from: Date())
+  }
+
+  func bumpCounter(_ name: String) {
+    let key = "geofence.count.\(countersDay).\(name)"
+    defaults.set(defaults.integer(forKey: key) + 1, forKey: key)
+  }
+
+  func counters() -> [String: Int] {
+    var out: [String: Int] = [:]
+    let prefix = "geofence.count.\(countersDay)."
+    for (k, v) in defaults.dictionaryRepresentation() where k.hasPrefix(prefix) {
+      if let n = v as? Int { out[String(k.dropFirst(prefix.count))] = n }
+    }
+    return out
   }
 
   private enum Mode { case idle, configureFix, umbrellaFix, dwell(GeofenceStation) }
   private var mode = Mode.idle
   private var fixes: [CLLocation] = []
+
+  // -- The coverage disc (docs/25 §1) ---------------------------------------
+  //
+  // Where the station set was last drawn around, and how far it reaches. A significant-location
+  // update inside the disc costs nothing at all; outside it, one `stations/nearby` re-centres
+  // everything. The radius follows how fast the phone is moving, so a long-distance leg is one
+  // refresh rather than one per field.
+
+  private var discCentre: CLLocation? {
+    get {
+      guard let lat = defaults.object(forKey: "geofence.disc.lat") as? Double,
+            let lon = defaults.object(forKey: "geofence.disc.lon") as? Double else { return nil }
+      return CLLocation(latitude: lat, longitude: lon)
+    }
+    set {
+      guard let n = newValue else {
+        defaults.removeObject(forKey: "geofence.disc.lat")
+        defaults.removeObject(forKey: "geofence.disc.lon")
+        return
+      }
+      defaults.set(n.coordinate.latitude, forKey: "geofence.disc.lat")
+      defaults.set(n.coordinate.longitude, forKey: "geofence.disc.lon")
+      defaults.set(Date(), forKey: "geofence.disc.at")
+    }
+  }
+
+  private var discRadius: CLLocationDistance {
+    get { defaults.object(forKey: "geofence.disc.r") as? Double ?? GeofenceRules.coverageRadius(speedMps: 0) }
+    set { defaults.set(newValue, forKey: "geofence.disc.r") }
+  }
+
+  private var discAt: Date? { defaults.object(forKey: "geofence.disc.at") as? Date }
+
+  /// The last significant-location fix, so the next one can be turned into a speed.
+  private var lastSignificant: CLLocation?
+
+  // -- Nudges nobody acts on (docs/25 §4) -----------------------------------
+  //
+  // Three in a row at the same station — not tapped, no check-in within half an hour — and that
+  // station goes quiet for thirty days. Counted natively, because the whole point is that the
+  // app is not running. Dart reads the tally through `status` and folds it into the muted list,
+  // which already carries an expiry.
+
+  private func ignoreKey(_ id: String) -> String { "geofence.ignored.\(id)" }
+
+  private func noteNudgeFired(_ s: GeofenceStation) {
+    let n = defaults.integer(forKey: ignoreKey(s.id)) + 1
+    defaults.set(n, forKey: ignoreKey(s.id))
+    if n >= GeofenceRules.ignoresBeforeMute {
+      lastEvent = "\(s.name) ignored \(n)× — due to be muted for \(GeofenceRules.stationMuteDays) days"
+    }
+  }
+
+  /// A tap, or a check-in: this station is being used after all, so the tally starts over.
+  func clearIgnored(_ stationId: String) {
+    defaults.removeObject(forKey: ignoreKey(stationId))
+  }
+
+  /// Stations whose nudges have gone unanswered often enough to be muted, with how often.
+  func ignoredTally() -> [String: Int] {
+    var out: [String: Int] = [:]
+    for (k, v) in defaults.dictionaryRepresentation() where k.hasPrefix("geofence.ignored.") {
+      if let n = v as? Int, n >= GeofenceRules.ignoresBeforeMute {
+        out[String(k.dropFirst("geofence.ignored.".count))] = n
+      }
+    }
+    return out
+  }
   private var modeTimer: Timer?
   private var bgTask = UIBackgroundTaskIdentifier.invalid
   private var configureReply: (([String: Any]) -> Void)?
@@ -180,13 +355,17 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       enabled: args["enabled"] as? Bool ?? false, riding: args["riding"] as? Bool ?? false,
       stations: stations, umbrellaRadiusM: args["umbrellaRadiusM"] as? Double ?? 8000,
       stationRadiusM: args["stationRadiusM"] as? Double ?? 300,
-      quietFrom: args["quietFrom"] as? String, quietTo: args["quietTo"] as? String)
+      quietFrom: args["quietFrom"] as? String, quietTo: args["quietTo"] as? String,
+      nudgeDelay: args["nudgeDelayS"] as? Double ?? GeofenceRules.defaultNudgeDelay)
     config = c
     stopAllRegions()
     guard c.enabled, CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else {
+      manager.stopMonitoringSignificantLocationChanges()
+      discCentre = nil
       reply(["registered": 0])
       return
     }
+    startCoarseLayer()
     let n = registerStations(c)
     lastEvent = "configure: \(n) stations, enabled=\(c.enabled), riding=\(c.riding), auth=\(Self.permissionString(authStatus))"
     configureReply = reply
@@ -225,6 +404,25 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         "notifications": s.authorizationStatus == .authorized || s.authorizationStatus == .provisional,
         "registered": manager.monitoredRegions.count,
         "pushToken": pushToken as Any,
+        // docs/25 §4: stations whose nudges nobody answered, for Dart to mute with an expiry.
+        "ignored": ignoredTally(),
+        // docs/25 §5: the coverage disc, so the debug page can say why nothing happened.
+        "discLat": discCentre?.coordinate.latitude as Any,
+        "discLon": discCentre?.coordinate.longitude as Any,
+        "discRadiusM": discRadius,
+        "discAt": discAt?.timeIntervalSince1970 as Any,
+        "counters": counters(),
+        // Every registered region, with whether the phone is inside it right now (docs/25 §5).
+        "regions": manager.monitoredRegions.compactMap { r -> [String: Any]? in
+          guard let c = r as? CLCircularRegion else { return nil }
+          var row: [String: Any] = ["id": c.identifier, "lat": c.center.latitude, "lon": c.center.longitude, "radiusM": c.radius]
+          if let here = discCentre {
+            row["distanceM"] = here.distance(from: CLLocation(latitude: c.center.latitude, longitude: c.center.longitude))
+            row["inside"] = c.contains(here.coordinate)
+          }
+          if let st = station(for: c) { row["name"] = st.name }
+          return row
+        },
       ]
       if let e = lastEvent { out["lastEvent"] = e }
       if let p = pendingNudge {
@@ -263,7 +461,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   @discardableResult
   private func registerStations(_ c: GeofenceConfig) -> Int {
-    let set = GeofenceRules.regionSet(frequent: c.stations, nearest: nearest)
+    let set = GeofenceRules.regionSet(frequent: c.stations, nearest: nearest, here: discCentre)
     for s in set {
       let r = CLCircularRegion(center: s.location.coordinate, radius: c.stationRadiusM, identifier: Self.stationPrefix + s.id)
       r.notifyOnEntry = true
@@ -275,6 +473,33 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       manager.requestState(for: r)
     }
     return set.count
+  }
+
+  /// The coarse "where am I roughly" trigger (docs/25 §1). Significant location changes cost
+  /// almost nothing, arrive from cell towers at most every few minutes, and relaunch a
+  /// terminated app — and they free the 20th region slot the umbrella used to hold. The umbrella
+  /// stays only as a backstop for devices where they are unavailable.
+  private func startCoarseLayer() {
+    if CLLocationManager.significantLocationChangeMonitoringAvailable() {
+      manager.startMonitoringSignificantLocationChanges()
+      lastEvent = "significant-location monitoring on"
+    } else {
+      lastEvent = "no significant-location monitoring; umbrella is the backstop"
+    }
+  }
+
+  /// A significant-location update. Inside the disc this is free; outside it costs one
+  /// `stations/nearby` and re-centres everything around where the passenger actually is.
+  private func significantUpdate(_ l: CLLocation, _ c: GeofenceConfig) {
+    let speed = lastSignificant.map { GeofenceRules.speedBetween($0, l) } ?? 0
+    lastSignificant = l
+    if let centre = discCentre, GeofenceRules.insideDisc(l, centre: centre, radius: discRadius) {
+      lastEvent = "inside the disc, nothing to do"
+      return
+    }
+    discRadius = GeofenceRules.coverageRadius(speedMps: speed)
+    lastEvent = "left the disc at \(Int(speed * 3.6)) km/h, radius now \(Int(discRadius / 1000)) km"
+    refreshNearest(around: l, c)
   }
 
   private func registerUmbrella(at l: CLLocation, _ c: GeofenceConfig) {
@@ -343,20 +568,29 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     enteredStation(region)
   }
 
-  /// Entry: the nudge is scheduled 60 s out and iOS delivers it on its own, so
-  /// nothing depends on the app staying alive. Leaving the region, or a fix
-  /// outside it or at vehicle speed during the short watch window, cancels it.
+  /// Entry: the nudge is scheduled three minutes out and iOS delivers it on its own, so nothing
+  /// depends on the app staying alive (docs/25 §3). A train passing through has left the region
+  /// long before it fires, and the exit cancels it. Nothing else watches: the old 25 s
+  /// vehicle-speed window was a guess at the same thing and cancelled real arrivals.
   private func enteredStation(_ region: CLRegion) {
     guard let c = config, c.enabled, let s = station(for: region) else { return }
+    // `didDetermineState` reports every monitored region at once after a configure, and the
+    // phone is usually inside more than one of them. Without this, one configure writes a dozen
+    // enter/cooldown pairs and a few of those flush the log ring of everything worth reading
+    // (docs/25 §5). A station already inside its cooldown has nothing new to say.
+    if inCooldown(s) { return }
     lastEvent = "enter \(s.name)"
     if c.riding { lastEvent = "riding, no nudge"; return }
-    guard scheduleNudge(s, c) else { return }
-    beginMode(.dwell(s), timeout: GeofenceRules.watchWindow) { [weak self] in self?.lastEvent = "watch over \(s.name), nudge stays scheduled" }
-    manager.allowsBackgroundLocationUpdates = true
-    manager.startUpdatingLocation()
+    scheduleNudge(s, c)
+  }
+
+  private func inCooldown(_ s: GeofenceStation) -> Bool {
+    guard let last = defaults.object(forKey: "geofence.nudged.\(s.id)") as? Date else { return false }
+    return Date().timeIntervalSince(last) < GeofenceRules.nudgeCooldown
   }
 
   private func cancelNudge(_ s: GeofenceStation, reason: String) {
+    bumpCounter("cancelled")
     center.removePendingNotificationRequests(withIdentifiers: ["nudge-\(s.id)"])
     defaults.removeObject(forKey: "geofence.nudged.\(s.id)")
     lastEvent = "cancelled \(s.name): \(reason)"
@@ -379,17 +613,24 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     switch mode {
     case .configureFix:
       registerUmbrella(at: l, c)
+      // The first fix of a configure draws the disc and the region set around where we are.
+      discCentre = l
+      discRadius = GeofenceRules.coverageRadius(speedMps: 0)
+      registerStations(c)
       finishConfigure()
     case .umbrellaFix:
       endMode()
       refreshNearest(around: l, c)
     case .dwell(let s):
-      lastEvent = "watch fix at \(Int(l.distance(from: s.location))) m, \(Int(max(l.speed, 0))) m/s"
+      // Kept for a device that still delivers one: a fix outside the region is an exit we can
+      // act on early. The speed test went with docs/25 §3.
       if GeofenceRules.fixCancelsNudge(l, station: s.location, radius: c.stationRadiusM) {
         endMode()
-        cancelNudge(s, reason: "passing through")
+        cancelNudge(s, reason: "outside the region")
       }
-    case .idle: break
+    case .idle:
+      // Not waiting for anything: this is the significant-location stream (docs/25 §1).
+      significantUpdate(l, c)
     }
   }
 
@@ -419,11 +660,14 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
           self.registerStations(c)
         }
         self.registerUmbrella(at: l, c)
-        self.lastEvent = "umbrella recentred, nearest \(found?.count ?? 0)"
+        self.discCentre = l
+        self.lastEvent = "recentred on \(Int(self.discRadius / 1000)) km disc, nearest \(found?.count ?? 0)"
         self.onUmbrellaExit?()
         if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
       }
     }
+    bumpCounter("nearby")
+    bumpCounter("requests")
     guard var comps = URLComponents(string: c.apiUrl + "/v1/stations/nearby") else { return finish(nil) }
     comps.queryItems = [URLQueryItem(name: "lat", value: "\(l.coordinate.latitude)"), URLQueryItem(name: "lon", value: "\(l.coordinate.longitude)")]
     guard let url = comps.url else { return finish(nil) }
@@ -437,15 +681,15 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   @discardableResult
   private func scheduleNudge(_ s: GeofenceStation, _ c: GeofenceConfig) -> Bool {
-    let fireAt = Date().addingTimeInterval(GeofenceRules.nudgeDelay)
+    let delay = config?.nudgeDelay ?? GeofenceRules.defaultNudgeDelay
+    let fireAt = Date().addingTimeInterval(delay)
     if GeofenceRules.isQuiet(now: fireAt, from: c.quietFrom, to: c.quietTo) { lastEvent = "quiet \(s.name)"; return false }
-    let key = "geofence.nudged.\(s.id)"
-    if let last = defaults.object(forKey: key) as? Date, Date().timeIntervalSince(last) < GeofenceRules.nudgeCooldown {
+    if inCooldown(s) {
       lastEvent = "cooldown \(s.name)"
       return false
     }
-    defaults.set(Date(), forKey: key)
-    lastEvent = "nudge scheduled \(s.name) in \(Int(GeofenceRules.nudgeDelay)) s"
+    defaults.set(Date(), forKey: "geofence.nudged.\(s.id)")
+    lastEvent = "nudge scheduled \(s.name) in \(Int(delay)) s"
     let content = UNMutableNotificationContent()
     content.title = "Am \(s.name)?"
     content.body = "Einchecken, bevor der Zug kommt."
@@ -453,8 +697,11 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     content.threadIdentifier = "nudge"
     content.categoryIdentifier = Self.nudgeCategory
     content.userInfo = ["stationId": s.id, "stationName": s.name]
-    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: GeofenceRules.nudgeDelay, repeats: false)
+    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
     center.add(UNNotificationRequest(identifier: "nudge-\(s.id)", content: content, trigger: trigger))
+    bumpCounter("scheduled")
+    // Counted as unanswered from the moment it is scheduled; a tap or a check-in clears it.
+    noteNudgeFired(s)
     return true
   }
 
@@ -468,7 +715,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification, withCompletionHandler h: @escaping (UNNotificationPresentationOptions) -> Void) {
     // In the foreground the Bahnsteig shows its own banner.
-    if n.request.content.threadIdentifier == "nudge" { return h([]) }
+    if n.request.content.threadIdentifier == "nudge" { bumpCounter("fired"); return h([]) }
     if #available(iOS 14, *) { h([.banner, .sound]) } else { h([.alert, .sound]) }
   }
 
@@ -483,6 +730,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     }
     var payload: [String: String]? = nil
     if let id = info["stationId"] as? String {
+      clearIgnored(id) // acted on, so it was never ignored (docs/25 §4)
       payload = ["kind": "station", "stationId": id, "stationName": info["stationName"] as? String ?? ""]
     } else if let v = info["verspaetomat"] as? [String: Any], let kind = v["kind"] as? String {
       // A server push (docs/17): kind "journey" with {journey_id, transfer|arrived}, "mail", "incident", …

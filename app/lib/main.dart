@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'platform/diagnose_log.dart';
 import 'platform/geofence_sync.dart';
 import 'repo/repo_scope.dart';
 import 'router.dart';
@@ -47,6 +48,7 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
     _geofence = GeofenceSync(
       session: widget.session,
       onNudge: (n) {
+        DiagnoseLog.instance.add('push', 'tapped ${n.kind}${n.isStation ? ' · ${n.stationName}' : ''}');
         // A station nudge opens the check-in; a journey push (docs/17) the transfer card or the arrival;
         // mail opens the reply, the rest lands on the Konto.
         // "3 Stunden Ruhe" from the notification itself (docs/24 §3): no screen opens, the

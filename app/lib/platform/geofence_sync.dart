@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import '../api/models.dart';
 import '../repo/repo_scope.dart';
 import '../state/demo_state.dart' show LocationMode;
+import 'diagnose_log.dart';
 import 'geofence.dart';
 
 /// Keeps the native geofence layer in step with the account (docs/15).
@@ -34,6 +35,7 @@ class GeofenceSync with WidgetsBindingObserver {
   void start() {
     if (_started) return;
     _started = true;
+    DiagnoseLog.instance.add('app', 'launch');
     WidgetsBinding.instance.addObserver(this);
     session.addListener(scheduleSync);
     _taps = _geofence.onNudgeTapped.listen(onNudge);
@@ -53,6 +55,7 @@ class GeofenceSync with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    DiagnoseLog.instance.add('app', state.name);
     if (state == AppLifecycleState.resumed) {
       _checkPending();
       scheduleSync();
@@ -141,6 +144,15 @@ class GeofenceSync with WidgetsBindingObserver {
       _lastFingerprint = fp;
       await _geofence.configure(config);
       _scheduleSnoozeExpiry(geo.snoozeUntil);
+      // docs/25 §4: stations whose nudges nobody answered three times running go quiet for a
+      // month. The tally is native, because it is counted while the app is not running.
+      final status = await _geofence.status();
+      if (status.ignored.isNotEmpty) {
+        await session.muteIgnoredStations(status.ignored, known: geo.stations);
+        for (final id in status.ignored.keys) {
+          await _geofence.clearIgnored(id);
+        }
+      }
     } catch (_) {
       // The nudge is a convenience; the app never fails because of it.
     }

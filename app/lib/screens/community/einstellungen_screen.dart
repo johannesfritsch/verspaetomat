@@ -11,6 +11,7 @@ import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../ride/ride_widgets.dart' show fmtLocal;
+import 'entwicklung_screen.dart';
 import 'ruhe_sheet.dart';
 import '../../content/legal.dart';
 import 'community_widgets.dart';
@@ -85,6 +86,14 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             chevron: true,
             onTap: () => showRuheSheet(context),
           ),
+          if (EntwicklungScreen.available)
+            VListRow(
+              key: const Key('entwicklung'),
+              title: 'Entwicklung',
+              subtitle: 'Was der Hintergrund-Scan gerade tut',
+              chevron: true,
+              onTap: () => context.push(Routes.entwicklung),
+            ),
           VListRow(
             title: 'Stumme Bahnhöfe',
             subtitle: session.mutedStations.isEmpty ? 'Keine' : session.mutedStations.map((m) => m.name).join(', '),

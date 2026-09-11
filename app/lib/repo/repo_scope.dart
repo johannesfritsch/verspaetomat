@@ -228,6 +228,23 @@ class Session extends ChangeNotifier {
     await updateSettings(MePatch(mutedStations: [...mutedStations, station]));
   }
 
+  /// docs/25 §4: three nudges in a row that nobody answered mute a station for 30 days. The
+  /// native layer keeps the tally (it is counted while the app is not running); this turns it
+  /// into a muted entry with an expiry, which is the same list the passenger's own mutes live in.
+  Future<void> muteIgnoredStations(Map<String, int> ignored, {required List<ApiGeofenceStation> known}) async {
+    if (ignored.isEmpty) return;
+    final add = <ApiMutedStation>[];
+    final until = DateTime.now().toUtc().add(const Duration(days: 30));
+    for (final id in ignored.keys) {
+      if (isMuted(id)) continue;
+      final s = known.where((x) => x.id == id).firstOrNull;
+      if (s == null) continue;
+      add.add(ApiMutedStation(id: s.id, name: s.name, until: until));
+    }
+    if (add.isEmpty) return;
+    await updateSettings(MePatch(mutedStations: [...mutedStations, ...add]));
+  }
+
   Future<void> unmuteStation(String stationId) async {
     await updateSettings(MePatch(mutedStations: mutedStations.where((m) => m.id != stationId).toList()));
   }

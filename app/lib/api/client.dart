@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../platform/diagnose_log.dart';
 import 'models.dart';
 import 'token_store.dart';
 
@@ -67,16 +68,39 @@ class ApiClient {
   Future<void>? _reauth;
 
   Future<dynamic> _get(String path, [Map<String, String>? query]) => _retryOnce(() async {
-        final r = await _http.get(_uri(path, query), headers: await _headers(json: false)).timeout(_timeout);
+        final r = await _timed('GET', path, () async => _http.get(_uri(path, query), headers: await _headers(json: false)).timeout(_timeout));
         return _decode(r);
       });
 
   Future<dynamic> _send(String method, String path, [Object? body]) => _retryOnce(() async {
-        final req = http.Request(method, _uri(path))..headers.addAll(await _headers());
-        if (body != null) req.body = jsonEncode(body);
-        final r = await http.Response.fromStream(await _http.send(req).timeout(_timeout));
+        final r = await _timed(method, path, () async {
+          final req = http.Request(method, _uri(path))..headers.addAll(await _headers());
+          if (body != null) req.body = jsonEncode(body);
+          return http.Response.fromStream(await _http.send(req).timeout(_timeout));
+        });
         return _decode(r);
       });
+
+  /// An exception as one short line: the log is read on a phone.
+  static String shortErrorLine(Object e) {
+    final s = e.toString().replaceAll('\n', ' ');
+    return s.length > 80 ? '${s.substring(0, 80)}…' : s;
+  }
+
+  /// The one place every request passes through, so the debug page can show what the app asked
+  /// for and how long it took (docs/25 §5). The path and the status, never the body — the log
+  /// must be safe to paste into a message.
+  Future<http.Response> _timed(String method, String path, Future<http.Response> Function() run) async {
+    final started = DateTime.now();
+    try {
+      final r = await run();
+      DiagnoseLog.instance.http(method, path, r.statusCode, DateTime.now().difference(started), bytes: r.bodyBytes.length);
+      return r;
+    } catch (e) {
+      DiagnoseLog.instance.add('http', '$method $path → ${shortErrorLine(e)} · ${DateTime.now().difference(started).inMilliseconds} ms');
+      rethrow;
+    }
+  }
 
   Future<dynamic> _retryOnce(Future<dynamic> Function() attempt) async {
     try {

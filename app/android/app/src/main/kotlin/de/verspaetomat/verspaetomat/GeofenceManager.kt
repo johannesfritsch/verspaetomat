@@ -46,8 +46,44 @@ object GeofenceManager {
     private const val PREFS = "verspaetomat.geofence"
     const val UMBRELLA_ID = "umbrella"
     const val STATION_PREFIX = "station:"
+    /// The region budget (docs/25 §2). Android has no hard 20 limit the way iOS does, but the
+    /// same reasoning applies: the frequent set is worth its slots at home and worthless
+    /// 300 km away, so it is spent on whoever is actually nearby.
+    private const val MAX_REGIONS = 20
     private const val MAX_STATIONS = 16
-    private const val MAX_NEAREST = 3
+    private const val NEAREST_NEAR_HOME = 4
+
+    /// Beyond this from every frequent station, the frequent set is dropped entirely.
+    private const val AWAY_FROM_HOME_M = 50_000.0
+
+    /// The dwell before a nudge (docs/25 §3): a train passing through is long gone, a passenger
+    /// on a platform is not. Was 60 s, which fired at stations the train only rolled through.
+    private const val DWELL_MS = 180_000
+
+    /// docs/25 §4: three unanswered nudges in a row mute a station for thirty days.
+    private const val IGNORES_BEFORE_MUTE = 3
+    private fun ignoreKey(id: String) = "ignored.$id"
+
+    /** Counted when a nudge goes out; a tap or a check-in clears it. */
+    fun noteNudgeFired(ctx: Context, stationId: String) {
+        val p = prefs(ctx)
+        p.edit().putInt(ignoreKey(stationId), p.getInt(ignoreKey(stationId), 0) + 1).apply()
+    }
+
+    fun clearIgnored(ctx: Context, stationId: String) {
+        prefs(ctx).edit().remove(ignoreKey(stationId)).apply()
+    }
+
+    /** Stations whose nudges have gone unanswered often enough to be muted, with how often. */
+    fun ignoredTally(ctx: Context): Map<String, Int> {
+        val out = HashMap<String, Int>()
+        for ((k, v) in prefs(ctx).all) {
+            if (k.startsWith("ignored.") && v is Int && v >= IGNORES_BEFORE_MUTE) {
+                out[k.removePrefix("ignored.")] = v
+            }
+        }
+        return out
+    }
     private const val COOLDOWN_MS = 30L * 60 * 1000
     private const val FIX_BUDGET_MS = 10_000L
 
@@ -62,6 +98,34 @@ object GeofenceManager {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun config(ctx: Context): JSONObject? = prefs(ctx).getString("config", null)?.let { JSONObject(it) }
+    /**
+     * Within [AWAY_FROM_HOME_M] of any frequent station (docs/25 §2). Not knowing where the
+     * phone is counts as near home: the frequent set is at least somewhere this person stood.
+     */
+    private fun nearHome(frequent: List<Station>, fix: Location?): Boolean {
+        if (fix == null) return true
+        if (frequent.isEmpty()) return false
+        return frequent.any { s ->
+            val out = FloatArray(1)
+            Location.distanceBetween(s.lat, s.lon, fix.latitude, fix.longitude, out)
+            out[0] <= AWAY_FROM_HOME_M
+        }
+    }
+
+    /**
+     * How far the coverage disc reaches, by how fast the phone is moving (docs/25 §1). Android
+     * keeps the umbrella as its coarse trigger, but sizes it from the same table, so a long
+     * leg costs one refresh instead of one per field.
+     */
+    fun coverageRadius(speedMps: Float): Double {
+        val kmh = maxOf(0f, speedMps) * 3.6
+        return when {
+            kmh < 30 -> 5_000.0
+            kmh <= 120 -> 25_000.0
+            else -> 60_000.0
+        }
+    }
+
     private fun nearest(ctx: Context): List<Station> = Station.list(prefs(ctx).getString("nearest", null)?.let { JSONArray(it) })
     fun lastEvent(ctx: Context): String? = prefs(ctx).getString("lastEvent", null)
     private fun setLastEvent(ctx: Context, s: String) = prefs(ctx).edit().putString("lastEvent", s).apply()
@@ -122,9 +186,13 @@ object GeofenceManager {
 
     @SuppressLint("MissingPermission")
     private fun addAll(ctx: Context, cfg: JSONObject, fix: Location?, done: (Int) -> Unit) {
-        val stations = Station.list(cfg.optJSONArray("stations")).take(MAX_STATIONS)
+        // docs/25 §2: at home the frequent set keeps its slots and the nearest fill the rest;
+        // away from it every slot goes to what is around the passenger now.
+        val frequent = Station.list(cfg.optJSONArray("stations"))
+        val atHome = nearHome(frequent, fix)
+        val stations = if (atHome) frequent.take(MAX_STATIONS) else emptyList()
         val ids = stations.map { it.id }.toMutableSet()
-        val extra = nearest(ctx).filter { ids.add(it.id) }.take(MAX_NEAREST)
+        val extra = nearest(ctx).filter { ids.add(it.id) }.take(if (atHome) NEAREST_NEAR_HOME else MAX_REGIONS)
         val radius = cfg.optDouble("stationRadiusM", 300.0).toFloat()
         val umbrellaRadius = cfg.optDouble("umbrellaRadiusM", 8000.0).toFloat()
         val fences = ArrayList<Geofence>()
@@ -134,7 +202,7 @@ object GeofenceManager {
                     .setRequestId(STATION_PREFIX + s.id)
                     .setCircularRegion(s.lat, s.lon, radius)
                     .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_DWELL)
-                    .setLoiteringDelay(60_000)
+                    .setLoiteringDelay(cfg.optInt("nudgeDelayS", DWELL_MS / 1000) * 1000)
                     .setExpirationDuration(Geofence.NEVER_EXPIRE)
                     .build()
             )
@@ -194,6 +262,8 @@ object GeofenceManager {
         if (now - last < COOLDOWN_MS) return setLastEvent(ctx, "skip cooldown ${station.name}")
         prefs(ctx).edit().putLong(key, now).apply()
         NudgeNotification.show(ctx, station)
+        // Counted as unanswered until a tap or a check-in says otherwise (docs/25 §4).
+        noteNudgeFired(ctx, station.id)
         setLastEvent(ctx, "nudge ${station.name}")
     }
 
@@ -231,7 +301,7 @@ object GeofenceManager {
             val arr = JSONObject(body).optJSONArray("stations") ?: return null
             (0 until arr.length()).map { arr.getJSONObject(it) }
                 .sortedBy { it.optInt("distance_m", Int.MAX_VALUE) }
-                .take(MAX_NEAREST)
+                .take(MAX_REGIONS)
                 .map { Station.from(it) }
         } catch (e: Exception) {
             Log.w(TAG, "nearby failed", e)

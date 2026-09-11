@@ -196,6 +196,20 @@ void main() {
     await session.unsnoozeNudges();
     await wait(tester, 800);
     demo.reset();
+    // docs/25 §5: the debug page, which exists so "why no nudge at Memmingen?" can be answered
+    // from the phone. The Entwicklung row is present because the tour runs a debug build.
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.einstellungen);
+    await shot('einstellungen-entwicklung');
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.entwicklung);
+    await shot('debug-status');
+    await tester.dragUntilVisible(
+      find.byKey(const Key('diagnose-log')),
+      find.byType(SingleChildScrollView).first,
+      const Offset(0, -220),
+    );
+    await shot('debug-log');
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    await wait(tester, 600);
     // "Ich fahre weiter" (docs/21 §2): the passenger gives up on this train at Hagen and
     // picks the next one onward; only the delay up to that earliest train counts.
     DemoLeg tourLeg(String tripId, String from, String to) {

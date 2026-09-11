@@ -3,57 +3,96 @@ import XCTest
 
 @testable import Runner
 
-class GeofenceRulesTests: XCTestCase {
-  private func at(_ h: Int, _ m: Int) -> Date {
-    var c = DateComponents()
-    c.year = 2026; c.month = 9; c.day = 10; c.hour = h; c.minute = m
-    return Calendar.current.date(from: c)!
+/// The pure rules behind station geofencing (docs/25). They are the part that decides how much
+/// the phone talks to the backend on a long trip, so they are worth pinning down away from
+/// CoreLocation.
+final class GeofenceRulesTests: XCTestCase {
+
+  /// docs/25 §1: the disc reaches as far as the passenger is travelling fast.
+  func testCoverageRadiusFollowsSpeed() {
+    // Standing, walking, a tram: be precise.
+    XCTAssertEqual(GeofenceRules.coverageRadius(speedMps: 0), 5_000)
+    XCTAssertEqual(GeofenceRules.coverageRadius(speedMps: 8), 5_000) // 28.8 km/h
+    // A regional train: one refresh every few stops.
+    XCTAssertEqual(GeofenceRules.coverageRadius(speedMps: 9), 25_000) // 32.4 km/h
+    XCTAssertEqual(GeofenceRules.coverageRadius(speedMps: 33), 25_000) // 118.8 km/h
+    // Long distance: one refresh per leg, not per field.
+    XCTAssertEqual(GeofenceRules.coverageRadius(speedMps: 34), 60_000) // 122.4 km/h
+    XCTAssertEqual(GeofenceRules.coverageRadius(speedMps: 80), 60_000)
+    // A negative speed is CoreLocation saying "I don't know", not a direction.
+    XCTAssertEqual(GeofenceRules.coverageRadius(speedMps: -1), 5_000)
   }
 
-  func testQuietHoursAcrossMidnight() {
-    XCTAssertTrue(GeofenceRules.isQuiet(now: at(23, 30), from: "22:00", to: "06:00"))
-    XCTAssertTrue(GeofenceRules.isQuiet(now: at(5, 59), from: "22:00", to: "06:00"))
-    XCTAssertFalse(GeofenceRules.isQuiet(now: at(6, 0), from: "22:00", to: "06:00"))
-    XCTAssertFalse(GeofenceRules.isQuiet(now: at(12, 0), from: "22:00", to: "06:00"))
-    XCTAssertTrue(GeofenceRules.isQuiet(now: at(13, 0), from: "12:00", to: "14:00"))
-    XCTAssertFalse(GeofenceRules.isQuiet(now: at(13, 0), from: nil, to: nil))
-    XCTAssertFalse(GeofenceRules.isQuiet(now: at(13, 0), from: "12:00", to: "12:00"))
-    XCTAssertFalse(GeofenceRules.isQuiet(now: at(13, 0), from: "25:00", to: "06:00"))
+  /// Inside the disc nothing happens and no network call is made.
+  func testDiscContainment() {
+    let koeln = CLLocation(latitude: 50.9413, longitude: 6.9583)
+    let duesseldorf = CLLocation(latitude: 51.2198, longitude: 6.7942)  // ~34 km away
+    XCTAssertTrue(GeofenceRules.insideDisc(koeln, centre: koeln, radius: 5_000))
+    XCTAssertFalse(GeofenceRules.insideDisc(duesseldorf, centre: koeln, radius: 5_000))
+    XCTAssertFalse(GeofenceRules.insideDisc(duesseldorf, centre: koeln, radius: 25_000))
+    XCTAssertTrue(GeofenceRules.insideDisc(duesseldorf, centre: koeln, radius: 60_000))
   }
 
-  func testRegionSetCapsAndDedupes() {
-    let frequent = (0..<20).map { GeofenceStation(id: "f\($0)", name: "F\($0)", lat: 50, lon: 7) }
-    let nearest = [
-      GeofenceStation(id: "f1", name: "F1", lat: 50, lon: 7),
-      GeofenceStation(id: "n1", name: "N1", lat: 50, lon: 7),
-      GeofenceStation(id: "n2", name: "N2", lat: 50, lon: 7),
-      GeofenceStation(id: "n3", name: "N3", lat: 50, lon: 7),
-      GeofenceStation(id: "n4", name: "N4", lat: 50, lon: 7),
-    ]
-    let set = GeofenceRules.regionSet(frequent: frequent, nearest: nearest)
-    XCTAssertEqual(set.count, 19)
-    XCTAssertEqual(set.prefix(16).map { $0.id }, (0..<16).map { "f\($0)" })
-    XCTAssertEqual(set.suffix(3).map { $0.id }, ["n1", "n2", "n3"])
-    XCTAssertEqual(Set(set.map { $0.id }).count, 19)
+  func testSpeedBetweenTwoFixes() {
+    let t0 = Date()
+    let a = CLLocation(coordinate: CLLocationCoordinate2D(latitude: 50.9413, longitude: 6.9583),
+                       altitude: 0, horizontalAccuracy: 10, verticalAccuracy: 10, timestamp: t0)
+    // ~34 km in 20 minutes is a bit over 100 km/h.
+    let b = CLLocation(coordinate: CLLocationCoordinate2D(latitude: 51.2198, longitude: 6.7942),
+                       altitude: 0, horizontalAccuracy: 10, verticalAccuracy: 10, timestamp: t0.addingTimeInterval(1200))
+    let kmh = GeofenceRules.speedBetween(a, b) * 3.6
+    XCTAssertGreaterThan(kmh, 90)
+    XCTAssertLessThan(kmh, 120)
+    // Two fixes at the same instant say nothing; they must not read as infinite speed.
+    XCTAssertEqual(GeofenceRules.speedBetween(a, a), 0)
   }
 
-  func testFixCancelsNudge() {
-    let station = CLLocation(latitude: 50.9432, longitude: 6.9586)
-    let inside = CLLocation(coordinate: CLLocationCoordinate2D(latitude: 50.9440, longitude: 6.9586), altitude: 0, horizontalAccuracy: 30, verticalAccuracy: 0, course: 0, speed: 1, timestamp: Date())
-    let outside = CLLocation(latitude: 50.9500, longitude: 6.9586)
-    let fast = CLLocation(coordinate: CLLocationCoordinate2D(latitude: 50.9440, longitude: 6.9586), altitude: 0, horizontalAccuracy: 30, verticalAccuracy: 0, course: 0, speed: 15, timestamp: Date())
-    XCTAssertFalse(GeofenceRules.fixCancelsNudge(inside, station: station, radius: 300))
-    XCTAssertTrue(GeofenceRules.fixCancelsNudge(outside, station: station, radius: 300))
-    XCTAssertTrue(GeofenceRules.fixCancelsNudge(fast, station: station, radius: 300))
+  /// docs/25 §2: the budget follows the passenger over the 50 km boundary.
+  func testRegionBudgetFollowsThePassenger() {
+    let frequent = (0..<16).map { GeofenceStation(id: "f\($0)", name: "Frequent \($0)", lat: 50.94 + Double($0) / 1000, lon: 6.95) }
+    let nearest = (0..<20).map { GeofenceStation(id: "n\($0)", name: "Nearest \($0)", lat: 48.0 + Double($0) / 1000, lon: 11.5) }
+
+    // At home: the frequent set keeps its 16 slots, the nearest get the other 4.
+    let atHome = CLLocation(latitude: 50.9413, longitude: 6.9583)
+    let home = GeofenceRules.regionSet(frequent: frequent, nearest: nearest, here: atHome)
+    XCTAssertEqual(home.count, GeofenceRules.maxRegions)
+    XCTAssertEqual(home.filter { $0.id.hasPrefix("f") }.count, 16)
+    XCTAssertEqual(home.filter { $0.id.hasPrefix("n") }.count, 4)
+
+    // 300 km away the frequent set buys nothing: all 20 slots go to what is actually here.
+    let away = CLLocation(latitude: 48.1372, longitude: 11.5755) // München
+    let far = GeofenceRules.regionSet(frequent: frequent, nearest: nearest, here: away)
+    XCTAssertEqual(far.count, GeofenceRules.maxRegions)
+    XCTAssertTrue(far.allSatisfy { $0.id.hasPrefix("n") })
+
+    // Not knowing where the phone is, the frequent set is the better guess: it is at least
+    // somewhere this person has stood.
+    XCTAssertTrue(GeofenceRules.nearHome(frequent: frequent, here: nil))
+    // Just inside and just outside the boundary, measured due north of Köln.
+    let just = CLLocation(latitude: 50.9413 + 0.40, longitude: 6.9583)   // ~44 km
+    let past = CLLocation(latitude: 50.9413 + 0.55, longitude: 6.9583)   // ~61 km
+    XCTAssertTrue(GeofenceRules.nearHome(frequent: frequent, here: just))
+    XCTAssertFalse(GeofenceRules.nearHome(frequent: frequent, here: past))
+    // No frequent stations at all (a fresh account) is never "near home".
+    XCTAssertFalse(GeofenceRules.nearHome(frequent: [], here: atHome))
   }
 
-  func testParseNearbyTakesThreeNearest() {
-    let json = """
-    {"stations":[{"id":"a","name":"A","lat":1,"lon":1,"distance_m":900},{"id":"b","name":"B","lat":1,"lon":1,"distance_m":100},
-    {"id":"c","name":"C","lat":1,"lon":1,"distance_m":500},{"id":"d","name":"D","lat":1,"lon":1,"distance_m":300},{"id":"x","name":"X"}],
-    "source":"gps","label":null}
-    """.data(using: .utf8)!
-    XCTAssertEqual(GeofenceRules.parseNearby(json).map { $0.id }, ["b", "d", "c"])
-    XCTAssertEqual(GeofenceRules.parseNearby(Data("nope".utf8)), [])
+  /// docs/25 §3: exit is the honest signal. Rolling into a station and stopping used to cancel
+  /// a nudge that should have fired, because the speed at that moment still looked like a train.
+  func testOnlyLeavingTheRegionCancelsTheNudge() {
+    let station = CLLocation(latitude: 50.9413, longitude: 6.9583)
+    let onThePlatform = CLLocation(
+      coordinate: CLLocationCoordinate2D(latitude: 50.9414, longitude: 6.9584),
+      altitude: 0, horizontalAccuracy: 10, verticalAccuracy: 10, timestamp: Date())
+    XCTAssertFalse(GeofenceRules.fixCancelsNudge(onThePlatform, station: station, radius: 300))
+    let downTheLine = CLLocation(latitude: 50.9600, longitude: 6.9583)
+    XCTAssertTrue(GeofenceRules.fixCancelsNudge(downTheLine, station: station, radius: 300))
+  }
+
+  /// docs/25 §4: nobody should be nudged forever by an app they stopped using.
+  func testSwitchOffThresholds() {
+    XCTAssertEqual(GeofenceRules.ignoresBeforeMute, 3)
+    XCTAssertEqual(GeofenceRules.stationMuteDays, 30)
+    XCTAssertEqual(GeofenceRules.idleDaysBeforeOff, 30)
   }
 }

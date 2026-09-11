@@ -43,6 +43,9 @@ class Routes {
   static const historie = '/historie';
   static const einstellungen = '/einstellungen';
   static const datenherkunft = '/einstellungen/daten';
+
+  /// docs/25 §5: the debug page. Reachable only where `EntwicklungScreen.available`.
+  static const entwicklung = '/einstellungen/entwicklung';
   static const rechtlichesBase = '/rechtliches'; // /rechtliches/:id  (impressum | datenschutz | bote)
   static String rechtliches(String id) => '$rechtlichesBase/$id';
   static const showcase = '/showcase';

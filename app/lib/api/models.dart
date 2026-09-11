@@ -306,13 +306,23 @@ class ApiPersonalData {
 }
 
 /// A station the customer never wants the nudge for. Part of the account.
+/// A station that stays quiet. [until] null is the mute a passenger set by hand, which has no
+/// end; a date is the automatic one from docs/25 §4, which runs out on its own.
 class ApiMutedStation {
-  const ApiMutedStation({required this.id, required this.name});
+  const ApiMutedStation({required this.id, required this.name, this.until});
   final String id;
   final String name;
+  final DateTime? until;
 
-  factory ApiMutedStation.fromJson(Map<String, dynamic> j) => ApiMutedStation(id: _s(j['id']), name: _s(j['name']));
-  Map<String, dynamic> toJson() => {'id': id, 'name': name};
+  /// Still silent. An automatic mute that has run out is no mute at all.
+  bool get active => until == null || until!.isAfter(DateTime.now());
+
+  /// Set by the passenger rather than by three ignored nudges.
+  bool get byHand => until == null;
+
+  factory ApiMutedStation.fromJson(Map<String, dynamic> j) =>
+      ApiMutedStation(id: _s(j['id']), name: _s(j['name']), until: DateTime.tryParse(_s(j['until']))?.toLocal());
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, if (until != null) 'until': until!.toUtc().toIso8601String()};
 }
 
 class ApiSettings {
@@ -436,7 +446,15 @@ class MePatch {
 
 /// GET /v1/me/geofence: the stations the phone should watch (docs/15).
 class ApiGeofence {
-  const ApiGeofence({required this.enabled, required this.stations, this.quietFrom, this.quietTo, this.snoozeUntil});
+  const ApiGeofence({
+    required this.enabled,
+    required this.stations,
+    this.quietFrom,
+    this.quietTo,
+    this.snoozeUntil,
+    this.idle = false,
+    this.lastCheckin,
+  });
   final bool enabled;
   final List<ApiGeofenceStation> stations;
   final String? quietFrom;
@@ -446,6 +464,12 @@ class ApiGeofence {
   /// the app can say until when without a second call.
   final DateTime? snoozeUntil;
 
+  /// docs/25 §4: thirty days without a check-in switched background scanning off. Folded into
+  /// [enabled] as well; Home says so in one line and offers it back. Nothing was deleted and
+  /// no permission was revoked.
+  final bool idle;
+  final DateTime? lastCheckin;
+
   static const empty = ApiGeofence(enabled: false, stations: []);
 
   factory ApiGeofence.fromJson(Map<String, dynamic> j) => ApiGeofence(
@@ -454,6 +478,8 @@ class ApiGeofence {
         quietFrom: _sn(j['quiet_from']),
         quietTo: _sn(j['quiet_to']),
         snoozeUntil: DateTime.tryParse(_s(j['nudge_snooze_until'] ?? j['snooze_until']))?.toLocal(),
+        idle: _b(j['idle']),
+        lastCheckin: DateTime.tryParse(_s(j['last_checkin']))?.toLocal(),
       );
 }
 
