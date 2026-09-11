@@ -193,6 +193,68 @@ class RideSheetBody extends StatelessWidget {
   return ('Unterwegs', r == null ? '' : '${r.line} nach $headsign');
 }
 
+/// The stops of the train after the change (docs/26 §4).
+///
+/// `ApiLeg` carries only its endpoints, so the stops come from the trip itself. While that is
+/// in flight — or when the feed has nothing — the endpoints alone still say where the passenger
+/// gets on and off, which is the part that matters.
+class _NextLegStops extends StatefulWidget {
+  const _NextLegStops({required this.leg});
+  final ApiLeg leg;
+
+  @override
+  State<_NextLegStops> createState() => _NextLegStopsState();
+}
+
+class _NextLegStopsState extends State<_NextLegStops> {
+  List<ApiStop> _stops = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void didUpdateWidget(covariant _NextLegStops old) {
+    super.didUpdateWidget(old);
+    if (old.leg.tripId != widget.leg.tripId) _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final trip = await RepoScope.read(context).repo.trip(widget.leg.tripId);
+      if (mounted) setState(() => _stops = trip.stops);
+    } catch (_) {
+      // The endpoints below are enough; a missing feed is not worth an error here.
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = widget.leg;
+    if (_stops.isEmpty) {
+      if (_loading) return const LoadingLine(label: 'Halte werden geladen …');
+      return Text('Halte folgen, sobald der Zug im Feed ist.', style: VText.caption);
+    }
+    final from = fromIndex(_stops, l.fromStationId, l.fromStationName);
+    final to = fromIndex(_stops, l.toStationId, l.toStationName);
+    return StopLine(
+      stops: _stops,
+      from: from,
+      to: to,
+      // Nothing of this train has been ridden yet, so no stop is behind us.
+      passed: from - 1,
+      exitIndex: to,
+      compact: true,
+      labels: {from: 'Umstieg', to: 'Ziel'},
+    );
+  }
+}
+
 /// The current leg, live. With a journey: the transfer ahead and the destination underneath.
 /// The line and headsign are the sheet's header, so the body starts with the context line.
 class _RidingView extends StatelessWidget {
@@ -252,12 +314,24 @@ class _RidingView extends StatelessWidget {
         if (stops.isEmpty)
           Text('Halte folgen, sobald der Zug im Feed ist.', style: VText.caption)
         else
-          StopLine(
-            stops: stops,
-            passed: r.passedStops - 1 + fromIndex(stops, r.fromStationId, r.fromStationName),
-            exitIndex: exitIndex < 0 ? null : exitIndex,
-            compact: true,
-          ),
+          Builder(builder: (context) {
+            // docs/26 §4: the journey starts where the passenger got on. Stops the train called
+            // at before that are not theirs and only push the useful part off the screen.
+            final boarded = fromIndex(stops, r.fromStationId, r.fromStationName);
+            return StopLine(
+              stops: stops,
+              from: boarded,
+              // The train runs on past the exit; the passenger does not (docs/26 §4).
+              to: exitIndex < 0 ? null : exitIndex,
+              passed: r.passedStops - 1 + boarded,
+              exitIndex: exitIndex < 0 ? null : exitIndex,
+              compact: true,
+              labels: {
+                boarded: 'Zustieg',
+                if (exitIndex >= 0) exitIndex: nextLeg != null ? 'Umstieg' : 'Ziel',
+              },
+            );
+          }),
         if (nextLeg != null) ...[
           const VGap.l(),
           const VRule(),
@@ -293,6 +367,10 @@ class _RidingView extends StatelessWidget {
             connectionAtRisk ? 'Der Anschluss wird knapp. Wir planen um, sobald du da bist.' : 'Am Umstieg fragen wir einmal: bist du drin?',
             style: VText.caption,
           ),
+          const VGap.m(),
+          // The second train's stops, so the whole journey reads as one line down the page
+          // rather than stopping at the change (docs/26 §4).
+          _NextLegStops(leg: nextLeg),
         ],
         if (j != null) ...[
           const VGap.m(),

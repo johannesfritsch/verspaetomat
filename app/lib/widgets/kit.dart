@@ -853,6 +853,11 @@ Future<T?> showVSheet<T>(BuildContext context, {required WidgetBuilder builder, 
         : ConstrainedBox(
             constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.92),
             child: SingleChildScrollView(
+              // Clamping, not the iOS default: a bouncing list swallows the pull at the top as
+              // an overscroll of its own, so a sheet taller than the screen could only ever be
+              // closed from the few pixels of header above the list. Refusing the overscroll
+              // hands the drag back to the sheet, and the whole thing pulls down again.
+              physics: const ClampingScrollPhysics(),
               padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
               child: builder(ctx),
             ),
@@ -869,16 +874,36 @@ class VSheetHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The header is the handle: a drag anywhere on it closes the sheet, and so does a tap on
+    // the grabber. Before this the only way out of a long sheet was a few pixels of dead space.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragEnd: (d) {
+        if ((d.primaryVelocity ?? 0) > 120) Navigator.of(context).maybePop();
+      },
+      child: _body(context),
+    );
+  }
+
+  Widget _body(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(VSpace.page, 10, VSpace.page, VSpace.s),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(color: VColors.rule, borderRadius: BorderRadius.circular(2)),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).maybePop(),
+              // A 36×4 bar is the smallest thing on screen; the target around it is not.
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 40),
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(color: VColors.rule, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
             ),
           ),
           if (title != null) ...[

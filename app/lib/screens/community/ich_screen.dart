@@ -155,7 +155,10 @@ class IchScreen extends StatelessWidget {
                 title: 'Dein Zweck',
                 subtitle: ngoName ?? 'Noch nicht gewählt',
                 chevron: true,
-                onTap: ngoId.isEmpty ? () => pickNgo(context, session, null) : () => context.push('${Routes.zweck}?id=$ngoId'),
+                // The row is about which Zweck is yours, so it opens the choice — the same
+                // sheet Einstellungen opens. The Zweck's own page is where "Trotzdem spenden"
+                // belongs, and that is reached from a claim, not from here.
+                onTap: () => pickNgo(context, session, ngoId.isEmpty ? null : ngoId),
               ),
               const VRule.soft(),
               VListRow(title: 'Alle Fahrten', subtitle: '${rides.length} zuletzt', chevron: true, onTap: () => context.push(Routes.historie)),

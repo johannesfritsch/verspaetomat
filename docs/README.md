@@ -55,6 +55,7 @@ number wins.
 | [23-standort-und-loeschen.md](23-standort-und-loeschen.md) | build 13 | Stations ranked by what departs there, deleting a ride, noticing a forgotten one |
 | [24-einchecken-flow-und-ruhe.md](24-einchecken-flow-und-ruhe.md) | build 13 | One live station source, the check-in asks where you are, Zug wechseln, a snooze |
 | [25-geofence-v2-und-diagnose.md](25-geofence-v2-und-diagnose.md) | build 13 | Significant Location Change, a coverage disc, a 3-minute dwell, the Entwicklung page |
+| [26-fahrt-lesen-und-blaetter.md](26-fahrt-lesen-und-blaetter.md) | build 15 | Home stops ranking, sheets pull down again, Dein Zweck opens the choice, the ride reads as one journey |
 
 Two numbers are used twice: `20-backend.md` and `21-data-requirements.md` came first, the decision
 series later walked into the same numbers. In prose and in code comments a bare **docs/20** or

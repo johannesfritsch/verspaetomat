@@ -299,8 +299,25 @@ class StopLine extends StatefulWidget {
     this.firstSelectable = 1,
     this.showRadios = false,
     this.inlineChild,
+    this.from = 0,
+    this.to,
+    this.labels = const {},
   });
   final List<ApiStop> stops;
+
+  /// First stop to draw. Stops the train called at before the passenger boarded are not part
+  /// of their journey and only push the useful part off the screen (docs/26 §4).
+  final int from;
+
+  /// Last stop to draw. Where the passenger gets off, the train carries on without them; those
+  /// stops are the train's journey, not theirs, and on a journey with a change the real
+  /// continuation is the next train below (docs/26 §4). Null draws to the end, which is what the
+  /// exit picker wants — there the stops beyond are the choice.
+  final int? to;
+
+  /// Index → the word for that stop: `Zustieg`, `Umstieg`, `Ziel`. Drawn as a small eyebrow
+  /// beside the name, so the timeline says what each marked stop means.
+  final Map<int, String> labels;
 
   /// Index of the last passed stop (-1 = none yet).
   final int passed;
@@ -350,13 +367,17 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     final rows = <Widget>[];
-    for (var i = 0; i < widget.stops.length; i++) {
+    final first = widget.from.clamp(0, widget.stops.isEmpty ? 0 : widget.stops.length - 1);
+    final last = (widget.to ?? widget.stops.length - 1).clamp(first, widget.stops.isEmpty ? 0 : widget.stops.length - 1);
+    for (var i = first; i <= last; i++) {
       final s = widget.stops[i];
       final isPassed = i <= widget.passed;
       final isNext = i == widget.passed + 1;
       final isExit = widget.exitIndex == i;
       final isSelected = widget.selectedIndex == i;
-      final isLast = i == widget.stops.length - 1;
+      final isLast = i == last;
+      // The connector is drawn against the first row on screen, not against stop zero.
+      final isFirst = i == first;
       final afterExit = widget.exitIndex != null && i > widget.exitIndex!;
       final planned = plannedAt(s);
       final live = liveAt(s);
@@ -411,9 +432,9 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      if (!isLast && i != 0) Container(width: 2, color: afterExit ? VColors.rule : VColors.ink),
-                      if (i == 0 && !isLast) Positioned(top: (widget.compact ? 20 : 26), bottom: 0, child: Container(width: 2, color: VColors.ink)),
-                      if (isLast && i != 0)
+                      if (!isLast && !isFirst) Container(width: 2, color: afterExit ? VColors.rule : VColors.ink),
+                      if (isFirst && !isLast) Positioned(top: (widget.compact ? 20 : 26), bottom: 0, child: Container(width: 2, color: VColors.ink)),
+                      if (isLast && !isFirst)
                         Positioned(top: 0, bottom: (widget.compact ? 20 : 26), child: Container(width: 2, color: afterExit ? VColors.rule : VColors.ink)),
                       dot,
                     ],
@@ -434,7 +455,13 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (isExit && !widget.compact) ...[
+                      // What this stop is to the passenger: where they got on, where they change,
+                      // where they are going (docs/26 §4). Falls back to the old "Ausstieg" chip
+                      // where no word was given and there is room for it.
+                      if (widget.labels[i] != null) ...[
+                        VChip(widget.labels[i]!, tone: widget.labels[i] == 'Ziel' ? VTone.red : VTone.ink),
+                        const SizedBox(width: 10),
+                      ] else if (isExit && !widget.compact) ...[
                         const VChip('Ausstieg', tone: VTone.red),
                         const SizedBox(width: 10),
                       ],

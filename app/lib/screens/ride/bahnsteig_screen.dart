@@ -905,7 +905,6 @@ class _Momentum extends StatelessWidget {
   Widget build(BuildContext context) {
     final st = standing;
     final quiet = st.pointsThisWeek == 0;
-    final lvl = st.level;
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -939,19 +938,8 @@ class _Momentum extends StatelessWidget {
                 ],
               ),
             ],
-            if (lvl != null) ...[
-              const SizedBox(height: 10),
-              VProgress(confirmed: lvl.progress),
-              const SizedBox(height: 6),
-              Text(
-                lvl.pointsToNext > 0
-                    ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“'
-                    : '${lvl.name} · höchste Stufe erreicht',
-                style: VText.caption,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+            // The level lives on Ich and nowhere else (docs/20 §5). Home says what happened
+            // this week; a rank and a countdown to the next one is a different conversation.
           ],
         ),
       ),
