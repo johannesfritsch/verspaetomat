@@ -23,6 +23,7 @@ main() {
   docker compose ps --format '{{.Name}} {{.Status}}'
   docker compose logs --tail 40 api 2>/dev/null | grep -E "migrat|push:|listening|ERROR|WARN" | tail -6 | cut -c1-160
   curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1 || docker compose exec api curl -sf http://127.0.0.1:8080/health
+  echo   # /health endet ohne Zeilenumbruch, sonst klebt die nächste Zeile daran
   # The website is not built here, only served: it comes ready from git (docs/31 §6).
   if docker compose exec -T caddy test -f /srv/site/index.html 2>/dev/null; then
     echo "site: $(docker compose exec -T caddy sh -c 'ls /srv/site | wc -l' | tr -d ' \r') Einträge in /srv/site"
