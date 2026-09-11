@@ -52,3 +52,50 @@ does not yet. Worth revisiting if it bothers anyone; noted rather than left to b
   stay apart.
 - Tour: `bahnsteig-deine-woche`, a scrolled shot, because the section that changed sits below the
   fold and an unphotographed change is an unchecked one.
+
+## Nachtrag, 12. September 2026: die Hälfte, die im Backend fehlte
+
+Build 20 zeigte „Ab Kißlegg Bahnhof" wieder zweimal — und diesmal mit **identischen Namen**, was
+den Fehler sofort verriet: `sameStation` in der App ist nur die Schranke, wenn zwei *verschiedene*
+Quellen zusammenfließen (die häufigen Bahnhöfe aus der Fahrtenhistorie und die nahen aus dem
+Feed). Die häufigen Bahnhöfe selbst kamen ungeprüft in die Liste, weil sie aus dem Backend schon
+dedupliziert hätten kommen sollen. Taten sie nicht: `geofence_set` verglich Ids, und
+`select … group by from_station_id, from_station_name` macht aus einem Bahnsteig zwei Zeilen,
+sobald derselbe Bahnsteig einmal über DELFI und einmal über amarillo-bw eingecheckt wurde.
+
+Das hatte drei Folgen, von denen nur eine zu sehen war:
+
+1. Zwei Chips auf Home, mit demselben Namen.
+2. **Zwei von zwanzig Regionen** auf dem Telefon für einen Bahnsteig (docs/25 §2). Das Budget ist
+   knapp und wurde für ein Duplikat ausgegeben.
+3. Die Check-ins waren geteilt: vier Fahrten ab Kißlegg zählten als zwei plus zwei. Damit stand
+   auch der Stammbahnhof falsch in der Reihenfolge.
+
+Ein Bahnsteig ist ein Bahnsteig, und **eine Schranke entscheidet das für jede Liste**:
+`train::same_platform(StationRef, StationRef)` — gleiche Id, oder gleicher Name nach
+`normalise_station_name` und näher als ein Kilometer beieinander. Bewusst strenger als
+`station_names_match`, das ein Wortpräfix akzeptiert: „Wangen" ist ein Präfix von „Wangen im
+Allgäu Nord" und ein anderer Halt. Wo eine Liste keine Koordinaten hat — die Ziel-Listen speichern
+keine —, entscheidet der Name allein; zwei Orte mit gleichem Bahnhofsnamen gibt es, aber eine
+Abkürzung für beide ist der kleinere Fehler als derselbe Name zweimal, und der andere Bahnhof ist
+eine Suche weit.
+
+Angewandt an drei Stellen, die alle vorher Ids verglichen:
+
+- `geofence_set`: die Zeilen werden erst zusammengefaltet (erste Schreibweise gewinnt, weil die
+  Zeilen in Häufigkeitsreihenfolge kommen; die Check-ins addieren sich), dann wie vorher gefiltert.
+  Auch der Stammbahnhof wird über die Schranke gesucht, sonst kam er ein zweites Mal unter der Id
+  zurück, die das Zusammenfalten behalten hat.
+- `rank_destinations`: gruppiert nach Bahnsteig statt nach Id, und der Bahnhof, an dem man steht,
+  fällt auch unter seinem anderen Namen heraus (den Namen dazu findet die Funktion in der Historie
+  selbst — kein neuer Query-Parameter).
+- die „Zuletzt"-Liste in `destinations`: dasselbe.
+
+In der App wurde nichts geändert: die eine Schranke dort (`sameStation`) gehört an die Stelle, wo
+zwei Quellen zusammenkommen, und dort steht sie. Damit reicht ein Deploy — Build 20 bekommt die
+saubere Liste, ohne dass etwas Neues installiert werden muss.
+
+Tests: `same_platform` (zwei Feeds, ein Bahnsteig · Wortpräfix bleibt getrennt · gleicher Name in
+einer anderen Stadt bleibt getrennt · leerer Name trifft nur seine eigene Id), `geofence_set`
+(Zusammenfalten mit Summe; der Stammbahnhof nicht zweimal) und `rank_destinations`
+(nach Bahnsteig gezählt; der eigene Standort fällt unter beiden Ids heraus). 60 Rust-Tests.

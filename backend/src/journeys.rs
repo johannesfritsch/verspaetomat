@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::auth::{internal, Customer};
 use crate::db::rows::*;
 use crate::rules;
-use crate::train::{Itinerary, PlanLeg, TripInfo};
+use crate::train::{same_platform, Itinerary, PlanLeg, StationRef, TripInfo};
 use crate::AppState;
 
 type ApiResult = Result<Json<Value>, (StatusCode, Json<Value>)>;
@@ -73,20 +73,32 @@ pub struct Predicted {
 /// The home station comes first when `home` is set and differs from `from`. The current station
 /// is never a destination. Ties: more recent first, then by name.
 pub fn rank_destinations(history: &[DestHistory], from: Option<&str>, home: Option<&str>) -> Vec<Predicted> {
-    let mut acc: std::collections::HashMap<&str, (Predicted, DateTime<Utc>)> = std::collections::HashMap::new();
+    // Ids come from two feeds and one platform can have two of them (`same_platform`), so the
+    // history is grouped by platform. Keyed by id, „Nach Kißlegg" appeared twice with half its
+    // count on each. There are no coordinates in this list, so the names carry the decision.
+    let from_name = from.and_then(|f| history.iter().find(|h| h.station_id == f).map(|h| h.station_name.as_str()));
+    let mut acc: Vec<(Predicted, DateTime<Utc>)> = Vec::new();
     for h in history {
-        if Some(h.station_id.as_str()) == from {
-            continue;
+        let here = StationRef::named(&h.station_id, &h.station_name);
+        // The station you are standing at is not a destination — not under its other name either.
+        if let Some(f) = from {
+            if same_platform(here, StationRef::named(f, from_name.unwrap_or(""))) {
+                continue;
+            }
         }
-        let e = acc.entry(h.station_id.as_str()).or_insert((Predicted { station_id: h.station_id.clone(), station_name: h.station_name.clone(), count: 0, score: 0.0 }, h.at));
-        e.0.count += 1;
-        e.0.score += 1.0;
-        if h.at > e.1 {
-            e.1 = h.at;
+        match acc.iter_mut().find(|(p, _)| same_platform(StationRef::named(&p.station_id, &p.station_name), here)) {
+            Some((p, at)) => {
+                p.count += 1;
+                p.score += 1.0;
+                if h.at > *at {
+                    *at = h.at;
+                }
+            }
+            None => acc.push((Predicted { station_id: h.station_id.clone(), station_name: h.station_name.clone(), count: 1, score: 1.0 }, h.at)),
         }
     }
     let away = matches!((home, from), (Some(h), Some(f)) if h != f) || (home.is_some() && from.is_none());
-    let mut out: Vec<(Predicted, DateTime<Utc>)> = acc.into_values().collect();
+    let mut out: Vec<(Predicted, DateTime<Utc>)> = acc;
     out.sort_by(|a, b| {
         let ah = away && Some(a.0.station_id.as_str()) == home;
         let bh = away && Some(b.0.station_id.as_str()) == home;
@@ -702,8 +714,19 @@ pub async fn destinations(State(s): State<AppState>, c: Customer, Query(q): Quer
         })
         .collect();
     let mut recent: Vec<Value> = Vec::new();
+    let from_name = q.from.as_deref().and_then(|f| history.iter().find(|h| h.station_id == f).map(|h| h.station_name.clone()));
     for h in &history {
-        if Some(h.station_id.as_str()) == q.from.as_deref() || recent.iter().any(|r| r["station_id"] == h.station_id) {
+        let here = StationRef::named(&h.station_id, &h.station_name);
+        if q.from.as_deref().map(|f| same_platform(here, StationRef::named(f, from_name.as_deref().unwrap_or("")))).unwrap_or(false) {
+            continue;
+        }
+        // By platform, not by id: „Zuletzt" listed the same station twice under two feed ids.
+        if recent.iter().any(|r| {
+            same_platform(
+                StationRef::named(r["station_id"].as_str().unwrap_or(""), r["station_name"].as_str().unwrap_or("")),
+                here,
+            )
+        }) {
             continue;
         }
         recent.push(json!({ "station_id": h.station_id, "station_name": h.station_name, "last_at": h.at }));
@@ -1563,5 +1586,26 @@ mod tests {
         assert!(rank_destinations(&history, Some("koeln"), Some("koeln")).iter().all(|p| p.station_id != "koeln"));
         // The current station never predicts itself.
         assert!(rank_destinations(&history, Some("bonn"), None).iter().all(|p| p.station_id != "bonn"));
+    }
+
+    /// docs/30: one platform, two feed ids. Keyed by id this offered „Nach Kißlegg" twice, each
+    /// with half the rides behind it, and offered the station the customer was standing at.
+    #[test]
+    fn destinations_are_ranked_by_platform_not_by_id() {
+        let t = |d: i64| Utc::now() - Duration::days(d);
+        let history = vec![
+            DestHistory { station_id: "amarillo-bw:kisslegg".into(), station_name: "Kißlegg".into(), at: t(1) },
+            DestHistory { station_id: "de:08436:12345".into(), station_name: "Kißlegg Bahnhof".into(), at: t(2) },
+            DestHistory { station_id: "muenchen".into(), station_name: "München Hbf".into(), at: t(3) },
+            DestHistory { station_id: "muenchen".into(), station_name: "München Hbf".into(), at: t(4) },
+        ];
+        let r = rank_destinations(&history, None, None);
+        assert_eq!(r.len(), 2, "{r:?}");
+        assert_eq!(r[0].station_name, "Kißlegg", "two rides to one platform outrank two to München on recency");
+        assert_eq!(r[0].count, 2, "both rides count for the same place");
+
+        // Standing at Kißlegg under the other feed's id, Kißlegg is not a destination.
+        let r = rank_destinations(&history, Some("de:08436:12345"), None);
+        assert!(r.iter().all(|p| !p.station_name.starts_with("Kißlegg")), "{r:?}");
     }
 }

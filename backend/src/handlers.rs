@@ -19,7 +19,7 @@ use base64::Engine;
 use crate::auth::{internal, sha256, Customer};
 use crate::db::rows::*;
 use crate::rules::{self, Cents};
-use crate::train::{agency_to_operator, normalise_station_name, TripInfo};
+use crate::train::{agency_to_operator, normalise_station_name, same_platform, StationRef, TripInfo};
 
 fn row_category(c: crate::train::TrainCategory) -> TrainCategory {
     match c.as_str() {
@@ -422,25 +422,57 @@ pub struct GeofenceStation {
 }
 
 /// Pure part of [geofence]: rows are (id, name, lat, lon, checkins) in frequency order.
+///
+/// One platform is one station, even where the feeds give it two ids (`same_platform`): the rows
+/// are merged first, so the phone registers one region for Kißlegg instead of two of its twenty,
+/// and the check-ins that decide the order are counted together.
 pub fn geofence_set(rows: Vec<(String, String, f64, f64, i64)>, home: Option<(String, String, f64, f64)>, muted: &[MutedStation], cap: usize) -> Vec<GeofenceStation> {
     let is_muted = |id: &str| muted.iter().any(|m| m.id == id);
+    let merged = merge_platforms(rows);
     let mut out: Vec<GeofenceStation> = Vec::new();
     if let Some((id, name, lat, lon)) = home {
         if !is_muted(&id) {
-            let checkins = rows.iter().find(|r| r.0 == id).map(|r| r.4).unwrap_or(0);
+            // The home station's own row may have been merged into a differently spelled one, so
+            // its count is looked up by platform and not by id.
+            let checkins = merged
+                .iter()
+                .find(|r| same_platform(StationRef::at(&r.0, &r.1, r.2, r.3), StationRef::at(&id, &name, lat, lon)))
+                .map(|r| r.4)
+                .unwrap_or(0);
             out.push(GeofenceStation { id, name, lat, lon, checkins });
         }
     }
-    for (id, name, lat, lon, checkins) in rows {
+    for (id, name, lat, lon, checkins) in merged {
         if out.len() >= cap {
             break;
         }
-        if is_muted(&id) || out.iter().any(|o| o.id == id) {
+        // Also by platform: otherwise the home station, listed under the id the customer set,
+        // comes back a second time under the id the merge happened to keep.
+        if is_muted(&id) || out.iter().any(|o| same_platform(StationRef::at(&o.id, &o.name, o.lat, o.lon), StationRef::at(&id, &name, lat, lon))) {
             continue;
         }
         out.push(GeofenceStation { id, name, lat, lon, checkins });
     }
     out.truncate(cap);
+    out
+}
+
+/// Fold the rows of one platform into one row: the first spelling wins, because the rows arrive
+/// in frequency order and that is the one this customer met most often; the check-ins add up.
+fn merge_platforms(rows: Vec<(String, String, f64, f64, i64)>) -> Vec<(String, String, f64, f64, i64)> {
+    let mut out: Vec<(String, String, f64, f64, i64)> = Vec::new();
+    for (id, name, lat, lon, checkins) in rows {
+        match out
+            .iter_mut()
+            .find(|o| same_platform(StationRef::at(&o.0, &o.1, o.2, o.3), StationRef::at(&id, &name, lat, lon)))
+        {
+            Some(o) => o.4 += checkins,
+            None => out.push((id, name, lat, lon, checkins)),
+        }
+    }
+    // Adding up can change the order: a merged platform may now outrank one that was above it.
+    // A stable sort keeps the feed's recency order among equal counts.
+    out.sort_by(|a, b| b.4.cmp(&a.4));
     out
 }
 
@@ -2054,6 +2086,37 @@ mod inbound_tests {
     }
 
     #[test]
+    /// docs/30: two feeds, one platform. Before the merge this produced two regions on the phone
+    /// and two „Ab Kißlegg Bahnhof" on Home, each with half the check-ins.
+    #[test]
+    fn geofence_set_merges_one_platform_from_two_feeds() {
+        let rows = vec![
+            ("de:08436:12345".to_string(), "Kißlegg Bahnhof".to_string(), 47.7931, 9.8869, 2),
+            ("muenchen".to_string(), "München Hbf".to_string(), 48.1402, 11.5586, 2),
+            ("amarillo-bw:kisslegg".to_string(), "Kißlegg".to_string(), 47.7935, 9.8871, 2),
+        ];
+        let set = geofence_set(rows, None, &[], 15);
+        assert_eq!(set.len(), 2, "one Kißlegg, one München: {set:?}");
+        assert_eq!(set[0].name, "Kißlegg Bahnhof", "the spelling met most often, and now the most frequent station");
+        assert_eq!(set[0].checkins, 4, "the check-ins add up");
+        assert_eq!(set[1].name, "München Hbf");
+    }
+
+    /// The home station is listed under the id the customer set, which may not be the id the
+    /// merge kept — and then it used to come back a second time.
+    #[test]
+    fn geofence_set_home_is_not_listed_twice_under_the_other_id() {
+        let rows = vec![
+            ("amarillo-bw:kisslegg".to_string(), "Kißlegg".to_string(), 47.7935, 9.8871, 3),
+            ("de:08436:12345".to_string(), "Kißlegg Bahnhof".to_string(), 47.7931, 9.8869, 1),
+        ];
+        let home = Some(("de:08436:12345".to_string(), "Kißlegg Bahnhof".to_string(), 47.7931, 9.8869));
+        let set = geofence_set(rows, home, &[], 15);
+        assert_eq!(set.len(), 1, "{set:?}");
+        assert_eq!(set[0].id, "de:08436:12345", "the home station keeps its own id");
+        assert_eq!(set[0].checkins, 4, "with the whole platform's count");
+    }
+
     fn geofence_set_home_first_muted_out_capped() {
         let rows = vec![
             ("a".into(), "A".into(), 50.0, 7.0, 9),

@@ -301,6 +301,55 @@ pub fn station_names_match(a: &str, b: &str) -> bool {
     long.starts_with(short.as_str()) && long[short.len()..].starts_with(' ')
 }
 
+/// One record of a platform, as our lists carry it.
+#[derive(Debug, Clone, Copy)]
+pub struct StationRef<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+    /// Where the platform is, when the list knows. The destination lists do not store it.
+    pub at: Option<(f64, f64)>,
+}
+
+impl<'a> StationRef<'a> {
+    pub fn at(id: &'a str, name: &'a str, lat: f64, lon: f64) -> Self {
+        Self { id, name, at: Some((lat, lon)) }
+    }
+    pub fn named(id: &'a str, name: &'a str) -> Self {
+        Self { id, name, at: None }
+    }
+}
+
+/// **The one gate that decides whether two records are the same platform.** Every list of
+/// stations we hand out passes through it.
+///
+/// The feeds disagree about ids. DELFI and amarillo-bw both carry Kißlegg, with different ids and
+/// sometimes different spellings, so a customer who had checked in from both got two
+/// „Ab Kißlegg Bahnhof" on Home, two of the phone's twenty geofence regions for one platform, and
+/// their check-ins split across two rows — which also decided the Stammbahnhof wrongly.
+///
+/// Deliberately stricter than [station_names_match]: that one accepts a word-prefix, and „Wangen"
+/// is a word-prefix of „Wangen im Allgäu Nord" while being a different stop.
+pub fn same_platform(a: StationRef<'_>, b: StationRef<'_>) -> bool {
+    if a.id == b.id {
+        return true;
+    }
+    let (na, nb) = (normalise_station_name(a.name), normalise_station_name(b.name));
+    if na.is_empty() || na != nb {
+        return false;
+    }
+    match (a.at, b.at) {
+        (Some((alat, alon)), Some((blat, blon))) => haversine_m(alat, alon, blat, blon) <= SAME_PLATFORM_M,
+        // Without coordinates the name is all there is. Two towns with the same station name do
+        // exist; one shortcut for both is a smaller fault than the same name listed twice, and
+        // the other station is still one search away.
+        _ => true,
+    }
+}
+
+/// Two feeds put the same platform a few hundred metres apart at most. A kilometre is generous
+/// and still nowhere near the next town's station.
+pub const SAME_PLATFORM_M: f64 = 1_000.0;
+
 /// Great-circle distance in metres.
 pub fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let r = 6_371_000.0_f64;
@@ -314,6 +363,38 @@ pub fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// docs/30: Home showed „Ab Kißlegg Bahnhof" twice. The two rows were the same platform from
+    /// two feeds, so nothing that compared ids could see it.
+    #[test]
+    fn one_platform_under_two_feed_ids() {
+        let a = StationRef::at("de:08436:12345", "Kißlegg Bahnhof", 47.7931, 9.8869);
+        let b = StationRef::at("amarillo-bw:kisslegg", "Kißlegg", 47.7935, 9.8871);
+        assert!(same_platform(a, b), "same name after normalisation, 40 m apart");
+        assert!(same_platform(b, a), "and the other way round");
+    }
+
+    #[test]
+    fn a_word_prefix_is_not_the_same_platform() {
+        let a = StationRef::at("a", "Wangen", 47.6833, 9.8333);
+        let b = StationRef::at("b", "Wangen im Allgäu Nord", 47.6900, 9.8400);
+        assert!(!same_platform(a, b), "station_names_match would accept this; we must not");
+    }
+
+    #[test]
+    fn the_same_name_in_another_town_stays_another_station() {
+        let a = StationRef::at("a", "Neustadt", 49.3500, 8.1400);
+        let b = StationRef::at("b", "Neustadt", 51.0300, 13.8100);
+        assert!(!same_platform(a, b), "400 km apart");
+        // Without coordinates the name is all we have, and one shortcut is better than two rows.
+        assert!(same_platform(StationRef::named("a", "Neustadt"), StationRef::named("b", "Neustadt")));
+    }
+
+    #[test]
+    fn an_empty_name_matches_only_its_own_id() {
+        assert!(same_platform(StationRef::named("a", ""), StationRef::named("a", "Köln Hbf")));
+        assert!(!same_platform(StationRef::named("a", ""), StationRef::named("b", "")));
+    }
 
     /// docs/28: Kißlegg → Aulendorf on a Friday evening is a bus called RB53. Without this the
     /// app offered three changes through Memmingen for a journey that is one direct ride.
