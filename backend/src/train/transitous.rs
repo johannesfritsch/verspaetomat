@@ -31,6 +31,11 @@ const RANK_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,L
 /// MOTIS transit modes that are railway service (docs/17); the plan never proposes bus or tram legs.
 const RAIL_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,SUBURBAN";
 
+/// What we ask the planner for. `BUS` is in here only so a Schienenersatzverkehr can be found;
+/// `itinerary_from` throws away every bus that is not standing in for a train, so an ordinary
+/// city bus never becomes a leg of a journey (docs/28).
+const PLAN_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,SUBURBAN,BUS,COACH";
+
 #[derive(Clone)]
 pub struct TransitousClient {
     http: reqwest::Client,
@@ -236,7 +241,7 @@ impl TransitousClient {
                     ("toPlace", to.to_string()),
                     ("time", time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
                     ("numItineraries", n.max(1).to_string()),
-                    ("transitModes", RAIL_MODES.to_string()),
+                    ("transitModes", PLAN_MODES.to_string()),
                 ],
             )
             .await?;
@@ -364,10 +369,12 @@ fn departure_from(st: StopTime) -> Option<DepartureInfo> {
 fn itinerary_from(it: PlanItinerary) -> Option<Itinerary> {
     let mut legs = Vec::new();
     for l in it.legs.into_iter().filter(|l| l.mode != "WALK") {
-        if !is_rail_mode(&l.mode) {
+        let (line, train_number) = parse_line(l.route_short_name.as_deref().unwrap_or(""));
+        // A bus under a train's line number is a replacement and belongs to the journey; any
+        // other bus means this itinerary is not a rail journey at all (docs/28).
+        if !crate::train::is_journey_mode(&l.mode, &line) {
             return None;
         }
-        let (line, train_number) = parse_line(l.route_short_name.as_deref().unwrap_or(""));
         let agency_name = l.agency_name.clone().unwrap_or_default();
         let planned_departure = l.from.scheduled_departure.or(l.scheduled_start_time).or(l.from.departure)?;
         let planned_arrival = l.to.scheduled_arrival.or(l.scheduled_end_time).or(l.to.arrival)?;

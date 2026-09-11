@@ -56,6 +56,8 @@ number wins.
 | [24-einchecken-flow-und-ruhe.md](24-einchecken-flow-und-ruhe.md) | build 13 | One live station source, the check-in asks where you are, Zug wechseln, a snooze |
 | [25-geofence-v2-und-diagnose.md](25-geofence-v2-und-diagnose.md) | build 13 | Significant Location Change, a coverage disc, a 3-minute dwell, the Entwicklung page |
 | [26-fahrt-lesen-und-blaetter.md](26-fahrt-lesen-und-blaetter.md) | build 15 | Home stops ranking, sheets pull down again, Dein Zweck opens the choice, the ride reads as one journey |
+| [27-teilen.md](27-teilen.md) | build 15 | Teilen: the Fahrkarte, five faces, the four lines, Lochzangen-Konfetti |
+| [28-schienenersatzverkehr.md](28-schienenersatzverkehr.md) | build 17 | A bus running under a train's line number is part of the journey; the planner was dropping every one |
 
 Two numbers are used twice: `20-backend.md` and `21-data-requirements.md` came first, the decision
 series later walked into the same numbers. In prose and in code comments a bare **docs/20** or

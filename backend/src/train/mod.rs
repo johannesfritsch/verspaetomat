@@ -171,6 +171,35 @@ pub fn is_rail_mode(mode: &str) -> bool {
     )
 }
 
+/// Schienenersatzverkehr: a bus doing a train's job (docs/28).
+///
+/// When a line is closed, the replacement runs under the **line's own number** — Kißlegg to
+/// Aulendorf on a Friday evening is `BUS` with `routeShortName: "RB53"`, operated by DB ZugBus
+/// Alb-Bodensee. A city bus is numbered `7`, `X41`, `N3`; a train is `RB 53`, `RE 96`, `S 12`.
+/// The prefix is what tells them apart, and it is the only honest signal in the feed.
+///
+/// This matters beyond convenience: a replacement bus is part of the rail contract, so the
+/// delay on it is claimable like any other — and the app has carried a `Schienenersatzverkehr`
+/// badge since docs/12 for exactly this. Leaving these out meant the one journey most likely to
+/// go wrong was the one journey the app could not plan.
+pub fn is_rail_replacement(mode: &str, line: &str) -> bool {
+    if mode != "BUS" && mode != "COACH" {
+        return false;
+    }
+    let prefix: String = line.chars().take_while(|c| c.is_alphabetic()).collect::<String>().to_uppercase();
+    let has_number = line.chars().any(|c| c.is_ascii_digit());
+    has_number
+        && matches!(
+            prefix.as_str(),
+            "ICE" | "IC" | "EC" | "ECE" | "RJ" | "RJX" | "NJ" | "FLX" | "TGV" | "EN" | "IR" | "RE" | "IRE" | "MEX" | "RRX" | "REX" | "RB" | "RS" | "S"
+        )
+}
+
+/// A leg the app will carry: a train, or a bus standing in for one.
+pub fn is_journey_mode(mode: &str, line: &str) -> bool {
+    is_rail_mode(mode) || is_rail_replacement(mode, line)
+}
+
 /// "RE7 (17429)" -> ("RE 7", Some("17429")); "S12" -> ("S 12", None); "ICE 26" -> ("ICE 26", None); "18" -> ("18", None)
 pub fn parse_line(route_short_name: &str) -> (String, Option<String>) {
     let raw = route_short_name.trim();
@@ -273,6 +302,35 @@ pub fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// docs/28: Kißlegg → Aulendorf on a Friday evening is a bus called RB53. Without this the
+    /// app offered three changes through Memmingen for a journey that is one direct ride.
+    #[test]
+    fn a_bus_under_a_train_number_is_rail_replacement() {
+        assert!(is_rail_replacement("BUS", "RB 53"));
+        assert!(is_rail_replacement("BUS", "RB53"));
+        assert!(is_rail_replacement("BUS", "RE 96"));
+        assert!(is_rail_replacement("COACH", "IC 2013"));
+        assert!(is_rail_replacement("BUS", "S 6"));
+
+        // An ordinary bus is not a train, whatever it is called.
+        assert!(!is_rail_replacement("BUS", "7"));
+        assert!(!is_rail_replacement("BUS", "X41"));
+        assert!(!is_rail_replacement("BUS", "N3"));
+        assert!(!is_rail_replacement("BUS", "SEV"), "a line with no number tells us nothing");
+        // A train is not a replacement; it is the thing being replaced.
+        assert!(!is_rail_replacement("REGIONAL_RAIL", "RB 53"));
+    }
+
+    #[test]
+    fn a_journey_is_trains_and_the_buses_stood_in_for_them() {
+        assert!(is_journey_mode("REGIONAL_RAIL", "RB 53"));
+        assert!(is_journey_mode("BUS", "RB 53"));
+        assert!(!is_journey_mode("BUS", "7"));
+        assert!(!is_journey_mode("TRAM", "1"));
+    }
+
     use super::*;
 
     #[test]
