@@ -23,6 +23,7 @@ const tour = <(String, String)>[
   ('setup', Routes.setup),
   ('bahnsteig', Routes.bahnsteig),
   ('checkin', '${Routes.checkin}?station=koeln-hbf'),
+  ('exit-stop', '${Routes.exitStop}?departure=re7-0747&station=koeln-hbf&name=K%C3%B6ln%20Hbf'),
   ('wohin', '${Routes.wohin}?station=koeln-hbf&name=K%C3%B6ln%20Hbf'),
   ('wohin-zug', '${Routes.wohin}?station=koeln-hbf&name=K%C3%B6ln%20Hbf&departure=re7-0747&line=RE%207'),
   ('welcher-zug', '${Routes.welcherZug}?from=koeln-hbf&fromName=K%C3%B6ln%20Hbf&to=mock%3Ad-sseldorf-hbf&toName=D%C3%BCsseldorf%20Hbf'),

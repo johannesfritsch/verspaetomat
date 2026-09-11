@@ -152,3 +152,7 @@ const bote = LegalDoc(
 const legalDocs = [impressum, datenschutz, bote];
 
 LegalDoc legalDocById(String id) => legalDocs.firstWhere((d) => d.id == id, orElse: () => impressum);
+
+/// The version shown in Einstellungen on a release build (docs/22 §3). `tools/release.sh`
+/// passes the real `1.0.0 (13)`; a plain `flutter run` falls back to the pubspec's version.
+const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '1.0.0');

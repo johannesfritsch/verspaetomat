@@ -33,7 +33,7 @@ AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKey
 
 echo "== Verspätomat $VERSION ($BUILD) → $API_URL"
 flutter build ios --release --config-only --build-name="$VERSION" --build-number="$BUILD" \
-  --dart-define=API_URL="$API_URL" --dart-define=BACKEND=local >/dev/null
+  --dart-define=API_URL="$API_URL" --dart-define=BACKEND=local --dart-define=APP_VERSION="$VERSION ($BUILD)" >/dev/null
 
 echo "== archive"
 rm -rf "$ARCHIVE"

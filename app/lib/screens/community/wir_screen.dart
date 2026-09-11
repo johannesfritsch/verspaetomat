@@ -7,16 +7,30 @@ import '../../api/models.dart';
 import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
+import '../../screens/ride/ride_widgets.dart' show shortError;
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
 
 class _WirData {
-  const _WirData(this.community, this.standing);
+  const _WirData(this.community, this.standing, this.boards);
   final ApiCommunity community;
   final ApiStanding standing;
+
+  /// All three boards, loaded with the rest of Wir (docs/22 §2). A tab switch then only
+  /// swaps rows that are already there: no loader, no height change, no scroll jump.
+  final Map<String, _BoardData> boards;
 }
+
+/// One board as it came back: its rows, or why they are missing.
+class _BoardData {
+  const _BoardData(this.entries, this.error);
+  final List<ApiBoardEntry> entries;
+  final String? error;
+}
+
+const _boardScopes = ['line', 'city', 'germany'];
 
 /// Wir: the community. Minutes waited together, the Vereine, the boards (docs/20: nothing
 /// about the customer alone here; that is Ich).
@@ -54,8 +68,6 @@ class _WirScreenState extends State<WirScreen> {
     super.dispose();
   }
 
-  String get _scope => switch (_board) { 0 => 'line', 1 => 'city', _ => 'germany' };
-
   @override
   Widget build(BuildContext context) {
     final session = RepoScope.of(context);
@@ -64,7 +76,15 @@ class _WirScreenState extends State<WirScreen> {
       load: (repo) async {
         final c = await repo.community();
         final st = await repo.standing().catchError((_) => ApiStanding.empty);
-        return _WirData(c, st);
+        final boards = <String, _BoardData>{};
+        for (final scope in _boardScopes) {
+          try {
+            boards[scope] = _BoardData(await repo.boards(scope), null);
+          } catch (e) {
+            boards[scope] = _BoardData(const [], shortError(e));
+          }
+        }
+        return _WirData(c, st, boards);
       },
       builder: (context, data, refresh) {
         final c = data.community;
@@ -122,7 +142,12 @@ class _WirScreenState extends State<WirScreen> {
                 style: VText.caption,
               ),
               const VGap.s(),
-              _Board(scope: _scope),
+              IndexedStack(
+                index: _board,
+                alignment: Alignment.topLeft,
+                sizing: StackFit.loose,
+                children: [for (final scope in _boardScopes) _Board(board: data.boards[scope])],
+              ),
               const VGap.s(),
               Text(
                 (session.me?.settings.showOnBoards ?? true) ? 'Nur verifizierte Fahrten zählen.' : 'Nur verifizierte Fahrten zählen. Du bist in den Ranglisten verborgen.',
@@ -169,34 +194,33 @@ class _WirScreenState extends State<WirScreen> {
   }
 }
 
-/// The board for one scope, loaded on its own so tab switches are cheap.
+/// One board's rows, already in hand (docs/22 §2). Switching tabs must never load, because
+/// a loader is shorter than a board and the page would jump under the reader's thumb.
 class _Board extends StatelessWidget {
-  const _Board({required this.scope});
-  final String scope;
+  const _Board({required this.board});
+  final _BoardData? board;
 
   @override
   Widget build(BuildContext context) {
-    return Loader<List<ApiBoardEntry>>(
-      key: ValueKey(scope),
-      load: (repo) => repo.boards(scope),
-      builder: (context, entries, _) {
-        final top = entries.where((e) => e.rank <= 10).toList();
-        final me = entries.where((e) => e.isMe && e.rank > 10).toList();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (entries.isEmpty) Text('Noch niemand auf dieser Liste.', style: VText.caption),
-            for (final e in top) BoardRow(entry: e),
-            if (me.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text('· · ·', style: VText.caption.copyWith(letterSpacing: 4)),
-              ),
-              for (final e in me) BoardRow(entry: e),
-            ],
-          ],
-        );
-      },
+    final b = board;
+    if (b == null) return Text('Rangliste wird geladen …', style: VText.caption);
+    if (b.error != null) return Text('Rangliste nicht erreichbar: ${b.error}', style: VText.caption.copyWith(color: VColors.red));
+    final entries = b.entries;
+    final top = entries.where((e) => e.rank <= 10).toList();
+    final me = entries.where((e) => e.isMe && e.rank > 10).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (entries.isEmpty) Text('Noch niemand auf dieser Liste.', style: VText.caption),
+        for (final e in top) BoardRow(entry: e),
+        if (me.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Text('· · ·', style: VText.caption.copyWith(letterSpacing: 4)),
+          ),
+          for (final e in me) BoardRow(entry: e),
+        ],
+      ],
     );
   }
 }

@@ -252,6 +252,8 @@ class StopLine extends StatefulWidget {
     this.onSelect,
     this.compact = false,
     this.firstSelectable = 1,
+    this.showRadios = false,
+    this.inlineChild,
   });
   final List<ApiStop> stops;
 
@@ -265,17 +267,39 @@ class StopLine extends StatefulWidget {
   /// Stops before this index cannot be selected as the exit.
   final int firstSelectable;
 
+  /// docs/22 §5: draw a radio mark in front of every selectable stop, so the list reads as a
+  /// set of options rather than a decoration. Off everywhere else, where the timeline is only
+  /// showing where the train is.
+  final bool showRadios;
+
+  /// Sits directly under the selected stop, inside the list — the place where the choice is
+  /// confirmed. The list scrolls it into view whenever the selection moves.
+  final Widget? inlineChild;
+
   @override
   State<StopLine> createState() => _StopLineState();
 }
 
 class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin {
   late final AnimationController _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat(reverse: true);
+  final _inlineKey = GlobalKey();
 
   @override
   void dispose() {
     _pulse.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant StopLine old) {
+    super.didUpdateWidget(old);
+    // The confirm block travels with the selection; keep it where the thumb already is.
+    if (widget.inlineChild != null && old.selectedIndex != widget.selectedIndex) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = _inlineKey.currentContext;
+        if (ctx != null && mounted) Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 220), alignment: 0.7);
+      });
+    }
   }
 
   @override
@@ -313,6 +337,7 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
         },
       );
 
+      final selectable = widget.onSelect != null && i >= widget.firstSelectable && !afterExit;
       rows.add(
         InkWell(
           onTap: widget.onSelect == null || i < widget.firstSelectable ? null : () => widget.onSelect!(i),
@@ -321,6 +346,21 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // docs/22 §5: the mark that says "this is a choice". Only where the list is
+                // actually a set of options; a stop already behind the train gets none.
+                if (widget.showRadios)
+                  SizedBox(
+                    width: 30,
+                    child: Center(
+                      child: selectable
+                          ? Icon(
+                              isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                              size: 22,
+                              color: isSelected ? VColors.red : VColors.ink3,
+                            )
+                          : const SizedBox(width: 22),
+                    ),
+                  ),
                 SizedBox(
                   width: 28,
                   child: Stack(
@@ -368,6 +408,16 @@ class _StopLineState extends State<StopLine> with SingleTickerProviderStateMixin
           ),
         ),
       );
+      // The confirm block lives inside the list, under the stop it confirms (docs/22 §5).
+      if (widget.inlineChild != null && isSelected) {
+        rows.add(
+          Padding(
+            key: _inlineKey,
+            padding: EdgeInsets.only(left: widget.showRadios ? 30 + 12 : 28 + 12, right: 2, bottom: 4),
+            child: widget.inlineChild,
+          ),
+        );
+      }
     }
     return Column(children: rows);
   }

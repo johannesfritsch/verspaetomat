@@ -453,10 +453,9 @@ class _EmptyAntraege extends StatelessWidget {
     ];
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.m),
+      // docs/22 §4: no box. Nothing is collected yet, so nothing should look like a container.
       child: Container(
         key: const Key('antraege-empty'),
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(border: Border.all(color: VColors.ink, width: 1.5), borderRadius: BorderRadius.circular(4)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -254,7 +254,7 @@ class MockRepository implements AppRepository {
       finalDelayMin: j.finalDelay,
       missedConnection: j.missedConnection,
       cancelled: j.legs.any((l) => l.cancelled),
-      points: j.finalDelay ?? 0,
+      points: j.points != 0 ? j.points : (j.finalDelay ?? 0),
       ticket: state.ticket,
       currentLeg: j.currentLeg,
       legs: legs,

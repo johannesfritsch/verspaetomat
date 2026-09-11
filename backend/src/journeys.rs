@@ -739,6 +739,16 @@ pub fn end_reason_for(arrived: bool, reason: Option<&str>) -> Result<&'static st
     }
 }
 
+/// docs/22 §1: what an aborted journey is worth in Geduldspunkte. Giving up loses the claim —
+/// compensation hangs on arriving — but not the patience, because the waiting really happened.
+/// Never having boarded is worth nothing: that journey did not happen at all.
+pub fn abandon_points(end_reason: &str, delay_min: i64, cancelled: bool) -> i64 {
+    match end_reason {
+        "aufgegeben" => rules::points_for(delay_min, cancelled, false),
+        _ => 0,
+    }
+}
+
 /// `POST /v1/journeys/{id}/finish`: "Ich bin da" (arrived) or abort.
 pub async fn finish(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(b): Json<FinishBody>) -> ApiResult {
     let j = journey_of(&s.pool, c.0.id, id).await?;
@@ -756,17 +766,32 @@ pub async fn finish(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
         let actual = now;
         finalise_journey(s.clone(), &j, actual, j.planned_arrival, false, false, "finished by the passenger").await.map_err(internal)?
     } else {
+        // docs/22 §1: giving up loses the claim (compensation hangs on arriving) but not the
+        // patience — the waiting really happened, so the leg keeps its Geduldspunkte. Having
+        // never boarded earns nothing: that journey did not happen at all.
+        let points = riding.as_ref().map(|r| abandon_points(end_reason, r.live_delay_min as i64, r.cancelled)).unwrap_or(0);
         if let Some(r) = &riding {
-            sqlx::query("update rides set status = 'abandoned' where id = $1").bind(r.id).execute(&s.pool).await.map_err(internal)?;
+            if end_reason == "aufgegeben" {
+                sqlx::query("update rides set status = 'abandoned', points = $2, final_delay_min = $3, finalised_at = now() where id = $1")
+                    .bind(r.id)
+                    .bind(points as i32)
+                    .bind(r.live_delay_min)
+                    .execute(&s.pool)
+                    .await
+                    .map_err(internal)?;
+            } else {
+                sqlx::query("update rides set status = 'abandoned' where id = $1").bind(r.id).execute(&s.pool).await.map_err(internal)?;
+            }
         }
-        let u: JourneyRow = sqlx::query_as("update journeys set status = 'abandoned', end_reason = $2, next_leg = null, transfer_deadline = null, finalised_at = now() where id = $1 returning *")
+        let u: JourneyRow = sqlx::query_as("update journeys set status = 'abandoned', end_reason = $2, points = $3, next_leg = null, transfer_deadline = null, finalised_at = now() where id = $1 returning *")
             .bind(j.id)
             .bind(end_reason)
+            .bind(points as i32)
             .fetch_one(&s.pool)
             .await
             .map_err(internal)?;
         rules::audit(&s.pool, "journey", j.id, Some("riding"), "abandoned", end_reason).await.map_err(internal)?;
-        s.events.publish(c.0.id, "journey", json!({ "journey_id": j.id, "status": "abandoned", "transfer": false, "arrived": false, "finished": true, "missed_connection": u.missed_connection, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null, "end_reason": end_reason }));
+        s.events.publish(c.0.id, "journey", json!({ "journey_id": j.id, "status": "abandoned", "transfer": false, "arrived": false, "finished": true, "missed_connection": u.missed_connection, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null, "end_reason": end_reason, "points": points }));
         (u, None)
     };
     let _ = fin;
@@ -965,13 +990,28 @@ pub async fn expire_transfers(s: &AppState) -> anyhow::Result<usize> {
             // No leg ever arrived: the passenger gave up on their first train, said they would
             // continue later (docs/21 §2) and never did. They reached no stop, so there is no
             // delay to measure and no claim to make — compensation hangs on arriving (docs/02).
+            // The waiting still counts (docs/22 §1): the leg the passenger stepped off keeps
+            // its Geduldspunkte, exactly as if they had said "Ich gebe auf" on the spot.
+            sqlx::query("update rides set status = 'abandoned' where journey_id = $1 and status = 'riding'").bind(j.id).execute(&s.pool).await?;
+            let waited: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 and status = 'abandoned' order by leg_no desc limit 1").bind(j.id).fetch_optional(&s.pool).await?;
+            let points = waited.as_ref().map(|r| abandon_points("aufgegeben", r.live_delay_min as i64, r.cancelled)).unwrap_or(0);
+            if let Some(r) = &waited {
+                if r.finalised_at.is_none() && points > 0 {
+                    sqlx::query("update rides set points = $2, final_delay_min = $3, finalised_at = now() where id = $1")
+                        .bind(r.id)
+                        .bind(points as i32)
+                        .bind(r.live_delay_min)
+                        .execute(&s.pool)
+                        .await?;
+                }
+            }
             let u: JourneyRow = sqlx::query_as(
-                "update journeys set status = 'abandoned', end_reason = 'aufgegeben', next_leg = null, transfer_deadline = null, finalised_at = now() where id = $1 returning *",
+                "update journeys set status = 'abandoned', end_reason = 'aufgegeben', points = $2, next_leg = null, transfer_deadline = null, finalised_at = now() where id = $1 returning *",
             )
             .bind(j.id)
+            .bind(points as i32)
             .fetch_one(&s.pool)
             .await?;
-            sqlx::query("update rides set status = 'abandoned' where journey_id = $1 and status = 'riding'").bind(j.id).execute(&s.pool).await?;
             rules::audit(&s.pool, "journey", j.id, Some("transfer"), "abandoned", "no leg was ever confirmed").await?;
             s.events.publish(j.customer_id, "journey", json!({ "journey_id": j.id, "status": "abandoned", "transfer": false, "arrived": false, "finished": true, "missed_connection": u.missed_connection, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null, "end_reason": "aufgegeben" }));
             n += 1;
@@ -1175,6 +1215,17 @@ mod tests {
         // A journey that ran through carries no cap and is measured as before.
         assert_eq!(counted_arrival(actual, None), actual);
         assert_eq!(journey_delay_min(counted_arrival(actual, None), planned, false), 180);
+    }
+
+    /// docs/22 §1: the patience is kept, the claim is not; never boarding earns neither.
+    #[test]
+    fn giving_up_keeps_the_patience() {
+        assert_eq!(abandon_points("aufgegeben", 43, false), 43, "43 minutes waited are 43 Geduldspunkte");
+        assert_eq!(abandon_points("aufgegeben", 0, false), 0, "no delay, nothing to honour");
+        assert_eq!(abandon_points("aufgegeben", 12, true), 60, "a cancelled train is worth the usual 60");
+        assert_eq!(abandon_points("nicht_gefahren", 43, false), 0, "a journey that never happened earns nothing");
+        assert_eq!(abandon_points("nicht_gefahren", 12, true), 0);
+        assert_eq!(abandon_points("beendet", 43, false), 0, "arriving goes through the journey's own finalisation");
     }
 
     /// A passenger who gives up on one train gets longer than a real transfer to pick the next.

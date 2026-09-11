@@ -163,7 +163,9 @@ pub async fn badges(State(s): State<AppState>, c: Customer) -> ApiResult {
 async fn customer_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value> {
     let week_ago = crate::clock::now() - Duration::days(7);
     let (points_total, points_week): (i64, i64) = sqlx::query_as(
-        "select coalesce(sum(points),0)::bigint, coalesce(sum(points) filter (where finalised_at >= $2),0)::bigint from rides where customer_id = $1 and status = 'arrived'",
+        // docs/22 §1: an abandoned leg keeps the patience it earned, so points count it too.
+        // Money and bundles never do — those stay on 'arrived' (see rules.rs and the ledger).
+        "select coalesce(sum(points),0)::bigint, coalesce(sum(points) filter (where finalised_at >= $2),0)::bigint from rides where customer_id = $1 and status in ('arrived','abandoned')",
     )
     .bind(c.id)
     .bind(week_ago)
@@ -718,7 +720,7 @@ pub fn ride_arrived_payload(ride_id: Uuid, final_delay_min: i64, fin: &Finalised
 pub async fn award_badges(pool: &PgPool, customer_id: Uuid, ride_id: Uuid, delay: i64) -> anyhow::Result<Option<BadgeRow>> {
     let mut new_badge = None;
     let mut candidates: Vec<String> = if delay >= 60 { vec!["stunde".into(), "erste".into()] } else if (1..10).contains(&delay) { vec!["gegenzug".into(), "erste".into()] } else if delay > 0 { vec!["erste".into()] } else { vec![] };
-    let (total,): (i64,) = sqlx::query_as("select coalesce(sum(points),0)::bigint from rides where customer_id = $1 and status = 'arrived'")
+    let (total,): (i64,) = sqlx::query_as("select coalesce(sum(points),0)::bigint from rides where customer_id = $1 and status in ('arrived','abandoned')")
         .bind(customer_id)
         .fetch_one(pool)
         .await?;
@@ -1817,7 +1819,7 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
                 coalesce(sum(points) filter (where finalised_at >= $2 and finalised_at < $3),0)::bigint,
                 coalesce(sum(points) filter (where finalised_at >= $4 and finalised_at < $2),0)::bigint,
                 count(*) filter (where finalised_at >= $2 and finalised_at < $3)::bigint
-         from rides where customer_id = $1 and status = 'arrived'",
+         from rides where customer_id = $1 and status in ('arrived','abandoned')",
     )
     .bind(c.0.id)
     .bind(week_start)

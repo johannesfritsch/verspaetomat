@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -147,6 +148,10 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
               chevron: true,
               onTap: () => context.push(Routes.rechtliches(d.id)),
             ),
+          // docs/22 §3: backend switching, the demo toys and the "alles erfunden" footer are
+          // workshop tools. They stay in a debug build, where the tour and the local loop need
+          // them, and are absent from anything a passenger installs.
+          if (kDebugMode) ...[
           const VGap.xl(),
           const VSection('Backend'),
           for (final m in BackendMode.values)
@@ -182,6 +187,10 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           VListRow(title: 'Showcase', subtitle: 'Alle Screens auf einen Blick', chevron: true, onTap: () => context.go(Routes.showcase)),
           const VGap.l(),
           Text('Verspätomat 0.1 · Vorführung · Alle Daten erfunden', style: VText.caption),
+          ] else ...[
+            const VGap.xl(),
+            Text('Verspätomat $appVersion', style: VText.caption),
+          ],
         ],
       ),
     );
@@ -424,7 +433,9 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     if (ok == true && context.mounted) {
       await session.deleteEverything();
       if (!session.isLocal) state.reset();
-      if (context.mounted) context.go(Routes.showcase);
+      // docs/22 §3: a passenger who deleted everything starts over at Willkommen; only the
+      // workshop build lands back in the Showcase.
+      if (context.mounted) context.go(kDebugMode ? Routes.showcase : Routes.welcome);
     }
   }
 

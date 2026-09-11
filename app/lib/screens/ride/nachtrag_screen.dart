@@ -207,6 +207,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
               selectedIndex: _exit,
               firstSelectable: _from + 1,
               onSelect: (i) => setState(() => _exit = i),
+              showRadios: true, // docs/22 §5: the same list, the same need to look selectable
               compact: true,
             ),
           const VGap.l(),

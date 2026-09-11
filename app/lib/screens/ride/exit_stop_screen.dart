@@ -107,18 +107,7 @@ class _ExitStopScreenState extends State<ExitStopScreen> {
     return VScreen(
       eyebrow: 'Wo steigst du aus?',
       title: t == null ? 'Zug wird geladen …' : '${t.line} nach $headsign',
-      bottom: t == null
-          ? null
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Ausstieg ${exit?.name ?? '–'} · ${fmtLocal(exit == null ? null : plannedAt(exit))}', style: VText.bodySStrong),
-                Text('${session.me?.settings.ticket.label ?? 'Ticket'} · ${t.operator}', style: VText.caption),
-                const VGap.m(),
-                VPrimaryButton(label: _sending ? 'Einchecken …' : 'Einchecken', icon: Icons.check, onTap: _sending || exit == null ? null : _confirm),
-              ],
-            ),
+      // docs/22 §5: no bottom bar. The button belongs to the stop it confirms, inside the list.
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -126,15 +115,42 @@ class _ExitStopScreenState extends State<ExitStopScreen> {
           if (_loading) const LoadingLine(label: 'Halte werden geladen …'),
           if (_error != null) ErrorLine(message: _error!, onRetry: _load),
           if (t != null) ...[
-            Text('Der übliche Halt ist vorgewählt. Tipp auf einen anderen.', style: VText.caption),
+            Text('Tipp auf deinen Ausstieg.', style: VText.bodyStrong),
+            const SizedBox(height: 2),
+            Text('Der übliche Halt ist vorgewählt.', style: VText.caption),
             const VGap.m(),
             StopLine(
               stops: t.stops,
               passed: _from - 1,
               selectedIndex: _selected,
               firstSelectable: _from + 1,
+              showRadios: true,
               onSelect: (i) => setState(() => _selected = i),
+              inlineChild: exit == null
+                  ? null
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 2, bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${session.me?.settings.ticket.label ?? 'Ticket'} · ${t.operator}',
+                            style: VText.caption,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 8),
+                          VPrimaryButton(
+                            key: const Key('exit-stop-confirm'),
+                            label: _sending ? 'Einchecken …' : 'Einchecken',
+                            icon: Icons.check,
+                            onTap: _sending ? null : _confirm,
+                          ),
+                        ],
+                      ),
+                    ),
             ),
+            const VGap.xl(),
           ],
         ],
       ),

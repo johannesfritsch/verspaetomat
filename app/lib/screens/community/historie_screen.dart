@@ -118,7 +118,9 @@ class _JourneyRowState extends State<_JourneyRow> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                VDelay(j.finalDelayMin ?? 0, size: VDelaySize.small, cancelled: j.cancelled),
+                // Giving up keeps the waiting (docs/22 §1): the journey has no arrival delay,
+                // but its Geduldspunkte are the minutes that were really spent waiting.
+                VDelay(j.finalDelayMin ?? (j.gaveUp ? j.points : 0), size: VDelaySize.small, cancelled: j.cancelled),
               ],
             ),
           ),

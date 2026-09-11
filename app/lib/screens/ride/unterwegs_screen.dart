@@ -545,14 +545,14 @@ Future<void> showAbortSheet(BuildContext context, RideMonitor monitor) {
                 VChoiceCard(
                   key: const Key('abort-aufgegeben'),
                   title: 'Ich gebe auf',
-                  subtitle: 'Zu viel Verspätung, ich fahre nicht mehr. Keine Geduldspunkte, kein Anspruch — die Entschädigung hängt an der Ankunft.',
+                  subtitle: 'Zu viel Verspätung, ich fahre nicht mehr. Die Wartezeit zählt für deine Geduldspunkte, ein Anspruch entsteht nicht.',
                   selected: false,
                   trailing: const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
                   onTap: () async {
                     Navigator.of(ctx).pop();
                     final ticket = RepoScope.read(context).me?.settings.ticket;
                     await _abortAction(context, monitor, () => monitor.finish(arrived: false, reason: 'aufgegeben'));
-                    if (context.mounted) await showGaveUpSheet(context, ticket);
+                    if (context.mounted) await showGaveUpSheet(context, ticket, monitor.lastAbandonPoints);
                   },
                 ),
                 const VGap.s(),
@@ -589,7 +589,7 @@ Future<void> _abortAction(BuildContext context, RideMonitor monitor, Future<void
 
 /// After "Ich gebe auf": the right the passenger has instead, which almost nobody knows.
 /// Art. 18 VO (EU) 2021/782 — the fare back, not the compensation (docs/02, docs/21 §0).
-Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket) {
+Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket, [int points = 0]) {
   final single = ticket == TicketType.einzelfahrkarte;
   return showVSheet(
     context,
@@ -599,13 +599,18 @@ Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket) {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const VSheetHeader(title: 'Aufgegeben', subtitle: 'Keine Geduldspunkte für diese Fahrt.'),
+          VSheetHeader(
+            title: 'Aufgegeben',
+            subtitle: points > 0 ? '+$points Geduldspunkte für die Wartezeit.' : 'Keine Wartezeit, keine Geduldspunkte.',
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const VGap.s(),
+                Text('Ein Anspruch entsteht nicht — die Entschädigung hängt an der Ankunft.', style: VText.bodyS.copyWith(color: VColors.ink2)),
+                const VGap.m(),
                 Text('Dafür hast du ein anderes Recht.', style: VText.bodyStrong),
                 const SizedBox(height: 6),
                 Text(
