@@ -63,6 +63,22 @@ dedupliziert hätten kommen sollen. Taten sie nicht: `geofence_set` verglich Ids
 `select … group by from_station_id, from_station_name` macht aus einem Bahnsteig zwei Zeilen,
 sobald derselbe Bahnsteig einmal über DELFI und einmal über amarillo-bw eingecheckt wurde.
 
+**Korrektur, nachdem ich in die Produktionsdaten gesehen habe:** meine erste Erklärung — zwei
+Feeds, DELFI und amarillo-bw — war falsch, und die Wahrheit ist banaler und häufiger. Die Zeilen
+hinter dem Duplikat waren:
+
+```
+de-DELFI_de:08436:1159_G     Kißlegg Bahnhof   47.7935, 9.8818   2
+de-DELFI_de:08436:1159:2:3   Kißlegg Bahnhof   47.7935, 9.8818   1
+```
+
+Ein Feed, ein Name, dieselben Koordinaten. Es sind der **Haltestellen-Knoten und einer seiner
+Steige**: eine DHID ist `Land:Regionalschlüssel:Halt:Steig:Abschnitt`, und `_G` markiert den
+Knoten selbst. Transitous gibt beim Einchecken manchmal den einen und manchmal den anderen zurück.
+Damit ist der Fall nicht exotisch, sondern der Normalfall an jedem Bahnhof mit mehr als einem
+Gleis — er war nur bisher nicht sichtbar, weil man dafür zweimal am selben Bahnhof über
+verschiedene Knoten einchecken muss.
+
 Das hatte drei Folgen, von denen nur eine zu sehen war:
 
 1. Zwei Chips auf Home, mit demselben Namen.
@@ -71,9 +87,17 @@ Das hatte drei Folgen, von denen nur eine zu sehen war:
 3. Die Check-ins waren geteilt: vier Fahrten ab Kißlegg zählten als zwei plus zwei. Damit stand
    auch der Stammbahnhof falsch in der Reihenfolge.
 
-Ein Bahnsteig ist ein Bahnsteig, und **eine Schranke entscheidet das für jede Liste**:
-`train::same_platform(StationRef, StationRef)` — gleiche Id, oder gleicher Name nach
-`normalise_station_name` und näher als ein Kilometer beieinander. Bewusst strenger als
+Ein Bahnhof ist ein Bahnhof, und **eine Schranke entscheidet das für jede Liste**:
+`train::same_platform(StationRef, StationRef)`, mit zwei Kriterien in der Reihenfolge dessen, was
+sie wissen:
+
+1. **Die Id selbst**, wo sie eine deutsche DHID ist: gleich bis zum Halt heißt derselbe Bahnhof,
+   der Steig ist nicht unsere Sache. Das ist der Fall oben, und die Id ist dabei die verlässlichste
+   Quelle, die es gibt — genauer als jeder Namensvergleich.
+2. **Sonst der Name** nach `normalise_station_name`, mit Nähe, wo die Liste Koordinaten hat. Das
+   fängt die Feeds, die einen Bahnhof unterschiedlich schreiben.
+
+Bewusst strenger als
 `station_names_match`, das ein Wortpräfix akzeptiert: „Wangen" ist ein Präfix von „Wangen im
 Allgäu Nord" und ein anderer Halt. Wo eine Liste keine Koordinaten hat — die Ziel-Listen speichern
 keine —, entscheidet der Name allein; zwei Orte mit gleichem Bahnhofsnamen gibt es, aber eine
@@ -95,7 +119,8 @@ In der App wurde nichts geändert: die eine Schranke dort (`sameStation`) gehör
 zwei Quellen zusammenkommen, und dort steht sie. Damit reicht ein Deploy — Build 20 bekommt die
 saubere Liste, ohne dass etwas Neues installiert werden muss.
 
-Tests: `same_platform` (zwei Feeds, ein Bahnsteig · Wortpräfix bleibt getrennt · gleicher Name in
-einer anderen Stadt bleibt getrennt · leerer Name trifft nur seine eigene Id), `geofence_set`
+Tests: `same_platform` (Knoten und Steig mit den echten Ids aus der Produktion · zwei Feeds, ein
+Bahnsteig · Wortpräfix bleibt getrennt · gleicher Name in einer anderen Stadt bleibt getrennt ·
+leerer Name trifft nur seine eigene Id), `geofence_set`
 (Zusammenfalten mit Summe; der Stammbahnhof nicht zweimal) und `rank_destinations`
-(nach Bahnsteig gezählt; der eigene Standort fällt unter beiden Ids heraus). 60 Rust-Tests.
+(nach Bahnhof gezählt; der eigene Standort fällt unter beiden Ids heraus). 61 Rust-Tests.

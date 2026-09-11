@@ -322,16 +322,30 @@ impl<'a> StationRef<'a> {
 /// **The one gate that decides whether two records are the same platform.** Every list of
 /// stations we hand out passes through it.
 ///
-/// The feeds disagree about ids. DELFI and amarillo-bw both carry Kißlegg, with different ids and
-/// sometimes different spellings, so a customer who had checked in from both got two
-/// „Ab Kißlegg Bahnhof" on Home, two of the phone's twenty geofence regions for one platform, and
-/// their check-ins split across two rows — which also decided the Stammbahnhof wrongly.
+/// One station has many stop ids. The rides behind the duplicate „Ab Kißlegg Bahnhof" on Home
+/// carried `de-DELFI_de:08436:1159_G` and `de-DELFI_de:08436:1159:2:3` — the station node and one
+/// of its quays, same feed, same name, same coordinates. So the customer got two chips, two of the
+/// phone's twenty geofence regions for one station (docs/25 §2), and their check-ins split across
+/// two rows, which also put the Stammbahnhof in the wrong place.
+///
+/// Two criteria, in order of how much they know:
+///
+/// 1. The id itself, where it is a German DHID (`de-DELFI_de:08436:1159:2:3` = country, regional
+///    key, stop, quay, section): equal down to the stop is the same station, and the quay is not
+///    our business. `_G` marks the station node and is not part of the number.
+/// 2. Otherwise the name after [normalise_station_name], plus proximity where the list has
+///    coordinates — which is what catches two feeds spelling one platform differently.
 ///
 /// Deliberately stricter than [station_names_match]: that one accepts a word-prefix, and „Wangen"
 /// is a word-prefix of „Wangen im Allgäu Nord" while being a different stop.
 pub fn same_platform(a: StationRef<'_>, b: StationRef<'_>) -> bool {
     if a.id == b.id {
         return true;
+    }
+    if let (Some(x), Some(y)) = (dhid_station(a.id), dhid_station(b.id)) {
+        if x == y {
+            return true;
+        }
     }
     let (na, nb) = (normalise_station_name(a.name), normalise_station_name(b.name));
     if na.is_empty() || na != nb {
@@ -350,6 +364,19 @@ pub fn same_platform(a: StationRef<'_>, b: StationRef<'_>) -> bool {
 /// and still nowhere near the next town's station.
 pub const SAME_PLATFORM_M: f64 = 1_000.0;
 
+/// The station part of a German stop id: country, regional key and stop, without quay and section.
+/// `None` for anything that is not shaped like one, which then falls back to name and distance.
+fn dhid_station(id: &str) -> Option<String> {
+    let mut parts = id.split(':');
+    let (country, region, stop) = (parts.next()?, parts.next()?, parts.next()?);
+    if country.is_empty() || region.is_empty() || stop.is_empty() {
+        return None;
+    }
+    // `1159_G` is the same stop as `1159`.
+    let stop = stop.split('_').next().unwrap_or(stop);
+    Some(format!("{country}:{region}:{stop}"))
+}
+
 /// Great-circle distance in metres.
 pub fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let r = 6_371_000.0_f64;
@@ -364,11 +391,23 @@ pub fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// docs/30: Home showed „Ab Kißlegg Bahnhof" twice. The two rows were the same platform from
-    /// two feeds, so nothing that compared ids could see it.
+    /// docs/30: Home showed „Ab Kißlegg Bahnhof" twice. These are the two ids the production
+    /// database actually held — the station node and one of its quays, one feed.
+    #[test]
+    fn the_station_node_and_its_quay_are_one_station() {
+        let a = StationRef::at("de-DELFI_de:08436:1159_G", "Kißlegg Bahnhof", 47.7935, 9.8818);
+        let b = StationRef::at("de-DELFI_de:08436:1159:2:3", "Kißlegg Bahnhof", 47.7935, 9.8818);
+        assert!(same_platform(a, b));
+        assert!(same_platform(b, a), "and the other way round");
+        // The quay decides nothing, but the stop does.
+        let other = StationRef::at("de-DELFI_de:08436:1160:1:1", "Kißlegg Nord", 47.7990, 9.8820);
+        assert!(!same_platform(a, other));
+    }
+
+    /// And the case the id cannot answer: two feeds, two id shapes, one platform.
     #[test]
     fn one_platform_under_two_feed_ids() {
-        let a = StationRef::at("de:08436:12345", "Kißlegg Bahnhof", 47.7931, 9.8869);
+        let a = StationRef::at("de-DELFI_de:08436:1159_G", "Kißlegg Bahnhof", 47.7931, 9.8869);
         let b = StationRef::at("amarillo-bw:kisslegg", "Kißlegg", 47.7935, 9.8871);
         assert!(same_platform(a, b), "same name after normalisation, 40 m apart");
         assert!(same_platform(b, a), "and the other way round");
