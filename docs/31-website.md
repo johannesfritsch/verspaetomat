@@ -290,8 +290,10 @@ later in one build-time fetch.
 
 ## 8. Three decisions I would like
 
-1. **The Impressum address.** `legal.dart` still has `[Name] [Straße Nr] [PLZ Ort]`. Needed for the
-   site and for the store submission. Nothing else here is blocked.
+1. ~~**The Impressum address.**~~ Settled the same evening: Zoom7 GmbH, Pfarrer-Eggart-Str. 5,
+   88085 Langenargen, with the register (Amtsgericht Ulm, HRB 728616), the VAT id and the company's
+   own telephone and mail. `--strict` passes; see the note below about the one sentence that still
+   needs a signature behind it.
 2. **The hero card's example ride.** I would use a real one of yours with the name on it — it reads
    true in a way an invented Musterfahrt does not — or an anonymous one if you would rather not.
 3. **iOS state in §2.6**: „Bald im App Store", or a public TestFlight link so the page can already
@@ -310,10 +312,19 @@ Alles oben, mit diesen Abweichungen — und einer Überraschung:
   Entwurf und Aufnahme zu sehen, nicht vorher zu wissen.
 - **Die Löschseite ist ein Dokument wie die drei anderen**, nur eben hier geschrieben. Damit
   entfällt der Markdown-Renderer aus §5.
-- **`--strict` hat mehr gefunden als erwartet.** Nicht nur `[Name]`, `[Straße Nr]`, `[PLZ Ort]` im
-  Impressum: die Datenschutzerklärung wartet außerdem auf den Mail-Dienstleister mitsamt Sitz und
-  auf das `[Bundesland]` der zuständigen Aufsichtsbehörde. Vier Lücken, nicht drei — und die App
-  zeigt diese Platzhalter heute schon jedem, der in den Einstellungen nachliest.
+- **`--strict` hat mehr gefunden als erwartet, und alles davon ist jetzt ausgefüllt.** Nicht nur
+  `[Name]`, `[Straße Nr]`, `[PLZ Ort]` im Impressum: die Datenschutzerklärung wartete außerdem auf
+  den Mail-Dienstleister mitsamt Sitz und auf das `[Bundesland]` der zuständigen Aufsichtsbehörde.
+  Vier Lücken, nicht drei — und die App zeigte diese Klammern jedem, der in den Einstellungen
+  nachlas. Eingetragen sind: der Anbieter mit Registereintrag und USt-IdNr., Postmark
+  (ActiveCampaign, LLC, Chicago) als Versanddienstleister mit dem Hinweis auf die Übermittlung in
+  die USA, Hetzner Online GmbH als Serverbetreiber, und Baden-Württemberg als Aufsicht.
+  **Eine Zeile steht noch auf Vorschuss:** „Grundlage sind ein Auftragsverarbeitungsvertrag und die
+  Standardvertragsklauseln" — das stimmt erst, wenn der Postmark-AVV wirklich unterschrieben ist.
+  Der Mailversand läuft bis dahin ohnehin im Trockenlauf, es ist also noch nichts passiert; vor dem
+  ersten echten Antrag muss der Vertrag stehen.
+- **Gefunden beim Nachsehen:** die Website schrieb „Stand: Stand: 10. September 2026" — die Vorlage
+  setzte das Wort davor, das die App längst im Text mitliefert. Nur auf dem Schirm zu sehen.
 - **Die Schriften liegen selbst gehostet** (`static/fonts/`, 90 KB + 86 KB, SIL OFL). Die Seite
   lädt nichts von Dritten; deshalb braucht sie auch kein Einwilligungsbanner.
 - **Ungeprüft:** dass Caddy die beiden Zertifikate (Apex und www) wirklich bekommt. Das lässt sich

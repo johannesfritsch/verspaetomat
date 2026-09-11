@@ -3,8 +3,10 @@
 /// wording can be edited without touching a screen. Sources: docs/05-legal.md,
 /// docs/03-claim-filing.md, docs/14-location-concept.md.
 ///
-/// Placeholders in square brackets ([Name], [Straße Nr], [PLZ Ort]) must be
-/// filled in before the first store build. Nothing in here is invented.
+/// The operator's own details are below and in `legalCompany…`; the website
+/// renders these same texts (docs/31 §4) and `cargo run -p verspaetomat-site
+/// -- --strict` refuses to publish while a `[Platzhalter]` is left anywhere in
+/// here. Nothing in here is invented.
 library;
 
 class LegalSection {
@@ -23,8 +25,16 @@ class LegalDoc {
   final String? stand;
 }
 
-/// Contact that appears in all three texts.
+/// Contact for everything about the app itself: data requests, deletion, complaints. It appears
+/// in all three texts and in the store listings (docs/40), and it is answered by a person.
 const legalContactEmail = 'j@jfritsch.de';
+
+/// The operator, as in the commercial register. The company's own channels belong in the
+/// Impressum; `legalContactEmail` stays the address for anything about Verspätomat.
+const legalCompany = 'Zoom7 GmbH';
+const legalAddress = 'Pfarrer-Eggart-Str. 5\n88085 Langenargen';
+const legalPhone = '+49 751 18 527 44-0';
+const legalCompanyEmail = 'info@zoom7.de';
 
 const impressum = LegalDoc(
   id: 'impressum',
@@ -33,11 +43,23 @@ const impressum = LegalDoc(
   lead: 'Angaben nach § 5 DDG.',
   sections: [
     LegalSection('Anbieter', [
-      '[Name]\n[Straße Nr]\n[PLZ Ort]\nDeutschland',
-      'E-Mail: $legalContactEmail',
+      '$legalCompany\n$legalAddress\nDeutschland',
+    ]),
+    LegalSection('Vertreten durch', [
+      'Johannes Fritsch',
+    ]),
+    LegalSection('Kontakt', [
+      'Telefon: $legalPhone\nE-Mail: $legalCompanyEmail',
+      'Für alles, was die App betrifft — Auskunft, Löschung, Rückfragen zu einem Antrag: $legalContactEmail',
+    ]),
+    LegalSection('Registereintrag', [
+      'Registergericht: Amtsgericht Ulm\nRegisternummer: HRB 728616',
+    ]),
+    LegalSection('Umsatzsteuer-Identifikationsnummer', [
+      'Nach § 27a Umsatzsteuergesetz: DE286789402',
     ]),
     LegalSection('Verantwortlich für den Inhalt', [
-      '[Name], Anschrift wie oben.',
+      'Johannes Fritsch, Anschrift wie oben.',
     ]),
     LegalSection('Was Verspätomat ist', [
       'Verspätomat ist eine Ausfüll- und Weiterleitungshilfe für Fahrgastrechte. Die App hilft dir, deine Zugverspätungen festzuhalten, füllt das EU-Antragsformular mit deinen Angaben aus und schickt es von deiner persönlichen Verspätomat-Adresse an die Fahrgastrechte-Stelle des Eisenbahnunternehmens. Die Entschädigung überweist das Unternehmen direkt an den Verein, den du gewählt hast.',
@@ -61,10 +83,10 @@ const datenschutz = LegalDoc(
   eyebrow: 'Rechtliches',
   title: 'Datenschutz',
   lead: 'Was wir speichern, warum, wie lange, und was du jederzeit selbst löschen kannst. Kurz: kein Konto, kein Tracking, keine Werbung, kein Standort während der Fahrt.',
-  stand: 'Stand: 10. September 2026',
+  stand: 'Stand: 11. September 2026',
   sections: [
     LegalSection('Verantwortlicher', [
-      '[Name], [Straße Nr], [PLZ Ort]. E-Mail: $legalContactEmail. Siehe Impressum.',
+      '$legalCompany\n$legalAddress\nE-Mail: $legalContactEmail oder $legalCompanyEmail. Siehe Impressum.',
     ]),
     LegalSection('Kein Konto, aber ein Gerät', [
       'Verspätomat hat kein Benutzerkonto. Beim ersten Start erzeugt die App eine zufällige Gerätekennung und einen Zugangsschlüssel. Der Schlüssel bleibt im Schlüsselbund deines Telefons; bei uns liegt nur ein Prüfwert. Alles, was wir über dich speichern, hängt an dieser Kennung, nicht an deinem Namen.',
@@ -96,9 +118,9 @@ const datenschutz = LegalDoc(
     ]),
     LegalSection('Dienstleister', [
       'Fahrplan- und Verspätungsdaten: Transitous (transitous.org), ein offener Dienst auf Basis öffentlicher Fahrplandaten. Er bekommt die Bahnhofs- und Zugabfragen unseres Servers, keine Kennung von dir.',
-      'E-Mail: ein Versand- und Empfangsdienstleister für unsere Domain, der deine Anträge zustellt und Antworten an uns übergibt. [Dienstleister und Sitz werden vor dem Start eingetragen.]',
+      'E-Mail: Postmark, ein Dienst der ActiveCampaign, LLC, Chicago, USA, stellt deine Anträge zu und übergibt Antworten an uns. Damit verlassen diese Mails die EU; Grundlage sind ein Auftragsverarbeitungsvertrag und die Standardvertragsklauseln der EU-Kommission.',
       'Mitteilungen: Apple (APNs) und Google (Firebase Cloud Messaging) stellen Push-Nachrichten zu, wenn du Mitteilungen erlaubst. Sie sehen einen Zustellschlüssel und den Text der Mitteilung („Angekommen, +14“), sonst nichts.',
-      'Server: der Dienst läuft auf Servern in der Europäischen Union.',
+      'Server: Hetzner Online GmbH, Gunzenhausen. Der Dienst läuft auf Servern in der Europäischen Union.',
     ]),
     LegalSection('Wie lange', [
       'Fahrten, Punkte, Abzeichen und die Einträge im Konto bleiben, bis du sie löschst.',
@@ -115,7 +137,7 @@ const datenschutz = LegalDoc(
       'Auskunft und Übertragbarkeit: Einstellungen → Deine Daten → „Daten exportieren“ gibt dir alles, was wir über dich haben, als Datei.',
       'Löschung: Einstellungen → Deine Daten → „Alles löschen“ entfernt Konto, Fahrten, Anträge, Anhänge und deine Verspätomat-Adresse sofort und endgültig. Ein bereits abgeschickter Antrag liegt beim Eisenbahnunternehmen weiter; seine Antwort sehen wir dann nicht mehr.',
       'Berichtigung: Name, Anschrift, Postfach und Ticketnummer änderst du unter Einstellungen → Anträge. Deinen Anzeigenamen unter Einstellungen → Konto.',
-      'Widerspruch, Beschwerde: schreib an $legalContactEmail. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, zum Beispiel der für [Bundesland] zuständigen.',
+      'Widerspruch, Beschwerde: schreib an $legalContactEmail. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, für uns ist das der Landesbeauftragte für den Datenschutz und die Informationsfreiheit Baden-Württemberg.',
     ]),
   ],
 );

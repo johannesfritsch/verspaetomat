@@ -18,6 +18,7 @@
   </section>
   {% endfor %}
 
-  {% if doc.stand %}<p class="stand">Stand: {{ doc.stand }}</p>{% endif %}
+  {# `stand` bringt sein „Stand:" schon mit, so wie die App es anzeigt. #}
+  {% if doc.stand %}<p class="stand">{{ doc.stand }}</p>{% endif %}
 </article>
 {% endblock %}
