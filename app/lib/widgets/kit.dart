@@ -301,21 +301,33 @@ class _DashedBorderPainter extends CustomPainter {
 // ---------------------------------------------------------------------------
 
 /// The delay figure: a red "+" and the minutes. `size` picks the scale.
+///
+/// On time is a **green nought**, not the word „pünktlich". A word in a slot built for `+204`
+/// is a different width class, and at figure sizes that breaks the layout around it rather than
+/// itself: on Home the word took the whole row and left its neighbour one letter per line
+/// („Aulendo / rf"). A nought is the same width as any other minute count, so a card keeps its
+/// shape whether the train was late or not — and the number stays the design.
+///
+/// „Ausfall" has no figure to show, so it stays a word and drops to the label size for its slot.
+/// The screens that show a delay inside a list do it the other way round and say „pünktlich" in
+/// caption size next to a `VChip('Ausfall')`; that is prose, and prose may use words.
 class VDelay extends StatelessWidget {
-  const VDelay(this.minutes, {super.key, this.size = VDelaySize.medium, this.cancelled = false});
+  const VDelay(this.minutes, {super.key, this.size = VDelaySize.medium, this.cancelled = false, this.punctualZero = true});
   final int minutes;
   final VDelaySize size;
   final bool cancelled;
 
+  /// Off while a figure counts up to a real delay: zero is then a frame on the way, not a verdict,
+  /// and a green flash at the start of the animation would say the opposite of what follows.
+  final bool punctualZero;
+
   @override
   Widget build(BuildContext context) {
     if (cancelled) {
-      return Text('Ausfall', style: _style().copyWith(color: VColors.red));
+      return Text('Ausfall', style: _wordStyle().copyWith(color: VColors.red), maxLines: 1, softWrap: false);
     }
     if (minutes <= 0) {
-      final word = Text('pünktlich', style: _style().copyWith(color: VColors.green, fontWeight: FontWeight.w600), maxLines: 1, softWrap: false);
-      // At hero sizes the word must stay on one line; shrink it instead of wrapping.
-      return size == VDelaySize.display || size == VDelaySize.large ? FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: word) : word;
+      return Text('0', style: _style().copyWith(color: punctualZero ? VColors.green : VColors.ink));
     }
     final s = _style();
     return RichText(
@@ -333,6 +345,14 @@ class VDelay extends StatelessWidget {
         VDelaySize.display => VText.display,
         VDelaySize.large => VText.number,
         VDelaySize.medium => VText.numberM,
+        VDelaySize.small => VText.mono.copyWith(fontWeight: FontWeight.w700),
+      };
+
+  /// A word in the figure's slot: big enough to lead, small enough to leave room beside it.
+  TextStyle _wordStyle() => switch (size) {
+        VDelaySize.display => VText.h1,
+        VDelaySize.large => VText.h2,
+        VDelaySize.medium => VText.bodyStrong,
         VDelaySize.small => VText.mono.copyWith(fontWeight: FontWeight.w700),
       };
 }

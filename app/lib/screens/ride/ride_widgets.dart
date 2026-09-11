@@ -623,7 +623,7 @@ class CountUpDelay extends StatelessWidget {
       tween: Tween(begin: 0, end: minutes.toDouble()),
       duration: const Duration(milliseconds: 1200),
       curve: Curves.easeOutCubic,
-      builder: (context, v, _) => VDelay(v.round(), size: size),
+      builder: (context, v, _) => VDelay(v.round(), size: size, punctualZero: minutes <= 0),
     );
   }
 }

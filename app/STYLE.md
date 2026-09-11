@@ -9,6 +9,8 @@ The German station clock. Paper white, black grotesk, one red second hand. Preci
 - Use only the tokens and widgets in `lib/theme/tokens.dart` and `lib/widgets/kit.dart`. Do not invent colours, radii or shadows.
 - Colours: `VColors.paper` background, `VColors.ink` text, `VColors.ink2` secondary text, `VColors.rule` hairlines, `VColors.red` the single accent (the "+" before a delay, the second hand, progress dots, the one thick rule). `VColors.green` only for "pünktlich". No amber. No gradients. No shadows. No cards with rounded corners and coloured left borders.
 - Type: Archivo everywhere via `VText` styles. Delays and euros in `VText.display` / `VText.number` with tabular figures. Everything else quiet.
+- **A figure's slot is for figures.** On time is a green `0` (`VDelay`), never the word „pünktlich“: a word in a slot built for `+204` is a different width class and breaks the layout around it — on Home it took the whole row and left the station name one letter per line. A word that must stand there („Ausfall“) drops to the label size for that slot.
+- Figures in pairs share one size, and that includes blocks stacked down a screen. A `FittedBox` over a hero style is **not** a size: it only ever shrinks, so what you see depends on how many digits the number has — `1.208.473` came out at 65 px and `+60` at 168 px from the same line of code. Pick the size and keep the `FittedBox` as a net for the long ones.
 - Rules instead of cards: sections are separated by a 1 px `VRule()` in `rule` grey; the one important break on a screen is a 2 px `VRule.red()`.
 - Buttons: `VPrimaryButton` (black, 56 px, 4 px radius), `VGhostButton` (text only). Never more than one primary per screen.
 - Hit targets 44 px minimum. Bottom sheets and one-thumb layouts.

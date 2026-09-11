@@ -842,9 +842,16 @@ class _ArrivedBlock extends StatelessWidget {
     final delay = j?.finalDelayMin ?? r.finalDelayMinutes ?? 0;
     final where = j?.destinationStationName ?? r.exitStationName;
     final points = j?.points ?? r.points;
+    final cancelled = j?.cancelled ?? r.cancelled;
+    // Two lines beside the figure: where it ended, and what the waiting was worth. Next to a
+    // green nought „0 Geduldspunkte" would only say the same thing twice.
+    final worth = delay > 0 || cancelled ? '$points Geduldspunkte' : 'pünktlich, keine Punkte';
+    final note = j?.missedConnection == true ? '$worth · Anschluss verpasst' : worth;
     return Container(
       padding: const EdgeInsets.all(VSpace.m),
+      // Derselbe Kasten wie Wir und Deine Woche: erhobenes Papier, eine Haarlinie.
       decoration: BoxDecoration(
+        color: VColors.paperElevated,
         border: Border.all(color: VColors.rule),
         borderRadius: BorderRadius.circular(4),
       ),
@@ -854,17 +861,18 @@ class _ArrivedBlock extends StatelessWidget {
           Text('ANGEKOMMEN', style: VText.eyebrow),
           const SizedBox(height: 10),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              VDelay(
-                delay,
-                size: VDelaySize.large,
-                cancelled: j?.cancelled ?? r.cancelled,
-              ),
+              VDelay(delay, size: VDelaySize.large, cancelled: cancelled),
               const SizedBox(width: 16),
               Expanded(
-                child: Text(
-                  '$where\n$points Geduldspunkte${j?.missedConnection == true ? ' · Anschluss verpasst' : ''}',
-                  style: VText.bodyS.copyWith(color: VColors.ink2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(where, style: VText.bodyStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 2),
+                    Text(note, style: VText.bodyS.copyWith(color: VColors.ink2)),
+                  ],
                 ),
               ),
             ],
@@ -919,12 +927,17 @@ class _Momentum extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // `VText.number`, nicht `display`: mit `display` (168 px) und einem FittedBox, das nur
+            // verkleinert, hing die gezeigte Größe an der Zahl selbst — 1.208.473 wurde auf etwa
+            // 65 px gestaucht, +60 blieb riesig. Zwei Kästen übereinander gehören in eine Größe
+            // (app/STYLE.md), und der Wir-Schirm macht es längst so. Das FittedBox bleibt als
+            // Netz für sehr lange Zahlen.
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: Text(
                 quiet ? '0' : '+${fmtInt(st.pointsThisWeek)}',
-                style: VText.display.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
+                style: VText.number.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
               ),
             ),
             const SizedBox(height: 2),
@@ -988,12 +1001,13 @@ class _WirBlock extends StatelessWidget {
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Dieselbe Größe wie „Deine Woche" darunter und wie der Wir-Schirm.
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
                     child: Text(
                       fmtInt(c.minutesTotal + tick),
-                      style: VText.display.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
+                      style: VText.number.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
                     ),
                   ),
                   const SizedBox(height: 2),

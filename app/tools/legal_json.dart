@@ -9,6 +9,7 @@
 // Regenerate whenever lib/content/legal.dart changes; `cargo test` in site/
 // fails if the JSON is older than the Dart file.
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:verspaetomat/content/legal.dart';
 
@@ -29,5 +30,5 @@ void main() {
         },
     ],
   };
-  print(const JsonEncoder.withIndent('  ').convert(out));
+  stdout.writeln(const JsonEncoder.withIndent('  ').convert(out));
 }
