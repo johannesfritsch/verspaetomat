@@ -37,7 +37,23 @@ import 'wohin_screen.dart';
 ///
 /// [from] skips step 1 (a nudge knows the station); [to] skips step 2 as well (the Home card's
 /// destination buttons know both, and only the train is left to choose).
+/// One check-in at a time (issue #12). The square in the nav bar and the button on Home both
+/// come here, and the button stays under the sheet where a thumb can still reach it — tapping it
+/// twice used to stack a second „Von wo?" on the first. The guard belongs here rather than on the
+/// buttons: every way in passes through this function, so there is one place to be sure of.
+bool _running = false;
+
 Future<void> runCheckinFlow(BuildContext context, {ApiStation? from, ApiStation? to}) async {
+  if (_running) return;
+  _running = true;
+  try {
+    await _runCheckinFlow(context, from: from, to: to);
+  } finally {
+    _running = false;
+  }
+}
+
+Future<void> _runCheckinFlow(BuildContext context, {ApiStation? from, ApiStation? to}) async {
   final near = NearbyScope.read(context);
   // A fix may still be in flight when the square is tapped right after a cold start.
   if (from == null && near != null && near.station == null) await near.refresh();

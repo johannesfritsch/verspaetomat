@@ -334,7 +334,9 @@ class VTafelZahl extends StatefulWidget {
   const VTafelZahl(this.text, {super.key, this.style, this.look = VTafelLook.papier, this.flaps = true});
 
   /// The number as it should read, German formatting and all: `1.208.316`, `+96`, `4,50 €`.
-  /// Everything that is not a digit stands still; only digits flip.
+  /// Digits flip; a sign in front of them sits on a flap of its own and stands still, the way a
+  /// board shows a character it never has to turn (issue #10). Group separators stay bare — they
+  /// are punctuation between figures, and a board has no flap for them.
   final String text;
   final TextStyle? style;
 
@@ -362,6 +364,11 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
 
   /// A flap card is this much taller than the figure printed on it.
   static const _cardHeight = 1.18;
+
+  /// What sits on a flap: the digits and the sign in front of them. The dots and commas that
+  /// group a German number do not (issue #10).
+  static final _bare = RegExp(r'[.,\s]');
+  static bool _flapped(String c) => !_bare.hasMatch(c);
 
   late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
   late String _from = _blank(widget.text);
@@ -415,12 +422,13 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           for (final c in _to.split(''))
-            if (RegExp(r'\d').hasMatch(c))
+            if (_flapped(c))
               _Card(
                 height: cell,
-                width: probe.width,
+                // Digits share one flap width; a sign keeps its own.
+                width: RegExp(r'\d').hasMatch(c) ? probe.width : null,
                 look: widget.look,
-                child: SizedBox(height: cell, width: probe.width, child: Center(child: Text(c, style: style))),
+                child: SizedBox(height: cell, child: Center(child: Text(c, style: style))),
               )
             else
               Padding(padding: const EdgeInsets.symmetric(horizontal: 1), child: Text(c, style: style)),
@@ -442,7 +450,15 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
       children: [
         for (var i = 0; i < to.length; i++)
           if (!digits.hasMatch(to[i]))
-            Padding(padding: EdgeInsets.symmetric(horizontal: widget.flaps ? 1 : 0), child: Text(to[i], style: style))
+            if (widget.flaps && _flapped(to[i]))
+              _Card(
+                height: cell,
+                width: null,
+                look: widget.look,
+                child: SizedBox(height: cell, child: Center(child: Text(to[i], style: style))),
+              )
+            else
+              Padding(padding: EdgeInsets.symmetric(horizontal: widget.flaps ? 1 : 0), child: Text(to[i], style: style))
           else
             _Flap(
               controller: _c,
@@ -1352,7 +1368,10 @@ class VSheetHeader extends StatelessWidget {
 class _Card extends StatelessWidget {
   const _Card({required this.height, required this.width, required this.look, required this.child});
   final double height;
-  final double width;
+
+  /// Null for a flap that takes the width of what is printed on it: every digit is the same
+  /// width, a `+` is not.
+  final double? width;
   final VTafelLook look;
   final Widget child;
 

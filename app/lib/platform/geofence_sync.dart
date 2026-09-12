@@ -27,6 +27,9 @@ class GeofenceSync with WidgetsBindingObserver {
   StreamSubscription<PushToken>? _tokens;
   bool _started = false;
   String? _lastFingerprint;
+
+  /// The last answer to "is a ride running?" — see [sync].
+  bool _lastRiding = false;
   static const _pushKey = 'push_token_sent';
 
   /// Screenshots and the E2E must never trigger the OS permission dialog; the sync itself is harmless.
@@ -123,12 +126,17 @@ class GeofenceSync with WidgetsBindingObserver {
     if (session.me == null || session.healthy != true) return;
     try {
       final geo = await session.repo.geofence();
-      var riding = false;
+      // A failed call is not an answer (issue #11). On a platform with one bar of signal this
+      // used to come back as "not riding", the native layer forgot the journey, and every region
+      // the phone was already inside nudged — twice, once per station at the same spot. The last
+      // known answer is kept instead; the sync runs again on the next change.
+      var riding = _lastRiding;
       try {
         riding = (await session.repo.currentRide())?.ride.status == ApiRideStatus.riding;
       } catch (_) {
-        // no ride or no answer: not riding
+        // keep what we last knew
       }
+      _lastRiding = riding;
       final config = GeofenceConfig(
         apiUrl: session.apiUrl,
         token: session.isLocal ? await session.tokens.token() : null,

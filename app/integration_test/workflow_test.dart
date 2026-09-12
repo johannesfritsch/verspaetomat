@@ -258,12 +258,27 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
   // own desk ("Unbekannt") whose claim flow has no ticket step, which the test relies on.
   // A connecting journey with exactly one transfer first: the scenario confirms one leg and
   // expects the arrival after the next; late at night Transitous sometimes only offers two.
-  for (final (knownOnly, oneTransfer) in [(true, true), (false, true), (true, false), (false, false)]) {
+  // The list holds the last half hour as well now (issue #9), and a train that already left is a
+  // real check-in but a poor test subject: the scenario fast-forwards to the exit stop from the
+  // entry stop. So a departure still to come is preferred, and a past one is only a last resort.
+  bool stillToCome(ApiItinerary it) {
+    final d = it.first.liveDeparture ?? it.plannedDeparture;
+    return d == null || d.isAfter(DateTime.now());
+  }
+
+  for (final (knownOnly, oneTransfer, futureOnly) in [
+    (true, true, true),
+    (false, true, true),
+    (true, false, true),
+    (false, false, true),
+    (true, false, false),
+    (false, false, false),
+  ]) {
     for (var i = 0; i < rows.evaluate().length && pick == null; i++) {
       final it = tester.widget<ItineraryRow>(rows.at(i)).itinerary;
       final ok = connecting ? (oneTransfer ? it.transfers == 1 : it.transfers >= 1) : it.direct;
       final known = it.legs.every((l) => Mock.desks.containsKey(l.operator) || l.operator.startsWith('DB '));
-      if (ok && !it.first.cancelled && (known || !knownOnly)) pick = rows.at(i);
+      if (ok && !it.first.cancelled && (known || !knownOnly) && (stillToCome(it) || !futureOnly)) pick = rows.at(i);
     }
     if (pick != null) break;
   }

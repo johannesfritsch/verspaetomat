@@ -66,9 +66,12 @@ class _WelcherZugListState extends State<WelcherZugList> {
     });
     try {
       final plan = await repo.planJourney(from: widget.fromStationId, to: widget.toStationId, firstTrip: widget.firstTripId);
+      // One list, in the order a board has them (issue #9): the train that left twelve minutes
+      // ago stands above the next one, because that is where it belongs in time. Sorting the
+      // „preferred" one to the top used to do that job and now only hides what came before it.
       final list = [...plan.itineraries]..sort((a, b) {
-          if (a.preferred != b.preferred) return a.preferred ? -1 : 1;
-          final da = a.plannedDeparture, db = b.plannedDeparture;
+          final da = a.first.liveDeparture ?? a.plannedDeparture;
+          final db = b.first.liveDeparture ?? b.plannedDeparture;
           if (da == null || db == null) return 0;
           return da.compareTo(db);
         });
@@ -111,12 +114,7 @@ class _WelcherZugListState extends State<WelcherZugList> {
     }
   }
 
-  /// The trains that are still to come, and the ones that left within the backend's look-back
-  /// window (issue #9). Split here rather than in the sort, so the common case — the next train —
-  /// stays at the top of the list where it has always been.
   DateTime get _now => DateTime.now();
-  List<ApiItinerary> get _upcoming => _itineraries.where((i) => !_hasLeft(i)).toList();
-  List<ApiItinerary> get _departed => _itineraries.where(_hasLeft).toList().reversed.toList();
 
   /// The backend plans from half an hour back (issue #9, `PLAN_LOOKBACK_MIN`), and this window is
   /// that one plus a little slack. Anything older than it is not „just left" — it is a timetable
@@ -157,13 +155,17 @@ class _WelcherZugListState extends State<WelcherZugList> {
           Text(widget.continueJourneyId != null ? 'Tipp auf den Zug, mit dem du weiterfährst.' : 'Tipp auf den Zug, in dem du sitzt.', style: VText.bodyStrong),
           const SizedBox(height: 2),
           Text(
-            widget.continueJourneyId != null ? 'Deine Fahrt läuft weiter. Die Verspätung zählt am Ziel.' : 'Umstiege folgen später von selbst.',
+            widget.continueJourneyId != null
+                ? 'Deine Fahrt läuft weiter. Die Verspätung zählt am Ziel.'
+                : _itineraries.any(_hasLeft)
+                    ? 'Auch der, der gerade weg ist — sitzt du drin, zählt die Fahrt. Umstiege folgen später von selbst.'
+                    : 'Umstiege folgen später von selbst.',
             style: VText.caption,
           ),
         ],
         const VGap.m(),
-        for (final it in _upcoming) ...[
-          ItineraryRow(itinerary: it, onTap: _sending ? null : () => _start(it)),
+        for (final it in _itineraries) ...[
+          ItineraryRow(itinerary: it, departed: _hasLeft(it), onTap: _sending ? null : () => _start(it)),
           // A later train than the earliest one: the extra wait is the passenger's, not the railway's.
           if (_later(it)) ...[
             Padding(
@@ -171,16 +173,6 @@ class _WelcherZugListState extends State<WelcherZugList> {
               child: Text('Deine Pause zählt nicht mit — es bleiben ${fmtMinutes(widget.countedMinutes ?? 0)}.', style: VText.caption),
             ),
           ],
-        ],
-        // Already gone, and that is the point: someone who boarded and only then thought of the
-        // app is on one of these (issue #9). Half an hour back, no further — beyond that it is
-        // the Nachtrag.
-        if (_departed.isNotEmpty) ...[
-          const VGap.s(),
-          const VSection('Schon abgefahren'),
-          const VGap.s(),
-          Text('Sitzt du schon drin? Auch dann zählt die Fahrt.', style: VText.caption),
-          for (final it in _departed) ItineraryRow(itinerary: it, departed: true, onTap: _sending ? null : () => _start(it)),
         ],
         if (_sending) const LoadingLine(label: 'Einchecken …'),
         // The ticket belongs to the claim, not to the train: quiet, and always reachable.

@@ -40,6 +40,10 @@ enum GeofenceRules {
   static let defaultNudgeDelay: TimeInterval = 180
   static let nudgeCooldown: TimeInterval = 30 * 60
 
+  /// While one nudge stands, no second one is scheduled — a neighbouring platform is the same
+  /// spot as far as a passenger is concerned (issue #11).
+  static let oneNudgeWindow: TimeInterval = 10 * 60
+
   /// „Am Bahnhof" should mean standing at it, not walking past its outskirts (issue #8). The
   /// monitored region stays wide because iOS delivers small circles late or not at all — a 50 m
   /// region is monitored from cell towers like any other and simply misses. So the region is the
@@ -108,17 +112,44 @@ enum GeofenceRules {
   /// guess, because it is at least somewhere this person has actually stood.
   static func regionSet(frequent: [GeofenceStation], nearest: [GeofenceStation], here: CLLocation?) -> [GeofenceStation] {
     var out: [GeofenceStation] = []
+    // Same spot, two entries: the frequent set and the nearby list name one platform differently
+    // often enough (docs/30), and two circles around it meant two nudges in Wangen (issue #11).
+    // Ids alone do not catch it; the name and 250 m do.
+    func known(_ s: GeofenceStation) -> Bool {
+      out.contains { $0.id == s.id || samePlace($0, s) }
+    }
     if nearHome(frequent: frequent, here: here) {
-      for s in frequent where !out.contains(where: { $0.id == s.id }) && out.count < maxFrequent { out.append(s) }
+      for s in frequent where !known(s) && out.count < maxFrequent { out.append(s) }
       var added = 0
-      for s in nearest where !out.contains(where: { $0.id == s.id }) && added < nearestNearHome {
+      for s in nearest where !known(s) && added < nearestNearHome {
         out.append(s)
         added += 1
       }
       return out
     }
-    for s in nearest where !out.contains(where: { $0.id == s.id }) && out.count < maxRegions { out.append(s) }
+    for s in nearest where !known(s) && out.count < maxRegions { out.append(s) }
     return out
+  }
+
+  /// One platform under two names: close together, and one name is the other plus the word for
+  /// the thing itself (`Bahnhof`, `Bf`, `Hbf`) — the Swift half of Dart's `sameStation`.
+  static func samePlace(_ a: GeofenceStation, _ b: GeofenceStation) -> Bool {
+    guard a.location.distance(from: b.location) <= 250 else { return false }
+    let x = normalise(a.name), y = normalise(b.name)
+    if x.isEmpty || y.isEmpty { return false }
+    return x == y || x.hasPrefix(y) || y.hasPrefix(x)
+  }
+
+  static func normalise(_ name: String) -> String {
+    var s = name.lowercased()
+      .replacingOccurrences(of: "hauptbahnhof", with: "hbf")
+      .folding(options: .diacriticInsensitive, locale: .current)
+    s = String(s.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+    for suffix in ["bahnhof", "hbf", "bf"] where s.hasSuffix(suffix) && s.count > suffix.count {
+      s = String(s.dropLast(suffix.count))
+      break
+    }
+    return s
   }
 
   /// Within [`awayFromHomeM`] of any frequent station. Unknown position counts as near home.
@@ -158,6 +189,9 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   static let nudgeCategory = "station-nudge"
   static let snoozeAction = "nudge-snooze"
   static let stationPrefix = "station:"
+
+  /// When the last nudge was scheduled, whichever station it was for (issue #11).
+  static let pendingKey = "geofence.nudge.pending"
 
   /// Set by the channel while a Flutter engine is alive.
   var onNudgeTapped: (([String: String]) -> Void)?
@@ -377,6 +411,12 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       nudgeDelay: args["nudgeDelayS"] as? Double ?? GeofenceRules.defaultNudgeDelay,
       nudgeRadiusM: args["nudgeRadiusM"] as? Double ?? GeofenceRules.defaultNudgeRadius)
     config = c
+    // A journey that started while a nudge was already pending used to let it fire anyway: the
+    // notification lives in iOS, not in the app, and nothing took it back (issue #11). The same
+    // for a switched-off layer.
+    if c.riding || !c.enabled {
+      cancelAllNudges(reason: c.riding ? "riding" : "off")
+    }
     stopAllRegions()
     guard c.enabled, CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else {
       manager.stopMonitoringSignificantLocationChanges()
@@ -631,7 +671,23 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     bumpCounter("cancelled")
     center.removePendingNotificationRequests(withIdentifiers: ["nudge-\(s.id)"])
     defaults.removeObject(forKey: "geofence.nudged.\(s.id)")
+    defaults.removeObject(forKey: Self.pendingKey)
     lastEvent = "cancelled \(s.name): \(reason)"
+  }
+
+  /// Every nudge that has not been delivered yet, gone. Used when a journey starts and when the
+  /// layer is switched off (issue #11).
+  private func cancelAllNudges(reason: String) {
+    center.getPendingNotificationRequests { [weak self] requests in
+      let ids = requests.map { $0.identifier }.filter { $0.hasPrefix("nudge-") }
+      guard !ids.isEmpty else { return }
+      self?.center.removePendingNotificationRequests(withIdentifiers: ids)
+      DispatchQueue.main.async {
+        self?.bumpCounter("cancelled")
+        self?.lastEvent = "cancelled \(ids.count) pending: \(reason)"
+      }
+    }
+    defaults.removeObject(forKey: Self.pendingKey)
   }
 
   func locationManager(_ m: CLLocationManager, didExitRegion region: CLRegion) {
@@ -731,7 +787,15 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       lastEvent = "cooldown \(s.name)"
       return false
     }
+    // Two stations at one spot (a Bahnhof and its Haltestelle, one in the frequent set and one
+    // from the nearby list) both report "inside" after a configure and both used to nudge. One
+    // nudge stands at a time; the second station has nothing to add (issue #11).
+    if let pending = defaults.object(forKey: Self.pendingKey) as? Date, Date().timeIntervalSince(pending) < GeofenceRules.oneNudgeWindow {
+      lastEvent = "another nudge already stands, not \(s.name)"
+      return false
+    }
     defaults.set(Date(), forKey: "geofence.nudged.\(s.id)")
+    defaults.set(Date(), forKey: Self.pendingKey)
     lastEvent = "nudge scheduled \(s.name) in \(Int(delay)) s"
     let content = UNMutableNotificationContent()
     content.title = "Am \(s.name)?"

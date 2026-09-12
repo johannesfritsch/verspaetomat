@@ -47,6 +47,31 @@ final class GeofenceRulesTests: XCTestCase {
     XCTAssertEqual(GeofenceRules.speedBetween(a, a), 0)
   }
 
+  /// Issue #11: in Wangen two entries named the same platform — one from the frequent set, one
+  /// from the nearby list — and the phone sat inside both circles, so it was nudged twice.
+  func testOnePlatformIsOneRegion() {
+    // Same spot, different feeds, different spelling and different ids.
+    let a = GeofenceStation(id: "de:08436:12345", name: "Wangen (Allgäu)", lat: 47.6870, lon: 9.8330)
+    let b = GeofenceStation(id: "mock:wangen-bahnhof", name: "Wangen (Allgäu) Bahnhof", lat: 47.6871, lon: 9.8332)
+    XCTAssertTrue(GeofenceRules.samePlace(a, b))
+    let set = GeofenceRules.regionSet(frequent: [a], nearest: [b], here: CLLocation(latitude: 47.687, longitude: 9.833))
+    XCTAssertEqual(set.count, 1, "one platform, one circle")
+
+    // A different station that happens to be close by keeps its own circle.
+    let neighbour = GeofenceStation(id: "x", name: "Wangen Nord", lat: 47.6872, lon: 9.8331)
+    XCTAssertFalse(GeofenceRules.samePlace(a, neighbour))
+    // The same name 200 km away is a different station and stays one.
+    let elsewhere = GeofenceStation(id: "y", name: "Wangen (Allgäu)", lat: 49.5, lon: 9.8)
+    XCTAssertFalse(GeofenceRules.samePlace(a, elsewhere))
+  }
+
+  /// Köln Hbf and Köln Hauptbahnhof are one place; Köln Hbf and Köln Süd are not.
+  func testNormaliseFoldsTheWordForTheThingItself() {
+    XCTAssertEqual(GeofenceRules.normalise("Köln Hauptbahnhof"), GeofenceRules.normalise("Köln Hbf"))
+    XCTAssertEqual(GeofenceRules.normalise("Kißlegg Bahnhof"), GeofenceRules.normalise("Kisslegg"))
+    XCTAssertNotEqual(GeofenceRules.normalise("Köln Hbf"), GeofenceRules.normalise("Köln Süd"))
+  }
+
   /// docs/25 §2: the budget follows the passenger over the 50 km boundary.
   func testRegionBudgetFollowsThePassenger() {
     let frequent = (0..<16).map { GeofenceStation(id: "f\($0)", name: "Frequent \($0)", lat: 50.94 + Double($0) / 1000, lon: 6.95) }
