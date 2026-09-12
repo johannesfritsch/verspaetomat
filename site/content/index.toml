@@ -7,8 +7,8 @@ description = "Verspätomat merkt sich deine Zugverspätungen, füllt den Fahrga
 
 [hero]
 eyebrow = "Fahrgastrechte, ohne Papierkrieg"
-headline = "Die Bahn war zu spät. Diesmal zahlt sie dafür."
-lead = "Verspätomat merkt sich deine Verspätungen, füllt den Antrag aus und schickt ihn ab. Das Geld geht an einen Verein, den du wählst. Nicht an uns."
+headline = "Die Bahn war zu spät. Jetzt zahlt sie dafür."
+lead = "Verspätomat merkt sich deine Verspätungen, füllt für dich den Antrag aus und schickt ihn ab. Das Geld geht an einen Verein, den du wählst. Kein Cent davon an uns."
 cta = "Im App Store laden"
 cta_secondary = "So funktioniert’s ↓"
 
@@ -138,7 +138,7 @@ a = "Da sind es pauschal 1,50 € im Nahverkehr. Auszahlen muss die Bahn erst ab
 
 [[fragen.frage]]
 q = "Muss ich mich anmelden?"
-a = "Nein. Beim ersten Antrag brauchst du Name und Adresse, weil das Formular sie verlangt. Vorher nichts."
+a = "Nein. Erst wenn du der Bahn zum ersten Mal einen Antrag senden willst, brauchen wir Name und Adresse, weil das Formular sie verlangt. Vorher nichts."
 
 [[fragen.frage]]
 q = "Was macht die App mit meinem Standort?"
