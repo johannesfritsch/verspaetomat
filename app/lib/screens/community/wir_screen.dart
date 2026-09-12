@@ -101,28 +101,37 @@ class _WirScreenState extends State<WirScreen> {
               TabHeader(title: 'Wir', caption: '${fmtInt(c.users)} Fahrgäste', onSettings: () => context.push(Routes.einstellungen).then((_) => refresh())),
               const VGap.xl(),
 
-              // The community's big number first (docs/18); no community euro totals here.
-              Text('ZUSAMMEN GEWARTET', style: VText.eyebrow),
-              const SizedBox(height: 6),
-              InkWell(
+              // The community's big number first (docs/18); no community euro totals here. It
+              // stands on the same board as Home's copy of it (docs/33) and sets itself the way
+              // a departure board does.
+              VTafel(
                 onTap: () => showSourceSheet(
                   context,
                   title: 'Minuten zusammen gewartet',
                   origin: 'Die Summe aller endgültigen Verspätungen aller Fahrgäste, Minute für Minute.',
                   freshness: 'Live',
                 ),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(fmtInt(c.minutes + _extraMinutes), style: VText.number),
-                      const SizedBox(width: 10),
-                      Text('Minuten', style: VText.title.copyWith(color: VColors.ink2)),
-                    ],
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('ZUSAMMEN GEWARTET', style: VText.eyebrow),
+                    const SizedBox(height: 6),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          VTafelZahl(fmtInt(c.minutes + _extraMinutes)),
+                          const SizedBox(width: 10),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text('Minuten', style: VText.title.copyWith(color: VColors.ink2)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const VGap.s(),
@@ -142,8 +151,6 @@ class _WirScreenState extends State<WirScreen> {
                   ),
                 ),
               ),
-              const VGap.s(),
-              const VRule.red(),
               const VGap.l(),
 
               const VSection('Vereine'),

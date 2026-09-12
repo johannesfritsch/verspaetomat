@@ -327,7 +327,10 @@ class _ClaimCard extends StatelessWidget {
                 style: VText.eyebrow.copyWith(color: last.direction == ApiMailDirection.inbound ? VColors.red : VColors.ink2),
               ),
               const SizedBox(height: 6),
-              MailView(mail: last, compact: true),
+              // Inside the Fahrkarte, so no box of its own (docs/33).
+              MailView(mail: last, compact: true, boxed: false),
+              const VGap.s(),
+              const VRule.soft(),
             ],
             const VGap.s(),
             Wrap(

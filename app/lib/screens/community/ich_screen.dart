@@ -82,50 +82,70 @@ class IchScreen extends StatelessWidget {
                 onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
               ),
               const VGap.xl(),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(fmtInt(me.pointsTotal), style: VText.number),
-                  const SizedBox(width: 10),
-                  Text('Geduldspunkte', style: VText.title.copyWith(color: VColors.ink2)),
-                ],
-              ),
-              const VGap.m(),
-              const VRule.red(),
-              // The level (docs/20 §5): the same line Home shows under "Deine Woche".
-              if (lvl != null) ...[
-                const VGap.m(),
-                VProgress(confirmed: lvl.progress),
-                const SizedBox(height: 6),
-                Text(
-                  lvl.pointsToNext > 0 ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“' : '${lvl.name} · höchste Stufe erreicht',
-                  style: VText.caption,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-              const VGap.m(),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: BigFigure(
-                      value: fmtEuro(confirmedCents / 100),
-                      label: 'Bestätigt, durch dich',
-                      onTap: () => context.go(Routes.antraege),
+              // The points and the level on one board, the four figures on the next (docs/33):
+              // the same surface Home and Wir use for the same kind of statement. They used to
+              // be bare figures on paper here and boxed numbers there.
+              VTafel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          VTafelZahl(fmtInt(me.pointsTotal)),
+                          const SizedBox(width: 10),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text('Geduldspunkte', style: VText.title.copyWith(color: VColors.ink2)),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  Expanded(child: BigFigure(value: fmtEuro(submittedCents / 100), label: 'Eingereicht, unterwegs')),
-                ],
+                    // The level (docs/20 §5): the same line Home shows under "Deine Woche".
+                    if (lvl != null) ...[
+                      const VGap.m(),
+                      VProgress(confirmed: lvl.progress),
+                      const SizedBox(height: 6),
+                      Text(
+                        lvl.pointsToNext > 0 ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“' : '${lvl.name} · höchste Stufe erreicht',
+                        style: VText.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
               ),
               const VGap.m(),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: BigFigure(value: '+${me.pointsThisWeek}', label: 'Diese Woche')),
-                  Expanded(child: BigFigure(value: '$recent', label: 'Fahrten, letzte 14 Tage')),
-                ],
+              VTafel(
+                child: Column(
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: BigFigure(
+                            value: fmtEuro(confirmedCents / 100),
+                            label: 'Bestätigt, durch dich',
+                            onTap: () => context.go(Routes.antraege),
+                          ),
+                        ),
+                        Expanded(child: BigFigure(value: fmtEuro(submittedCents / 100), label: 'Eingereicht, unterwegs')),
+                      ],
+                    ),
+                    const VGap.m(),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: BigFigure(value: '+${me.pointsThisWeek}', label: 'Diese Woche')),
+                        Expanded(child: BigFigure(value: '$recent', label: 'Fahrten, letzte 14 Tage')),
+                      ],
+                    ),
+                  ],
+                ),
               ),
               const VGap.xl(),
               VSection('Abzeichen', trailing: Text('$earned von ${data.badges.length}', style: VText.caption)),

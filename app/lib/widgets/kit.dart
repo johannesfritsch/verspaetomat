@@ -242,6 +242,210 @@ class VTicketBorder extends ShapeBorder {
   int get hashCode => side.hashCode;
 }
 
+
+// ---------------------------------------------------------------------------
+// Die Tafel
+// ---------------------------------------------------------------------------
+
+/// The second of the app's two surfaces (app/STYLE.md): the board a figure stands on.
+///
+/// Elevated paper, a hairline all round, a 4 px radius — deliberately not the Fahrkarte, which
+/// is one journey or one claim. A Tafel holds the numbers that belong together at one glance:
+/// what we all waited, what your week came to, what you have collected. Same object on Home, on
+/// Wir and on Ich, so the same kind of statement looks the same wherever it stands.
+///
+/// A surface never contains another surface. Nothing inside a Tafel gets its own border.
+class VTafel extends StatelessWidget {
+  const VTafel({super.key, required this.child, this.onTap, this.padding = const EdgeInsets.all(VSpace.m)});
+
+  final Widget child;
+  final VoidCallback? onTap;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final box = Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: VColors.paperElevated,
+        border: Border.all(color: VColors.rule),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: child,
+    );
+    if (onTap == null) return box;
+    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(4), child: box);
+  }
+}
+
+/// A figure on a Tafel, set the way a Fallblattanzeige sets one: every digit that changed flips
+/// over to its new value, left to right, running through the digits in between the way the flaps
+/// on a departure board do. Digits that did not change stand still — so a total ticking up by
+/// one only moves its last flap, and a screen opening sets its whole row.
+///
+/// Tabular figures and a fixed cell height, so nothing shifts sideways or jumps while it runs.
+/// This is the only animation in the app besides the station clock's second hand and the
+/// arrival count-up (app/STYLE.md).
+class VTafelZahl extends StatefulWidget {
+  const VTafelZahl(this.text, {super.key, this.style});
+
+  /// The number as it should read, German formatting and all: `1.208.316`, `+96`, `4,50 €`.
+  /// Everything that is not a digit stands still; only digits flip.
+  final String text;
+  final TextStyle? style;
+
+  @override
+  State<VTafelZahl> createState() => _VTafelZahlState();
+}
+
+class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateMixin {
+  static const _flap = Duration(milliseconds: 110);
+  static const _stagger = 45;
+
+  /// `--dart-define=NO_ANIM=1`: the board stands still. The screenshot tour runs with it, because
+  /// a still caught halfway through a flap looks like a rendering fault rather than a board, and
+  /// a number that flaps every second made the capture drift a screen behind (docs/33).
+  static const _still = bool.fromEnvironment('NO_ANIM');
+
+  /// At most this many flaps per digit: a board is quick, and 0 → 9 should not take a second.
+  static const _maxFlaps = 6;
+
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+  late String _from = _blank(widget.text);
+  late String _to = widget.text;
+
+  /// The row a board starts from: all flaps blank, so the first paint sets itself.
+  static String _blank(String s) => s.replaceAll(RegExp(r'\d'), '0');
+
+  @override
+  void initState() {
+    super.initState();
+    _c.forward();
+  }
+
+  @override
+  void didUpdateWidget(VTafelZahl old) {
+    super.didUpdateWidget(old);
+    if (widget.text == _to) return;
+    // Mid-flight the row shows whatever the animation has reached; starting the new run from the
+    // old target is close enough and keeps the digits from jumping backwards.
+    _from = _to;
+    _to = widget.text;
+    _c
+      ..reset()
+      ..forward();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = (widget.style ?? VText.number).copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+    // Measured, not guessed: a flap has to be exactly as wide and as tall as the digit it turns
+    // over, or the row shifts sideways while it runs. Tabular figures make one measurement do
+    // for all ten.
+    if (_still) return Text(_to, style: style);
+    final probe = TextPainter(text: TextSpan(text: '0', style: style), textDirection: TextDirection.ltr)..layout();
+    final cell = probe.height;
+    final width = probe.width;
+    // A shorter number than last time (never mind a longer one) must not read digits against the
+    // wrong places: both rows are compared from the right, which is where a number grows.
+    final to = _to;
+    final from = _from.length == to.length ? _from : _blank(to);
+    final digits = RegExp(r'\d');
+    var index = 0;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        for (var i = 0; i < to.length; i++)
+          if (!digits.hasMatch(to[i]))
+            Text(to[i], style: style)
+          else
+            _Flap(
+              controller: _c,
+              from: int.parse(from[i]),
+              to: int.parse(to[i]),
+              begin: (index++ * _stagger) / 900,
+              span: _flap.inMilliseconds / 900,
+              height: cell,
+              width: width,
+              style: style,
+            ),
+      ],
+    );
+  }
+}
+
+/// One digit's column of flaps, clipped to a single cell and slid from the old digit to the new.
+class _Flap extends StatelessWidget {
+  const _Flap({
+    required this.controller,
+    required this.from,
+    required this.to,
+    required this.begin,
+    required this.span,
+    required this.height,
+    required this.width,
+    required this.style,
+  });
+
+  final AnimationController controller;
+  final int from;
+  final int to;
+  final double begin;
+  final double span;
+  final double height;
+  final double width;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    // The flaps this digit turns over: from the old value up to the new one, the way the board
+    // does it, capped so a long way round stays quick.
+    final steps = <int>[];
+    var d = from;
+    while (d != to && steps.length < _VTafelZahlState._maxFlaps) {
+      steps.add(d);
+      d = (d + 1) % 10;
+    }
+    steps.add(to);
+    if (steps.length == 1) return _cell(to);
+
+    final end = (begin + span * steps.length).clamp(0.0, 1.0);
+    final t = CurvedAnimation(parent: controller, curve: Interval(begin.clamp(0.0, 1.0), end, curve: Curves.easeOut));
+    return ClipRect(
+      child: SizedBox(
+        height: height,
+        width: width,
+        child: AnimatedBuilder(
+          animation: t,
+          builder: (context, _) {
+            final offset = -t.value * (steps.length - 1) * height;
+            return Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                for (var i = 0; i < steps.length; i++)
+                  Positioned(top: i * height + offset, child: _cell(steps[i])),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _cell(int digit) => SizedBox(
+        height: height,
+        width: width,
+        child: Text('$digit', style: style),
+      );
+}
+
 // ---------------------------------------------------------------------------
 // Buttons
 // ---------------------------------------------------------------------------

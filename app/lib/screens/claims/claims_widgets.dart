@@ -574,11 +574,17 @@ class _StrokePainter extends CustomPainter {
 // Mail
 // ---------------------------------------------------------------------------
 
-/// A mail rendered as a card: header lines, body, attachments.
+/// A mail: header lines, body, attachments.
+///
+/// On a page of its own it is a box. Inside a Fahrkarte it is not — [boxed] off drops the border
+/// and lets the header lines sit in the card's own column, because a surface never contains
+/// another surface (app/STYLE.md, docs/33). A box inside a box gave Anträge three different
+/// left edges on one screen.
 class MailView extends StatelessWidget {
-  const MailView({super.key, required this.mail, this.compact = false, this.bcc});
+  const MailView({super.key, required this.mail, this.compact = false, this.bcc, this.boxed = true});
   final ApiMail mail;
   final bool compact;
+  final bool boxed;
 
   /// Overrides the BCC header line (e.g. "… (dein Postfach)").
   final String? bcc;
@@ -587,12 +593,14 @@ class MailView extends StatelessWidget {
   Widget build(BuildContext context) {
     final bccLine = bcc ?? mail.bcc;
     return Container(
-      padding: const EdgeInsets.all(VSpace.m),
-      decoration: BoxDecoration(
-        color: VColors.paperElevated,
-        border: Border.all(color: VColors.rule),
-        borderRadius: BorderRadius.circular(4),
-      ),
+      padding: boxed ? const EdgeInsets.all(VSpace.m) : EdgeInsets.zero,
+      decoration: boxed
+          ? BoxDecoration(
+              color: VColors.paperElevated,
+              border: Border.all(color: VColors.rule),
+              borderRadius: BorderRadius.circular(4),
+            )
+          : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
