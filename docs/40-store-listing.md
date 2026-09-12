@@ -52,7 +52,7 @@ Paste into "Notes" in App Review Information:
 >
 > Sending a claim in review: in the built-in demo nothing is sent anywhere. Against the production backend a sent claim goes to the railway; please use the demo mode for the send step.
 >
-> Contact for review questions: j@jfritsch.de.
+> Contact for review questions: info@zoom7.de.
 
 Age rating: 4+. Category: Travel (secondary: Utilities). Export compliance: uses standard HTTPS only (answer "No" to proprietary encryption; TLS is exempt).
 
@@ -64,7 +64,7 @@ Section by section, as the console asks.
 
 - Does your app collect or share any of the required user data types? Yes.
 - Is all of the user data collected by your app encrypted in transit? Yes (HTTPS/TLS).
-- Do you provide a way for users to request that their data is deleted? Yes: in app, Einstellungen → Deine Daten → "Alles löschen" (immediate, complete), plus e-mail to j@jfritsch.de. The console also asks for a deletion URL: `https://verspaetomat.de/loeschen` describing the in-app control.
+- Do you provide a way for users to request that their data is deleted? Yes: in app, Einstellungen → Deine Daten → "Alles löschen" (immediate, complete), plus e-mail to info@zoom7.de. The console also asks for a deletion URL: `https://verspaetomat.de/loeschen` describing the in-app control.
 
 **Data types**
 

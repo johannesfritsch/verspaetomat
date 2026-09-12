@@ -25,16 +25,16 @@ class LegalDoc {
   final String? stand;
 }
 
-/// Contact for everything about the app itself: data requests, deletion, complaints. It appears
-/// in all three texts and in the store listings (docs/40), and it is answered by a person.
-const legalContactEmail = 'j@jfritsch.de';
+/// The one address, for everything: the Impressum, data requests, deletion, complaints, a
+/// question about a claim. It appears in all three legal texts, in the store listings (docs/40)
+/// and in the website's footer, and it is answered by a person. There is deliberately no second
+/// one — a private address next to the company's only made people guess which one was meant.
+const legalEmail = 'info@zoom7.de';
 
-/// The operator, as in the commercial register. The company's own channels belong in the
-/// Impressum; `legalContactEmail` stays the address for anything about Verspätomat.
+/// The operator, as in the commercial register.
 const legalCompany = 'Zoom7 GmbH';
 const legalAddress = 'Pfarrer-Eggart-Str. 5\n88085 Langenargen';
 const legalPhone = '+49 751 18 527 44-0';
-const legalCompanyEmail = 'info@zoom7.de';
 
 const impressum = LegalDoc(
   id: 'impressum',
@@ -49,8 +49,8 @@ const impressum = LegalDoc(
       'Johannes Fritsch',
     ]),
     LegalSection('Kontakt', [
-      'Telefon: $legalPhone\nE-Mail: $legalCompanyEmail',
-      'Für alles, was die App betrifft — Auskunft, Löschung, Rückfragen zu einem Antrag: $legalContactEmail',
+      'Telefon: $legalPhone\nE-Mail: $legalEmail',
+      'Dieselbe Adresse für alles, was die App betrifft — Auskunft, Löschung, Rückfragen zu einem Antrag.',
     ]),
     LegalSection('Registereintrag', [
       'Registergericht: Amtsgericht Ulm\nRegisternummer: HRB 728616',
@@ -86,7 +86,7 @@ const datenschutz = LegalDoc(
   stand: 'Stand: 11. September 2026',
   sections: [
     LegalSection('Verantwortlicher', [
-      '$legalCompany\n$legalAddress\nE-Mail: $legalContactEmail oder $legalCompanyEmail. Siehe Impressum.',
+      '$legalCompany\n$legalAddress\nE-Mail: $legalEmail. Siehe Impressum.',
     ]),
     LegalSection('Kein Konto, aber ein Gerät', [
       'Verspätomat hat kein Benutzerkonto. Beim ersten Start erzeugt die App eine zufällige Gerätekennung und einen Zugangsschlüssel. Der Schlüssel bleibt im Schlüsselbund deines Telefons; bei uns liegt nur ein Prüfwert. Alles, was wir über dich speichern, hängt an dieser Kennung, nicht an deinem Namen.',
@@ -137,7 +137,7 @@ const datenschutz = LegalDoc(
       'Auskunft und Übertragbarkeit: Einstellungen → Deine Daten → „Daten exportieren“ gibt dir alles, was wir über dich haben, als Datei.',
       'Löschung: Einstellungen → Deine Daten → „Alles löschen“ entfernt Konto, Fahrten, Anträge, Anhänge und deine Verspätomat-Adresse sofort und endgültig. Ein bereits abgeschickter Antrag liegt beim Eisenbahnunternehmen weiter; seine Antwort sehen wir dann nicht mehr.',
       'Berichtigung: Name, Anschrift, Postfach und Ticketnummer änderst du unter Einstellungen → Anträge. Deinen Anzeigenamen unter Einstellungen → Konto.',
-      'Widerspruch, Beschwerde: schreib an $legalContactEmail. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, für uns ist das der Landesbeauftragte für den Datenschutz und die Informationsfreiheit Baden-Württemberg.',
+      'Widerspruch, Beschwerde: schreib an $legalEmail. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, für uns ist das der Landesbeauftragte für den Datenschutz und die Informationsfreiheit Baden-Württemberg.',
     ]),
   ],
 );

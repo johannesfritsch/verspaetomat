@@ -15,7 +15,7 @@ import 'package:verspaetomat/content/legal.dart';
 
 void main() {
   final out = {
-    'contact': legalContactEmail,
+    'contact': legalEmail,
     'docs': [
       for (final d in legalDocs)
         {
