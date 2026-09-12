@@ -405,11 +405,13 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
   @override
   Widget build(BuildContext context) {
     final anzeige = widget.look == VTafelLook.anzeige;
-    // Ink on a white flap, whichever board it hangs in (issue #10) — but the group separators
-    // hang between the flaps, on the board itself, so they take the board's colour or they are
-    // black on black.
-    final style = (widget.style ?? VText.number).copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
-    final bareStyle = anzeige ? style.copyWith(color: VColors.paper) : style;
+    // White on a dark flap, in both boxes (issue #10) — but the group separators hang *between*
+    // the flaps, on whatever the flaps hang in, so they take that colour instead.
+    final style = (widget.style ?? VText.number).copyWith(
+      fontFeatures: const [FontFeature.tabularFigures()],
+      color: widget.flaps ? VColors.paper : null,
+    );
+    final bareStyle = style.copyWith(color: anzeige ? VColors.paper : VColors.ink);
     // Measured, not guessed: a flap has to be exactly as wide and as tall as the digit it turns
     // over, or the row shifts sideways while it runs. Tabular figures make one measurement do
     // for all ten.
@@ -1376,23 +1378,24 @@ class _Card extends StatelessWidget {
   final VTafelLook look;
   final Widget child;
 
-  /// The flaps are paper in both lights (issue #10): white cards on the black board, and paper
-  /// cards on the elevated paper. What changes is what surrounds them, and the seam.
+  /// A flap is dark with white figures on it, in both boxes (issue #10). That is the flap of a
+  /// real board; what changes is what it hangs in — the black board, or a white card with a
+  /// little board on it.
+  static const _flap = Color(0xFF1D1D1D);
+  static const _seam = Color(0xFF000000);
+
   @override
-  Widget build(BuildContext context) {
-    final anzeige = look == VTafelLook.anzeige;
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 1),
-      height: height,
-      width: width,
-      color: anzeige ? VColors.paperElevated : VColors.paper,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          child,
-          Positioned(top: height / 2 - 0.5, left: 0, right: 0, child: Container(height: 1, color: VColors.rule)),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.symmetric(horizontal: 1),
+        height: height,
+        width: width,
+        color: _flap,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            child,
+            Positioned(top: height / 2 - 0.5, left: 0, right: 0, child: Container(height: 1, color: _seam)),
+          ],
+        ),
+      );
 }

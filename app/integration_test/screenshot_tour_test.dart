@@ -171,6 +171,12 @@ void main() {
     await tester.tap(find.byKey(const Key('einchecken-cta')));
     await wait(tester, 1200);
     await shot('einchecken-von');
+    await dismissSheet(tester);
+    // The same sheet from the square in the bar. It has to look the same, bottom bar and all
+    // (issue #12): the two used to open on different Navigators.
+    await tester.tap(find.byKey(const Key('nav-checkin')));
+    await wait(tester, 1200);
+    await shot('einchecken-von-square');
     await tester.tap(find.byKey(const Key('von-detected')));
     await wait(tester, 1400);
     await shot('einchecken-wohin-sheet');

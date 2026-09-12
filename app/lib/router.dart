@@ -57,6 +57,13 @@ String initialLocationFor({required bool onboardingDone}) {
   return onboardingDone ? Routes.bahnsteig : Routes.welcome;
 }
 
+/// The Navigator that renders the four tabs, below the bottom bar (issue #12).
+///
+/// A sheet pushed on the root Navigator covers the whole app, bar included; one pushed here sits
+/// in the Scaffold's body and leaves the bar standing. Home's button has always been inside this
+/// Navigator, the square in the bar is outside it, and that was the whole of the difference.
+final shellNavigatorKey = GlobalKey<NavigatorState>();
+
 GoRouter buildRouter(DemoState state, {required String initialLocation}) {
   return GoRouter(
     initialLocation: initialLocation,
@@ -66,6 +73,7 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
 
       // The four tabs live in a shell with the bottom navigation; the Einchecken square in the middle is not a tab.
       ShellRoute(
+        navigatorKey: shellNavigatorKey,
         builder: (context, routerState, child) => _TabShell(location: routerState.uri.toString(), child: child),
         routes: [
           GoRoute(path: Routes.bahnsteig, builder: (c, s) => bahnsteigBuilder(c, s)),
@@ -102,10 +110,6 @@ class _TabShellState extends State<_TabShell> {
   RideMonitor? _monitor;
   NearbyMonitor? _nearby;
   String? _consumedLocation;
-
-  /// See the `Builder` in [build]: the tab's own context, so the Einchecken square opens its
-  /// sheet exactly where Home's button opens it (issue #12).
-  BuildContext? _bodyContext;
 
   @override
   void initState() {
@@ -205,14 +209,7 @@ class _TabShellState extends State<_TabShell> {
             return Stack(
               children: [
                 Scaffold(
-                  // A context from inside the shell's own Navigator (issue #12). The square in
-                  // the bar sits above that Navigator, so a sheet opened with the bar's context
-                  // goes on the root one and covers the bar; Home's button opens the same sheet
-                  // from inside the tab, where the bar stays visible. One context, one result.
-                  body: Builder(builder: (bodyContext) {
-                    _bodyContext = bodyContext;
-                    return widget.child;
-                  }),
+                  body: widget.child,
                   bottomNavigationBar: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -221,7 +218,12 @@ class _TabShellState extends State<_TabShell> {
                         index: index.clamp(0, 3),
                         onTap: (i) => context.go(_TabShell._tabs[i]),
                         // Under way, the square points at the journey you are on (docs/20 §1).
-                        onCheckin: () => monitor.active ? monitor.openSheet() : startCheckin(_bodyContext ?? context),
+                        // The shell Navigator's overlay: a context *below* that Navigator, so the
+                        // sheet lands in the body and the bar stays visible (issue #12). Wrapping
+                        // the shell's child in a Builder does not do it — that context is above.
+                        onCheckin: () => monitor.active
+                            ? monitor.openSheet()
+                            : startCheckin(shellNavigatorKey.currentState?.overlay?.context ?? context),
                         checkinEnabled: !monitor.active,
                         badges: {1: session.unreadMails},
                       ),

@@ -12,6 +12,7 @@ import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'checkin_flow.dart';
+import '../community/community_widgets.dart';
 import 'ride_widgets.dart';
 
 /// Home, second version (docs/16). Six blocks, everything above the fold: the action
@@ -157,26 +158,16 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Slim header: the Stellwerk caption when a simulated position is active, the small clock.
-            Row(
-              children: [
-                Expanded(
-                  child: _nearby.simulated
-                      ? Text(
-                          'Standort: Stellwerk · ${_nearby.label ?? ''}',
-                          style: VText.caption.copyWith(color: VColors.red),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        )
-                      : const SizedBox.shrink(),
-                ),
-                VIconButton(
-                  icon: Icons.settings_outlined,
-                  onTap: () =>
-                      context.push(Routes.einstellungen).then((_) => _load()),
-                ),
-              ],
+            // The same header as the other tabs (issue #14): a title, a quiet line under it, the
+            // settings button. Home had only the button, which made it the one screen without a
+            // name. The Stellwerk line keeps its place as the caption, because that is what it
+            // is — a note about where the app thinks it is.
+            TabHeader(
+              title: 'Willkommen',
+              caption: _nearby.simulated ? 'Standort: Stellwerk · ${_nearby.label ?? ''}' : null,
+              onSettings: () => context.push(Routes.einstellungen).then((_) => _load()),
             ),
+            const VGap.m(),
             if (_error != null) ...[
               const VGap.m(),
               OfflineBanner(stamp: null),
