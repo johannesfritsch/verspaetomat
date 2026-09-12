@@ -516,13 +516,15 @@ class _Momentum extends StatelessWidget {
             // at about 65 px while +60 stayed huge. Two boxes above each other share one size
             // (app/STYLE.md), which is what the Wir screen has always done. The FittedBox stays
             // as a net for very long numbers.
+            const VTafelLabel('Geduldspunkte diese Woche'),
+            const SizedBox(height: 10),
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: VTafelZahl(quiet ? '0' : '+${fmtInt(st.pointsThisWeek)}'),
             ),
-            const SizedBox(height: 2),
-            Text('Geduldspunkte diese Woche', style: VText.caption),
+            const SizedBox(height: 10),
+            Container(height: 1, color: VColors.red),
             const SizedBox(height: 12),
             // Last week as the bar, so the two numbers can be compared at a glance rather than
             // read. A quiet week shows an empty track, which is the honest picture of it.
@@ -575,14 +577,16 @@ class _WirBlock extends StatelessWidget {
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const VTafelLabel('Minuten haben wir gewartet', look: look),
+                  const SizedBox(height: 10),
                   // The same size as „Deine Woche" below it and as the Wir screen.
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
                     child: VTafelZahl(fmtInt(c.minutesTotal + tick), look: look),
                   ),
-                  const SizedBox(height: 6),
-                  const VTafelCaption('Minuten haben wir gewartet', look: look),
+                  const SizedBox(height: 10),
+                  Container(height: 1, color: VColors.red),
                   const SizedBox(height: 12),
                   // The share is tiny; the filled part keeps a visible minimum.
                   LayoutBuilder(

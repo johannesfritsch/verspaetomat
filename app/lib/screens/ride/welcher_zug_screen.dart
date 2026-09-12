@@ -111,6 +111,26 @@ class _WelcherZugListState extends State<WelcherZugList> {
     }
   }
 
+  /// The trains that are still to come, and the ones that left within the backend's look-back
+  /// window (issue #9). Split here rather than in the sort, so the common case — the next train —
+  /// stays at the top of the list where it has always been.
+  DateTime get _now => DateTime.now();
+  List<ApiItinerary> get _upcoming => _itineraries.where((i) => !_hasLeft(i)).toList();
+  List<ApiItinerary> get _departed => _itineraries.where(_hasLeft).toList().reversed.toList();
+
+  /// The backend plans from half an hour back (issue #9, `PLAN_LOOKBACK_MIN`), and this window is
+  /// that one plus a little slack. Anything older than it is not „just left" — it is a timetable
+  /// the app happens to be holding (the Demo fixture keeps fixed morning departures all day) and
+  /// it stays in the ordinary list rather than claiming you could still be on it.
+  static const _justLeft = Duration(minutes: 35);
+
+  bool _hasLeft(ApiItinerary it) {
+    // The leg's own live departure when there is one: a train ten minutes late has not left yet.
+    final d = it.first.liveDeparture ?? it.plannedDeparture;
+    if (d == null || !d.isBefore(_now)) return false;
+    return _now.difference(d) <= _justLeft;
+  }
+
   /// True when this itinerary arrives after the earliest onward connection (docs/21 §2).
   bool _later(ApiItinerary it) {
     final e = widget.earliestOnwardArrival;
@@ -142,7 +162,7 @@ class _WelcherZugListState extends State<WelcherZugList> {
           ),
         ],
         const VGap.m(),
-        for (final it in _itineraries) ...[
+        for (final it in _upcoming) ...[
           ItineraryRow(itinerary: it, onTap: _sending ? null : () => _start(it)),
           // A later train than the earliest one: the extra wait is the passenger's, not the railway's.
           if (_later(it)) ...[
@@ -151,6 +171,16 @@ class _WelcherZugListState extends State<WelcherZugList> {
               child: Text('Deine Pause zählt nicht mit — es bleiben ${fmtMinutes(widget.countedMinutes ?? 0)}.', style: VText.caption),
             ),
           ],
+        ],
+        // Already gone, and that is the point: someone who boarded and only then thought of the
+        // app is on one of these (issue #9). Half an hour back, no further — beyond that it is
+        // the Nachtrag.
+        if (_departed.isNotEmpty) ...[
+          const VGap.s(),
+          const VSection('Schon abgefahren'),
+          const VGap.s(),
+          Text('Sitzt du schon drin? Auch dann zählt die Fahrt.', style: VText.caption),
+          for (final it in _departed) ItineraryRow(itinerary: it, departed: true, onTap: _sending ? null : () => _start(it)),
         ],
         if (_sending) const LoadingLine(label: 'Einchecken …'),
         // The ticket belongs to the claim, not to the train: quiet, and always reachable.
@@ -176,9 +206,21 @@ class _WelcherZugListState extends State<WelcherZugList> {
 
 /// One itinerary in board style: the first leg as a departure row, the transfers as a chip line.
 class ItineraryRow extends StatelessWidget {
-  const ItineraryRow({super.key, required this.itinerary, required this.onTap});
+  const ItineraryRow({super.key, required this.itinerary, required this.onTap, this.departed = false});
   final ApiItinerary itinerary;
   final VoidCallback? onTap;
+
+  /// This train has left. The row keeps its live delay — it is the same train, still running —
+  /// and says how long ago it went instead of pretending it is next (issue #9).
+  final bool departed;
+
+  static String _ago(DateTime? when) {
+    if (when == null) return '';
+    final m = DateTime.now().difference(when).inMinutes;
+    if (m < 1) return 'gerade';
+    if (m < 60) return 'vor $m Min';
+    return 'vor ${(m / 60).round()} Std';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -202,7 +244,13 @@ class ItineraryRow extends StatelessWidget {
                   children: [
                     SizedBox(
                       width: 52,
-                      child: Text(fmtLocal(d.scheduledDeparture), style: VText.mono.copyWith(color: d.cancelled ? VColors.ink3 : VColors.ink, decoration: d.cancelled ? TextDecoration.lineThrough : null)),
+                      child: Text(
+                        fmtLocal(d.scheduledDeparture),
+                        style: VText.mono.copyWith(
+                          color: d.cancelled || departed ? VColors.ink3 : VColors.ink,
+                          decoration: d.cancelled ? TextDecoration.lineThrough : null,
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 10),
                     LineBadgeColumn(child: LineBadge(d.line, cancelled: d.cancelled)),
@@ -216,6 +264,11 @@ class ItineraryRow extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 10),
+                    if (departed && !d.cancelled)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Text(_ago(d.scheduledDeparture), style: VText.caption),
+                      ),
                     if (d.cancelled)
                       const VChip('Ausfall', tone: VTone.red)
                     else if (delay > 0)

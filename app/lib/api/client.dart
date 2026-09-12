@@ -200,11 +200,16 @@ class ApiClient {
   Future<ApiDestinations> destinations({String? from}) async =>
       ApiDestinations.fromJson(_map(await _get('/v1/me/destinations', {if (from != null) 'from': from})));
 
-  Future<ApiPlan> planJourney({required String from, required String to, DateTime? time, String? firstTrip}) async => ApiPlan.fromJson(_map(await _get('/v1/journeys/plan', {
+  /// `lookback` asks for the trains that left in the last half hour as well (issue #9). It is a
+  /// question only a build that labels them asks: the backend leaves it out for anyone who does
+  /// not, so an older app on this backend keeps the list it has always had.
+  Future<ApiPlan> planJourney({required String from, required String to, DateTime? time, String? firstTrip, int lookbackMin = 30}) async =>
+      ApiPlan.fromJson(_map(await _get('/v1/journeys/plan', {
         'from': from,
         'to': to,
         if (time != null) 'time': time.toUtc().toIso8601String(),
         if (firstTrip != null) 'first_trip': firstTrip,
+        if (time == null && lookbackMin > 0) 'lookback': '$lookbackMin',
       })));
 
   Future<ApiJourneyLive> startJourney(StartJourneyRequest r) async => ApiJourneyLive.fromJson(_map(await _post('/v1/journeys', r.toJson())));

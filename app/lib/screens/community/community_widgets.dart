@@ -185,6 +185,8 @@ class BigFigure extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Bare digits, no flaps: four boards in a grid would shout over the one that matters
+            // (docs/35). The Fallblatt is for the figure a screen is about.
             FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: style ?? VText.numberM)),
             const SizedBox(height: 4),
             Text(label, style: VText.caption),

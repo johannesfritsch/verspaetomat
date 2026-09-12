@@ -18,6 +18,8 @@ struct GeofenceConfig: Codable {
   /// How long the phone must stay in a region before the nudge fires (docs/25 §3). Tunable from
   /// the debug page so it can be settled on real trips rather than argued about.
   var nudgeDelay: TimeInterval = GeofenceRules.defaultNudgeDelay
+  /// How close the phone has to actually be before the nudge is scheduled (issue #8, docs/35).
+  var nudgeRadiusM: Double = GeofenceRules.defaultNudgeRadius
 }
 
 /// Pure rules, kept free of CoreLocation state so they can be unit-tested.
@@ -37,6 +39,22 @@ enum GeofenceRules {
   /// thing and cancelled real arrivals.
   static let defaultNudgeDelay: TimeInterval = 180
   static let nudgeCooldown: TimeInterval = 30 * 60
+
+  /// „Am Bahnhof" should mean standing at it, not walking past its outskirts (issue #8). The
+  /// monitored region stays wide because iOS delivers small circles late or not at all — a 50 m
+  /// region is monitored from cell towers like any other and simply misses. So the region is the
+  /// wake-up and this is the nudge: after entering, the app watches its own fixes and schedules
+  /// only once one lands this close to the station.
+  static let defaultNudgeRadius: CLLocationDistance = 50
+
+  /// How long that watch runs. Walking in from the edge of a 300 m circle takes about three
+  /// minutes; beyond this the phone is near the station but not going to it, and the watch —
+  /// the only part of this that costs battery — gives up.
+  static let nearWatchWindow: TimeInterval = 6 * 60
+
+  /// Once the phone is that close, the nudge is a short hop out: far enough that a train rolling
+  /// through cancels itself by leaving the region, near enough to be useful on a platform.
+  static let nearNudgeDelay: TimeInterval = 45
 
   /// How far the coverage disc reaches, by how fast the phone is moving (docs/25 §1). Drawn
   /// around somewhere the passenger recently *was*, so a München → Memmingen trip costs two or
@@ -356,7 +374,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       stations: stations, umbrellaRadiusM: args["umbrellaRadiusM"] as? Double ?? 8000,
       stationRadiusM: args["stationRadiusM"] as? Double ?? 300,
       quietFrom: args["quietFrom"] as? String, quietTo: args["quietTo"] as? String,
-      nudgeDelay: args["nudgeDelayS"] as? Double ?? GeofenceRules.defaultNudgeDelay)
+      nudgeDelay: args["nudgeDelayS"] as? Double ?? GeofenceRules.defaultNudgeDelay,
+      nudgeRadiusM: args["nudgeRadiusM"] as? Double ?? GeofenceRules.defaultNudgeRadius)
     config = c
     stopAllRegions()
     guard c.enabled, CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else {
@@ -538,7 +557,11 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   private func endMode() {
     modeTimer?.invalidate(); modeTimer = nil
-    if case .dwell = mode { manager.stopUpdatingLocation() }
+    if case .dwell = mode {
+      manager.stopUpdatingLocation()
+      manager.allowsBackgroundLocationUpdates = false
+      manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
     mode = .idle
     fixes = []
     if bgTask != .invalid {
@@ -581,7 +604,22 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     if inCooldown(s) { return }
     lastEvent = "enter \(s.name)"
     if c.riding { lastEvent = "riding, no nudge"; return }
-    scheduleNudge(s, c)
+    beginNearWatch(s, c)
+  }
+
+  /// The region was entered; now find out whether the passenger is actually *at* the station
+  /// (issue #8, docs/35). The app turns its own fixes on for a few minutes and schedules the
+  /// nudge on the first one inside [GeofenceConfig.nudgeRadiusM]. No fix that close, no nudge —
+  /// walking past the edge of the region stays silent.
+  private func beginNearWatch(_ s: GeofenceStation, _ c: GeofenceConfig) {
+    if case .dwell = mode { return } // one watch at a time
+    manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+    manager.allowsBackgroundLocationUpdates = true
+    manager.startUpdatingLocation()
+    lastEvent = "watching for \(Int(c.nudgeRadiusM)) m at \(s.name)"
+    beginMode(.dwell(s), timeout: GeofenceRules.nearWatchWindow) { [weak self] in
+      self?.lastEvent = "no fix within \(Int(c.nudgeRadiusM)) m of \(s.name)"
+    }
   }
 
   private func inCooldown(_ s: GeofenceStation) -> Bool {
@@ -622,11 +660,16 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       endMode()
       refreshNearest(around: l, c)
     case .dwell(let s):
-      // Kept for a device that still delivers one: a fix outside the region is an exit we can
-      // act on early. The speed test went with docs/25 §3.
-      if GeofenceRules.fixCancelsNudge(l, station: s.location, radius: c.stationRadiusM) {
+      // Close enough: this is the nudge (issue #8). A fix outside the wide region is an exit we
+      // can act on early; the speed test went with docs/25 §3.
+      let metres = l.distance(from: s.location)
+      if metres <= c.nudgeRadiusM {
         endMode()
-        cancelNudge(s, reason: "outside the region")
+        lastEvent = "\(Int(metres)) m from \(s.name)"
+        scheduleNudge(s, c, delay: GeofenceRules.nearNudgeDelay)
+      } else if GeofenceRules.fixCancelsNudge(l, station: s.location, radius: c.stationRadiusM) {
+        endMode()
+        lastEvent = "left \(s.name) before getting close"
       }
     case .idle:
       // Not waiting for anything: this is the significant-location stream (docs/25 §1).
@@ -680,8 +723,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   }
 
   @discardableResult
-  private func scheduleNudge(_ s: GeofenceStation, _ c: GeofenceConfig) -> Bool {
-    let delay = config?.nudgeDelay ?? GeofenceRules.defaultNudgeDelay
+  private func scheduleNudge(_ s: GeofenceStation, _ c: GeofenceConfig, delay: TimeInterval? = nil) -> Bool {
+    let delay = delay ?? config?.nudgeDelay ?? GeofenceRules.defaultNudgeDelay
     let fireAt = Date().addingTimeInterval(delay)
     if GeofenceRules.isQuiet(now: fireAt, from: c.quietFrom, to: c.quietTo) { lastEvent = "quiet \(s.name)"; return false }
     if inCooldown(s) {

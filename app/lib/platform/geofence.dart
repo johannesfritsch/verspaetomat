@@ -302,6 +302,7 @@ class GeofenceConfig {
     required this.stations,
     this.umbrellaRadiusM = 8000,
     this.stationRadiusM = 300,
+    this.nudgeRadiusM = 50,
     this.quietFrom,
     this.quietTo,
   });
@@ -311,7 +312,12 @@ class GeofenceConfig {
   final bool riding;
   final List<GeofenceStationConfig> stations;
   final int umbrellaRadiusM;
+  /// The circle iOS monitors: wide, because small regions are delivered late or not at all.
   final int stationRadiusM;
+
+  /// How close the phone has to actually be before the nudge is scheduled (issue #8, docs/35).
+  /// The wide region is the wake-up; this is the nudge.
+  final int nudgeRadiusM;
   final String? quietFrom;
   final String? quietTo;
 
@@ -323,6 +329,7 @@ class GeofenceConfig {
         'stations': stations.map((s) => s.toChannel()).toList(),
         'umbrellaRadiusM': umbrellaRadiusM,
         'stationRadiusM': stationRadiusM,
+        'nudgeRadiusM': nudgeRadiusM,
         'quietFrom': quietFrom,
         'quietTo': quietTo,
       };

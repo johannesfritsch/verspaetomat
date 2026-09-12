@@ -331,16 +331,18 @@ class VTafelCaption extends StatelessWidget {
 /// This is the only animation in the app besides the station clock's second hand and the
 /// arrival count-up (app/STYLE.md).
 class VTafelZahl extends StatefulWidget {
-  const VTafelZahl(this.text, {super.key, this.style, this.look = VTafelLook.papier});
+  const VTafelZahl(this.text, {super.key, this.style, this.look = VTafelLook.papier, this.flaps = true});
 
   /// The number as it should read, German formatting and all: `1.208.316`, `+96`, `4,50 €`.
   /// Everything that is not a digit stands still; only digits flip.
   final String text;
   final TextStyle? style;
 
-  /// On [VTafelLook.anzeige] every digit sits in its own flap: a black card a shade darker than
-  /// the board, the hinge seam across the middle, white figures. On paper the digits are bare.
+  /// On [VTafelLook.anzeige] every digit sits on a black flap with the hinge seam across it; on
+  /// paper the same flaps are paper-coloured with a grey seam (issue #10). [flaps] off leaves the
+  /// digits bare, for the small figures where a board would be louder than the number.
   final VTafelLook look;
+  final bool flaps;
 
   @override
   State<VTafelZahl> createState() => _VTafelZahlState();
@@ -405,7 +407,7 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
     // for all ten.
     if (_still) {
       // No flapping, but the board keeps its flaps: the cells are the look, not the animation.
-      if (!anzeige) return Text(_to, style: style);
+      if (!widget.flaps) return Text(_to, style: style);
       final probe = TextPainter(text: TextSpan(text: '0', style: style), textDirection: TextDirection.ltr)..layout();
       final cell = probe.height * _cardHeight;
       return Row(
@@ -417,6 +419,7 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
               _Card(
                 height: cell,
                 width: probe.width,
+                look: widget.look,
                 child: SizedBox(height: cell, width: probe.width, child: Center(child: Text(c, style: style))),
               )
             else
@@ -425,7 +428,7 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
       );
     }
     final probe = TextPainter(text: TextSpan(text: '0', style: style), textDirection: TextDirection.ltr)..layout();
-    final cell = anzeige ? probe.height * _cardHeight : probe.height;
+    final cell = widget.flaps ? probe.height * _cardHeight : probe.height;
     final width = probe.width;
     // A shorter number than last time (never mind a longer one) must not read digits against the
     // wrong places: both rows are compared from the right, which is where a number grows.
@@ -439,7 +442,7 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
       children: [
         for (var i = 0; i < to.length; i++)
           if (!digits.hasMatch(to[i]))
-            Padding(padding: EdgeInsets.symmetric(horizontal: anzeige ? 1 : 0), child: Text(to[i], style: style))
+            Padding(padding: EdgeInsets.symmetric(horizontal: widget.flaps ? 1 : 0), child: Text(to[i], style: style))
           else
             _Flap(
               controller: _c,
@@ -451,6 +454,7 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
               width: width,
               style: style,
               anzeige: anzeige,
+              flaps: widget.flaps,
             ),
       ],
     );
@@ -469,6 +473,7 @@ class _Flap extends StatelessWidget {
     required this.width,
     required this.style,
     required this.anzeige,
+    required this.flaps,
   });
 
   final AnimationController controller;
@@ -480,6 +485,7 @@ class _Flap extends StatelessWidget {
   final double width;
   final TextStyle style;
   final bool anzeige;
+  final bool flaps;
 
   @override
   Widget build(BuildContext context) {
@@ -519,7 +525,9 @@ class _Flap extends StatelessWidget {
     );
   }
 
-  Widget _card(Widget child) => anzeige ? _Card(height: height, width: width, child: child) : child;
+  Widget _card(Widget child) => flaps
+      ? _Card(height: height, width: width, look: anzeige ? VTafelLook.anzeige : VTafelLook.papier, child: child)
+      : child;
 
   Widget _cell(int digit) => SizedBox(
         height: height,
@@ -1342,26 +1350,37 @@ class VSheetHeader extends StatelessWidget {
 /// across the middle — the line you see on every Solari board, drawn over the figure because
 /// that is where it sits in the real thing.
 class _Card extends StatelessWidget {
-  const _Card({required this.height, required this.width, required this.child});
+  const _Card({required this.height, required this.width, required this.look, required this.child});
   final double height;
   final double width;
+  final VTafelLook look;
   final Widget child;
 
-  static const _flapColor = Color(0xFF1D1D1D);
-  static const _seam = Color(0xFF000000);
+  /// The same board in two lights (issue #10): black flaps with a black seam, or paper flaps
+  /// with a grey one. The silhouette is what makes it a Fallblattanzeige, not the colour.
+  static const _darkFlap = Color(0xFF1D1D1D);
+  static const _darkSeam = Color(0xFF000000);
 
   @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.symmetric(horizontal: 1),
-        height: height,
-        width: width,
-        color: _flapColor,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            child,
-            Positioned(top: height / 2 - 0.5, left: 0, right: 0, child: Container(height: 1, color: _seam)),
-          ],
-        ),
-      );
+  Widget build(BuildContext context) {
+    final anzeige = look == VTafelLook.anzeige;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 1),
+      height: height,
+      width: width,
+      color: anzeige ? _darkFlap : VColors.paper,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          child,
+          Positioned(
+            top: height / 2 - 0.5,
+            left: 0,
+            right: 0,
+            child: Container(height: 1, color: anzeige ? _darkSeam : VColors.rule),
+          ),
+        ],
+      ),
+    );
+  }
 }

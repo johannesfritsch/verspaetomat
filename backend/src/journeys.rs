@@ -656,12 +656,26 @@ pub struct PlanQuery {
     pub time: Option<DateTime<Utc>>,
     #[serde(default)]
     pub first_trip: Option<String>,
+    /// Minutes of already-departed trains to include, capped at [PLAN_LOOKBACK_MIN] (issue #9).
+    /// Only a build that knows how to label them asks for them: an older app sends nothing and
+    /// gets the list it has always got, with nothing in it that has already left.
+    #[serde(default)]
+    pub lookback: Option<i64>,
 }
+
+/// The furthest back the plan will look (issue #9). Someone who boarded and only then remembered
+/// the app is on a train that has already left, and the check-in has to be able to name it.
+/// Further back than this is the Nachtrag, which is a different screen and a different promise.
+pub const PLAN_LOOKBACK_MIN: i64 = 30;
 
 /// `GET /v1/journeys/plan`
 pub async fn plan(State(s): State<AppState>, _c: Customer, Query(q): Query<PlanQuery>) -> ApiResult {
-    let time = q.time.unwrap_or_else(crate::clock::now);
-    let mut its = s.train.plan(&q.from, &q.to, time, 4).await.map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("plan: {e}")))?;
+    let back = q.lookback.unwrap_or(0).clamp(0, PLAN_LOOKBACK_MIN);
+    let time = q.time.unwrap_or_else(|| crate::clock::now() - Duration::minutes(back));
+    // Room for both halves: on a dense line the last half hour alone would fill a list of four
+    // and leave nothing to board.
+    let n = if back > 0 { 7 } else { 4 };
+    let mut its = s.train.plan(&q.from, &q.to, time, n).await.map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("plan: {e}")))?;
     if let Some(ft) = &q.first_trip {
         its.retain(|it| it.legs.first().map(|l| &l.trip_id == ft).unwrap_or(false));
     }
