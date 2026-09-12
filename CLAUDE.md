@@ -33,7 +33,7 @@ flutter test integration_test/workflow_test.dart -d <udid> --dart-define=API_URL
 app/tools/tour.sh
 ```
 
-Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (string compare), `E2E=true`, `ADMIN_TOKEN`. Release builds default to local mode and start at Willkommen/Bahnsteig; debug builds default to Demo and the Showcase.
+Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (string compare), `E2E=true`, `ADMIN_TOKEN`, `NO_ANIM=1` (the Tafel stops flapping; the tour sets it so stills are stills). Release builds default to local mode and start at Willkommen/Bahnsteig; debug builds default to Demo and the Showcase.
 
 ## Production
 
@@ -44,6 +44,22 @@ Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (stri
 - Checks: `curl https://api.verspaetomat.de/health`; `stellwerk --prod customers`; `ssh verspaetomat 'cd /opt/verspaetomat/deploy && docker compose logs --tail 50 api'`.
 - Secrets live only in `deploy/.env` and `deploy/secrets/` on the server. Mail (Postmark) and push (APNs, FCM) are switched on by uncommenting the lines there; see `deploy/README.md` and `docs/42-runbook-vps-testflight.md`.
 - Never `docker compose down -v` (drops the database). Backups: nightly `pg_dump` in `/var/backups` on the server.
+
+## House rules (issue #3)
+
+- **Code is English.** Identifiers, comments, doc comments — all of them. German belongs in the
+  product: UI strings, copy, the docs in `docs/`, commit messages. A German term inside an English
+  sentence is fine where it names a thing that has no English name (`Geduldspunkte`, `aufgegeben`
+  as an API value).
+- **Talk to Johannes in English.**
+- **A visual change in the app is not finished until the website's screenshots are.** They live in
+  `site/static/shots/`, come out of `app/tools/tour.sh`, are resampled to 640 px wide, and are
+  described in `site/content/index.toml` — the alt text and the caption have to still be true.
+- **Old app versions must keep working against the new backend.** Anything on the wire is
+  additive: new fields are optional, existing fields keep their meaning, nothing is renamed or
+  removed while an older build is still in TestFlight or the store.
+- **Shipping order: website, backend, then TestFlight.** The server is up before the build that
+  expects it.
 
 ## Rules that are easy to break
 

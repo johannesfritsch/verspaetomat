@@ -445,7 +445,7 @@ class _ArrivedBlock extends StatelessWidget {
     // green nought „0 Geduldspunkte" would only say the same thing twice.
     final worth = delay > 0 || cancelled ? '$points Geduldspunkte' : 'pünktlich, keine Punkte';
     final note = j?.missedConnection == true ? '$worth · Anschluss verpasst' : worth;
-    // Eine Fahrt, zu Ende: die Fahrkarte, gestanzt (app/STYLE.md).
+    // One journey, over: the Fahrkarte, punched (app/STYLE.md).
     return VFahrkarte(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -506,31 +506,20 @@ class _Momentum extends StatelessWidget {
     // The same box as Wir (docs/30): elevated paper, a hairline border, the big number on top
     // and one quiet line under it. Two blocks that say the same kind of thing should look the
     // same; this one used to be bare text next to a bordered box.
-    return InkWell(
+    return VTafel(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Container(
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(
-          color: VColors.paperElevated,
-          border: Border.all(color: VColors.rule),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Column(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // `VText.number`, nicht `display`: mit `display` (168 px) und einem FittedBox, das nur
-            // verkleinert, hing die gezeigte Größe an der Zahl selbst — 1.208.473 wurde auf etwa
-            // 65 px gestaucht, +60 blieb riesig. Zwei Kästen übereinander gehören in eine Größe
-            // (app/STYLE.md), und der Wir-Schirm macht es längst so. Das FittedBox bleibt als
-            // Netz für sehr lange Zahlen.
+            // `VText.number`, not `display`: with `display` (168 px) inside a FittedBox that only
+            // ever shrinks, the size on screen depended on the number itself — 1.208.473 came out
+            // at about 65 px while +60 stayed huge. Two boxes above each other share one size
+            // (app/STYLE.md), which is what the Wir screen has always done. The FittedBox stays
+            // as a net for very long numbers.
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
-              child: Text(
-                quiet ? '0' : '+${fmtInt(st.pointsThisWeek)}',
-                style: VText.number.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
-              ),
+              child: VTafelZahl(quiet ? '0' : '+${fmtInt(st.pointsThisWeek)}'),
             ),
             const SizedBox(height: 2),
             Text('Geduldspunkte diese Woche', style: VText.caption),
@@ -560,7 +549,6 @@ class _Momentum extends StatelessWidget {
             ),
           ],
         ),
-      ),
     );
   }
 }
@@ -578,29 +566,18 @@ class _WirBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = standing.community;
-    return InkWell(
+    return VTafel(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Container(
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(
-          color: VColors.paperElevated,
-          border: Border.all(color: VColors.rule),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: c == null
+      child: c == null
             ? Text('Wir haben zusammen gewartet. Zahlen folgen.', style: VText.caption)
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Dieselbe Größe wie „Deine Woche" darunter und wie der Wir-Schirm.
+                  // The same size as „Deine Woche" below it and as the Wir screen.
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
-                    child: Text(
-                      fmtInt(c.minutesTotal + tick),
-                      style: VText.number.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
-                    ),
+                    child: VTafelZahl(fmtInt(c.minutesTotal + tick)),
                   ),
                   const SizedBox(height: 2),
                   Text('Minuten haben wir gewartet', style: VText.caption),
@@ -626,7 +603,6 @@ class _WirBlock extends StatelessWidget {
                   ),
                 ],
               ),
-      ),
     );
   }
 }
