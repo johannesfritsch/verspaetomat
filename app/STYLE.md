@@ -14,15 +14,19 @@ The German station clock. Paper white, black grotesk, one red second hand. Preci
 - Rules instead of cards: sections are separated by a 1 px `VRule()` in `rule` grey; the one important break on a screen is a 2 px `VRule.red()`.
 - **Two surfaces, and nothing else (docs/33).** A screen is paper with rules on it; where
   something has to stand out, it stands on one of exactly two surfaces:
-  **the Fahrkarte** (`VFahrkarte`) for one journey or one claim, and
+  **the Fahrkarte** (`VFahrkarte`) for one journey or one claim — the check-in, the ride, the
+  arrival, an Antrag, the till that collects them — and
   **the Tafel** (`VTafel`) for the numbers that belong together at one glance — what we all
-  waited, what your week came to, what you have collected. A Tafel is elevated paper with a
-  hairline all round and a 4 px radius; Home, Wir and Ich use the same one for the same kind of
-  statement. Everything else — lists, rows, badges, settings, explanations — has no surface.
+  waited, what your week came to, what you have collected. A Tafel comes in two looks (docs/34):
+  `VTafelLook.anzeige` is the departure board — black, white flaps with the hinge seam across
+  them, a red hairline under the row — and there is **at most one per screen**, for the figure
+  the screen is about; `VTafelLook.papier` is the quiet one, elevated paper with a hairline and
+  a 4 px radius, for everything under the fold. Home, Wir and Ich use the same pair. Everything else — lists, rows, badges, settings, explanations — has no surface.
   **A surface never contains another surface**, and nothing inside one gets its own border: the
   content lines up with the surface's own padding, so a screen has one left edge, not three.
-- A figure on a Tafel may set itself like a Fallblattanzeige (`VTafelZahl`): the digits that
-  changed flip over to their new value, left to right, running through the ones in between.
+- A figure on a Tafel sets itself like a Fallblattanzeige (`VTafelZahl`): the digits that
+  changed flip over to their new value, left to right, running through the ones in between. On
+  the Anzeige each digit sits on its own flap; on paper the digits are bare.
   Digits that did not change stand still, so a total ticking up moves only its last flap. This is
   the third and last animation in the app.
 - **The Fahrkarte, in detail.** `VFahrkarte` is white paper whose top and bottom edge the perforator bit into, a hairline down each side, no radius and no shadow — the same silhouette as the hero on verspaetomat.de and as the shareable card in `widgets/ticket.dart`, down to the 5 px tooth every 14 px (`VTicketBorder`). It is for **one journey or one claim**: the ride under way, the arrival, an Antrag, the open till, the check-in about to start. A week of numbers, a settings group, a choice, the Deutschlandticket mock — those are rows and rules, never this shape. `strong: true` is the one card on a screen that is the open till; its side lines go to ink.

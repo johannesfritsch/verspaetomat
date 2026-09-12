@@ -155,27 +155,19 @@ class VGap extends StatelessWidget {
 /// to somebody. Numbers about a week, a settings group, a choice — those are still rules and
 /// rows, never this shape (app/STYLE.md).
 ///
-/// [strong] is the one card on a screen that is the open till: the side lines go to ink.
 class VFahrkarte extends StatelessWidget {
   const VFahrkarte({
     super.key,
     required this.child,
-    this.strong = false,
     this.padding = const EdgeInsets.symmetric(horizontal: VSpace.m, vertical: VSpace.m + VTicketBorder.bite),
   });
 
   final Widget child;
-  final bool strong;
   final EdgeInsetsGeometry padding;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
-        decoration: ShapeDecoration(
-          color: VColors.paperElevated,
-          shape: VTicketBorder(
-            side: BorderSide(color: strong ? VColors.ink : VColors.rule, width: strong ? 1.5 : 1),
-          ),
-        ),
+        decoration: const ShapeDecoration(color: VColors.paperElevated, shape: VTicketBorder()),
         child: Padding(padding: padding, child: child),
       );
 }
@@ -185,7 +177,7 @@ class VFahrkarte extends StatelessWidget {
 /// bites show whatever is behind the card, so the same border works on paper, on white and
 /// over a sheet.
 class VTicketBorder extends ShapeBorder {
-  const VTicketBorder({this.side = const BorderSide(color: VColors.rule)});
+  const VTicketBorder({this.side = const BorderSide(color: VColors.ruleSoft)});
 
   final BorderSide side;
 
@@ -255,20 +247,43 @@ class VTicketBorder extends ShapeBorder {
 /// Wir and on Ich, so the same kind of statement looks the same wherever it stands.
 ///
 /// A surface never contains another surface. Nothing inside a Tafel gets its own border.
+enum VTafelLook {
+  /// Ink on paper, a hairline round it. The quiet one, for the figures under the fold.
+  papier,
+
+  /// The departure board: white flaps on black, a red rule under the row. One per screen, for
+  /// the figure the screen is about (docs/34).
+  anzeige,
+}
+
 class VTafel extends StatelessWidget {
-  const VTafel({super.key, required this.child, this.onTap, this.padding = const EdgeInsets.all(VSpace.m)});
+  const VTafel({
+    super.key,
+    required this.child,
+    this.look = VTafelLook.papier,
+    this.onTap,
+    this.padding = const EdgeInsets.all(VSpace.m),
+  });
 
   final Widget child;
+  final VTafelLook look;
   final VoidCallback? onTap;
   final EdgeInsetsGeometry padding;
 
+  /// The board's own black: a shade off the ink, so the flaps can be darker still.
+  static const board = Color(0xFF121212);
+
+  /// Everything that is not a figure on the board: labels, units, captions.
+  static const boardInk = Color(0xFFA8A8A2);
+
   @override
   Widget build(BuildContext context) {
+    final anzeige = look == VTafelLook.anzeige;
     final box = Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: VColors.paperElevated,
-        border: Border.all(color: VColors.rule),
+        color: anzeige ? board : VColors.paperElevated,
+        border: anzeige ? null : Border.all(color: VColors.rule),
         borderRadius: BorderRadius.circular(4),
       ),
       child: child,
@@ -276,6 +291,35 @@ class VTafel extends StatelessWidget {
     if (onTap == null) return box;
     return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(4), child: box);
   }
+}
+
+/// The label over a figure: small caps, quiet, and legible on either look.
+class VTafelLabel extends StatelessWidget {
+  const VTafelLabel(this.text, {super.key, this.look = VTafelLook.papier});
+  final String text;
+  final VTafelLook look;
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text.toUpperCase(),
+        style: VText.eyebrow.copyWith(color: look == VTafelLook.anzeige ? VTafel.boardInk : VColors.ink2),
+      );
+}
+
+/// A line under a figure: where the number comes from, what it is worth, what it was last week.
+class VTafelCaption extends StatelessWidget {
+  const VTafelCaption(this.text, {super.key, this.look = VTafelLook.papier, this.maxLines = 2});
+  final String text;
+  final VTafelLook look;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: VText.caption.copyWith(color: look == VTafelLook.anzeige ? VTafel.boardInk : VColors.ink2),
+        maxLines: maxLines,
+        overflow: TextOverflow.ellipsis,
+      );
 }
 
 /// A figure on a Tafel, set the way a Fallblattanzeige sets one: every digit that changed flips
@@ -287,12 +331,16 @@ class VTafel extends StatelessWidget {
 /// This is the only animation in the app besides the station clock's second hand and the
 /// arrival count-up (app/STYLE.md).
 class VTafelZahl extends StatefulWidget {
-  const VTafelZahl(this.text, {super.key, this.style});
+  const VTafelZahl(this.text, {super.key, this.style, this.look = VTafelLook.papier});
 
   /// The number as it should read, German formatting and all: `1.208.316`, `+96`, `4,50 €`.
   /// Everything that is not a digit stands still; only digits flip.
   final String text;
   final TextStyle? style;
+
+  /// On [VTafelLook.anzeige] every digit sits in its own flap: a black card a shade darker than
+  /// the board, the hinge seam across the middle, white figures. On paper the digits are bare.
+  final VTafelLook look;
 
   @override
   State<VTafelZahl> createState() => _VTafelZahlState();
@@ -305,10 +353,13 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
   /// `--dart-define=NO_ANIM=1`: the board stands still. The screenshot tour runs with it, because
   /// a still caught halfway through a flap looks like a rendering fault rather than a board, and
   /// a number that flaps every second made the capture drift a screen behind (docs/33).
-  static const _still = bool.fromEnvironment('NO_ANIM');
+  static const _still = String.fromEnvironment('NO_ANIM') == '1';
 
   /// At most this many flaps per digit: a board is quick, and 0 → 9 should not take a second.
   static const _maxFlaps = 6;
+
+  /// A flap card is this much taller than the figure printed on it.
+  static const _cardHeight = 1.18;
 
   late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
   late String _from = _blank(widget.text);
@@ -344,13 +395,37 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    final style = (widget.style ?? VText.number).copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+    final anzeige = widget.look == VTafelLook.anzeige;
+    final style = (widget.style ?? VText.number).copyWith(
+      fontFeatures: const [FontFeature.tabularFigures()],
+      color: anzeige ? VColors.paper : null,
+    );
     // Measured, not guessed: a flap has to be exactly as wide and as tall as the digit it turns
     // over, or the row shifts sideways while it runs. Tabular figures make one measurement do
     // for all ten.
-    if (_still) return Text(_to, style: style);
+    if (_still) {
+      // No flapping, but the board keeps its flaps: the cells are the look, not the animation.
+      if (!anzeige) return Text(_to, style: style);
+      final probe = TextPainter(text: TextSpan(text: '0', style: style), textDirection: TextDirection.ltr)..layout();
+      final cell = probe.height * _cardHeight;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          for (final c in _to.split(''))
+            if (RegExp(r'\d').hasMatch(c))
+              _Card(
+                height: cell,
+                width: probe.width,
+                child: SizedBox(height: cell, width: probe.width, child: Center(child: Text(c, style: style))),
+              )
+            else
+              Padding(padding: const EdgeInsets.symmetric(horizontal: 1), child: Text(c, style: style)),
+        ],
+      );
+    }
     final probe = TextPainter(text: TextSpan(text: '0', style: style), textDirection: TextDirection.ltr)..layout();
-    final cell = probe.height;
+    final cell = anzeige ? probe.height * _cardHeight : probe.height;
     final width = probe.width;
     // A shorter number than last time (never mind a longer one) must not read digits against the
     // wrong places: both rows are compared from the right, which is where a number grows.
@@ -364,7 +439,7 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
       children: [
         for (var i = 0; i < to.length; i++)
           if (!digits.hasMatch(to[i]))
-            Text(to[i], style: style)
+            Padding(padding: EdgeInsets.symmetric(horizontal: anzeige ? 1 : 0), child: Text(to[i], style: style))
           else
             _Flap(
               controller: _c,
@@ -375,6 +450,7 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
               height: cell,
               width: width,
               style: style,
+              anzeige: anzeige,
             ),
       ],
     );
@@ -392,6 +468,7 @@ class _Flap extends StatelessWidget {
     required this.height,
     required this.width,
     required this.style,
+    required this.anzeige,
   });
 
   final AnimationController controller;
@@ -402,6 +479,7 @@ class _Flap extends StatelessWidget {
   final double height;
   final double width;
   final TextStyle style;
+  final bool anzeige;
 
   @override
   Widget build(BuildContext context) {
@@ -414,35 +492,39 @@ class _Flap extends StatelessWidget {
       d = (d + 1) % 10;
     }
     steps.add(to);
-    if (steps.length == 1) return _cell(to);
+    if (steps.length == 1) return _card(_cell(to));
 
     final end = (begin + span * steps.length).clamp(0.0, 1.0);
     final t = CurvedAnimation(parent: controller, curve: Interval(begin.clamp(0.0, 1.0), end, curve: Curves.easeOut));
-    return ClipRect(
-      child: SizedBox(
-        height: height,
-        width: width,
-        child: AnimatedBuilder(
-          animation: t,
-          builder: (context, _) {
-            final offset = -t.value * (steps.length - 1) * height;
-            return Stack(
-              clipBehavior: Clip.hardEdge,
-              children: [
-                for (var i = 0; i < steps.length; i++)
-                  Positioned(top: i * height + offset, child: _cell(steps[i])),
-              ],
-            );
-          },
+    return _card(
+      ClipRect(
+        child: SizedBox(
+          height: height,
+          width: width,
+          child: AnimatedBuilder(
+            animation: t,
+            builder: (context, _) {
+              final offset = -t.value * (steps.length - 1) * height;
+              return Stack(
+                clipBehavior: Clip.hardEdge,
+                children: [
+                  for (var i = 0; i < steps.length; i++)
+                    Positioned(top: i * height + offset, child: _cell(steps[i])),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
   }
 
+  Widget _card(Widget child) => anzeige ? _Card(height: height, width: width, child: child) : child;
+
   Widget _cell(int digit) => SizedBox(
         height: height,
         width: width,
-        child: Text('$digit', style: style),
+        child: Center(child: Text('$digit', style: style)),
       );
 }
 
@@ -819,9 +901,12 @@ class VDots extends StatelessWidget {
 
 /// A thin progress bar: confirmed solid red, submitted as a lighter segment.
 class VProgress extends StatelessWidget {
-  const VProgress({super.key, required this.confirmed, this.submitted = 0});
+  const VProgress({super.key, required this.confirmed, this.submitted = 0, this.track});
   final double confirmed; // 0..1
   final double submitted; // 0..1, drawn behind confirmed
+
+  /// The empty part. Darker than the paper default when the bar stands on a board (docs/34).
+  final Color? track;
 
   @override
   Widget build(BuildContext context) {
@@ -831,7 +916,7 @@ class VProgress extends StatelessWidget {
         height: 6,
         child: Stack(
           children: [
-            Container(color: VColors.ruleSoft),
+            Container(color: track ?? VColors.ruleSoft),
             FractionallySizedBox(widthFactor: (confirmed + submitted).clamp(0, 1), child: Container(color: VColors.redSoft)),
             FractionallySizedBox(widthFactor: confirmed.clamp(0, 1), child: Container(color: VColors.red)),
           ],
@@ -1251,4 +1336,32 @@ class VSheetHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One flap on the board: a card a shade darker than the board it hangs in, with the hinge seam
+/// across the middle — the line you see on every Solari board, drawn over the figure because
+/// that is where it sits in the real thing.
+class _Card extends StatelessWidget {
+  const _Card({required this.height, required this.width, required this.child});
+  final double height;
+  final double width;
+  final Widget child;
+
+  static const _flapColor = Color(0xFF1D1D1D);
+  static const _seam = Color(0xFF000000);
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.symmetric(horizontal: 1),
+        height: height,
+        width: width,
+        color: _flapColor,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            child,
+            Positioned(top: height / 2 - 0.5, left: 0, right: 0, child: Container(height: 1, color: _seam)),
+          ],
+        ),
+      );
 }

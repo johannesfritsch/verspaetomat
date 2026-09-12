@@ -268,27 +268,34 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$lineLabel · $origin → $where', style: VText.bodyStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
-          const VGap.l(),
-          CountUpDelay(delay, cancelled: cancelled),
-          const VGap.m(),
-          Text(_headline(delay, cancelled, points), style: VText.h2),
-          const VGap.xs(),
-          Text(
-            cancelled
-                ? 'Reise nicht angetreten. 60 Minuten angerechnet.'
-                : 'Ankunft $where ${fmtLocal(actual)} statt ${fmtLocal(planned)}${r.cause != null ? ' · ${r.cause}' : ''}${r.selfEntered ? ' · selbst eingetragen' : ''}',
-            style: VText.bodyS.copyWith(color: VColors.ink2),
+          // The journey, used up: one Fahrkarte, punched (docs/34). Everything below it —
+          // the badge, the claim, the buttons — is what follows from the card, not on it.
+          VFahrkarte(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$lineLabel · $origin → $where', style: VText.bodyStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
+                const VGap.l(),
+                CountUpDelay(delay, cancelled: cancelled),
+                const VGap.m(),
+                Text(_headline(delay, cancelled, points), style: VText.h2),
+                const VGap.xs(),
+                Text(
+                  cancelled
+                      ? 'Reise nicht angetreten. 60 Minuten angerechnet.'
+                      : 'Ankunft $where ${fmtLocal(actual)} statt ${fmtLocal(planned)}${r.cause != null ? ' · ${r.cause}' : ''}${r.selfEntered ? ' · selbst eingetragen' : ''}',
+                  style: VText.bodyS.copyWith(color: VColors.ink2),
+                ),
+                if (j != null && j.missedConnection) ...[
+                  const VGap.xs(),
+                  Text('Anschluss verpasst in ${j.transferStationName ?? (j.legs.length > 1 ? j.legs.first.toStationName : '')}. Zählt am Ziel, nicht pro Zug.', style: VText.bodySStrong.copyWith(color: VColors.red)),
+                ] else if (j != null && j.incomplete) ...[
+                  const VGap.xs(),
+                  Text('Beendet unterwegs: die Verspätung bis ${j.transferStationName ?? where} zählt.', style: VText.caption),
+                ],
+              ],
+            ),
           ),
-          if (j != null && j.missedConnection) ...[
-            const VGap.xs(),
-            Text('Anschluss verpasst in ${j.transferStationName ?? (j.legs.length > 1 ? j.legs.first.toStationName : '')}. Zählt am Ziel, nicht pro Zug.', style: VText.bodySStrong.copyWith(color: VColors.red)),
-          ] else if (j != null && j.incomplete) ...[
-            const VGap.xs(),
-            Text('Beendet unterwegs: die Verspätung bis ${j.transferStationName ?? where} zählt.', style: VText.caption),
-          ],
-          const VGap.l(),
-          const VRule.red(),
           if (result.newBadge != null) ...[
             const VGap.m(),
             Row(

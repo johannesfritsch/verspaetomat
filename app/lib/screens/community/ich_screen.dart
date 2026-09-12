@@ -86,34 +86,28 @@ class IchScreen extends StatelessWidget {
               // the same surface Home and Wir use for the same kind of statement. They used to
               // be bare figures on paper here and boxed numbers there.
               VTafel(
+                look: VTafelLook.anzeige,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const VTafelLabel('Geduldspunkte', look: VTafelLook.anzeige),
+                    const SizedBox(height: 10),
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          VTafelZahl(fmtInt(me.pointsTotal)),
-                          const SizedBox(width: 10),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Text('Geduldspunkte', style: VText.title.copyWith(color: VColors.ink2)),
-                          ),
-                        ],
-                      ),
+                      child: VTafelZahl(fmtInt(me.pointsTotal), look: VTafelLook.anzeige),
                     ),
+                    const SizedBox(height: 10),
+                    Container(height: 1, color: VColors.red),
                     // The level (docs/20 §5): the same line Home shows under "Deine Woche".
                     if (lvl != null) ...[
-                      const VGap.m(),
-                      VProgress(confirmed: lvl.progress),
+                      const SizedBox(height: 10),
+                      VProgress(confirmed: lvl.progress, track: const Color(0xFF2A2A2A)),
                       const SizedBox(height: 6),
-                      Text(
+                      VTafelCaption(
                         lvl.pointsToNext > 0 ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“' : '${lvl.name} · höchste Stufe erreicht',
-                        style: VText.caption,
+                        look: VTafelLook.anzeige,
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ],

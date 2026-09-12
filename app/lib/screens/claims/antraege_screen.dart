@@ -411,7 +411,6 @@ class _CollectingCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.m),
       child: VFahrkarte(
-        strong: true,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -566,10 +566,12 @@ class _WirBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = standing.community;
+    const look = VTafelLook.anzeige;
     return VTafel(
+      look: look,
       onTap: onTap,
       child: c == null
-            ? Text('Wir haben zusammen gewartet. Zahlen folgen.', style: VText.caption)
+            ? const VTafelCaption('Wir haben zusammen gewartet. Zahlen folgen.', look: look)
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -577,10 +579,10 @@ class _WirBlock extends StatelessWidget {
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
-                    child: VTafelZahl(fmtInt(c.minutesTotal + tick)),
+                    child: VTafelZahl(fmtInt(c.minutesTotal + tick), look: look),
                   ),
-                  const SizedBox(height: 2),
-                  Text('Minuten haben wir gewartet', style: VText.caption),
+                  const SizedBox(height: 6),
+                  const VTafelCaption('Minuten haben wir gewartet', look: look),
                   const SizedBox(height: 12),
                   // The share is tiny; the filled part keeps a visible minimum.
                   LayoutBuilder(
@@ -590,16 +592,16 @@ class _WirBlock extends StatelessWidget {
                       final filled = (box.maxWidth * share).clamp(c.myMinutes > 0 ? 6.0 : 0.0, box.maxWidth);
                       return Stack(
                         children: [
-                          Container(height: 6, decoration: BoxDecoration(color: VColors.ruleSoft, borderRadius: BorderRadius.circular(3))),
+                          Container(height: 6, decoration: BoxDecoration(color: const Color(0xFF2A2A2A), borderRadius: BorderRadius.circular(3))),
                           Container(height: 6, width: filled, decoration: BoxDecoration(color: VColors.red, borderRadius: BorderRadius.circular(3))),
                         ],
                       );
                     },
                   ),
                   const SizedBox(height: 6),
-                  Text(
+                  VTafelCaption(
                     c.myMinutes > 0 ? '${fmtInt(c.myMinutes)} davon deine' : 'Deine ersten Minuten kommen mit der ersten Fahrt.',
-                    style: VText.caption,
+                    look: look,
                   ),
                 ],
               ),

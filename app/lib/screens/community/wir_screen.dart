@@ -105,6 +105,7 @@ class _WirScreenState extends State<WirScreen> {
               // stands on the same board as Home's copy of it (docs/33) and sets itself the way
               // a departure board does.
               VTafel(
+                look: VTafelLook.anzeige,
                 onTap: () => showSourceSheet(
                   context,
                   title: 'Minuten zusammen gewartet',
@@ -114,23 +115,17 @@ class _WirScreenState extends State<WirScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('ZUSAMMEN GEWARTET', style: VText.eyebrow),
-                    const SizedBox(height: 6),
+                    const VTafelLabel('Zusammen gewartet', look: VTafelLook.anzeige),
+                    const SizedBox(height: 10),
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          VTafelZahl(fmtInt(c.minutes + _extraMinutes)),
-                          const SizedBox(width: 10),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Text('Minuten', style: VText.title.copyWith(color: VColors.ink2)),
-                          ),
-                        ],
-                      ),
+                      child: VTafelZahl(fmtInt(c.minutes + _extraMinutes), look: VTafelLook.anzeige),
                     ),
+                    const SizedBox(height: 10),
+                    Container(height: 1, color: VColors.red),
+                    const SizedBox(height: 8),
+                    const VTafelCaption('Minuten, von uns allen zusammen', look: VTafelLook.anzeige),
                   ],
                 ),
               ),
