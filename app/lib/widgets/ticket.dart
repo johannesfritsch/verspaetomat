@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../theme/tokens.dart';
+import 'kit.dart';
 
 /// The shareable Fahrkarte (docs/27 §1).
 ///
@@ -335,21 +336,32 @@ class Ticket extends StatelessWidget {
 
 /// The torn edges, top and bottom. A ticket is recognisable by its silhouette before anything
 /// on it can be read, which is the whole point at thumbnail size.
+///
+/// The card is captured as a standalone PNG, so the bites cannot be cut out of a background
+/// the way [VTicketBorder] does it in the app — they are painted in paper grey on white
+/// instead, which is exactly how the website's hero card does it (`.fahrkarte::before`).
+/// Same radius, same pitch, same two hairlines down the sides.
 class _PerforationPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final bg = Paint()..color = VColors.paper;
-    canvas.drawRect(Offset.zero & size, bg);
+    canvas.drawRect(Offset.zero & size, Paint()..color = VColors.paperElevated);
 
-    final notch = Paint()
-      ..color = VColors.rule
-      ..style = PaintingStyle.fill;
-    const r = 4.0;
-    final step = r * 3;
-    for (var x = step / 2; x < size.width; x += step) {
-      canvas.drawCircle(Offset(x, 0), r, notch);
-      canvas.drawCircle(Offset(x, size.height), r, notch);
+    final bite = Paint()..color = VColors.paper;
+    const r = VTicketBorder.radius;
+    const pitch = VTicketBorder.pitch;
+    final count = (size.width / pitch).floor();
+    final start = (size.width - count * pitch) / 2 + pitch / 2;
+    for (var i = 0; i < count; i++) {
+      final x = start + i * pitch;
+      canvas.drawCircle(Offset(x, 0), r, bite);
+      canvas.drawCircle(Offset(x, size.height), r, bite);
     }
+
+    final side = Paint()
+      ..color = VColors.ruleSoft
+      ..strokeWidth = 1;
+    canvas.drawLine(const Offset(0.5, 0), Offset(0.5, size.height), side);
+    canvas.drawLine(Offset(size.width - 0.5, 0), Offset(size.width - 0.5, size.height), side);
   }
 
   @override

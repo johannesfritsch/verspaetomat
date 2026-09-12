@@ -143,6 +143,106 @@ class VGap extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Die Fahrkarte
+// ---------------------------------------------------------------------------
+
+/// The one card shape this app has: a piece of paper whose top and bottom edge the perforator
+/// bit into, a hairline down each side, nothing rounded and nothing floating. Same object as
+/// the hero on verspaetomat.de (`site/static/verspaetomat.css`, `.fahrkarte`) and as the
+/// shareable Fahrkarte in `widgets/ticket.dart`, down to the radius and the pitch.
+///
+/// It means something: a ticket is **one journey or one claim**, a thing that could be handed
+/// to somebody. Numbers about a week, a settings group, a choice — those are still rules and
+/// rows, never this shape (app/STYLE.md).
+///
+/// [strong] is the one card on a screen that is the open till: the side lines go to ink.
+class VFahrkarte extends StatelessWidget {
+  const VFahrkarte({
+    super.key,
+    required this.child,
+    this.strong = false,
+    this.padding = const EdgeInsets.symmetric(horizontal: VSpace.m, vertical: VSpace.m + VTicketBorder.bite),
+  });
+
+  final Widget child;
+  final bool strong;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration: ShapeDecoration(
+          color: VColors.paperElevated,
+          shape: VTicketBorder(
+            side: BorderSide(color: strong ? VColors.ink : VColors.rule, width: strong ? 1.5 : 1),
+          ),
+        ),
+        child: Padding(padding: padding, child: child),
+      );
+}
+
+/// The silhouette itself: the rectangle minus a row of half circles along the top and the
+/// bottom edge, plus the two side hairlines. Subtractive, not a row of painted dots — the
+/// bites show whatever is behind the card, so the same border works on paper, on white and
+/// over a sheet.
+class VTicketBorder extends ShapeBorder {
+  const VTicketBorder({this.side = const BorderSide(color: VColors.rule)});
+
+  final BorderSide side;
+
+  /// The website's numbers: a 5 px tooth every 14 px.
+  static const radius = 5.0;
+  static const pitch = 14.0;
+
+  /// How deep the teeth reach into the card. Content keeps clear of it.
+  static const bite = radius;
+
+  @override
+  EdgeInsetsGeometry get dimensions =>
+      EdgeInsets.symmetric(horizontal: side.width, vertical: bite);
+
+  @override
+  Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
+    final teeth = Path();
+    // Centred, so no tooth is cut in half by a corner: a chipped corner reads as a rendering
+    // fault, a full tooth reads as perforation.
+    final count = (rect.width / pitch).floor();
+    if (count > 0) {
+      final start = rect.left + (rect.width - count * pitch) / 2 + pitch / 2;
+      for (var i = 0; i < count; i++) {
+        final x = start + i * pitch;
+        teeth.addOval(Rect.fromCircle(center: Offset(x, rect.top), radius: radius));
+        teeth.addOval(Rect.fromCircle(center: Offset(x, rect.bottom), radius: radius));
+      }
+    }
+    return Path.combine(PathOperation.difference, Path()..addRect(rect), teeth);
+  }
+
+  @override
+  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
+      getOuterPath(rect.deflate(side.width), textDirection: textDirection);
+
+  /// Only the two cut sides are drawn. Top and bottom are torn edges; a line along a tear is
+  /// what a border-everywhere box would do, and that is the look this replaces.
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    if (side.style == BorderStyle.none) return;
+    final paint = side.toPaint();
+    final inset = side.width / 2;
+    canvas.drawLine(Offset(rect.left + inset, rect.top), Offset(rect.left + inset, rect.bottom), paint);
+    canvas.drawLine(Offset(rect.right - inset, rect.top), Offset(rect.right - inset, rect.bottom), paint);
+  }
+
+  @override
+  ShapeBorder scale(double t) => VTicketBorder(side: side.scale(t));
+
+  @override
+  bool operator ==(Object other) => other is VTicketBorder && other.side == side;
+
+  @override
+  int get hashCode => side.hashCode;
+}
+
+// ---------------------------------------------------------------------------
 // Buttons
 // ---------------------------------------------------------------------------
 

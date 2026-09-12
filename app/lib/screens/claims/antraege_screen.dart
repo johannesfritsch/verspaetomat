@@ -295,9 +295,7 @@ class _ClaimCard extends StatelessWidget {
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.m),
-      child: Container(
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(border: Border.all(color: VColors.rule, width: 1.5), borderRadius: BorderRadius.circular(4)),
+      child: VFahrkarte(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -409,9 +407,8 @@ class _CollectingCard extends StatelessWidget {
             : '${fmtCents(desk.openCents)} von ${fmtCents(minPayoutCents)}';
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.m),
-      child: Container(
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(border: Border.all(color: VColors.ink, width: 1.5), borderRadius: BorderRadius.circular(4)),
+      child: VFahrkarte(
+        strong: true,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -571,9 +568,7 @@ class _DiscardedCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.m),
-      child: Container(
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(border: Border.all(color: VColors.rule, width: 1.5), borderRadius: BorderRadius.circular(4)),
+      child: VFahrkarte(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -600,9 +595,7 @@ class _EmptyCollecting extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.m),
-      child: Container(
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(border: Border.all(color: VColors.rule, width: 1.5), borderRadius: BorderRadius.circular(4)),
+      child: VFahrkarte(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -627,9 +620,7 @@ class _ExpiredCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.m),
-      child: Container(
-        padding: const EdgeInsets.all(VSpace.m),
-        decoration: BoxDecoration(border: Border.all(color: VColors.rule, width: 1.5), borderRadius: BorderRadius.circular(4)),
+      child: VFahrkarte(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
