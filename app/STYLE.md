@@ -21,7 +21,7 @@ The German station clock. Paper white, black grotesk, one red second hand. Preci
   `VTafelLook.anzeige` is the departure board — black, white flaps with the hinge seam across
   them, a red hairline under the row — and there is **at most one per screen**, for the figure
   the screen is about; `VTafelLook.papier` is the quiet one, elevated paper with a hairline and
-  a 4 px radius, for everything under the fold. Home, Wir and Ich use the same pair. Everything else — lists, rows, badges, settings, explanations — has no surface.
+  a 4 px radius, for everything under the fold. Home, Wir and Ich use the same pair. Everything else — lists, rows, badges, settings, explanations — has no surface, **except on Wir and Ich** (docs/37): those two are overview screens, and there every block stands on a Tafel with its section label outside it. A list on a card keeps an 8 px gutter, not 16.
   **A surface never contains another surface**, and nothing inside one gets its own border: the
   content lines up with the surface's own padding, so a screen has one left edge, not three.
 - A figure on a Tafel sets itself like a Fallblattanzeige (`VTafelZahl`): the digits that

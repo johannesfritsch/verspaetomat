@@ -405,10 +405,11 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
   @override
   Widget build(BuildContext context) {
     final anzeige = widget.look == VTafelLook.anzeige;
-    final style = (widget.style ?? VText.number).copyWith(
-      fontFeatures: const [FontFeature.tabularFigures()],
-      color: anzeige ? VColors.paper : null,
-    );
+    // Ink on a white flap, whichever board it hangs in (issue #10) — but the group separators
+    // hang between the flaps, on the board itself, so they take the board's colour or they are
+    // black on black.
+    final style = (widget.style ?? VText.number).copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+    final bareStyle = anzeige ? style.copyWith(color: VColors.paper) : style;
     // Measured, not guessed: a flap has to be exactly as wide and as tall as the digit it turns
     // over, or the row shifts sideways while it runs. Tabular figures make one measurement do
     // for all ten.
@@ -431,7 +432,7 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
                 child: SizedBox(height: cell, child: Center(child: Text(c, style: style))),
               )
             else
-              Padding(padding: const EdgeInsets.symmetric(horizontal: 1), child: Text(c, style: style)),
+              Padding(padding: const EdgeInsets.symmetric(horizontal: 1), child: Text(c, style: bareStyle)),
         ],
       );
     }
@@ -458,7 +459,7 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
                 child: SizedBox(height: cell, child: Center(child: Text(to[i], style: style))),
               )
             else
-              Padding(padding: EdgeInsets.symmetric(horizontal: widget.flaps ? 1 : 0), child: Text(to[i], style: style))
+              Padding(padding: EdgeInsets.symmetric(horizontal: widget.flaps ? 1 : 0), child: Text(to[i], style: bareStyle))
           else
             _Flap(
               controller: _c,
@@ -1375,11 +1376,8 @@ class _Card extends StatelessWidget {
   final VTafelLook look;
   final Widget child;
 
-  /// The same board in two lights (issue #10): black flaps with a black seam, or paper flaps
-  /// with a grey one. The silhouette is what makes it a Fallblattanzeige, not the colour.
-  static const _darkFlap = Color(0xFF1D1D1D);
-  static const _darkSeam = Color(0xFF000000);
-
+  /// The flaps are paper in both lights (issue #10): white cards on the black board, and paper
+  /// cards on the elevated paper. What changes is what surrounds them, and the seam.
   @override
   Widget build(BuildContext context) {
     final anzeige = look == VTafelLook.anzeige;
@@ -1387,17 +1385,12 @@ class _Card extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 1),
       height: height,
       width: width,
-      color: anzeige ? _darkFlap : VColors.paper,
+      color: anzeige ? VColors.paperElevated : VColors.paper,
       child: Stack(
         alignment: Alignment.center,
         children: [
           child,
-          Positioned(
-            top: height / 2 - 0.5,
-            left: 0,
-            right: 0,
-            child: Container(height: 1, color: anzeige ? _darkSeam : VColors.rule),
-          ),
+          Positioned(top: height / 2 - 0.5, left: 0, right: 0, child: Container(height: 1, color: VColors.rule)),
         ],
       ),
     );

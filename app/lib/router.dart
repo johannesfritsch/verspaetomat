@@ -103,6 +103,10 @@ class _TabShellState extends State<_TabShell> {
   NearbyMonitor? _nearby;
   String? _consumedLocation;
 
+  /// See the `Builder` in [build]: the tab's own context, so the Einchecken square opens its
+  /// sheet exactly where Home's button opens it (issue #12).
+  BuildContext? _bodyContext;
+
   @override
   void initState() {
     super.initState();
@@ -201,7 +205,14 @@ class _TabShellState extends State<_TabShell> {
             return Stack(
               children: [
                 Scaffold(
-                  body: widget.child,
+                  // A context from inside the shell's own Navigator (issue #12). The square in
+                  // the bar sits above that Navigator, so a sheet opened with the bar's context
+                  // goes on the root one and covers the bar; Home's button opens the same sheet
+                  // from inside the tab, where the bar stays visible. One context, one result.
+                  body: Builder(builder: (bodyContext) {
+                    _bodyContext = bodyContext;
+                    return widget.child;
+                  }),
                   bottomNavigationBar: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -210,7 +221,7 @@ class _TabShellState extends State<_TabShell> {
                         index: index.clamp(0, 3),
                         onTap: (i) => context.go(_TabShell._tabs[i]),
                         // Under way, the square points at the journey you are on (docs/20 §1).
-                        onCheckin: () => monitor.active ? monitor.openSheet() : startCheckin(context),
+                        onCheckin: () => monitor.active ? monitor.openSheet() : startCheckin(_bodyContext ?? context),
                         checkinEnabled: !monitor.active,
                         badges: {1: session.unreadMails},
                       ),

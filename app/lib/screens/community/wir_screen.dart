@@ -148,32 +148,49 @@ class _WirScreenState extends State<WirScreen> {
               ),
               const VGap.l(),
 
+              // Every block on this screen stands on a card (issue #13, docs/37): the section
+              // label outside it, the content on it. Nothing sits loose on the paper any more.
               const VSection('Vereine'),
-              for (final n in c.ngos) _ngoRow(context, n),
+              const VGap.m(),
+              VTafel(
+                // A list on a card keeps a narrow gutter: with the full 16 px, „Bahnhofsmission
+                // Köln" broke into two lines next to its figure (issue #13).
+                padding: const EdgeInsets.symmetric(horizontal: VSpace.s),
+                child: Column(
+                  children: [for (final n in c.ngos) _ngoRow(context, n)],
+                ),
+              ),
               const VGap.xl(),
               VSection('Ranglisten', trailing: Text('7 Tage', style: VText.caption)),
               const VGap.m(),
-              if (st.board != null) ...[
-                _RankLine(board: st.board!),
-                const VGap.m(),
-              ],
-              SegmentTabs(labels: const ['Meine Linie', 'Meine Stadt', 'Deutschland'], index: _board, onChanged: (i) => setState(() => _board = i)),
-              const VGap.s(),
-              Text(
-                switch (_board) { 0 => 'Deine häufigste Linie', 1 => session.me?.homeStation.isNotEmpty == true ? session.me!.homeStation : 'Deine Stadt', _ => 'Alle Fahrgäste' },
-                style: VText.caption,
-              ),
-              const VGap.s(),
-              IndexedStack(
-                index: _board,
-                alignment: Alignment.topLeft,
-                sizing: StackFit.loose,
-                children: [for (final scope in _boardScopes) _Board(board: data.boards[scope])],
-              ),
-              const VGap.s(),
-              Text(
-                (session.me?.settings.showOnBoards ?? true) ? 'Nur verifizierte Fahrten zählen.' : 'Nur verifizierte Fahrten zählen. Du bist in den Ranglisten verborgen.',
-                style: VText.caption,
+              VTafel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (st.board != null) ...[
+                      _RankLine(board: st.board!),
+                      const VGap.m(),
+                    ],
+                    SegmentTabs(labels: const ['Meine Linie', 'Meine Stadt', 'Deutschland'], index: _board, onChanged: (i) => setState(() => _board = i)),
+                    const VGap.s(),
+                    Text(
+                      switch (_board) { 0 => 'Deine häufigste Linie', 1 => session.me?.homeStation.isNotEmpty == true ? session.me!.homeStation : 'Deine Stadt', _ => 'Alle Fahrgäste' },
+                      style: VText.caption,
+                    ),
+                    const VGap.s(),
+                    IndexedStack(
+                      index: _board,
+                      alignment: Alignment.topLeft,
+                      sizing: StackFit.loose,
+                      children: [for (final scope in _boardScopes) _Board(board: data.boards[scope])],
+                    ),
+                    const VGap.s(),
+                    Text(
+                      (session.me?.settings.showOnBoards ?? true) ? 'Nur verifizierte Fahrten zählen.' : 'Nur verifizierte Fahrten zählen. Du bist in den Ranglisten verborgen.',
+                      style: VText.caption,
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

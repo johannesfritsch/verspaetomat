@@ -81,7 +81,11 @@ void main() {
       await wait(tester, 1800);
       // ignore: avoid_print
       print('SHOT $name');
-      await wait(tester, 1500);
+      // The screenshot is taken by tour.sh half a second after this line, and `simctl io
+      // screenshot` is not instant: under load the captures fall behind the markers and a shot
+      // lands on the next screen. Three seconds of standing still is cheap insurance — the whole
+      // tour is five minutes either way.
+      await wait(tester, 3000);
     }
     /// Closes the topmost bottom sheet the way a thumb does, above its top edge.
     Future<void> dismissSheet(WidgetTester tester) async {

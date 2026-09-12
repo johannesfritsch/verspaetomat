@@ -142,43 +142,66 @@ class IchScreen extends StatelessWidget {
                 ),
               ),
               const VGap.xl(),
+              // Every block on this screen stands on a card (issue #13, docs/37): the section
+              // label outside it, the content on it.
               VSection('Abzeichen', trailing: Text('$earned von ${data.badges.length}', style: VText.caption)),
-              const VGap.s(),
-              GridView.count(
-                crossAxisCount: 3,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 6,
-                crossAxisSpacing: 6,
-                childAspectRatio: 0.84, // 64 px artwork + two caption lines
-                children: [
-                  for (final b in data.badges) BadgeTile(badge: b, onTap: () => _showBadge(context, b)),
-                ],
+              const VGap.m(),
+              VTafel(
+                // A tile is 64 px of artwork plus two caption lines: a fixed height, so the ratio
+                // has to follow the width the card's padding leaves (issue #13).
+                padding: const EdgeInsets.symmetric(horizontal: VSpace.xs, vertical: VSpace.s),
+                child: GridView.count(
+                  crossAxisCount: 3,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 6,
+                  crossAxisSpacing: 6,
+                  childAspectRatio: 0.80,
+                  children: [
+                    for (final b in data.badges) BadgeTile(badge: b, onTap: () => _showBadge(context, b)),
+                  ],
+                ),
               ),
               const VGap.xl(),
               const VSection('Meine Statistik'),
-              VKeyValue('Durchschnittliche Verspätung', '$avg Minuten', strong: true),
-              const VRule.soft(),
-              VKeyValue('Geduldigste Linie', patientLine, strong: true),
-              const VRule.soft(),
-              VKeyValue('Längste Wartezeit', '$longest Minuten', strong: true),
-              const VRule.soft(),
-              VKeyValue('Minuten dieses Jahr', fmtInt(minutesThisYear), strong: true),
-              const VRule.soft(),
-              VKeyValue('Fahrten dieses Jahr', fmtInt(thisYear.length), strong: true),
+              const VGap.m(),
+              VTafel(
+                padding: const EdgeInsets.symmetric(horizontal: VSpace.s, vertical: VSpace.s),
+                child: Column(
+                  children: [
+                    VKeyValue('Durchschnittliche Verspätung', '$avg Minuten', strong: true),
+                    const VRule.soft(),
+                    VKeyValue('Geduldigste Linie', patientLine, strong: true),
+                    const VRule.soft(),
+                    VKeyValue('Längste Wartezeit', '$longest Minuten', strong: true),
+                    const VRule.soft(),
+                    VKeyValue('Minuten dieses Jahr', fmtInt(minutesThisYear), strong: true),
+                    const VRule.soft(),
+                    VKeyValue('Fahrten dieses Jahr', fmtInt(thisYear.length), strong: true),
+                  ],
+                ),
+              ),
               const VGap.xl(),
               const VSection('Mehr'),
-              VListRow(
-                title: 'Dein Zweck',
-                subtitle: ngoName ?? 'Noch nicht gewählt',
-                chevron: true,
-                // The row is about which Zweck is yours, so it opens the choice — the same
-                // sheet Einstellungen opens. The Zweck's own page is where "Trotzdem spenden"
-                // belongs, and that is reached from a claim, not from here.
-                onTap: () => pickNgo(context, session, ngoId.isEmpty ? null : ngoId),
+              const VGap.m(),
+              VTafel(
+                padding: const EdgeInsets.symmetric(horizontal: VSpace.s),
+                child: Column(
+                  children: [
+                    VListRow(
+                      title: 'Dein Zweck',
+                      subtitle: ngoName ?? 'Noch nicht gewählt',
+                      chevron: true,
+                      // The row is about which Zweck is yours, so it opens the choice — the same
+                      // sheet Einstellungen opens. The Zweck's own page is where "Trotzdem spenden"
+                      // belongs, and that is reached from a claim, not from here.
+                      onTap: () => pickNgo(context, session, ngoId.isEmpty ? null : ngoId),
+                    ),
+                    const VRule.soft(),
+                    VListRow(title: 'Alle Fahrten', subtitle: '${rides.length} zuletzt', chevron: true, onTap: () => context.push(Routes.historie)),
+                  ],
+                ),
               ),
-              const VRule.soft(),
-              VListRow(title: 'Alle Fahrten', subtitle: '${rides.length} zuletzt', chevron: true, onTap: () => context.push(Routes.historie)),
             ],
           ),
         );
