@@ -186,7 +186,14 @@ class _VonSheetState extends State<_VonSheet> {
 
   Widget _body(BuildContext context, ApiStation? detected) {
     final near = widget.near;
-    final others = (near?.others(take: 2) ?? const <ApiStation>[]).where((s) => s.id != detected?.id).toList();
+    // Not `others()`: that one hides whatever the monitor currently offers, and after a step
+    // back from „Wohin?" the row at the top is [widget.current] — the station picked last time,
+    // which may not be the detected one. The detected station would then be hidden by a monitor
+    // that is no longer the one on offer, and only the search could bring it back.
+    final others = (near?.nearby.stations ?? const <ApiStation>[])
+        .where((s) => detected == null || (s.id != detected.id && !sameStation(s.name, detected.name)))
+        .take(2)
+        .toList();
     // The frequent ones the fix has not already named. The two lists come from different
     // sources and spell the same platform differently often enough that ids alone let
     // „Ab Kißlegg" appear twice (docs/30).
