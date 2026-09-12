@@ -92,10 +92,8 @@ void main() {
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
     await wait(tester, 600);
     demo.reset(); // an arrival left over from the Angekommen routes would hide the idle state
-    demo.awayFromStation = true;
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
-    await shot('bahnsteig-away');
-    demo.awayFromStation = false;
+    await shot('bahnsteig-einchecken');
     final dep = Mock.departuresKoelnHbf.firstWhere((d) => !d.cancelled);
     demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
@@ -154,33 +152,21 @@ void main() {
       GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
       await shot(name);
     }
-    demo.awayFromStation = true;
-    await home('bahnsteig-away-wir'); // the away box and the Wir block above the fold
-    demo.awayFromStation = false;
-    // docs/23 §1: no fix yet, so the card says so instead of naming the last station.
-    demo.locatingStation = true;
-    await home('bahnsteig-locating');
-    demo.locatingStation = false;
-    demo.reset();
-    // docs/24 §1: the check-in is three sheets, and the source is a question. Home's card
-    // carries the Von row that opens the first of them.
-    await home('bahnsteig-von-nach');
+    // docs/30: Home is the same square of paper wherever the phone thinks it is — no station,
+    // no destinations, one button. The stations are the check-in's own first question now.
+    await home('bahnsteig-wir-und-einchecken');
     // docs/30: Wir is at the top now and Deine Woche wears the same box, which is below the
     // fold — so the tour scrolls to it rather than leaving the change unphotographed.
     await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -420));
     await shot('bahnsteig-deine-woche');
     await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, 420));
     await wait(tester, 400);
-    await tester.tap(find.byKey(const Key('von-row')));
-    await wait(tester, 900);
-    await shot('einchecken-von');
-    // Sheets are dismissed by tapping their barrier: these are modal routes on the shell's own
-    // navigator, and popping that directly trips go_router's "no pages left" assertion.
-    await dismissSheet(tester);
-    // The square runs all three; the itineraries are a sheet now, one swipe from the choice above.
-    await tester.tap(find.byIcon(Icons.train).first);
+    // docs/24 §1 · docs/30: the button on Home opens the first of the three sheets, the same
+    // one the square opens. It proposes the detected station, the ones nearby and the ones
+    // this passenger uses most.
+    await tester.tap(find.byKey(const Key('einchecken-cta')));
     await wait(tester, 1200);
-    await shot('einchecken-von-square');
+    await shot('einchecken-von');
     await tester.tap(find.byKey(const Key('von-detected')));
     await wait(tester, 1400);
     await shot('einchecken-wohin-sheet');
@@ -303,9 +289,15 @@ void main() {
     demo.mails.clear();
     await tab(Routes.antraege, 'antraege-empty');
     demo.reset();
-    // The Einchecken card without any journey history: only the Wohin? field.
+    // "Wohin?" without any journey history: the line that says so, and the search (docs/18).
     demo.noHistory = true;
-    await tab(Routes.bahnsteig, 'bahnsteig-no-history');
+    await tab(Routes.bahnsteig, 'bahnsteig-idle');
+    await tester.tap(find.byKey(const Key('einchecken-cta')));
+    await wait(tester, 1000);
+    await tester.tap(find.byKey(const Key('von-detected')));
+    await wait(tester, 1200);
+    await shot('einchecken-wohin-leer');
+    await dismissSheet(tester);
     demo.noHistory = false;
     demo.reset();
     // The reply composer (docs/18): Ticketkopie toggle, Foto hinzufügen, chips.

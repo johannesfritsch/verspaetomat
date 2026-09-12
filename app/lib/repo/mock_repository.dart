@@ -591,6 +591,12 @@ class MockRepository implements AppRepository {
       stations: [
         for (final s in Mock.nearbyStations)
           if (!muted.contains(s.id)) ApiGeofenceStation(id: s.id, name: s.name, lat: s.lat, lon: s.lon, checkins: s.id == 'koeln-hbf' ? 12 : 1),
+        // The list the backend returns is where this person checks in, not what is nearby: the
+        // stations at the other end of the usual rides belong in it, and "Von wo?" offers them.
+        if (!muted.contains('mock:bonn-hbf'))
+          const ApiGeofenceStation(id: 'mock:bonn-hbf', name: 'Bonn Hbf', lat: 50.7320, lon: 7.0972, checkins: 8),
+        if (!muted.contains('mock:d-sseldorf-hbf'))
+          const ApiGeofenceStation(id: 'mock:d-sseldorf-hbf', name: 'Düsseldorf Hbf', lat: 51.2200, lon: 6.7942, checkins: 4),
       ],
       quietFrom: state.quietHours ? '22:00' : null,
       quietTo: state.quietHours ? '06:00' : null,

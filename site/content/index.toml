@@ -57,8 +57,8 @@ title = "Die ganze App."
 
 [[bilder.schuss]]
 src = "shots/bahnsteig.png"
-alt = "Der Home-Screen: die gemeinsame Wartezeit aller Fahrgäste, darunter die Karte zum Einchecken mit Startbahnhof und Ziel."
-caption = "Einchecken in zwei Tipps"
+alt = "Der Home-Screen: die gemeinsame Wartezeit aller Fahrgäste, darunter eine perforierte Fahrkarte mit dem Knopf zum Einchecken."
+caption = "Ein Knopf, drei Fragen"
 width = 640
 height = 1387
 
@@ -71,7 +71,7 @@ height = 1387
 
 [[bilder.schuss]]
 src = "shots/antraege.png"
-alt = "Der Antragsschalter: vier gesammelte Verspätungen, zusammen 6,00 Euro für die Bahnhofsmission Köln."
+alt = "Der Antragsschalter: drei gesammelte Verspätungen, zusammen 4,50 Euro für die Bahnhofsmission Köln."
 caption = "Der Antrag, fertig"
 width = 640
 height = 1387

@@ -149,14 +149,14 @@ Future<void> tapText(WidgetTester tester, String text, {Duration timeout = const
   await settle(tester);
 }
 
-/// Home in one of its idle states: the card ('EINCHECKEN'), the away box ('STARTBAHNHOF'),
-/// the arrival card ('ANGEKOMMEN'); or the ride under way as the bar above the nav (docs/19).
+/// Home in one of its idle states: the check-in card ('EINCHECKEN'), the arrival card
+/// ('ANGEKOMMEN'); or the ride under way as the bar above the nav (docs/19).
 final Finder homeOrRide = find.byWidgetPredicate(
-  (w) => (w is Text && (w.data == 'EINCHECKEN' || w.data == 'STARTBAHNHOF' || w.data == 'ANGEKOMMEN')) || w.key == const Key('ride-bar'),
+  (w) => (w is Text && (w.data == 'EINCHECKEN' || w.data == 'ANGEKOMMEN')) || w.key == const Key('ride-bar'),
 );
 
-/// Home idle without a position: the away box, or the card once Stellwerk located us.
-final Finder homeIdle = find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'STARTBAHNHOF'));
+/// Home idle: one section, one card, one button — with or without a position (docs/30).
+final Finder homeIdle = find.byWidgetPredicate((w) => w is Text && w.data == 'EINCHECKEN');
 
 final Finder rideBar = find.byKey(const Key('ride-bar'));
 final Finder rideSheet = find.byKey(const Key('ride-sheet-handle'));
@@ -196,70 +196,56 @@ Future<void> tapIcon(WidgetTester tester, IconData icon) async {
 // One ride: check in through the UI, then let the Stellwerk run the world.
 // ---------------------------------------------------------------------------
 
-/// Destination first (docs/17): a predicted destination if the account has one,
-/// otherwise the search. Then the itinerary list; [connecting] picks one with a transfer.
-/// Returns the picked itinerary, or null when [connecting] found none.
+/// The whole check-in, through the three sheets it always runs now (docs/24 §1, docs/30):
+/// Von wo? · Wohin? · Welcher Zug?. Home proposes no stations any more — it is one button —
+/// so both entry points land on the same first sheet, and [viaSquare] only decides which
+/// button the test presses.
+///
+/// The destination is a predicted one if the account has any, otherwise the search.
 /// [search] goes into the station search; [match] is the substring of the station name to tap
 /// (the backend spells "Düsseldorf Hauptbahnhof", the predicted button keeps that name).
-///
-/// [viaSquare] runs docs/24 §1's three sheets from the Einchecken square — Von wo? · Wohin? ·
-/// Welcher Zug? — instead of the Home card's one-tap path. Both reach the same check-in, and
-/// the direct scenario takes the long way so the steps are covered.
+/// [connecting] picks an itinerary with a transfer; the return value is the picked itinerary,
+/// or null when [connecting] found none.
 Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {required String match, bool connecting = false, bool viaSquare = false}) async {
   // Bahnsteig, idle. A leftover arrival card from an earlier run is dismissed first.
-  await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'STARTBAHNHOF' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 40));
+  await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is Text && (w.data == 'EINCHECKEN' || w.data == 'ANGEKOMMEN')), timeout: const Duration(seconds: 40));
   if (find.text('ANGEKOMMEN').evaluate().isNotEmpty) {
     await tapText(tester, 'Fertig');
   }
   await pumpUntilFound(tester, find.text('EINCHECKEN'), timeout: const Duration(seconds: 40));
-  if (viaSquare) {
-    // docs/24 §1, step 1: the square always asks where you are, with the detected station
-    // preselected. One tap moves on.
-    await tester.tap(find.byIcon(Icons.train).first, warnIfMissed: false);
-    await pumpUntilFound(tester, find.text('Von wo?'), timeout: const Duration(seconds: 30));
-    await pumpUntilFound(tester, find.byKey(const Key('von-detected')), timeout: const Duration(seconds: 30));
-    await tester.tap(find.byKey(const Key('von-detected')), warnIfMissed: false);
-    await pumpUntilFound(tester, find.text('Wohin?'), timeout: const Duration(seconds: 30));
-    await settle(tester, 600);
-  }
-  // At a station: the card with the destinations from history (if any) and the Wohin? field
-  // (docs/18), or the Wohin? sheet from the square (docs/24 §1). The sheet has no inline field
-  // — it opens the station search — so the search is reached differently on the two paths.
-  if (!viaSquare) {
-    await pumpUntilFound(tester, find.byType(TextField), timeout: const Duration(seconds: 40));
-    expect(find.textContaining('Köln', findRichText: true), findsWidgets);
-  }
+
+  // Step 1: the square in the nav, or the button on Home. Both open "Von wo?", which asks
+  // with the detected station preselected. One tap moves on.
+  await tester.tap(find.byKey(Key(viaSquare ? 'nav-checkin' : 'einchecken-cta')), warnIfMissed: false);
+  await pumpUntilFound(tester, find.text('Von wo?'), timeout: const Duration(seconds: 30));
+  await pumpUntilFound(tester, find.byKey(const Key('von-detected')), timeout: const Duration(seconds: 30));
+  await tester.tap(find.byKey(const Key('von-detected')), warnIfMissed: false);
+
+  // Step 2: the destinations from history, or the search behind "Bahnhof suchen".
+  await pumpUntilFound(tester, find.text('Wohin?'), timeout: const Duration(seconds: 30));
   await settle(tester, 600);
-  // On the sheet path the Home card is still mounted behind the modal and carries the same
-  // widgets. Finders walk the tree in order and the modal route is pushed above the tab, so
-  // the sheet's copy is the LAST match — tapping `.first` would hit the card through the sheet.
-  Finder topmost(Finder f) => viaSquare ? f.last : f.first;
   final predicted = find.byWidgetPredicate((w) => w is DestinationButton && w.destination.stationName.contains(match));
   if (predicted.evaluate().isNotEmpty) {
     // ignore: avoid_print
     print('destination $match: from history');
-    await tester.ensureVisible(topmost(predicted));
-    await tester.tap(topmost(predicted), warnIfMissed: false);
+    await tester.ensureVisible(predicted.last);
+    await tester.tap(predicted.last, warnIfMissed: false);
     await settle(tester);
   } else {
-    // No history yet (a fresh E2E customer): reach a search field and pick the suggestion.
-    // The station search sheet's own field, not the Home card's Wohin? field behind it:
-    // `byType(TextField).first` picks by tree order and would find the card's.
+    // No history yet (a fresh E2E customer): the search sheet's own field, found by its hint
+    // so the finder cannot wander off to another TextField in the tree.
     final searchField = find.byWidgetPredicate(
       (w) => w is TextField && (w.decoration?.hintText ?? '').startsWith('Köln Hbf'),
     );
-    if (viaSquare) {
-      await tapText(tester, 'Bahnhof suchen');
-      await pumpUntilFound(tester, searchField, timeout: const Duration(seconds: 30));
-    }
-    final field = viaSquare ? searchField.last : find.byType(TextField).first;
-    await tester.ensureVisible(field);
-    await tester.enterText(field, search);
+    await tapText(tester, 'Bahnhof suchen');
+    await pumpUntilFound(tester, searchField, timeout: const Duration(seconds: 30));
+    await tester.ensureVisible(searchField.last);
+    await tester.enterText(searchField.last, search);
     // A Text widget only: find.text would also hit the field's own contents.
     final hit = find.byWidgetPredicate((w) => w is Text && (w.data ?? '').contains(match));
     await pumpUntilFound(tester, hit, timeout: const Duration(seconds: 40));
-    await tester.ensureVisible(topmost(hit));
-    await tester.tap(topmost(hit), warnIfMissed: false);
+    await tester.ensureVisible(hit.last);
+    await tester.tap(hit.last, warnIfMissed: false);
     await settle(tester);
   }
   // Welcher Zug?: the itineraries.

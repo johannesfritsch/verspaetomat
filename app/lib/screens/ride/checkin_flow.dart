@@ -20,17 +20,17 @@ import 'wohin_screen.dart';
 /// step is answerable, and each one shows what the previous settled as a breadcrumb, so any
 /// of them can be reopened without starting over.
 ///
-///  1. **Von wo?** — the detected station preselected, the next two beneath it, then search.
+///  1. **Von wo?** — the detected station preselected, the next two beneath it, the stations
+///     this person uses most, then search.
 ///  2. **Wohin?** — destinations from history, then search.
 ///  3. **Welcher Zug?** — the itineraries, one swipe from the choice above.
 ///
-/// The square always starts at step 1, even when the detection is right: one tap on the
-/// preselected station moves on, and the passenger sees what the app thinks before committing
-/// to it. The one-tap path for the common case lives on the Home card instead, whose `Nach`
-/// row starts at step 3.
+/// It always starts at step 1, even when the detection is right: one tap on the preselected
+/// station moves on, and the passenger sees what the app thinks before committing to it. Home
+/// no longer offers a shortcut past it (docs/30) — one question, asked in one place.
 ///
 /// **This is the only way into a check-in.** Every entry point comes here: the square, a station
-/// nudge, the Home card, the away box. Before docs/29 there were three different journeys — the
+/// nudge, Home's Einchecken button. Before docs/29 there were three different journeys — the
 /// square ran these sheets while a nudge and the Home card still ran the train-first board from
 /// before docs/17, so the same station could offer different trains depending on which button
 /// you pressed.
@@ -132,24 +132,69 @@ Future<StepResult<ApiStation>?> showVonSheet(BuildContext context, {ApiStation? 
   );
 }
 
-class _VonSheet extends StatelessWidget {
+class _VonSheet extends StatefulWidget {
   const _VonSheet({this.current, this.near});
   final ApiStation? current;
   final NearbyMonitor? near;
+
+  @override
+  State<_VonSheet> createState() => _VonSheetState();
+}
+
+class _VonSheetState extends State<_VonSheet> {
+  /// The stations this person checks in at most often (docs/15). They used to sit on Home as
+  /// chips; the question they answer is this sheet's question, so this is where they live now.
+  List<ApiGeofenceStation> _frequent = const [];
+  String _homeStation = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load() async {
+    if (!mounted) return; // the sheet can be dismissed before the first frame lands
+    final session = RepoScope.read(context);
+    final g = await session.repo.geofence().catchError((_) => ApiGeofence.empty);
+    if (!mounted) return;
+    setState(() {
+      _frequent = [...g.stations]..sort((a, b) => b.checkins.compareTo(a.checkins));
+      _homeStation = session.me?.homeStation ?? '';
+    });
+  }
+
+  void _pick(ApiStation s) => Navigator.of(context).pop(StepResult<ApiStation>.value(s));
+
+  /// „Standort erlauben": without a fix this sheet can only offer history and the search, and
+  /// the way out of that is a permission, not another list.
+  Future<void> _locate() async {
+    final message = await widget.near?.requestPermission();
+    if (!mounted || message == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   Widget build(BuildContext context) {
     // The fix may land while the sheet is open; it follows the monitor rather than freezing
     // whatever was known at the moment of the tap.
     return AnimatedBuilder(
-      animation: near ?? const AlwaysStoppedAnimation(0),
-      builder: (context, _) => _body(context, current ?? near?.station),
+      animation: widget.near ?? const AlwaysStoppedAnimation(0),
+      builder: (context, _) => _body(context, widget.current ?? widget.near?.station),
     );
   }
 
   Widget _body(BuildContext context, ApiStation? detected) {
-    final near = this.near;
+    final near = widget.near;
     final others = (near?.others(take: 2) ?? const <ApiStation>[]).where((s) => s.id != detected?.id).toList();
+    // The frequent ones the fix has not already named. The two lists come from different
+    // sources and spell the same platform differently often enough that ids alone let
+    // „Ab Kißlegg" appear twice (docs/30).
+    bool listed(ApiGeofenceStation f) =>
+        (detected != null && (f.id == detected.id || sameStation(f.name, detected.name))) ||
+        others.any((s) => s.id == f.id || sameStation(s.name, f.name));
+    final frequent = _frequent.where((f) => !listed(f)).take(3).toList();
+    final nothingKnown = detected == null && others.isEmpty;
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.l),
       child: Column(
@@ -169,27 +214,38 @@ class _VonSheet extends StatelessWidget {
                   VListRow(
                     key: const Key('von-detected'),
                     title: detected.name,
-                    subtitle: detected.distanceM == null ? null : '${detected.distanceM} m',
+                    subtitle: detected.distanceM == null ? null : _dist(detected.distanceM!),
                     chevron: true,
-                    onTap: () => Navigator.of(context).pop(StepResult<ApiStation>.value(detected)),
+                    onTap: () => _pick(detected),
                   ),
                 for (final s in others)
                   VListRow(
                     title: s.name,
-                    subtitle: s.distanceM == null ? null : '${s.distanceM} m',
+                    subtitle: s.distanceM == null ? null : _dist(s.distanceM!),
                     chevron: true,
-                    onTap: () => Navigator.of(context).pop(StepResult<ApiStation>.value(s)),
+                    onTap: () => _pick(s),
                   ),
-                if (detected == null && others.isEmpty)
+                if (nothingKnown)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: VSpace.s),
                     child: Text(
                       near?.checking == true
                           ? 'Wir schauen noch, wo du bist.'
-                          : 'Wir wissen gerade nicht, wo du bist. Such deinen Bahnhof.',
+                          : 'Wir wissen gerade nicht, wo du bist.',
                       style: VText.bodyS.copyWith(color: VColors.ink2),
                     ),
                   ),
+                if (frequent.isNotEmpty) ...[
+                  const VGap.m(),
+                  const VSection('Deine Bahnhöfe'),
+                  for (final f in frequent)
+                    VListRow(
+                      title: f.name,
+                      subtitle: f.name == _homeStation ? 'Stammbahnhof' : null,
+                      chevron: true,
+                      onTap: () => _pick(ApiStation(id: f.id, name: f.name, lat: f.lat, lon: f.lon)),
+                    ),
+                ],
                 const VGap.m(),
                 VOutlineButton(
                   label: 'Bahnhof suchen',
@@ -199,9 +255,20 @@ class _VonSheet extends StatelessWidget {
                     if (s == null || !context.mounted) return;
                     // A station chosen by hand is where the passenger is, for everything else too.
                     near?.pick(s);
-                    if (context.mounted) Navigator.of(context).pop(StepResult<ApiStation>.value(s));
+                    if (context.mounted) _pick(s);
                   },
                 ),
+                // Only when the phone is the missing piece: with a fix the list above is the answer.
+                if (nothingKnown && near?.position == null && near?.checking != true) ...[
+                  const VGap.s(),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: _locate,
+                      child: Text('Standort erlauben', style: VText.bodySStrong.copyWith(color: VColors.red)),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -209,6 +276,9 @@ class _VonSheet extends StatelessWidget {
       ),
     );
   }
+
+  static String _dist(int m) =>
+      m < 1000 ? '$m m' : '${(m / 1000).toStringAsFixed(1).replaceAll('.', ',')} km';
 }
 
 // ---------------------------------------------------------------------------
