@@ -57,6 +57,7 @@ One binary, several loops:
 - Status machine for incidents: `gesammelt → bereit → eingereicht → bestätigt | abgelehnt`, plus `verfallen` from any open state, plus `gedeckelt`.
 - Points: one per minute late from minute 1; cancellation counts as 60; Nachtrag earns 1; only rides with a location fix at the station rank on boards.
 - Relay discipline: nothing is sent without a signed claim and an explicit send call; the server never composes mail to a railway on its own; every inbound mail is forwarded whole.
+- Rehearsals: with `CLAIM_MAIL_REDIRECT=<address>` in the environment, a claim send goes to that address instead of the desk, and subject and body name the desk it was addressed to. It is the only safe way to try the whole claim path against a live mail provider — the operator directory is re-seeded from `fixtures/operators.json` on every boot, so an edited `operators.email` row silently points at the railway again after the next deploy.
 
 ## What the backend does not do
 

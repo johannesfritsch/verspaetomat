@@ -1177,12 +1177,19 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "max 5 claims per day"));
     }
     let op: Option<OperatorRow> = sqlx::query_as("select * from operators where desk = $1 limit 1").bind(&claim.desk).fetch_optional(&s.pool).await.map_err(internal)?;
-    let Some(to) = op.as_ref().and_then(|o| if o.accepts_email { o.email.clone() } else { None }) else {
+    let Some(desk_address) = op.as_ref().and_then(|o| if o.accepts_email { o.email.clone() } else { None }) else {
         return Err(err(StatusCode::PRECONDITION_FAILED, "this desk takes no e-mail; use the paper route"));
     };
+    // A rehearsal must never reach a real railway. With CLAIM_MAIL_REDIRECT set, the claim goes
+    // to that address instead and says on its face whose desk it was addressed to. The operator
+    // directory is re-seeded from the fixture on every boot, so this is the switch to use —
+    // an edited `operators.email` row would quietly go back to the railway on the next deploy.
+    let redirect = std::env::var("CLAIM_MAIL_REDIRECT").ok().map(|r| r.trim().to_string()).filter(|r| r.contains('@'));
+    let to = redirect.clone().unwrap_or_else(|| desk_address.clone());
     let incidents: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date").bind(id).fetch_all(&s.pool).await.map_err(internal)?;
     let body = format!(
-        "Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
+        "{}Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
+        redirect.as_ref().map(|_| format!("— Testlauf des Verspätomat: dieser Antrag wäre an {desk_address} gegangen und ist stattdessen hier gelandet. —\n\n")).unwrap_or_default(),
         claim.account_holder, name, name
     );
     let attachments = json!([
@@ -1190,6 +1197,10 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         { "name": "EU-Antrag.txt", "content_type": "text/plain", "text": claim_summary_text(&claim, &incidents, &name) },
     ]);
     let message_id = new_message_id();
+    let subject = match &redirect {
+        Some(_) => format!("[Testlauf → {desk_address}] Fahrgastrechte: EU-Antragsformular"),
+        None => "Fahrgastrechte: EU-Antragsformular".to_string(),
+    };
     let summary = claim_summary_text(&claim, &incidents, &name);
     let mut uploads: Vec<(String, String, Vec<u8>)> = sqlx::query_as::<_, (String, String, Vec<u8>)>(
         "select ca.label || case when u.content_type like 'image/png' then '.png' when u.content_type like 'image/jpeg' then '.jpg' else '' end, u.content_type, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1",
@@ -1205,7 +1216,7 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         from: &format!("{name} <{relay}>"),
         to: &to,
         bcc: Some(&email),
-        subject: "Fahrgastrechte: EU-Antragsformular",
+        subject: &subject,
         body: &body,
         message_id: &message_id,
         in_reply_to: None,
@@ -1226,7 +1237,7 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     .bind(format!("{name} <{relay}>"))
     .bind(&to)
     .bind(&email)
-    .bind("Fahrgastrechte: EU-Antragsformular")
+    .bind(&subject)
     .bind(&body)
     .bind(attachments)
     .bind(dry_run)
