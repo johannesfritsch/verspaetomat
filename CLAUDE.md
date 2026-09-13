@@ -21,6 +21,7 @@ cargo build --bins && cargo test && cargo clippy --bins      # must be warning-f
 
 # admin CLI against the local backend
 backend/target/debug/stellwerk customers | locate <who> "Köln Hbf" | delay <who> 68 | ff <who> | reply <who> accepted | reset <who> | forget <who> | push <who> | scan
+backend/target/debug/stellwerk backdate <who> --delay 70 --days 3 --count 3   # rides that already happened, with their cases
 
 # app on the iOS simulator, local mode
 cd app && flutter run -d <simulator udid> --dart-define=API_URL=http://127.0.0.1:8080 --dart-define=BACKEND=local --dart-define=INITIAL_ROUTE=/bahnsteig

@@ -6,7 +6,7 @@ use axum::{
     http::{header, request::Parts, HeaderMap, StatusCode},
     Json,
 };
-use chrono::{Duration, NaiveDate};
+use chrono::{Duration, NaiveDate, NaiveTime, TimeZone};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -367,6 +367,259 @@ pub async fn scan(State(s): State<AppState>, _a: Admin) -> ApiResult {
     Ok(Json(crate::scanner::run_once(&s).await.map_err(internal)?))
 }
 
+// ---------------------------------------------------------------------------
+// Rides that already happened
+// ---------------------------------------------------------------------------
+
+/// What a backdated case says about itself. A claim form must never dress up an invented ride
+/// as live data, so the evidence names the Stellwerk and the case counts as self-entered.
+const BACKDATE_SOURCE: &str = "Stellwerk: nachträglich eingetragene Testfahrt";
+
+/// A finished ride to invent for a customer. No feed is asked: the times come from `days_ago`,
+/// `departure` and `duration_minutes`, and the trip id is ours. The stations are named by the
+/// caller — the server still does not guess a location (docs/14); it only looks their ids up.
+#[derive(Deserialize)]
+pub struct BackdateBody {
+    pub from: String,
+    pub to: String,
+    /// Minutes late at the destination. 60 and up is what makes a claim.
+    #[serde(default = "default_delay")]
+    pub delay_minutes: i64,
+    /// How many days back the ride departed.
+    #[serde(default = "default_days_ago")]
+    pub days_ago: i64,
+    /// Departure in German local time, "08:12".
+    #[serde(default)]
+    pub departure: Option<String>,
+    /// Scheduled travel time in minutes.
+    #[serde(default = "default_duration")]
+    pub duration_minutes: i64,
+    #[serde(default)]
+    pub line: Option<String>,
+    /// s | rb | re | fern | bus
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub operator: Option<String>,
+    /// deutschlandticket | zeitkarte | einzelfahrkarte; the customer's own by default.
+    #[serde(default)]
+    pub ticket: Option<String>,
+    #[serde(default)]
+    pub cancelled: bool,
+}
+
+fn default_delay() -> i64 {
+    70
+}
+fn default_days_ago() -> i64 {
+    1
+}
+fn default_duration() -> i64 {
+    52
+}
+
+fn parse_category(v: Option<&str>) -> Result<crate::train::TrainCategory, (StatusCode, Json<Value>)> {
+    use crate::train::TrainCategory as C;
+    Ok(match v.unwrap_or("re").trim().to_lowercase().as_str() {
+        "s" | "s-bahn" => C::S,
+        "rb" => C::Rb,
+        "re" => C::Re,
+        "fern" | "ice" | "ic" | "ec" => C::Fern,
+        "bus" => C::Bus,
+        other => return Err(err(StatusCode::BAD_REQUEST, &format!("category must be s|rb|re|fern|bus, got {other}"))),
+    })
+}
+
+fn parse_ticket(v: &str) -> Result<TicketType, (StatusCode, Json<Value>)> {
+    Ok(match v.trim().to_lowercase().as_str() {
+        "deutschlandticket" | "dticket" | "d-ticket" => TicketType::Deutschlandticket,
+        "zeitkarte" => TicketType::Zeitkarte,
+        "einzelfahrkarte" | "einzel" => TicketType::Einzelfahrkarte,
+        other => return Err(err(StatusCode::BAD_REQUEST, &format!("ticket must be deutschlandticket|zeitkarte|einzelfahrkarte, got {other}"))),
+    })
+}
+
+/// The feed's id for a station name, or one of ours when the geocoder has nothing to say.
+/// Test data must not depend on Transitous being reachable.
+async fn station_ref(s: &AppState, name: &str) -> (String, String) {
+    if let Ok(hits) = s.train.search_stops(name).await {
+        if let Some(h) = hits.into_iter().next() {
+            return (h.id, h.name);
+        }
+    }
+    let slug: String = name.chars().map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    (format!("stellwerk:{}", slug.trim_matches('-')), name.to_string())
+}
+
+/// When a backdated ride departed, was due, and arrived. The departure is read in German local
+/// time, because that is the clock the timetable and the three-month deadline are printed in;
+/// the hour that a spring clock change skips has no ride in it, and None says so.
+fn backdate_times(
+    now: chrono::DateTime<chrono::Utc>,
+    days_ago: i64,
+    time: NaiveTime,
+    duration_minutes: i64,
+    delay_minutes: i64,
+) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
+    let tz = chrono_tz::Europe::Berlin;
+    let date = now.with_timezone(&tz).date_naive() - Duration::days(days_ago);
+    let departure = tz.from_local_datetime(&date.and_time(time)).earliest()?.with_timezone(&chrono::Utc);
+    let arrival = departure + Duration::minutes(duration_minutes);
+    Some((departure, arrival, arrival + Duration::minutes(delay_minutes)))
+}
+
+/// `POST /admin/customers/{key}/backdate`: a ride that already happened, with the delay it had.
+/// It writes what an arrival writes — journey, leg, case — so bundles, the monthly cap, deadlines
+/// and the claim form see ordinary rows, and the case carries the Stellwerk in its evidence.
+pub async fn backdate(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<BackdateBody>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    if b.days_ago < 0 {
+        return Err(err(StatusCode::BAD_REQUEST, "days_ago must not be negative: the Stellwerk invents the past, not the future"));
+    }
+    if b.duration_minutes <= 0 {
+        return Err(err(StatusCode::BAD_REQUEST, "duration_minutes must be positive"));
+    }
+    if b.delay_minutes < 0 {
+        return Err(err(StatusCode::BAD_REQUEST, "delay_minutes must not be negative"));
+    }
+    if b.from.trim().is_empty() || b.to.trim().is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "name both stations: from and to"));
+    }
+    let category = parse_category(b.category.as_deref())?;
+    let ticket = match &b.ticket {
+        Some(t) => parse_ticket(t)?,
+        None => c.ticket,
+    };
+    let time = match b.departure.as_deref() {
+        Some(t) => NaiveTime::parse_from_str(t.trim(), "%H:%M").map_err(|_| err(StatusCode::BAD_REQUEST, "departure must read HH:MM"))?,
+        None => NaiveTime::from_hms_opt(8, 12, 0).unwrap(),
+    };
+    let (planned_departure, planned_arrival, actual_arrival) = backdate_times(clock::now(), b.days_ago, time, b.duration_minutes, b.delay_minutes)
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "that local time does not exist on that day (clock change)"))?;
+    if actual_arrival > clock::now() {
+        return Err(err(StatusCode::BAD_REQUEST, "that ride would still be running; put it further back"));
+    }
+
+    let (from_id, from_name) = station_ref(&s, b.from.trim()).await;
+    let (to_id, to_name) = station_ref(&s, b.to.trim()).await;
+    let operator = b.operator.clone().unwrap_or_else(|| "DB Regio NRW".to_string());
+    let operator_known: bool = sqlx::query_scalar("select exists(select 1 from operators where name = $1)").bind(&operator).fetch_one(&s.pool).await.map_err(internal)?;
+    let line = b.line.clone().unwrap_or_else(|| "RE 5".to_string());
+    let delay = b.delay_minutes;
+    let points = crate::rules::points_for(delay, b.cancelled, false);
+    let trip_id = format!("stellwerk:{}", Uuid::new_v4());
+
+    let leg = crate::train::PlanLeg {
+        trip_id: trip_id.clone(),
+        line: line.clone(),
+        train_number: None,
+        headsign: to_name.clone(),
+        agency_name: operator.clone(),
+        operator: operator.clone(),
+        category,
+        mode: "RAIL".into(),
+        from_station_id: from_id.clone(),
+        from_station_name: from_name.clone(),
+        to_station_id: to_id.clone(),
+        to_station_name: to_name.clone(),
+        planned_departure,
+        planned_arrival,
+        live_departure: Some(planned_departure),
+        live_arrival: Some(actual_arrival),
+        platform: None,
+        cancelled: b.cancelled,
+        realtime: false,
+        delay_min: delay,
+    };
+    let plan = json!([leg]);
+
+    // The journey is what the ledger reads; the ride is its only leg. Both arrive in the past,
+    // and both are dismissed: nothing about a ride from last week belongs on the Bahnsteig.
+    let j: JourneyRow = sqlx::query_as(
+        "insert into journeys (id, customer_id, origin_station_id, origin_station_name, destination_station_id, destination_station_name,
+            itinerary, plan, planned_departure, planned_arrival, status, current_leg, actual_arrival, final_delay_min, cancelled, points,
+            ticket, created_at, finalised_at, dismissed_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9,'arrived',1,$10,$11,$12,$13,$14,$8,$10,$10) returning *",
+    )
+    .bind(Uuid::new_v4())
+    .bind(c.id)
+    .bind(&from_id)
+    .bind(&from_name)
+    .bind(&to_id)
+    .bind(&to_name)
+    .bind(&plan)
+    .bind(planned_departure)
+    .bind(planned_arrival)
+    .bind(actual_arrival)
+    .bind(delay as i32)
+    .bind(b.cancelled)
+    .bind(points as i32)
+    .bind(ticket)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+
+    let ride: RideRow = sqlx::query_as(
+        "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name,
+            exit_station_id, exit_station_name, planned_departure, planned_arrival, actual_arrival, ticket, status, live_delay_min,
+            final_delay_min, cancelled, self_entered, points, checked_in_at, finalised_at, last_polled_at, dismissed_at, journey_id, leg_no)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'arrived',$16,$16,$17,true,$18,$12,$14,$14,$14,$19,1) returning *",
+    )
+    .bind(Uuid::new_v4())
+    .bind(c.id)
+    .bind(&trip_id)
+    .bind(&line)
+    .bind(&to_name)
+    .bind(&operator)
+    .bind(crate::handlers::row_category(category))
+    .bind(&from_id)
+    .bind(&from_name)
+    .bind(&to_id)
+    .bind(&to_name)
+    .bind(planned_departure)
+    .bind(planned_arrival)
+    .bind(actual_arrival)
+    .bind(ticket)
+    .bind(delay as i32)
+    .bind(b.cancelled)
+    .bind(points as i32)
+    .bind(j.id)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+
+    crate::rules::audit(&s.pool, "journey", j.id, None, "arrived", "stellwerk backdate").await.map_err(internal)?;
+    crate::rules::audit(&s.pool, "ride", ride.id, None, "arrived", "stellwerk backdate").await.map_err(internal)?;
+
+    let rides = vec![ride.clone()];
+    let incident = crate::journeys::create_journey_incident(
+        &s.pool,
+        &j,
+        &c,
+        &rides,
+        rides.first(),
+        actual_arrival,
+        planned_arrival,
+        delay,
+        b.cancelled,
+        false,
+        BACKDATE_SOURCE,
+        true,
+    )
+    .await
+    .map_err(internal)?;
+    let rows = crate::rules::refresh_statuses(&s.pool, c.id, clock::today()).await.map_err(internal)?;
+    let incident = incident.and_then(|i| rows.into_iter().find(|x| x.id == i.id));
+    let new_badge = crate::handlers::award_badges(&s.pool, c.id, ride.id, delay).await.map_err(internal)?;
+    // A ride from the past has no news to announce: the phone reloads its lists, nothing pops up.
+    s.events.publish(c.id, "resync", json!({ "reason": "backdate", "journey_id": j.id }));
+
+    Ok(Json(json!({
+        "customer": c.nickname, "journey": j, "ride": ride, "incident": incident, "new_badge": new_badge,
+        "points": points, "operator_known": operator_known,
+    })))
+}
+
 /// One transfer on the NGO's statement. `amount_cents` or a printed `amount` ("4,50", "4.50").
 #[derive(Deserialize, Clone)]
 pub struct Transfer {
@@ -520,6 +773,27 @@ pub async fn ngo_report(State(s): State<AppState>, _a: Admin, Path(ngo_id): Path
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The departure is a German clock time, whatever the server's timezone is, and summer time
+    /// moves it against UTC. The deadline hangs off that date, so an hour matters.
+    #[test]
+    fn backdated_rides_depart_on_the_german_clock() {
+        let at = |h, m| NaiveTime::from_hms_opt(h, m, 0).unwrap();
+        let now = |s: &str| chrono::DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&chrono::Utc);
+
+        // Summer time: 08:12 in Bonn is 06:12 UTC. 52 minutes planned, 70 late.
+        let (dep, arr, actual) = backdate_times(now("2026-09-13T20:47:00Z"), 3, at(8, 12), 52, 70).unwrap();
+        assert_eq!(dep.to_rfc3339(), "2026-09-10T06:12:00+00:00");
+        assert_eq!(arr.to_rfc3339(), "2026-09-10T07:04:00+00:00");
+        assert_eq!(actual.to_rfc3339(), "2026-09-10T08:14:00+00:00");
+
+        // Winter time: the same clock time is an hour later in UTC.
+        let (dep, _, _) = backdate_times(now("2026-12-01T10:00:00Z"), 1, at(8, 12), 52, 70).unwrap();
+        assert_eq!(dep.to_rfc3339(), "2026-11-30T07:12:00+00:00");
+
+        // The hour the spring clock change skips has no ride in it.
+        assert!(backdate_times(now("2026-03-30T10:00:00Z"), 1, at(2, 30), 52, 70).is_none());
+    }
 
     #[test]
     fn report_csv() {

@@ -4,6 +4,7 @@
 //!   stellwerk ride Johannes
 //!   stellwerk journey Johannes  |  stellwerk confirm Johannes [--trip <trip id>]
 //!   stellwerk delay Johannes +25
+//!   stellwerk backdate Johannes --delay 70 --days 3 [--count 3] [--from "Bonn Hbf" --to "Köln Hbf"]
 //!   stellwerk cancel Johannes
 //!   stellwerk ff Johannes
 //!   stellwerk poll
@@ -311,6 +312,42 @@ enum Cmd {
     Watch { customer: String },
     /// Send a test push to the customer's device (logged only without APNS_*/FCM_* credentials)
     Push { customer: String, text: Option<String> },
+    /// Invent a ride that already happened, with the delay it had: test data for claims
+    Backdate {
+        customer: String,
+        /// Minutes late at the destination; 60 and up is what makes a claim
+        #[arg(long, default_value_t = 70)]
+        delay: i64,
+        /// How many days back the newest invented ride departed
+        #[arg(long, default_value_t = 1)]
+        days: i64,
+        /// How many rides to invent, one a day going further back
+        #[arg(long, default_value_t = 1)]
+        count: i64,
+        /// Departure in German local time
+        #[arg(long, default_value = "08:12")]
+        at: String,
+        /// Scheduled travel time in minutes
+        #[arg(long, default_value_t = 52)]
+        duration: i64,
+        #[arg(long, default_value = "Bonn Hbf")]
+        from: String,
+        #[arg(long, default_value = "Köln Hbf")]
+        to: String,
+        #[arg(long, default_value = "RE 5")]
+        line: String,
+        /// s | rb | re | fern | bus
+        #[arg(long, default_value = "re")]
+        category: String,
+        #[arg(long, default_value = "DB Regio NRW")]
+        operator: String,
+        /// deutschlandticket | zeitkarte | einzelfahrkarte (default: the customer's own)
+        #[arg(long)]
+        ticket: Option<String>,
+        /// The train was cancelled
+        #[arg(long)]
+        cancelled: bool,
+    },
     /// Delete a customer entirely (device, rides, incidents, claims, mails, uploads); --force when claims were already sent
     Forget {
         customer: String,
@@ -399,6 +436,14 @@ fn hhmm(v: &Value) -> String {
                 .unwrap_or_else(|_| t[11..16].to_string())
         }
         _ => "–".into(),
+    }
+}
+
+/// "07.09. 08:12" in local time, for a ride that is not today's.
+fn dhm(v: &Value) -> String {
+    match v.as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) {
+        Some(d) => d.with_timezone(&chrono::Local).format("%d.%m. %H:%M").to_string(),
+        None => "–".into(),
     }
 }
 
@@ -693,6 +738,37 @@ async fn main() -> anyhow::Result<()> {
             let how = if v["configured"].as_bool().unwrap_or(false) { "Provider konfiguriert" } else { "Dry-Run, nur Log" };
             println!("Push an {} ({platform}, {token}, {how}): {}", s(&v, "nickname"), s(&v, "result"));
             println!("  {} – {}", s(&v, "title"), s(&v, "body"));
+        }
+        Cmd::Backdate { customer, delay, days, count, at, duration, from, to, line, category, operator, ticket, cancelled } => {
+            if count < 1 {
+                anyhow::bail!("--count must be at least 1");
+            }
+            let mut warned = false;
+            for i in 0..count {
+                let body = json!({
+                    "from": from, "to": to, "delay_minutes": delay, "days_ago": days + i, "departure": at,
+                    "duration_minutes": duration, "line": line, "category": category, "operator": operator,
+                    "ticket": ticket, "cancelled": cancelled,
+                });
+                let v = api.post(&format!("/admin/customers/{customer}/backdate"), body).await?;
+                let j = &v["journey"];
+                println!(
+                    "{}  {}  {} → {}  ·  +{} min  ·  {} Punkte",
+                    dhm(&j["planned_departure"]), s(&v["ride"], "line"), s(j, "origin_station_name"), s(j, "destination_station_name"),
+                    s(j, "final_delay_min"), s(&v, "points")
+                );
+                match v.get("incident").filter(|i| !i.is_null()) {
+                    Some(inc) => println!("    Anspruch {} ct  ·  {}  ·  {}  ·  Frist {}", s(inc, "amount_cents"), s(inc, "status"), s(inc, "desk"), s(inc, "legal_deadline")),
+                    None => println!("    Kein Anspruch (unter 60 Minuten)."),
+                }
+                if let Some(b) = v.get("new_badge").filter(|b| !b.is_null()) {
+                    println!("    Abzeichen: {}", s(b, "name"));
+                }
+                if !warned && v["operator_known"].as_bool() == Some(false) {
+                    println!("    Hinweis: »{operator}« steht nicht im Betreiberverzeichnis; die Stelle heißt deshalb »Unbekannt«.");
+                    warned = true;
+                }
+            }
         }
         Cmd::Scan => {
             let v = api.post("/admin/scan", json!({})).await?;

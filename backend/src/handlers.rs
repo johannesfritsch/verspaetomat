@@ -21,7 +21,7 @@ use crate::db::rows::*;
 use crate::rules::{self, Cents};
 use crate::train::{agency_to_operator, normalise_station_name, same_platform, StationRef, TripInfo};
 
-fn row_category(c: crate::train::TrainCategory) -> TrainCategory {
+pub(crate) fn row_category(c: crate::train::TrainCategory) -> TrainCategory {
     match c.as_str() {
         "s" => TrainCategory::S,
         "rb" => TrainCategory::Rb,

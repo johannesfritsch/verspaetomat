@@ -159,6 +159,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/customers/{key}/reset", post(admin::reset))
         .route("/admin/customers/{key}/locate", post(admin::locate).delete(admin::clear_location))
         .route("/admin/customers/{key}/push", post(admin::push))
+        .route("/admin/customers/{key}/backdate", post(admin::backdate))
         .route("/admin/poll", post(admin::poll))
         .route("/admin/scan", post(admin::scan))
         .route("/admin/customers/{key}/mail-test", post(admin::mail_test))

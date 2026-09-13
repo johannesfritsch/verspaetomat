@@ -261,6 +261,30 @@ paths:
       parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
       requestBody: { content: { application/json: { schema: { type: object, properties: { text: { type: string } } } } } }
       responses: { "200": { description: result }, "404": { description: no such customer } }
+  /admin/customers/{key}/backdate:
+    post:
+      summary: "A ride that already happened, invented for testing claims (Stellwerk `backdate`). Body {from, to, delay_minutes=70, days_ago=1, departure=\"08:12\" (German local time), duration_minutes=52, line, category=re, operator, ticket, cancelled}. No feed is asked: the trip id is the server's, the times are computed, the station ids come from the geocoder when it answers. Writes what an arrival writes — an arrived journey, its one leg, and the case the rules allow — so bundles, the monthly cap and deadlines see ordinary rows; the evidence names the Stellwerk and the case counts as self-entered. Answers {customer, journey, ride, incident, new_badge, points, operator_known}."
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, to]
+              properties:
+                from: { type: string }
+                to: { type: string }
+                delay_minutes: { type: integer }
+                days_ago: { type: integer }
+                departure: { type: string, example: "08:12" }
+                duration_minutes: { type: integer }
+                line: { type: string }
+                category: { type: string, enum: [s, rb, re, fern, bus] }
+                operator: { type: string }
+                ticket: { type: string, enum: [deutschlandticket, zeitkarte, einzelfahrkarte] }
+                cancelled: { type: boolean }
+      responses: { "200": { description: The invented ride and its case }, "400": { description: "Bad times, an unknown category or ticket, or a ride that would still be running" }, "404": { description: no such customer } }
   /admin/scan:
     post: { summary: "Run one deadline-scanner pass now: warnings, expiry across all customers, reply nudges, retention sweep.", responses: { "200": { description: "{today, warned, expired, nudged, retained}" } } }
   /admin/ngos:

@@ -1332,7 +1332,7 @@ pub async fn finalise_journey(
         }
     }
     let customer: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(j.customer_id).fetch_one(&s.pool).await?;
-    let incident = create_journey_incident(&s.pool, &updated, &customer, &rides, last_ride.as_ref(), actual, planned, delay, cancelled, incomplete).await?;
+    let incident = create_journey_incident(&s.pool, &updated, &customer, &rides, last_ride.as_ref(), actual, planned, delay, cancelled, incomplete, "Live-Daten Transitous", false).await?;
     let new_badge = match &last_ride {
         Some(r) => crate::handlers::award_badges(&s.pool, j.customer_id, r.id, delay).await?,
         None => None,
@@ -1349,8 +1349,11 @@ pub async fn finalise_journey(
     Ok((updated, Some((incident, new_badge))))
 }
 
+/// The case a finished journey leaves behind. `source` and `self_entered` say where the
+/// arrival time came from: the live feed for a journey the follower watched, the Stellwerk for
+/// an invented one (docs/20). A claim form must never dress up hand-entered data as live data.
 #[allow(clippy::too_many_arguments)]
-async fn create_journey_incident(
+pub(crate) async fn create_journey_incident(
     pool: &PgPool,
     j: &JourneyRow,
     c: &CustomerRow,
@@ -1361,6 +1364,8 @@ async fn create_journey_incident(
     delay: i64,
     cancelled: bool,
     incomplete: bool,
+    source: &str,
+    self_entered: bool,
 ) -> anyhow::Result<Option<IncidentRow>> {
     let existing: Option<IncidentRow> = sqlx::query_as("select * from incidents where journey_id = $1").bind(j.id).fetch_optional(pool).await?;
     if existing.is_some() {
@@ -1400,7 +1405,7 @@ async fn create_journey_incident(
     };
     let evidence = json!({
         "planned_arrival": planned, "actual_arrival": if cancelled && last_ride.map(|r| r.cancelled).unwrap_or(false) { Value::Null } else { json!(actual) },
-        "source": "Live-Daten Transitous", "fetched_at": crate::clock::now(),
+        "source": source, "fetched_at": crate::clock::now(),
         "journey": {
             "id": j.id, "origin": j.origin_station_name, "destination": j.destination_station_name,
             "planned_departure": j.planned_departure, "planned_arrival": j.planned_arrival, "actual_arrival": actual,
@@ -1431,7 +1436,7 @@ async fn create_journey_incident(
     .bind(&operator)
     .bind(&desk)
     .bind(cancelled)
-    .bind(false)
+    .bind(self_entered)
     .bind(&c.ngo_id)
     .bind(fare)
     .bind(rules::legal_deadline(j.planned_departure.with_timezone(&chrono_tz::Europe::Berlin).date_naive()))
