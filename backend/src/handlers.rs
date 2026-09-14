@@ -1116,10 +1116,37 @@ pub struct ClaimPatch {
     pub attachments: Option<Vec<AttachmentRef>>,
 }
 
-#[derive(Deserialize)]
+/// A file on a claim: the upload, and the name it carries on the form and as the file name in
+/// the mail to the railway (docs/18).
 pub struct AttachmentRef {
     pub upload_id: Uuid,
     pub label: String,
+}
+
+/// What an attachment may look like on the wire. Builds up to 1.0.0 (9) send a bare upload id
+/// and mean a ticket by it; since then the label travels with it. Both are read, because an
+/// older build in TestFlight has to keep working against this server.
+impl<'de> Deserialize<'de> for AttachmentRef {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Id(Uuid),
+            Named {
+                upload_id: Uuid,
+                #[serde(default)]
+                label: Option<String>,
+            },
+        }
+        let (upload_id, label) = match Wire::deserialize(d)? {
+            Wire::Id(upload_id) => (upload_id, None),
+            Wire::Named { upload_id, label } => (upload_id, label),
+        };
+        Ok(AttachmentRef {
+            upload_id,
+            label: label.filter(|l| !l.trim().is_empty()).unwrap_or_else(|| "Ticket".to_string()),
+        })
+    }
 }
 
 pub async fn claim_patch(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(p): Json<ClaimPatch>) -> ApiResult {
@@ -2175,6 +2202,32 @@ mod draft_tests {
         assert_eq!(draft_action(&i, None, &open), DraftAction::Rebuild);
         assert_eq!(draft_action(&[], None, &open), DraftAction::Rebuild);
         assert_eq!(draft_action(&i[..2], None, &open), DraftAction::Resume);
+    }
+}
+
+#[cfg(test)]
+mod attachment_tests {
+    use super::*;
+
+    /// The app up to build 9 sends `"attachments": ["<uuid>"]` and means a ticket by it. That
+    /// build is in TestFlight, so the server still reads it — and a nameless attachment gets
+    /// the name the mail needs.
+    #[test]
+    fn an_attachment_may_arrive_as_a_bare_id() {
+        let id = Uuid::new_v4();
+        let old: Vec<AttachmentRef> = serde_json::from_value(json!([id])).unwrap();
+        assert_eq!(old[0].upload_id, id);
+        assert_eq!(old[0].label, "Ticket");
+
+        let new: Vec<AttachmentRef> = serde_json::from_value(json!([{ "upload_id": id, "label": "Ticket August 2026" }])).unwrap();
+        assert_eq!(new[0].upload_id, id);
+        assert_eq!(new[0].label, "Ticket August 2026");
+
+        // An empty name is no name.
+        let blank: Vec<AttachmentRef> = serde_json::from_value(json!([{ "upload_id": id, "label": "  " }])).unwrap();
+        assert_eq!(blank[0].label, "Ticket");
+
+        assert!(serde_json::from_value::<Vec<AttachmentRef>>(json!(["not-a-uuid"])).is_err());
     }
 }
 

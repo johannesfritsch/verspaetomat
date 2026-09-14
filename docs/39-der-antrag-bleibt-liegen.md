@@ -58,9 +58,12 @@ das Formular druckt nur, was es als Bild erkennt. Der Server schaut jetzt auf di
 (und notfalls auf den Dateinamen); die App schickt den Typ von sich aus mit. Beides zusammen,
 damit ältere Builds im TestFlight ihre Unterschrift behalten.
 
-**Anhänge heißen `{upload_id, label}`.** Die App schickte eine nackte Liste von Ids — 422. Jetzt
-schickt sie, was der Server seit jeher liest, und das Label wird der Dateiname in der Mail an die
-Bahn (docs/18).
+**Anhänge heißen `{upload_id, label}`.** Die App schickte eine nackte Liste von Ids — 422, seit
+es das Backend gibt: in Build 9, dem, der gerade im TestFlight liegt, lässt sich also gar kein
+Ticket anhängen. Die App schickt jetzt Id und Label, und der Server liest **beide Formen**: eine
+nackte Id heißt weiterhin „Ticket". Damit funktioniert Build 9 wieder, sobald der Server steht —
+er muss nicht auf den nächsten Build warten (Hausregel: alte Builds müssen gegen das neue Backend
+weiterlaufen). Das Label wird der Dateiname in der Mail an die Bahn (docs/18).
 
 ## Was geprüft ist
 
