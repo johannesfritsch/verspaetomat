@@ -92,6 +92,13 @@ void main() {
       await tester.tapAt(const Offset(200, 60));
       await wait(tester, 700);
     }
+    // docs/39: behind the pre-step, the first step lists every open case of the desk with its
+    // own tick. The route above stops at „So läuft das", so the tour walks one step further.
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go('${Routes.antrag}?desk=Servicecenter%20Fahrgastrechte');
+    await wait(tester, 1800);
+    await tester.tap(find.text('Los geht\'s'));
+    await shot('antrag-pruefen');
+
     RideMonitor monitor() => RideScope.read(tester.element(find.byType(Scaffold).first))!;
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
     await wait(tester, 600);
