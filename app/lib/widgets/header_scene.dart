@@ -34,16 +34,17 @@ class VHeaderScene extends StatelessWidget {
       child: SizedBox(
         height: height,
         width: double.infinity,
-        // Two masks, because the drawing has to dissolve on two sides. Its own background is a
-        // hair brighter than the page, so any edge it ends on shows as a faint rectangle: down the
-        // middle of the screen where the title sits, and across the top under the masthead.
+        // Two masks. The left one lets the drawing dissolve into the page where the title sits;
+        // the bottom one stops it ending on a horizontal line just above the first card, because
+        // its own background is a hair brighter than the paper. Nothing fades at the top: the
+        // drawing is meant to run up behind the status bar and off the screen.
         child: ShaderMask(
           blendMode: BlendMode.dstIn,
           shaderCallback: (rect) => const LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
             colors: [Colors.white, Colors.white, Colors.transparent],
-            stops: [0, 0.62, 1],
+            stops: [0, 0.88, 1],
           ).createShader(rect),
           child: ShaderMask(
             blendMode: BlendMode.dstIn,
@@ -56,11 +57,10 @@ class VHeaderScene extends StatelessWidget {
             child: ClipRect(
               child: Image.asset(
                 heart ? _withHeart : _plain,
-                // fitWidth, not cover. Cover scales the drawing to fill the band's height, and a
-                // header band is short, so the train grew until it filled the screen and the empty
-                // left third the title needs was cropped away. Tying the drawing to the *width*
-                // keeps it the size it was drawn at, and a band shorter than it loses sky off the
-                // top rather than track off the bottom.
+                // fitWidth, not cover. The drawing is shipped at the band's own proportions, so
+                // tying it to the width fills the band top to bottom at exactly the size it was
+                // drawn. Cover would scale it to the height instead and the train would grow
+                // until it filled the screen.
                 fit: BoxFit.fitWidth,
                 alignment: Alignment.bottomCenter,
                 filterQuality: FilterQuality.medium,

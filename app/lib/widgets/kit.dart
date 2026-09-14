@@ -33,8 +33,17 @@ class VScreen extends StatelessWidget {
     this.showBack = true,
     this.scroll = true,
     this.bottom,
-    this.padding = const EdgeInsets.fromLTRB(VSpace.page, VSpace.m, VSpace.page, VSpace.l),
+    this.padding = const EdgeInsets.fromLTRB(VSpace.l, VSpace.m, VSpace.l, VSpace.l),
   });
+
+  /// How far the back arrow's 44 pt box hangs left of its glyph.
+  ///
+  /// The button is [VControl.touch] wide so a thumb can find it, but the arrow drawn inside is
+  /// 22 pt and centred, so the box starts eleven points left of the ink. Pulling the box back by
+  /// exactly that puts the *glyph* on the page gutter, which is where the title and every line of
+  /// the body start. Without it a sub-screen has three left edges: the arrow at 19, the title at
+  /// 52 and the text at 16.
+  static const _glyphInset = (VControl.touch - 22) / 2;
 
   final Widget child;
   final String? title;
@@ -50,26 +59,39 @@ class VScreen extends StatelessWidget {
     final canPop = Navigator.of(context).canPop();
     final header = (title != null || eyebrow != null || (showBack && canPop))
         ? Padding(
-            padding: const EdgeInsets.fromLTRB(VSpace.s, VSpace.s, VSpace.page, 0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+            padding: const EdgeInsets.fromLTRB(VSpace.l, VSpace.s, VSpace.l, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // The arrow sits on its own line above the title rather than beside it. Beside it,
+                // the title had to start clear of a 44 pt button and the screen gained a second
+                // left edge for no reason anybody could see.
                 if (showBack && canPop)
-                  VIconButton(icon: Icons.arrow_back, onTap: () => Navigator.of(context).maybePop())
-                else
-                  const SizedBox(width: VSpace.s),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (eyebrow != null) VEyebrow(eyebrow!),
-                      if (eyebrow != null) const SizedBox(height: 2),
-                      if (title != null) Text(title!, style: VText.h2, maxLines: 2, overflow: TextOverflow.ellipsis),
-                    ],
+                  Transform.translate(
+                    offset: const Offset(-_glyphInset, 0),
+                    child: VIconButton(
+                      icon: Icons.arrow_back,
+                      onTap: () => Navigator.of(context).maybePop(),
+                    ),
                   ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (eyebrow != null) VEyebrow(eyebrow!),
+                          if (eyebrow != null) const SizedBox(height: 2),
+                          if (title != null)
+                            Text(title!, style: VText.h2, maxLines: 2, overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
+                    ),
+                    if (trailing != null) trailing!,
+                  ],
                 ),
-                if (trailing != null) trailing!,
               ],
             ),
           )
@@ -89,7 +111,7 @@ class VScreen extends StatelessWidget {
               SafeArea(
                 top: false,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, VSpace.m),
+                  padding: const EdgeInsets.fromLTRB(VSpace.l, VSpace.s, VSpace.l, VSpace.m),
                   child: bottom!,
                 ),
               ),

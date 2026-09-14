@@ -112,7 +112,7 @@ class VHandNote extends StatelessWidget {
         final ceiling = constraints.maxWidth;
         painter.layout(maxWidth: ceiling);
         var width = painter.width;
-        var height = painter.height;
+        var height = painter.height + _inkSlack(span, direction, scaler, ceiling);
 
         final sin = math.sin(angle).abs();
         final cos = math.cos(angle).abs();
@@ -122,7 +122,7 @@ class VHandNote extends StatelessWidget {
         if (sin > 0 && ceiling.isFinite && width * cos + height * sin > ceiling) {
           painter.layout(maxWidth: math.max(0, ceiling - height * sin));
           width = painter.width;
-          height = painter.height;
+          height = painter.height + _inkSlack(span, direction, scaler, ceiling);
         }
 
         final rotated = Size(width * cos + height * sin, width * sin + height * cos);
@@ -152,6 +152,30 @@ class VHandNote extends StatelessWidget {
       },
     );
   }
+}
+
+/// How far the handwriting's ink reaches outside its own line boxes.
+///
+/// [VText.hand] sets a line height of 1.0, which is the tight spacing the design draws and which
+/// a grotesk can live with. Caveat cannot: its ascenders and descenders run well past a box that
+/// tall, so a block measured by its line boxes is shorter than the writing in it and the last
+/// line's descenders get sliced off — „schaffen!" lost the tails of both its f's.
+///
+/// Rather than loosen the spacing, the block is measured a second time at the font's own line
+/// height and the difference is added as slack. The text still sets tight; the box around it is
+/// simply big enough to hold what is drawn.
+double _inkSlack(TextSpan span, TextDirection direction, TextScaler scaler, double ceiling) {
+  final style = span.style;
+  if (style == null || style.height == null) return 0;
+  final natural = TextPainter(
+    textWidthBasis: TextWidthBasis.longestLine,
+    text: TextSpan(text: span.text, style: style.copyWith(height: null)),
+    textDirection: direction,
+    textScaler: scaler,
+  )..layout(maxWidth: ceiling);
+  final slack = natural.height - (style.height! * (style.fontSize ?? 0) * natural.computeLineMetrics().length);
+  natural.dispose();
+  return slack > 0 ? slack : 0;
 }
 
 /// The little curved arrow that points from a note back at the thing the note is about.

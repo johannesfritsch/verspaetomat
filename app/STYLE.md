@@ -23,6 +23,8 @@ Where something has to stand out, it stands on one of exactly three surfaces:
 
 **Nesting stops at two deep.** A card may hold a panel; a sheet may hold a card. Nothing inside a surface gets its own border, and the content lines up with the surface's own padding, so a screen has one left edge, not three. The design mockups break that rule inside the Anträge card and the app does not copy them.
 
+**One left edge means the back arrow too.** A sub-screen puts the arrow on its own line above the title, and pulls its 44 pt box half a glyph left so the *arrow itself* lands on the gutter. Beside the title it forced a second edge at 52 pt for no reason anybody could see. Tabs gutter at 16 because cards carry their own padding on top; sub-screens gutter at 24, because prose with nothing around it at 16 runs the full width of the phone.
+
 ### Rules, sections, figures
 
 - **Cards instead of rules.** Sections are separated by 12 pt of page. A hairline survives only *inside* a card, between the rows of one list (`VDivider`), and never after the last row — a line under the last row is a line under nothing, and it is what makes a list look like a form.
@@ -74,4 +76,8 @@ These were settled to unblock the work and each is one token or one flag to reve
 
 ## Looking at what you built
 
-`flutter test tools/preview_test.dart` renders single widgets to PNGs in `/tmp/verspaetomat-preview`, which is faster than driving the app to reach a screen. It has no network, so Archivo does not load there and text falls back to the platform face — judge type on the simulator, not on the bench. `app/tools/tour.sh` shoots the whole app in Demo mode and is what the website's screenshots come from.
+`flutter test tools/preview_test.dart` renders single widgets to PNGs in `/tmp/verspaetomat-preview`, which is faster than driving the app to reach a screen, and it is the only way to see a state the demo never reaches — a journey with a change, an empty week, a note that was reported cut off.
+
+Run `app/tools/fetch-preview-fonts.sh` once first. The bench has no network and `google_fonts` fetches at runtime, so without it every glyph falls back to the platform face, which has its own metrics and will lie to you about what fits. Material icons still draw as boxes there; that is the bench, not the app.
+
+`app/tools/tour.sh` shoots the whole app in Demo mode and is what the website's screenshots come from.

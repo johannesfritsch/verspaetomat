@@ -11,6 +11,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:verspaetomat/theme/tokens.dart';
@@ -25,14 +26,18 @@ const _pixelRatio = 3.0;
 
 const _outDir = '/tmp/verspaetomat-preview';
 
+/// Where fetch-preview-fonts.sh puts the app's two faces. Gitignored; the bench copes without.
+const _fontDir = '.preview-fonts';
+
 void main() {
-  setUpAll(() {
+  setUpAll(() async {
     Directory(_outDir).createSync(recursive: true);
-    // The bench has no network. Without this google_fonts tries to fetch Archivo, fails, and
-    // draws every glyph as a filled box — which looks like a layout bug rather than a missing
-    // font. Off, it falls back to the platform face: not the real type, but legible enough to
-    // judge everything around it.
+    // The bench has no network and google_fonts fetches at runtime, so every glyph would fall
+    // back to the platform face — which has its own metrics and makes a layout check lie about
+    // where things sit. app/tools/fetch-preview-fonts.sh drops static TTFs under the exact family
+    // names google_fonts uses; loading them here gives the bench the app's real type.
     GoogleFonts.config.allowRuntimeFetching = false;
+    await _loadFonts();
   });
 
   _preview('header-scene-home', height: 210, (context) => const VHeaderScene(height: 190));
@@ -347,6 +352,69 @@ void main() {
     );
   });
 
+  // The two handwritten notes that were reported cut off. Both sit at the end of a row with
+  // something fixed beside them, which is where a rotated block of writing runs out of room.
+  _preview('hand-notes', height: 400, (context) {
+    return Padding(
+      padding: const EdgeInsets.all(VSpace.page),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                flex: 3,
+                child: VTintButton(label: 'Teilen', icon: Icons.ios_share, onTap: () {}),
+              ),
+              const SizedBox(width: VSpace.s),
+              const Expanded(
+                flex: 2,
+                child: Row(
+                  children: [
+                    VHandArrow(),
+                    SizedBox(width: VSpace.xs),
+                    Flexible(
+                      child: VHandNote('Zeig, was wir\ngemeinsam schaffen!', angle: -0.06),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const VGap.l(),
+          VCard(
+            tone: VCardTone.sunken,
+            padding: const EdgeInsets.all(VSpace.cardTight),
+            child: Row(
+              children: [
+                const VIconBadge(
+                  icon: Icons.groups,
+                  tone: VBadgeTone.neutral,
+                  size: VControl.badgeSmall,
+                ),
+                const SizedBox(width: VSpace.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('18.420 Menschen machen mit.', style: VText.bodyStrong),
+                      Text('Danke, dass du Teil davon bist.', style: VText.bodyS),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: VSpace.s),
+                const VHeartMark(size: 20, color: VColors.redTint),
+                const SizedBox(width: VSpace.xs),
+                const VHandNote('Gemeinsam\nwirken.', angle: -0.12),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  });
+
   // Over the real thing: a title set across the faded half, which is the only test that matters
   // for a background.
   _preview('header-scene-with-title', height: 230, (context) {
@@ -367,6 +435,26 @@ void main() {
       ],
     );
   });
+}
+
+/// Registers the faces fetched by tools/fetch-preview-fonts.sh, if they are there.
+///
+/// Missing fonts are not an error: the bench still draws, it just draws in the platform face, and
+/// the run says so once rather than failing. The family names have to match what google_fonts
+/// asks for exactly — "Archivo_800", not "Archivo".
+Future<void> _loadFonts() async {
+  final dir = Directory(_fontDir);
+  if (!dir.existsSync()) {
+    // ignore: avoid_print
+    print('NOTE no fonts in $_fontDir — run tools/fetch-preview-fonts.sh for real type');
+    return;
+  }
+  for (final file in dir.listSync().whereType<File>()) {
+    if (!file.path.endsWith('.ttf')) continue;
+    final family = file.uri.pathSegments.last.replaceAll('.ttf', '');
+    await (FontLoader(family)..addFont(Future.value(file.readAsBytesSync().buffer.asByteData())))
+        .load();
+  }
 }
 
 /// Renders one widget on the page background and writes it to a PNG.
