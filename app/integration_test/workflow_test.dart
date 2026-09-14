@@ -24,6 +24,7 @@ import 'package:verspaetomat/mock/mock_data.dart' show Mock;
 import 'package:verspaetomat/api/token_store.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart';
+import 'package:verspaetomat/widgets/kit.dart' show VCheckbox;
 import 'package:verspaetomat/screens/ride/welcher_zug_screen.dart';
 import 'package:verspaetomat/screens/ride/wohin_screen.dart';
 import 'package:verspaetomat/state/demo_state.dart';
@@ -87,6 +88,11 @@ class Stellwerk {
     if (r.statusCode >= 300) throw StateError('DELETE /admin/overrides → ${r.statusCode} ${r.body}');
   }
   Future<void> locate(String id, String station) => _post('/admin/customers/$id/locate', {'station': station});
+
+  /// A ride that already happened, with the delay it had — the Stellwerk's backdate. Four of
+  /// them make a bundle without waiting for four real trains.
+  Future<dynamic> backdate(String id, {required int daysAgo, int delayMinutes = 70, String from = 'Bonn Hbf', String to = 'Köln Hbf'}) =>
+      _post('/admin/customers/$id/backdate', {'from': from, 'to': to, 'days_ago': daysAgo, 'delay_minutes': delayMinutes});
   /// Confirms the proposed next leg of the customer's journey, as the phone would (docs/17).
   Future<dynamic> confirm(String id) => _post('/admin/customers/$id/confirm');
   Future<dynamic> journey(String id) => _get('/admin/customers/$id/journey');
@@ -370,6 +376,10 @@ void main() {
       await pumpUntilFound(tester, find.textContaining('Bereit ·'), timeout: const Duration(seconds: 40));
       await tapText(tester, 'Antrag vorbereiten');
 
+      // Step 0: the pre-step explains the five steps before the first one asks anything.
+      await pumpUntilFound(tester, find.text('Los geht\'s'), timeout: const Duration(seconds: 40));
+      await tapText(tester, 'Los geht\'s');
+
       // Step 1: personal data and the recovery code appear on the first claim only.
       await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is TextField || (w is Text && (w.data ?? '').contains('@verspaetomat.de'))), timeout: const Duration(seconds: 40));
       if (find.byType(TextField).evaluate().length >= 4) {
@@ -390,9 +400,9 @@ void main() {
       await tapText(tester, 'Weiter');
 
       // Step 2: one ticket image per month covered.
-      await pumpUntilFound(tester, find.text('Aus Fotos'), timeout: const Duration(seconds: 20));
-      while (find.text('Aus Fotos').evaluate().isNotEmpty) {
-        await tapText(tester, 'Aus Fotos');
+      await pumpUntilFound(tester, find.text('Ticket anhängen'), timeout: const Duration(seconds: 20));
+      while (find.text('Ticket anhängen').evaluate().isNotEmpty) {
+        await tapText(tester, 'Ticket anhängen');
         await pumpUntilGone(tester, find.text('Lädt hoch …'), timeout: const Duration(seconds: 40));
         await settle(tester, 800);
       }
@@ -521,4 +531,118 @@ void main() {
       }
     }
   }, timeout: const Timeout(Duration(minutes: 15)));
+
+  /// The Antrag's own workings, with backdated rides instead of real ones: the pre-step, taking
+  /// a case out of the form (and the 4 € floor that refuses to let it go), and a draft that is
+  /// still there — with its ticket — when the passenger comes back to it.
+  testWidgets('Antrag: Überblick, abgewählte Fälle, ein Entwurf der liegen bleibt', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final demo = DemoState();
+    final session = Session(demo: demo, prefs: prefs, apiUrl: apiUrl, tokens: TokenStore(namespace: 'e2e.'));
+    session.init();
+    await tester.pumpWidget(VerspaetomatApp(state: demo, session: session));
+    await settle(tester, 1500);
+
+    final sw = Stellwerk(apiUrl);
+    String? customer;
+    try {
+      await pumpUntilFound(tester, homeOrRide, timeout: const Duration(seconds: 40));
+      customer = (await sw.customers()).first['id'] as String;
+      await sw.reset(customer);
+      await pumpUntilFound(tester, homeIdle, timeout: const Duration(seconds: 20));
+
+      // Four rides that already happened, all at the same desk: 4 × 1,50 € = 6,00 €.
+      for (var days = 3; days <= 6; days++) {
+        await sw.backdate(customer, daysAgo: days, delayMinutes: 70);
+      }
+
+      await tapIcon(tester, Icons.receipt_long_outlined);
+      await pumpUntilFound(tester, find.textContaining('Bereit ·'), timeout: const Duration(seconds: 40));
+      await tapText(tester, 'Antrag vorbereiten');
+
+      // The pre-step: what is about to happen, and what it is worth, before anything is asked.
+      await pumpUntilFound(tester, find.text('So läuft das'), timeout: const Duration(seconds: 40));
+      expect(find.text('4 Fälle · 6,00 €'), findsOneWidget);
+      for (final step in ['Prüfen', 'Ticket', 'Zweck', 'Unterschrift', 'Senden']) {
+        expect(find.text(step), findsWidgets, reason: 'the five steps are named up front');
+      }
+      await tapText(tester, 'Los geht\'s');
+
+      // Personal data and the recovery code: on the first claim of a fresh customer only.
+      await pumpUntilFound(
+        tester,
+        find.byWidgetPredicate((w) => w is TextField || (w is Text && (w.data ?? '').contains('@verspaetomat.de'))),
+        timeout: const Duration(seconds: 40),
+      );
+      if (find.byType(TextField).evaluate().length >= 4) {
+        final fields = find.byType(TextField);
+        await tester.enterText(fields.at(0), 'Johannes Test');
+        await tester.enterText(fields.at(1), 'Venloer Straße 123, 50823 Köln');
+        await tester.enterText(fields.at(2), 'johannes@example.de');
+        await tester.enterText(fields.at(3), 'D-2026-0904-771-2201');
+        await tester.pump(const Duration(milliseconds: 200));
+        await tapText(tester, 'Speichern');
+        try {
+          await tapText(tester, 'Ich habe es notiert', timeout: const Duration(seconds: 15));
+        } on TestFailure {
+          // no recovery code sheet this time
+        }
+      }
+
+      // Step 1: every open case at the desk is ticked.
+      await pumpUntilFound(tester, find.textContaining('4 von 4'), timeout: const Duration(seconds: 30));
+      expect(find.textContaining('6,00 €'), findsWidgets);
+      expect(find.byType(VCheckbox), findsNWidgets(4));
+
+      // Take the newest case out: it stays open for the next Antrag, the form asks for less.
+      await tester.tap(find.byType(VCheckbox).last);
+      await pumpUntilFound(tester, find.textContaining('3 von 4'), timeout: const Duration(seconds: 30));
+      expect(find.textContaining('4,50 €'), findsWidgets);
+
+      // One more would fall through the 4 € floor. The backend refuses and the case stays in.
+      await tester.tap(find.byType(VCheckbox).at(2));
+      await pumpUntilFound(tester, find.textContaining('keine 4 €'), timeout: const Duration(seconds: 30));
+      expect(find.textContaining('3 von 4'), findsWidgets, reason: 'the refused case is still in the form');
+      // The snackbar sits where the button is: wait it out, do not tap through it.
+      await pumpUntilGone(tester, find.textContaining('keine 4 €'), timeout: const Duration(seconds: 15));
+
+      // Step 2: a ticket for every month the three cases cover.
+      await tapText(tester, 'Weiter');
+      await pumpUntilFound(tester, find.text('Ticket anhängen'), timeout: const Duration(seconds: 20));
+      while (find.text('Ticket anhängen').evaluate().isNotEmpty) {
+        await tapText(tester, 'Ticket anhängen');
+        await pumpUntilGone(tester, find.text('Lädt hoch …'), timeout: const Duration(seconds: 40));
+        await settle(tester, 800);
+      }
+      expect(find.byType(MockTicket), findsWidgets);
+
+      // Leave the Antrag half-finished.
+      await tapIcon(tester, Icons.arrow_back);
+      await pumpUntilFound(tester, find.textContaining('Bereit ·'), timeout: const Duration(seconds: 30));
+
+      // Come back: the same form is lying there — three cases, and its ticket still attached.
+      await tapText(tester, 'Antrag vorbereiten');
+      await pumpUntilFound(tester, find.text('So läuft das'), timeout: const Duration(seconds: 40));
+      expect(find.text('3 Fälle · 4,50 €'), findsOneWidget, reason: 'the draft was picked up, not built again');
+      await tapText(tester, 'Los geht\'s');
+      await pumpUntilFound(tester, find.textContaining('3 von 4'), timeout: const Duration(seconds: 30));
+      await tapText(tester, 'Weiter');
+      await pumpUntilFound(tester, find.byType(MockTicket), timeout: const Duration(seconds: 30));
+      expect(find.text('Ticket anhängen'), findsNothing, reason: 'the ticket on the draft is not asked for twice');
+
+      // Put the fourth case back: that is another form, and it wants its own ticket.
+      await tapText(tester, 'Zurück');
+      await pumpUntilFound(tester, find.textContaining('3 von 4'), timeout: const Duration(seconds: 30));
+      await tester.tap(find.byType(VCheckbox).last);
+      await pumpUntilFound(tester, find.textContaining('4 von 4'), timeout: const Duration(seconds: 30));
+      await tapText(tester, 'Weiter');
+      await pumpUntilFound(tester, find.text('Ticket anhängen'), timeout: const Duration(seconds: 30));
+    } finally {
+      if (customer != null) {
+        try {
+          await sw.reset(customer);
+        } catch (_) {}
+      }
+    }
+  }, timeout: const Timeout(Duration(minutes: 10)));
 }
