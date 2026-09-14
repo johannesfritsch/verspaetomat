@@ -326,9 +326,17 @@ class VDelayTile extends StatelessWidget {
   /// The plus against the digits. Measured 45.7 pt of plus against 70.1 pt of digit.
   static const _plusRatio = 0.65;
 
+  /// The figure's line box, cut down to roughly its ink.
+  ///
+  /// A 96 pt line at height 1.0 is 96 pt tall while the digits inside it are 64 — the rest is the
+  /// font's internal leading, and at this size that is thirty points of empty tile above and below
+  /// the number. The design lays the tile out against the ink, so the box has to be trimmed to it.
+  /// Digits have no descender, so nothing is at risk of being cut.
+  static const _figureLineHeight = 0.78;
+
   @override
   Widget build(BuildContext context) {
-    final figure = VText.display;
+    final figure = VText.display.copyWith(height: _figureLineHeight);
     final plus = figure.copyWith(
       fontSize: (figure.fontSize ?? 0) * _plusRatio,
       color: VColors.red,
@@ -361,7 +369,9 @@ class VDelayTile extends StatelessWidget {
             const SizedBox(height: VSpace.s),
             Text(
               caption ?? (cancelled ? 'Zug fällt aus' : 'Minuten Verspätung'),
-              style: VText.body.copyWith(color: VColors.ink),
+              // Measured 13 pt and on one line. bodyS is the token that fits „Minuten Verspätung"
+              // across the tile without breaking it; two lines is the net for a longer caption.
+              style: VText.bodyS.copyWith(color: VColors.ink),
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,

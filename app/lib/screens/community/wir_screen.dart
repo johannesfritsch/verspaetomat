@@ -186,13 +186,9 @@ class _WirScreenState extends State<WirScreen> {
             // Every block on this screen stands on a card (issue #13, docs/37). Each Verein is its
             // own card now rather than a row in a shared one: three cards read as three partners,
             // where three rules read as a table of them.
-            VSectionHeader(
-              'Vereine',
-              wide: true,
-              onCard: false,
-              linkLabel: 'Mehr erfahren',
-              onLink: () => context.push(Routes.zweck),
-            ),
+            // No "Mehr erfahren" link until there is a page of all Vereine behind it. Each card
+            // already opens the one Verein it names, which is the thing you actually want.
+            const VSectionHeader('Vereine', wide: true, onCard: false),
             for (final n in c.ngos) _NgoCard(ngo: n),
 
             VCard(

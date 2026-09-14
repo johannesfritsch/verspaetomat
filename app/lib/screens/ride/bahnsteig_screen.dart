@@ -515,7 +515,9 @@ class _Momentum extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          VSectionHeader('Deine Woche', linkLabel: 'Alle Wochen', onLink: onTap),
+          // No "Alle Wochen" link until there is a week history to open. The card itself still
+          // goes to Ich, which is a place that exists.
+          const VSectionHeader('Deine Woche'),
           const VGap.md(),
           VPanel(
             tone: VPanelTone.redFaint,

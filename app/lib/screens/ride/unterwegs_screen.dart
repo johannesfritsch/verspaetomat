@@ -67,7 +67,7 @@ class RideSheetBody extends StatelessWidget {
           );
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.l),
+      padding: const EdgeInsets.fromLTRB(VSpace.sheet, 0, VSpace.sheet, VSpace.l),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -244,15 +244,19 @@ class _NextLegStopsState extends State<_NextLegStops> {
     }
     final from = fromIndex(_stops, l.fromStationId, l.fromStationName);
     final to = fromIndex(_stops, l.toStationId, l.toStationName);
-    return StopLine(
-      stops: _stops,
-      from: from,
-      to: to,
-      // Nothing of this train has been ridden yet, so no stop is behind us.
-      passed: from - 1,
-      exitIndex: to,
-      compact: true,
-      labels: {from: 'Umstieg', to: 'Ziel'},
+    return VStopTimeline(
+      // The quiet tone: this train has not been boarded yet, so its line is ink rather than red.
+      // Red here would put two live journeys on one screen.
+      tone: VTimelineTone.quiet,
+      stops: vStopsOf(
+        _stops,
+        from: from,
+        to: to,
+        // Nothing of this train has been ridden yet, so no stop is behind us.
+        passed: from - 1,
+        labels: {from: 'Umstieg', to: 'Ziel'},
+        operatorName: l.operator,
+      ),
     );
   }
 }
@@ -289,91 +293,139 @@ class _RidingView extends StatelessWidget {
       children: [
         Text(
           j == null ? r.operator : '${r.operator} · Zug ${j.currentLeg} von ${j.legs.length} · Ziel ${j.destinationStationName}',
-          style: VText.caption,
+          style: VText.body,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        const VGap.l(),
+        const VGap.m(),
+
+        // The delay and what it costs you, side by side: the figure on the left in its tint, and
+        // on the right the one consequence that matters — when you now reach the stop you get off
+        // at. The bubble points back at the figure it is explaining.
         Opacity(
           opacity: stale ? 0.45 : 1,
-          child: VDelay(j?.cappedDelay(delay) ?? delay, size: VDelaySize.display, cancelled: r.cancelled),
+          child: Builder(
+            builder: (context) => Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 48,
+                  child: VDelayTile(
+                    j?.cappedDelay(delay) ?? delay,
+                    cancelled: r.cancelled,
+                  ),
+                ),
+                const SizedBox(width: VSpace.md),
+                Expanded(
+                  flex: 52,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      VCallout(
+                        icon: Icons.schedule,
+                        line1: '${transferName != null ? 'Umstieg' : 'Ankunft'} ${r.exitStationName}',
+                        line2: delay > 0
+                            ? '${fmtLocal(eta)} statt ${fmtLocal(planned)}'
+                            : fmtLocal(planned),
+                      ),
+                      const VGap.s(),
+                      Text(
+                        r.cause ?? 'Wir behalten den weiteren Verlauf für dich im Blick.',
+                        style: VText.bodyS,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
         if (j?.countedCeilingMinutes != null && delay > j!.countedCeilingMinutes!) ...[
-          const SizedBox(height: 6),
-          Text('Mehr zählt nicht: die Zeit nach dem frühesten Zug ab ${j.transferStationName ?? 'dem Halt'} ist deine.', style: VText.caption),
+          const VGap.s(),
+          Text('Mehr zählt nicht: die Zeit nach dem frühesten Zug ab ${j.transferStationName ?? 'dem Halt'} ist deine.', style: VText.bodyS),
         ],
+
         const VGap.m(),
-        Text(
-          delay > 0
-              ? '${transferName != null ? 'Umstieg' : 'Ankunft'} ${r.exitStationName} ${fmtLocal(eta)} statt ${fmtLocal(planned)}'
-              : '${transferName != null ? 'Umstieg' : 'Ankunft'} ${r.exitStationName} ${fmtLocal(planned)}',
-          style: VText.body,
-        ),
-        if (r.cause != null) Text(r.cause!, style: VText.caption),
-        const VGap.l(),
-        const VRule.red(),
+        const VDivider(),
         const VGap.m(),
+
         if (stops.isEmpty)
-          Text('Halte folgen, sobald der Zug im Feed ist.', style: VText.caption)
+          Text('Halte folgen, sobald der Zug im Feed ist.', style: VText.bodyS)
         else
           Builder(builder: (context) {
             // docs/26 §4: the journey starts where the passenger got on. Stops the train called
             // at before that are not theirs and only push the useful part off the screen.
             final boarded = fromIndex(stops, r.fromStationId, r.fromStationName);
-            return StopLine(
-              stops: stops,
-              from: boarded,
-              // The train runs on past the exit; the passenger does not (docs/26 §4).
-              to: exitIndex < 0 ? null : exitIndex,
-              passed: r.passedStops - 1 + boarded,
-              exitIndex: exitIndex < 0 ? null : exitIndex,
-              compact: true,
-              labels: {
-                boarded: 'Zustieg',
-                if (exitIndex >= 0) exitIndex: nextLeg != null ? 'Umstieg' : 'Ziel',
-              },
+            final exit = exitIndex < 0 ? null : exitIndex;
+            return VStopTimeline(
+              stops: vStopsOf(
+                stops,
+                from: boarded,
+                // The train runs on past the exit; the passenger does not (docs/26 §4).
+                to: exit,
+                passed: r.passedStops - 1 + boarded,
+                boldIndex: exit,
+                // The two stops you have to do something at: get on, get off.
+                halos: {boarded, if (exit != null) exit},
+                labels: {
+                  boarded: 'Zustieg',
+                  if (exit != null) exit: nextLeg != null ? 'Umstieg' : 'Ziel',
+                },
+                operatorName: r.operator,
+              ),
             );
           }),
+
         if (nextLeg != null) ...[
-          const VGap.l(),
-          const VRule(),
           const VGap.m(),
-          Text('DANACH', style: VText.eyebrow),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              LineBadge(nextLeg.line, cancelled: nextLeg.cancelled),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('nach ${nextLeg.headsign.isNotEmpty ? nextLeg.headsign : nextLeg.toStationName}', style: VText.bodyStrong, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    Text(
-                      'ab ${nextLeg.fromStationName} ${fmtLocal(nextLeg.liveDeparture ?? nextLeg.plannedDeparture)}${nextLeg.platform != null && nextLeg.platform!.isNotEmpty ? ' · Gl. ${nextLeg.platform}' : ''}',
-                      style: VText.caption,
-                    ),
-                  ],
+          const VDivider(),
+          const VGap.m(),
+          const VEyebrow('Danach', size: VEyebrowSize.wide),
+          const VGap.s(),
+          // The onward train on its own card: it is a second journey, and on the page it reads as
+          // one because it is boxed rather than because a rule was drawn under the first.
+          VCard(
+            tone: VCardTone.raised,
+            padding: const EdgeInsets.all(VSpace.cardTight),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                VLegRow(
+                  line: nextLeg.line,
+                  cls: vLineClassOf(nextLeg.line),
+                  title: 'nach ${nextLeg.headsign.isNotEmpty ? nextLeg.headsign : nextLeg.toStationName}',
+                  subtitle: 'ab ${nextLeg.fromStationName} ${fmtLocal(nextLeg.liveDeparture ?? nextLeg.plannedDeparture)}'
+                      '${nextLeg.platform != null && nextLeg.platform!.isNotEmpty ? ' · Gl. ${nextLeg.platform}' : ''}',
                 ),
-              ),
-              if (nextLeg.cancelled)
-                const VChip('Ausfall', tone: VTone.red)
-              else if (connectionAtRisk)
-                const VChip('knapp', tone: VTone.red)
-              else if (nextLeg.delayMin > 0)
-                VDelay(nextLeg.delayMin, size: VDelaySize.small),
-            ],
+                if (nextLeg.cancelled || connectionAtRisk || nextLeg.delayMin > 0) ...[
+                  const VGap.s(),
+                  Row(
+                    children: [
+                      if (nextLeg.cancelled)
+                        const VPill('Ausfall', tone: VPillTone.red)
+                      else if (connectionAtRisk)
+                        const VPill('knapp', tone: VPillTone.red)
+                      else
+                        VDelayPill(nextLeg.delayMin),
+                    ],
+                  ),
+                ],
+                const VGap.s(),
+                VNoteBanner(
+                  icon: Icons.chat_bubble_outline,
+                  text: connectionAtRisk
+                      ? 'Der Anschluss wird knapp. Wir planen um, sobald du da bist.'
+                      : 'Am Umstieg fragen wir einmal: bist du drin?',
+                ),
+                const VGap.md(),
+                // The second train's stops, so the whole journey reads as one line down the page
+                // rather than stopping at the change (docs/26 §4).
+                _NextLegStops(leg: nextLeg),
+              ],
+            ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            connectionAtRisk ? 'Der Anschluss wird knapp. Wir planen um, sobald du da bist.' : 'Am Umstieg fragen wir einmal: bist du drin?',
-            style: VText.caption,
-          ),
-          const VGap.m(),
-          // The second train's stops, so the whole journey reads as one line down the page
-          // rather than stopping at the change (docs/26 §4).
-          _NextLegStops(leg: nextLeg),
         ],
+
         if (j != null) ...[
           const VGap.m(),
           Row(
@@ -385,18 +437,19 @@ class _RidingView extends StatelessWidget {
             ],
           ),
         ],
-        const VGap.l(),
-        const VRule(),
+
         const VGap.m(),
+        const VDivider(),
+        const VGap.s(),
         Text(
           stale ? 'Letzter Stand $stamp · Verbindung fehlt.' : 'Stand $stamp · Wir folgen dem Zug, nicht dir.',
           style: VText.caption,
         ),
         if (delay >= 60) ...[
           const VGap.xs(),
-          Text('Ab hier entsteht ein Anspruch.', style: VText.captionInk),
+          Text('Ab hier entsteht ein Anspruch.', style: VText.bodySStrong),
         ],
-        const VGap.l(),
+        const VGap.m(),
         Row(
           children: [
             Expanded(child: VGhostButton(label: 'Zug wechseln', color: VColors.ink2, onTap: onWrongTrain)),

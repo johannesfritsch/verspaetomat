@@ -788,3 +788,51 @@ Future<void> demoCheckIn(BuildContext context) async {
     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Check-in nicht möglich: ${shortError(e)}')));
   }
 }
+
+/// The stops of one train, in the shape the design's timeline reads.
+///
+/// The mapping lives here rather than in the widget because only this layer knows what an
+/// [ApiStop] is: which stop was boarded, which one is the exit, and that a delay is the gap
+/// between the live time and the planned one rather than a field of its own.
+///
+/// A stop the train has already called at shows the time it actually called at, so the line above
+/// the passenger is history and the line below is a forecast.
+List<VStop> vStopsOf(
+  List<ApiStop> stops, {
+  required int from,
+  int? to,
+  int passed = -1,
+  Map<int, String> labels = const {},
+  int? boldIndex,
+  Set<int> halos = const {},
+  String? operatorName,
+}) {
+  if (stops.isEmpty) return const [];
+  final first = from.clamp(0, stops.length - 1);
+  final last = (to ?? stops.length - 1).clamp(first, stops.length - 1);
+  final out = <VStop>[];
+  for (var i = first; i <= last; i++) {
+    final s = stops[i];
+    final planned = plannedAt(s);
+    final live = liveAt(s);
+    final delta = planned != null && live != null ? live.difference(planned).inMinutes : null;
+    final isPassed = i <= passed;
+    out.add(
+      VStop(
+        station: s.name,
+        time: fmtLocal((!isPassed && (delta ?? 0) > 0) ? live : planned),
+        delta: delta,
+        tag: labels[i],
+        bold: boldIndex == i,
+        halo: halos.contains(i),
+        // The mark goes on the stops that mean something to the passenger — where they get on and
+        // where they get off — which is where the design puts it. Every stop wearing one would be
+        // a column of logos beside a column of names.
+        mark: operatorName != null && operatorName.isNotEmpty && (i == first || i == last)
+            ? VOperatorTag(operatorName)
+            : null,
+      ),
+    );
+  }
+  return out;
+}

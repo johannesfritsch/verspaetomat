@@ -31,7 +31,9 @@ class RideBar extends StatelessWidget {
         child: Container(
           height: height,
           padding: const EdgeInsets.symmetric(horizontal: VSpace.m),
-          decoration: const BoxDecoration(border: Border(top: BorderSide(color: VColors.rule))),
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: VColors.hairline, width: VControl.hairline)),
+          ),
           child: content,
         ),
       ),
@@ -57,11 +59,11 @@ class RideBar extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         if (r.cancelled)
-          const VChip('Ausfall', tone: VTone.red)
+          const VPill('Ausfall', tone: VPillTone.red)
         else if (delay > 0)
-          VDelay(delay, size: VDelaySize.small)
+          VDelayPill(delay, unit: false)
         else
-          Text('pünktlich', style: VText.caption.copyWith(color: VColors.green)),
+          const VPill('pünktlich', tone: VPillTone.green),
         const Spacer(),
         if (next != null)
           Text(
@@ -95,10 +97,10 @@ class RideBar extends StatelessWidget {
         const SizedBox(width: 8),
         InkWell(
           onTap: m.busy ? null : () => m.finish(arrived: false),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(VRadius.button),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            child: Text('Beenden', style: VText.bodySStrong.copyWith(color: VColors.ink2)),
+            child: Text('Beenden', style: VText.buttonS.copyWith(color: VColors.ink2)),
           ),
         ),
       ],
@@ -134,14 +136,16 @@ class _SmallInkButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: VColors.ink,
-      borderRadius: BorderRadius.circular(4),
+      color: VColors.red,
+      borderRadius: BorderRadius.circular(VRadius.button),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(VRadius.button),
+        splashColor: VColors.redPressed,
+        highlightColor: VColors.redPressed,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          child: Text(label, style: VText.bodySStrong.copyWith(color: VColors.paper)),
+          padding: const EdgeInsets.symmetric(horizontal: VSpace.md, vertical: VSpace.s),
+          child: Text(label, style: VText.buttonS.copyWith(color: VColors.paperElevated)),
         ),
       ),
     );
@@ -198,7 +202,7 @@ class _RideSheetLayerState extends State<RideSheetLayer> {
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: m.closeSheet,
-            child: Container(color: const Color(0x33111111)),
+            child: const ColoredBox(color: VColors.scrim),
           ),
         ),
         DraggableScrollableSheet(
@@ -211,16 +215,18 @@ class _RideSheetLayerState extends State<RideSheetLayer> {
           builder: (context, scroll) => Material(
             key: const Key('ride-sheet'),
             color: VColors.paperElevated,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            borderRadius: const BorderRadius.vertical(top: VRadius.mdR),
             clipBehavior: Clip.antiAlias,
             child: ListView(
               controller: scroll,
               padding: EdgeInsets.zero,
               children: [
-                // Grab handle, then the header pattern (caption + h2), like every sub-screen.
+                // Grab handle, then the header: an eyebrow over the line you are on, and a round
+                // button to put the sheet away. The chevron is a filled circle here rather than a
+                // bare glyph, because it is the one control in a header full of text.
                 Padding(
                   key: const Key('ride-sheet-handle'),
-                  padding: const EdgeInsets.fromLTRB(VSpace.page, 10, VSpace.page, VSpace.m),
+                  padding: const EdgeInsets.fromLTRB(VSpace.sheet, 10, VSpace.sheet, VSpace.m),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -228,7 +234,10 @@ class _RideSheetLayerState extends State<RideSheetLayer> {
                         child: Container(
                           width: 36,
                           height: 4,
-                          decoration: BoxDecoration(color: VColors.rule, borderRadius: BorderRadius.circular(2)),
+                          decoration: BoxDecoration(
+                            color: VColors.handle,
+                            borderRadius: BorderRadius.circular(VRadius.full),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -239,12 +248,13 @@ class _RideSheetLayerState extends State<RideSheetLayer> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(caption, style: VText.caption),
+                                Text(caption, style: VText.body),
                                 Text(title, style: VText.h2, maxLines: 2, overflow: TextOverflow.ellipsis),
                               ],
                             ),
                           ),
-                          VIconButton(icon: Icons.expand_more, onTap: m.closeSheet, color: VColors.ink2),
+                          const SizedBox(width: VSpace.s),
+                          VCircleIconButton(icon: Icons.expand_more, onTap: m.closeSheet),
                         ],
                       ),
                     ],

@@ -238,6 +238,115 @@ void main() {
     );
   });
 
+  // The ride sheet's two halves. The tour cannot reach a journey with a change, so the onward
+  // leg's card is checked here instead: the leg row, the note and the quiet timeline under it.
+  _preview('ride-sheet', height: 840, (context) {
+    return Container(
+      color: VColors.paperElevated,
+      padding: const EdgeInsets.all(VSpace.sheet),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Expanded(flex: 48, child: VDelayTile(3)),
+              const SizedBox(width: VSpace.md),
+              Expanded(
+                flex: 52,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const VCallout(
+                      icon: Icons.schedule,
+                      line1: 'Umstieg Hagen Hbf',
+                      line2: '10:41 statt 10:38',
+                    ),
+                    const VGap.s(),
+                    Text(
+                      'Wir behalten den weiteren Verlauf für dich im Blick.',
+                      style: VText.bodyS,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const VGap.m(),
+          const VDivider(),
+          const VGap.m(),
+          VStopTimeline(
+            stops: [
+              VStop(
+                station: 'Köln Hbf',
+                time: '09:50',
+                delta: 0,
+                tag: 'Zustieg',
+                halo: true,
+                mark: const VOperatorTag('NordWestBahn'),
+              ),
+              const VStop(station: 'Solingen Hbf', time: '10:06', delta: 2),
+              const VStop(station: 'Wuppertal Hbf', time: '10:19', delta: 3),
+              VStop(
+                station: 'Hagen Hbf',
+                time: '10:41',
+                delta: 3,
+                tag: 'Umstieg',
+                bold: true,
+                halo: true,
+                mark: const VOperatorTag('NordWestBahn'),
+              ),
+            ],
+          ),
+          const VGap.m(),
+          const VDivider(),
+          const VGap.m(),
+          const VEyebrow('Danach', size: VEyebrowSize.wide),
+          const VGap.s(),
+          VCard(
+            tone: VCardTone.raised,
+            padding: const EdgeInsets.all(VSpace.cardTight),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const VLegRow(
+                  line: 'RB 52',
+                  cls: VLineClass.regional,
+                  title: 'nach Lüdenscheid',
+                  subtitle: 'ab Hagen Hbf 10:55 · Gl. 6',
+                ),
+                const VGap.s(),
+                const VNoteBanner(
+                  icon: Icons.chat_bubble_outline,
+                  text: 'Am Umstieg fragen wir einmal: bist du drin?',
+                ),
+                const VGap.md(),
+                VStopTimeline(
+                  tone: VTimelineTone.quiet,
+                  stops: [
+                    VStop(
+                      station: 'Hagen Hbf',
+                      time: '10:55',
+                      tag: 'Umstieg',
+                      mark: const VOperatorTag('NordWestBahn'),
+                    ),
+                    const VStop(station: 'Rummenohl', time: '11:12'),
+                    VStop(
+                      station: 'Lüdenscheid',
+                      time: '11:28',
+                      tag: 'Ziel',
+                      mark: const VOperatorTag('NordWestBahn'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  });
+
   // Over the real thing: a title set across the faded half, which is the only test that matters
   // for a background.
   _preview('header-scene-with-title', height: 230, (context) {
