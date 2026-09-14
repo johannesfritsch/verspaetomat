@@ -13,6 +13,7 @@ import '../../repo/app_repository.dart';
 import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../ride/ride_widgets.dart';
 
 // The claims screens reach for monthLabel and ticketLabel through this file.
 export '../../content/labels.dart';
@@ -177,12 +178,17 @@ class IncidentRow extends StatelessWidget {
                       Row(
                         children: [
                           Text(Mock.shortDate(i.date), style: VText.caption),
-                          const SizedBox(width: 8),
-                          Text(i.line, style: VText.bodySStrong),
+                          const SizedBox(width: VSpace.s),
+                          LineBadge(i.line, cancelled: i.cancelled),
                         ],
                       ),
-                      const SizedBox(height: 2),
-                      Text('${i.from} → ${i.to}', style: VText.bodyS, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${i.from} → ${i.to}',
+                        style: VText.bodyStrong,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       if (i.selfEntered || i.cancelled) ...[
                         const SizedBox(height: 2),
                         Text(
@@ -201,9 +207,9 @@ class IncidentRow extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    VDelay(i.delayMinutes, size: VDelaySize.small),
-                    const SizedBox(height: 2),
-                    Text(fmtCents(i.amountCents), style: VText.captionInk.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
+                    VDelayPill(i.delayMinutes),
+                    const SizedBox(height: 4),
+                    Text(fmtCents(i.amountCents), style: VText.amountS),
                     if (showStatus) ...[
                       const SizedBox(height: 4),
                       VChip(i.status.label, tone: toneFor(i.status)),

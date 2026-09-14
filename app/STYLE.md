@@ -2,41 +2,67 @@
 
 Fully mocked showcase. No backend, no network, no real data. Every screen is reachable from the Showcase index (`/showcase`) and from the natural flow.
 
-## Look: "Bahnhofsuhr"
+## Look: cards on a cool page, and one red light
 
-The German station clock. Paper white, black grotesk, one red second hand. Precise, calm. The number is the design.
+A screen is a cool grey page with white cards lifted off it. Where the app wants you to act, it puts red light under the thing you press. That glow is the signature of the whole design and nothing else in the app may invent one.
 
-- Use only the tokens and widgets in `lib/theme/tokens.dart` and `lib/widgets/kit.dart`. Do not invent colours, radii or shadows.
-- Colours: `VColors.paper` background, `VColors.ink` text, `VColors.ink2` secondary text, `VColors.rule` hairlines, `VColors.red` the single accent (the "+" before a delay, the second hand, progress dots, the one thick rule). `VColors.green` only for "pünktlich". No amber. No gradients. No shadows. No cards with rounded corners and coloured left borders.
-- Type: Archivo everywhere via `VText` styles. Delays and euros in `VText.display` / `VText.number` with tabular figures. Everything else quiet.
-- **A figure's slot is for figures.** On time is a green `0` (`VDelay`), never the word „pünktlich“: a word in a slot built for `+204` is a different width class and breaks the layout around it — on Home it took the whole row and left the station name one letter per line. A word that must stand there („Ausfall“) drops to the label size for that slot.
-- Figures in pairs share one size, and that includes blocks stacked down a screen. A `FittedBox` over a hero style is **not** a size: it only ever shrinks, so what you see depends on how many digits the number has — `1.208.473` came out at 65 px and `+60` at 168 px from the same line of code. Pick the size and keep the `FittedBox` as a net for the long ones.
-- Rules instead of cards: sections are separated by a 1 px `VRule()` in `rule` grey; the one important break on a screen is a 2 px `VRule.red()`.
-- **Two surfaces, and nothing else (docs/33).** A screen is paper with rules on it; where
-  something has to stand out, it stands on one of exactly two surfaces:
-  **the Fahrkarte** (`VFahrkarte`) for one journey or one claim — the check-in, the ride, the
-  arrival, an Antrag, the till that collects them — and
-  **the Tafel** (`VTafel`) for the numbers that belong together at one glance — what we all
-  waited, what your week came to, what you have collected. A Tafel comes in two looks (docs/34):
-  `VTafelLook.anzeige` is the departure board — black, white flaps with the hinge seam across
-  them, a red hairline under the row — and there is **at most one per screen**, for the figure
-  the screen is about; `VTafelLook.papier` is the quiet one, elevated paper with a hairline and
-  a 4 px radius, for everything under the fold. Home, Wir and Ich use the same pair. Everything else — lists, rows, badges, settings, explanations — has no surface, **except on Wir and Ich** (docs/37): those two are overview screens, and there every block stands on a Tafel with its section label outside it. A list on a card keeps an 8 px gutter, not 16.
-  **A surface never contains another surface**, and nothing inside one gets its own border: the
-  content lines up with the surface's own padding, so a screen has one left edge, not three.
-- A figure on a Tafel sets itself like a Fallblattanzeige (`VTafelZahl`): the digits that
-  changed flip over to their new value, left to right, running through the ones in between. On
-  the Anzeige each digit sits on its own flap; on paper the digits are bare.
-  Digits that did not change stand still, so a total ticking up moves only its last flap. This is
-  the third and last animation in the app.
-- **The Fahrkarte, in detail.** `VFahrkarte` is white paper whose top and bottom edge the perforator bit into, a hairline down each side, no radius and no shadow — the same silhouette as the hero on verspaetomat.de and as the shareable card in `widgets/ticket.dart`, down to the 5 px tooth every 14 px (`VTicketBorder`). It is for **one journey or one claim**: the ride under way, the arrival, an Antrag, the open till, the check-in about to start. A week of numbers, a settings group, a choice, the Deutschlandticket mock — those are rows and rules, never this shape. `strong: true` is the one card on a screen that is the open till; its side lines go to ink.
-- Buttons: `VPrimaryButton` (black, 56 px, 4 px radius), `VGhostButton` (text only). Never more than one primary per screen.
-- Hit targets 44 px minimum. Bottom sheets and one-thumb layouts.
-- Copy is German, "du", short, dry. See docs/10-experience.md. Never angry, never "schon wieder".
-- Numbers in copy use German formatting: `1,50 €`, `1.208.311`.
-- The station clock (`VStationClock`) appears small in headers and large on the idle home screen. Its second hand pauses at twelve. Nowhere else is there animation except the arrival count-up and the flaps on a Tafel (`VTafelZahl`).
-- No emoji. Icons are `Icons.*` outlined, 20–24 px, ink colour, sparingly.
-- No fake status bar, no fake keyboard.
+- Use only the tokens and widgets in `lib/theme/tokens.dart` and `lib/widgets/kit.dart` (which re-exports `surfaces.dart` and the rest). Do not invent colours, radii, shadows or sizes. The tokens for all four now exist — `VColors`, `VRadius`, `VShadow`, `VControl` — so there is no longer an excuse for a literal.
+- **The palette is cool.** Every neutral has more blue than red. Nothing is black: the darkest ink and the hero board are both blue-blacks, and every neutral shadow is made of a slate navy, because a black shadow on a cool page reads as dirt.
+- **There are two reds.** `VColors.red` is the deep one and means *do this* or *this is money*: the primary button, the check-in circle, an amount, a link. `VColors.redBright` is the lit one and means *this one*: today's bar in the week chart, the unread badge, the app mark. They are forty levels of green apart and one token cannot carry both.
+- **The other hues belong to other people.** Teal, the two blues and the bright green identify an operator or a partner NGO. They never carry an app state. Colour is for identity; red and green are for meaning.
+- **Green means good.** On time, and ready to file. It was narrower before and it is not any more — say what you mean with the label, not with the hue alone.
+- Type: Archivo through the interface via `VText`, and Caveat in exactly one place — the four handwritten margin notes. A second face earns its place by doing a different job: those are asides, not interface. Figures use the tabular styles so a total does not jitter as it ticks up.
+
+### The three surfaces, and nothing else
+
+Where something has to stand out, it stands on one of exactly three surfaces:
+
+- **The card** (`VCard`) — white, rounded 14, shadowed. The default. Anything that is a block.
+- **The board** (`VBoard`) — the dark or the red hero, at most one per screen, for the figure the screen is about. It is the direct descendant of the departure board: the small-caps label above, the figure, the quiet caption below. Rounded now, and lit from underneath rather than ruled with a red hairline. Wir takes the red one, so the pair reads as two looks of one thing rather than two ideas.
+- **The panel** (`VPanel`) — a tinted block *inside* a card, for the one thing in it that the eye should reach first. No shadow, no border: the tint is the whole device.
+
+**Nesting stops at two deep.** A card may hold a panel; a sheet may hold a card. Nothing inside a surface gets its own border, and the content lines up with the surface's own padding, so a screen has one left edge, not three. The design mockups break that rule inside the Anträge card and the app does not copy them.
+
+### Rules, sections, figures
+
+- **Cards instead of rules.** Sections are separated by 12 pt of page. A hairline survives only *inside* a card, between the rows of one list (`VDivider`), and never after the last row — a line under the last row is a line under nothing, and it is what makes a list look like a form.
+- A section heading is a small-caps label (`VEyebrow`) with no line under it. Standing on the page it is tracked wider than it is on a card, because it has nothing around it to hold it together.
+- **A figure's slot is for figures.** On time is a green `+0`, never the word „pünktlich“: a word in a slot built for `+204` is a different width class and breaks the layout around it. It carries a sign now because it lives in a signed column and every row in that column carries one. „Ausfall“ has no figure to show, so it drops to the label size for its slot, or out of the pill entirely into a grey note under the route.
+- Figures in pairs share one size, and that includes blocks stacked down a screen. A `FittedBox` over a hero style is **not** a size: it only ever shrinks, so what you see depends on how many digits the number has. Pick the size and keep the `FittedBox` as a net for the long ones.
+- Numbers in copy use German formatting: `1,50 €`, `1.208.311`, `38 %` with the space.
+
+### Controls
+
+- `VPrimaryButton` is red, 44 pt, radius 12, and carries a red glow. **One primary per card**, not one per screen: a page of collected claims has a real action on each desk.
+- `VTintButton` is the second tier — a filled tinted block, red ink on a red tint or ink on grey. `VGhostButton` is the third.
+- **Hit targets are 44 pt minimum**, even where the mockups draw the control smaller. Two of them do; build the drawn size inside 44 pt of touch area.
+- Icons are outlined in ink for navigation and disclosure, and **filled and coloured inside a tinted circle** (`VIconBadge`) when they name a block. That badge is the device the design uses instead of a section rule, so „sparingly“ no longer applies to it. No emoji.
+- The tab bar is a card the tabs stand on: rounded 14 at the top, a hairline, an upward shadow, and the faintest of gradients down it. The raised check-in circle is the one control with a real gradient.
+- Bottom sheets and one-thumb layouts. Copy is German, „du“, short, dry. See docs/10-experience.md. Never angry, never „schon wieder“.
+- **A chart shows the resolution the data has.** `VWeekBars` draws the seven days the design asks for, and it draws two columns when two is all there is. Widening the bars to fill the same block is honest; an empty slot waiting for an API is not. Nothing is picked out of a week where nothing happened.
+
+### What survives, and what does not
+
+The one red, in spirit. The tabular figures. The green nought. The station clock, in the five places it still has — Welcome, Permissions, Antrag, the nudge banner and the Showcase — with its second hand still pausing at twelve. The sub-screen header. The dry register. `VDemoControl`'s deliberately un-designed dashed box.
+
+What went, and it is worth knowing what it cost:
+
+- **The Fallblattanzeige.** The flaps, the hinge seam, the digits that stood still while their neighbours turned. It was the app's one piece of mechanical charm and the only thing that made a number on a screen feel like a station. `VTafelZahl` still exists and still works; it is simply not switched on. Try it on the new board before accepting the loss.
+- **The Fahrkarte, inside the app.** The perforated silhouette survives in `widgets/ticket.dart` and on verspaetomat.de, where a shared object still means something. It is gone from the screens. That leaves the thing you post looking unlike the app you posted it from, which is a real cost and an open question, not a decision anybody has made.
+- **The hairline as structure**, and with it `VRule.red`, the one important break a screen was allowed.
+- **The warm paper.** `#F3F3F0` was chosen. `#F7F7F8` is not a nudge of it, it is the other temperature.
+
+### Decisions taken on the way in
+
+These were settled to unblock the work and each is one token or one flag to reverse.
+
+| What | Taken | Why, and what it would cost to change |
+|---|---|---|
+| The typeface | Archivo stays | The mockups are not Archivo — their `i` has a round tittle where Archivo's is a hard square. Archivo was kept because it already has the footed `1` that makes a big figure read like a departure board, its x-height is closest to what the mockups measure, and it reaches w800 where the nearest alternative stops at w700. One line in `VText._a` to change. |
+| The type sizes | The mockup sizes, corrected for Archivo | Archivo's cap height is 0.686 of the em, not the 0.72 the measurements assumed, so several sizes are a point larger than a ruler on the mockup would say. |
+| The card radius | 14 outer, 10 panels, 12 buttons | The four mockups split two and two, at 14 and at 10. One radius of 12 everywhere would reproduce all four acceptably. |
+| The red | `#D61316` | Anträge measures this and Home measures `#CE1F18`. This one also matches the check-in circle, the progress fills and the active tab labels on three files, so the other reads as render drift. |
+| The Fallblattanzeige | Kept in code, switched off | See above. |
 
 ## Behaviour
 
@@ -45,3 +71,7 @@ The German station clock. Paper white, black grotesk, one red second hand. Preci
 - Routes are declared in `lib/router.dart`. Replace the placeholder for your screens; do not rename routes.
 - Every screen must render without crashing in every `DemoState` phase.
 - Small "demo controls" are allowed where the real world would take time (e.g. a "Ankunft simulieren" button on the ride screen), styled as `VDemoControl` so they read as showcase, not product.
+
+## Looking at what you built
+
+`flutter test tools/preview_test.dart` renders single widgets to PNGs in `/tmp/verspaetomat-preview`, which is faster than driving the app to reach a screen. It has no network, so Archivo does not load there and text falls back to the platform face — judge type on the simulator, not on the bench. `app/tools/tour.sh` shoots the whole app in Demo mode and is what the website's screenshots come from.

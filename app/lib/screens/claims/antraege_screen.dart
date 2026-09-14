@@ -9,7 +9,7 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
-import '../community/community_widgets.dart' show TabHeader, pickNgo;
+import '../community/community_widgets.dart' show pickNgo;
 import '../ride/checkin_launcher.dart' show startCheckin;
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
@@ -220,23 +220,30 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
           if (expired.isNotEmpty) _ExpiredCard(incidents: expired),
         ];
 
-        return VScreen(
-          showBack: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TabHeader(title: 'Anträge', caption: caption, onSettings: () => context.push(Routes.einstellungen).then((_) => refresh())),
-              const VGap.l(),
-              ...cards,
-              if (!session.isLocal && out.isNotEmpty)
-                VDemoControl(label: 'Antwort der Bahn simulieren', icon: Icons.mark_email_unread_outlined, onTap: () => _simulateReply(context)),
-              if (desks.length > 1) ...[
-                const VGap.s(),
-                Text('Ansprüche werden pro Bahnunternehmen gebündelt. Jedes Bündel muss 4 € erreichen.', style: VText.caption),
-              ],
-              const VGap.xl(),
-            ],
+        return VTabScaffold(
+          // No landscape here. Anträge is a desk, not a view: the screen is a stack of open cases
+          // and a picture behind the title would be the app admiring itself over somebody's claim.
+          scene: false,
+          onRefresh: () async => refresh(),
+          header: VTabHeader(
+            title: 'Anträge',
+            subtitle: caption,
+            onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
           ),
+          children: [
+            ...cards,
+            if (!session.isLocal && out.isNotEmpty)
+              VDemoControl(
+                label: 'Antwort der Bahn simulieren',
+                icon: Icons.mark_email_unread_outlined,
+                onTap: () => _simulateReply(context),
+              ),
+            if (desks.length > 1)
+              Text(
+                'Ansprüche werden pro Bahnunternehmen gebündelt. Jedes Bündel muss 4 € erreichen.',
+                style: VText.bodyS,
+              ),
+          ],
         );
       },
     );
@@ -414,12 +421,45 @@ class _CollectingCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(showDesk ? 'Wird gesammelt · ${deskDisplay(desk.desk)}' : 'Wird gesammelt', style: VText.title),
-            const SizedBox(height: 4),
-            Text(status, style: VText.bodySStrong.copyWith(color: ready ? VColors.green : VColors.ink)),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // No railway's artwork: the mark is a neutral disc with a glyph. Where a licensed
+                // logo arrives it comes through managed data, the way a Verein's does (docs/43 §5).
+                VOperatorMark(desk.desk),
+                const SizedBox(width: VSpace.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        showDesk ? 'Wird gesammelt · ${deskDisplay(desk.desk)}' : 'Wird gesammelt',
+                        style: VText.title,
+                      ),
+                      const SizedBox(height: VSpace.xs),
+                      if (ready)
+                        VPill(status, icon: Icons.schedule, tone: VPillTone.green)
+                      else
+                        Text(status, style: VText.bodyStrong),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             if (!ready) ...[
-              const SizedBox(height: 2),
-              Text('Ab ${fmtCents(minPayoutCents)} geht der Antrag raus. Noch ${fmtCents(desk.missingCents)}.', style: VText.caption),
+              const SizedBox(height: VSpace.s),
+              // How far along the bundle is. The bar is the thing you actually read here — the
+              // euros beside it are the detail.
+              VProgressBar(
+                value: minPayoutCents == 0
+                    ? 0
+                    : (desk.openCents / minPayoutCents).clamp(0.0, 1.0),
+                label: VProgressBar.pct(
+                  minPayoutCents == 0 ? 0 : desk.openCents / minPayoutCents,
+                ),
+              ),
+              const SizedBox(height: VSpace.s),
+              Text('Ab ${fmtCents(minPayoutCents)} geht der Antrag raus. Noch ${fmtCents(desk.missingCents)}.', style: VText.bodyS),
             ],
             if (showDesk && desk.desk != 'Servicecenter Fahrgastrechte') ...[
               const SizedBox(height: 2),

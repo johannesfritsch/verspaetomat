@@ -3,13 +3,26 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../theme/tokens.dart';
+import 'surfaces.dart';
+
+/// The kit is one import for the whole design system. The pieces live in several files because
+/// one file of three thousand lines is not a system, it is a drawer — but a screen should never
+/// have to know which drawer a widget came out of, so everything comes back out here.
+export 'figures.dart';
+export 'hand.dart';
+export 'marks.dart';
+export 'rows.dart';
+export 'scaffold.dart';
+export 'surfaces.dart';
+export 'timeline.dart';
 
 // ---------------------------------------------------------------------------
 // Page scaffolding
 // ---------------------------------------------------------------------------
 
-/// A page with the standard paper background, page padding and an optional
-/// simple header row (back button + title). Use [scroll] for long content.
+/// A sub-screen: the page ground, the page gutter, and the standard header — a back arrow, a
+/// caption eyebrow and a title. The tabs do not use this; they have their own scaffold with the
+/// illustrated band behind the header.
 class VScreen extends StatelessWidget {
   const VScreen({
     super.key,
@@ -37,7 +50,7 @@ class VScreen extends StatelessWidget {
     final canPop = Navigator.of(context).canPop();
     final header = (title != null || eyebrow != null || (showBack && canPop))
         ? Padding(
-            padding: const EdgeInsets.fromLTRB(VSpace.m, VSpace.m, VSpace.m, 0),
+            padding: const EdgeInsets.fromLTRB(VSpace.s, VSpace.s, VSpace.page, 0),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -50,7 +63,8 @@ class VScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (eyebrow != null) Text(eyebrow!, style: VText.caption),
+                      if (eyebrow != null) VEyebrow(eyebrow!),
+                      if (eyebrow != null) const SizedBox(height: 2),
                       if (title != null) Text(title!, style: VText.h2, maxLines: 2, overflow: TextOverflow.ellipsis),
                     ],
                   ),
@@ -110,17 +124,26 @@ class VIconButton extends StatelessWidget {
 // Rules and spacing
 // ---------------------------------------------------------------------------
 
-/// A hairline. `VRule.red()` is the one thick red rule a screen may carry.
+/// A hairline.
+///
+/// The redesign retired the rule as a structural device: sections are separated by the page now,
+/// not by a line across it. What survives lives *inside* a card, between the rows of one list —
+/// that is [VDivider], and new code should use it. This stays while the screens migrate, drawn at
+/// the new weight so an old call site does not look like a mistake.
 class VRule extends StatelessWidget {
   const VRule({super.key})
-      : color = VColors.rule,
-        thickness = 1;
+      : color = VColors.hairlineStrong,
+        thickness = VControl.hairline;
+  @Deprecated(
+    'The one thick red rule went with the hairline. A block that has to close now does it with a '
+    'card edge or with VDivider(strong: true).',
+  )
   const VRule.red({super.key})
       : color = VColors.red,
         thickness = 2;
   const VRule.soft({super.key})
-      : color = VColors.ruleSoft,
-        thickness = 1;
+      : color = VColors.hairline,
+        thickness = VControl.hairline;
 
   final Color color;
   final double thickness;
@@ -133,6 +156,9 @@ class VGap extends StatelessWidget {
   const VGap(this.size, {super.key});
   const VGap.xs({super.key}) : size = VSpace.xs;
   const VGap.s({super.key}) : size = VSpace.s;
+
+  /// The gap between two stacked surfaces, which is the rhythm of every page now.
+  const VGap.md({super.key}) : size = VSpace.md;
   const VGap.m({super.key}) : size = VSpace.m;
   const VGap.l({super.key}) : size = VSpace.l;
   const VGap.xl({super.key}) : size = VSpace.xl;
@@ -155,21 +181,23 @@ class VGap extends StatelessWidget {
 /// to somebody. Numbers about a week, a settings group, a choice — those are still rules and
 /// rows, never this shape (app/STYLE.md).
 ///
+@Deprecated(
+  'The perforated card left the app with the redesign. Use VCard, which is what this now draws. '
+  'The silhouette itself survives in widgets/ticket.dart and on verspaetomat.de, where a shared '
+  'object still means something. This alias exists only so the screens can migrate one at a time.',
+)
 class VFahrkarte extends StatelessWidget {
   const VFahrkarte({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.symmetric(horizontal: VSpace.m, vertical: VSpace.m + VTicketBorder.bite),
+    this.padding = const EdgeInsets.all(VSpace.card),
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
 
   @override
-  Widget build(BuildContext context) => DecoratedBox(
-        decoration: const ShapeDecoration(color: VColors.paperElevated, shape: VTicketBorder()),
-        child: Padding(padding: padding, child: child),
-      );
+  Widget build(BuildContext context) => VCard(padding: padding, child: child);
 }
 
 /// The silhouette itself: the rectangle minus a row of half circles along the top and the
@@ -270,26 +298,20 @@ class VTafel extends StatelessWidget {
   final VoidCallback? onTap;
   final EdgeInsetsGeometry padding;
 
-  /// The board's own black: a shade off the ink, so the flaps can be darker still.
-  static const board = Color(0xFF121212);
+  /// The board's own dark, from the tokens. A blue-black, never neutral.
+  static const board = VColors.surfaceDark;
 
-  /// Everything that is not a figure on the board: labels, units, captions.
-  static const boardInk = Color(0xFFA8A8A2);
+  /// Everything on the board that is not the figure: labels, units, captions.
+  static const boardInk = VColors.inkOnDark2;
 
   @override
   Widget build(BuildContext context) {
-    final anzeige = look == VTafelLook.anzeige;
-    final box = Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: anzeige ? board : VColors.paperElevated,
-        border: anzeige ? null : Border.all(color: VColors.rule),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: child,
-    );
-    if (onTap == null) return box;
-    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(4), child: box);
+    // The board became VBoard and the quiet paper one became an ordinary card. Both are drawn by
+    // the new surfaces now; this stays so the screens can migrate one at a time.
+    if (look == VTafelLook.anzeige) {
+      return VBoard(padding: padding, onTap: onTap, child: child);
+    }
+    return VCard(padding: padding, onTap: onTap, child: child);
   }
 }
 
@@ -302,7 +324,7 @@ class VTafelLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
         text.toUpperCase(),
-        style: VText.eyebrow.copyWith(color: look == VTafelLook.anzeige ? VTafel.boardInk : VColors.ink2),
+        style: VText.eyebrow.copyWith(color: look == VTafelLook.anzeige ? VColors.inkOnDark2 : VColors.ink2),
       );
 }
 
@@ -316,7 +338,7 @@ class VTafelCaption extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
         text,
-        style: VText.caption.copyWith(color: look == VTafelLook.anzeige ? VTafel.boardInk : VColors.ink2),
+        style: VText.bodyS.copyWith(color: look == VTafelLook.anzeige ? VColors.inkOnDark3 : VColors.ink2),
         maxLines: maxLines,
         overflow: TextOverflow.ellipsis,
       );
@@ -331,7 +353,7 @@ class VTafelCaption extends StatelessWidget {
 /// This is the only animation in the app besides the station clock's second hand and the
 /// arrival count-up (app/STYLE.md).
 class VTafelZahl extends StatefulWidget {
-  const VTafelZahl(this.text, {super.key, this.style, this.look = VTafelLook.papier, this.flaps = true});
+  const VTafelZahl(this.text, {super.key, this.style, this.look = VTafelLook.papier, this.flaps = false});
 
   /// The number as it should read, German formatting and all: `1.208.316`, `+96`, `4,50 €`.
   /// Digits flip; a sign in front of them sits on a flap of its own and stands still, the way a
@@ -340,9 +362,10 @@ class VTafelZahl extends StatefulWidget {
   final String text;
   final TextStyle? style;
 
-  /// On [VTafelLook.anzeige] every digit sits on a black flap with the hinge seam across it; on
-  /// paper the same flaps are paper-coloured with a grey seam (issue #10). [flaps] off leaves the
-  /// digits bare, for the small figures where a board would be louder than the number.
+  /// [flaps] draws each digit on a card with the hinge seam across it, the way a Solari board
+  /// does. It is **off by default since the redesign**: the new boards set their figures as bare
+  /// digits. The machinery is all still here and still correct, so switching a board back on is
+  /// one word — see the note in app/STYLE.md about what that loss cost.
   final VTafelLook look;
   final bool flaps;
 
@@ -407,11 +430,18 @@ class _VTafelZahlState extends State<VTafelZahl> with SingleTickerProviderStateM
     final anzeige = widget.look == VTafelLook.anzeige;
     // White on a dark flap, in both boxes (issue #10) — but the group separators hang *between*
     // the flaps, on whatever the flaps hang in, so they take that colour instead.
+    final onBoard = widget.look == VTafelLook.anzeige;
     final style = (widget.style ?? VText.number).copyWith(
       fontFeatures: const [FontFeature.tabularFigures()],
-      color: widget.flaps ? VColors.paper : null,
+      // A figure on the board takes the board's ink whether or not it sits on a flap. Left to the
+      // style it came out ink on ink the moment the flaps were switched off.
+      color: widget.flaps
+          ? VColors.paper
+          : onBoard
+              ? VColors.inkOnDark
+              : null,
     );
-    final bareStyle = style.copyWith(color: anzeige ? VColors.paper : VColors.ink);
+    final bareStyle = style.copyWith(color: anzeige ? VColors.inkOnDark : VColors.ink);
     // Measured, not guessed: a flap has to be exactly as wide and as tall as the digit it turns
     // over, or the row shifts sideways while it runs. Tabular figures make one measurement do
     // for all ten.
@@ -559,36 +589,78 @@ class _Flap extends StatelessWidget {
 // Buttons
 // ---------------------------------------------------------------------------
 
+/// The one thing on a card you are meant to press.
+///
+/// Red, and lit: it carries a red glow rather than a grey shadow, which is the device the whole
+/// design uses to say *press this*. The old rule was one primary per screen; it is now one per
+/// card, because a screen of collected claims has a real action on each desk.
 class VPrimaryButton extends StatelessWidget {
-  const VPrimaryButton({super.key, required this.label, this.onTap, this.icon, this.expanded = true});
+  const VPrimaryButton({
+    super.key,
+    required this.label,
+    this.onTap,
+    this.icon,
+    this.expanded = true,
+    this.busy = false,
+  });
+
   final String label;
   final VoidCallback? onTap;
   final IconData? icon;
   final bool expanded;
 
+  /// While something is in flight. The label stays, so the button does not change width and the
+  /// row around it does not move.
+  final bool busy;
+
   @override
   Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    final child = SizedBox(
-      height: 56,
-      child: Material(
-        color: enabled ? VColors.ink : VColors.rule,
-        borderRadius: BorderRadius.circular(4),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(4),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: VSpace.l),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, size: 20, color: enabled ? VColors.paper : VColors.ink3),
-                  const SizedBox(width: 10),
+    final enabled = onTap != null && !busy;
+    final shape = BorderRadius.circular(VRadius.button);
+    final fg = enabled ? VColors.paperElevated : VColors.disabledInk;
+
+    final child = DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: shape,
+        boxShadow: enabled ? VShadow.glowButton : const <BoxShadow>[],
+      ),
+      child: SizedBox(
+        height: VControl.button,
+        child: Material(
+          color: enabled ? VColors.red : VColors.disabledFill,
+          borderRadius: shape,
+          child: InkWell(
+            onTap: enabled ? onTap : null,
+            borderRadius: shape,
+            splashColor: VColors.redPressed,
+            highlightColor: VColors.redPressed,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: VSpace.l),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (busy) ...[
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: fg),
+                    ),
+                    const SizedBox(width: 10),
+                  ] else if (icon != null) ...[
+                    Icon(icon, size: 20, color: fg),
+                    const SizedBox(width: 10),
+                  ],
+                  Flexible(
+                    child: Text(
+                      label,
+                      style: VText.button.copyWith(color: fg),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
-                Text(label, style: VText.button.copyWith(color: enabled ? VColors.paper : VColors.ink3)),
-              ],
+              ),
             ),
           ),
         ),
@@ -781,15 +853,15 @@ class VChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (bg, fg) = switch (tone) {
-      VTone.neutral => (VColors.ruleSoft, VColors.ink2),
-      VTone.ink => (VColors.ink, VColors.paper),
-      VTone.red => (VColors.redSoft, VColors.red),
-      VTone.green => (VColors.greenSoft, VColors.green),
+      VTone.neutral => (VColors.greyPill, VColors.ink2),
+      VTone.ink => (VColors.ink, VColors.paperElevated),
+      VTone.red => (VColors.redTint, VColors.red),
+      VTone.green => (VColors.greenTint, VColors.green),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(3)),
-      child: Text(label, style: VText.tab.copyWith(color: fg)),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(VRadius.sm)),
+      child: Text(label, style: VText.pill.copyWith(color: fg)),
     );
   }
 }
@@ -833,12 +905,10 @@ class VSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(child: Text(label.toUpperCase(), style: VText.eyebrow)),
+            Expanded(child: Text(label.toUpperCase(), style: VText.eyebrowWide)),
             if (trailing != null) trailing!,
           ],
         ),
-        const SizedBox(height: 8),
-        const VRule(),
       ],
     );
   }
@@ -854,6 +924,7 @@ class VListRow extends StatelessWidget {
     this.trailing,
     this.onTap,
     this.chevron = false,
+    this.divider = true,
   });
   final String title;
   final String? subtitle;
@@ -861,6 +932,10 @@ class VListRow extends StatelessWidget {
   final Widget? trailing;
   final VoidCallback? onTap;
   final bool chevron;
+
+  /// Off for the last row of a list: a line under the last row is a line under nothing, and it is
+  /// what makes a list look like a form.
+  final bool divider;
 
   @override
   Widget build(BuildContext context) {
@@ -886,11 +961,11 @@ class VListRow extends StatelessWidget {
                   ),
                 ),
                 if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-                if (chevron) ...[const SizedBox(width: 8), const Icon(Icons.chevron_right, size: 20, color: VColors.ink3)],
+                if (chevron) ...[const SizedBox(width: 8), const VChevron()],
               ],
             ),
           ),
-          const VRule(),
+          if (divider) const VDivider(),
         ],
       ),
     );
@@ -917,7 +992,7 @@ class VDots extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: i < filled ? VColors.red : Colors.transparent,
-                border: Border.all(color: i < filled ? VColors.red : VColors.rule, width: 1.5),
+                border: Border.all(color: i < filled ? VColors.red : VColors.track, width: 1.5),
               ),
             ),
           ),
@@ -938,13 +1013,13 @@ class VProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(2),
+      borderRadius: BorderRadius.circular(VRadius.full),
       child: SizedBox(
-        height: 6,
+        height: VControl.progress,
         child: Stack(
           children: [
-            Container(color: track ?? VColors.ruleSoft),
-            FractionallySizedBox(widthFactor: (confirmed + submitted).clamp(0, 1), child: Container(color: VColors.redSoft)),
+            Container(color: track ?? VColors.track),
+            FractionallySizedBox(widthFactor: (confirmed + submitted).clamp(0, 1), child: Container(color: VColors.redTint)),
             FractionallySizedBox(widthFactor: confirmed.clamp(0, 1), child: Container(color: VColors.red)),
           ],
         ),
@@ -969,7 +1044,7 @@ class VSelectedMark extends StatelessWidget {
         color: selected ? VColors.red : Colors.transparent,
         border: Border.all(color: selected ? VColors.red : VColors.rule, width: 1.5),
       ),
-      child: selected ? const Icon(Icons.check, size: 14, color: VColors.paper) : null,
+      child: selected ? const Icon(Icons.check, size: 14, color: VColors.paperElevated) : null,
     );
   }
 }
@@ -1085,77 +1160,60 @@ class VBottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget tab(int i) => Expanded(
-          child: InkWell(
-            onTap: () => onTap(i),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Icon(i == index ? items[i].$2 : items[i].$1, size: 24, color: i == index ? VColors.ink : VColors.ink3),
-                    if ((badges[i] ?? 0) > 0)
-                      Positioned(
-                        top: -5,
-                        right: -9,
-                        child: Container(
-                          constraints: const BoxConstraints(minWidth: 17),
-                          height: 17,
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(color: VColors.red, borderRadius: BorderRadius.circular(9), border: Border.all(color: VColors.paper, width: 1.5)),
-                          child: Text('${badges[i]! > 9 ? '9+' : badges[i]}', style: VText.tab.copyWith(color: VColors.paper, fontSize: 10, height: 1)),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(items[i].$3, style: VText.tab.copyWith(color: i == index ? VColors.ink : VColors.ink3)),
-              ],
-            ),
+    Widget tab(int i) {
+      final selected = i == index;
+      final count = badges[i] ?? 0;
+      return Expanded(
+        child: InkWell(
+          onTap: () => onTap(i),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    selected ? items[i].$2 : items[i].$1,
+                    size: 24,
+                    color: selected ? VColors.red : VColors.tabInactive,
+                  ),
+                  if (count > 0) Positioned(top: -6, right: -10, child: VNavBadge(count)),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                items[i].$3,
+                style: VText.tab.copyWith(color: selected ? VColors.red : VColors.tabInactive),
+              ),
+            ],
           ),
-        );
-    return Container(
+        ),
+      );
+    }
+
+    return DecoratedBox(
       decoration: const BoxDecoration(
-        color: VColors.paper,
-        border: Border(top: BorderSide(color: VColors.rule)),
+        // The bar is a card the tabs stand on, so it takes a card's corner. Only the top two are
+        // seen; the other two are under the home indicator and past the screen edges.
+        borderRadius: BorderRadius.vertical(top: VRadius.lgR),
+        gradient: VGradients.tabBar,
+        // Uniform, because a border on one side and a radius cannot both be set. At half a point
+        // the three edges nobody sees cost nothing.
+        border: Border.fromBorderSide(
+          BorderSide(color: VColors.tabBarBorder, width: VControl.hairline),
+        ),
+        boxShadow: VShadow.tabBar,
       ),
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 60,
+          height: VControl.tabBar,
           child: Row(
             children: [
               tab(0),
               tab(1),
               Expanded(
-                child: InkWell(
-                  onTap: onCheckin,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Transform.translate(
-                        offset: const Offset(0, -10),
-                        child: Container(
-                          width: 46,
-                          height: 46,
-                          key: const Key('nav-checkin'),
-                          decoration: BoxDecoration(
-                            color: checkinEnabled ? VColors.ink : VColors.rule,
-                            borderRadius: BorderRadius.circular(14),
-                            boxShadow: checkinEnabled ? const [BoxShadow(color: Color(0x33111111), blurRadius: 8, offset: Offset(0, 3))] : null,
-                          ),
-                          child: Icon(Icons.train, size: 26, color: checkinEnabled ? VColors.paper : VColors.ink2),
-                        ),
-                      ),
-                      Transform.translate(
-                        offset: const Offset(0, -8),
-                        child: Text('Einchecken', style: VText.tab.copyWith(color: checkinEnabled ? VColors.ink : VColors.ink2)),
-                      ),
-                    ],
-                  ),
-                ),
+                child: VCheckinFab(onTap: onCheckin, enabled: checkinEnabled),
               ),
               tab(2),
               tab(3),
@@ -1165,6 +1223,79 @@ class VBottomNav extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The raised check-in circle. It is not a tab: it opens the check-in wherever you are, and it
+/// keeps its ink label on every screen because it is never the place you currently stand.
+class VCheckinFab extends StatelessWidget {
+  const VCheckinFab({super.key, required this.onTap, this.enabled = true, this.label = 'Einchecken'});
+
+  final VoidCallback onTap;
+  final bool enabled;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Transform.translate(
+            offset: const Offset(0, -VControl.fabRise),
+            child: Container(
+              width: VControl.fab,
+              height: VControl.fab,
+              key: const Key('nav-checkin'),
+              decoration: BoxDecoration(
+                gradient: enabled ? VGradients.fab : null,
+                color: enabled ? null : VColors.disabledFill,
+                shape: BoxShape.circle,
+                boxShadow: enabled ? VShadow.glowFab : const <BoxShadow>[],
+              ),
+              child: Icon(
+                Icons.train,
+                size: 24,
+                color: enabled ? VColors.paperElevated : VColors.disabledInk,
+              ),
+            ),
+          ),
+          Transform.translate(
+            offset: const Offset(0, -VControl.fabRise + 1),
+            child: Text(
+              label,
+              style: VText.tab.copyWith(
+                color: enabled ? VColors.tabCenterLabel : VColors.disabledInk,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The unread count on a tab. Lit red, not the action red: it is a notice, not a button.
+class VNavBadge extends StatelessWidget {
+  const VNavBadge(this.count, {super.key});
+  final int count;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        constraints: const BoxConstraints(minWidth: 17),
+        height: 17,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: VColors.redBright,
+          borderRadius: BorderRadius.circular(VRadius.full),
+          border: Border.all(color: VColors.paperElevated, width: 1.5),
+        ),
+        child: Text(
+          count > 9 ? '9+' : '$count',
+          style: VText.tab.copyWith(color: VColors.paperElevated, fontSize: 10, height: 1),
+        ),
+      );
 }
 
 // ---------------------------------------------------------------------------
@@ -1384,7 +1515,10 @@ class VSheetHeader extends StatelessWidget {
                 child: Container(
                   width: 36,
                   height: 4,
-                  decoration: BoxDecoration(color: VColors.rule, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                    color: VColors.handle,
+                    borderRadius: BorderRadius.circular(VRadius.full),
+                  ),
                 ),
               ),
             ),
@@ -1397,8 +1531,8 @@ class VSheetHeader extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title!, style: VText.h2),
-                      if (subtitle != null) ...[const SizedBox(height: 2), Text(subtitle!, style: VText.caption)],
+                      Text(title!, style: VText.h2, maxLines: 2, overflow: TextOverflow.ellipsis),
+                      if (subtitle != null) ...[const SizedBox(height: 3), Text(subtitle!, style: VText.body)],
                     ],
                   ),
                 ),

@@ -92,149 +92,227 @@ class _WirScreenState extends State<WirScreen> {
       builder: (context, data, refresh) {
         final c = data.community;
         final st = data.standing;
-        return VScreen(
-          showBack: false,
-          padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.l, VSpace.page, VSpace.xl),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TabHeader(title: 'Wir', caption: '${fmtInt(c.users)} Fahrgäste', onSettings: () => context.push(Routes.einstellungen).then((_) => refresh())),
-              const VGap.xl(),
-
-              // The community's big number first (docs/18); no community euro totals here. It
-              // stands on the same board as Home's copy of it (docs/33) and sets itself the way
-              // a departure board does.
-              VTafel(
-                look: VTafelLook.anzeige,
-                onTap: () => showSourceSheet(
-                  context,
-                  title: 'Minuten zusammen gewartet',
-                  origin: 'Die Summe aller endgültigen Verspätungen aller Fahrgäste, Minute für Minute.',
-                  freshness: 'Live',
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const VTafelLabel('Zusammen gewartet', look: VTafelLook.anzeige),
-                    const SizedBox(height: 10),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: VTafelZahl(fmtInt(c.minutes + _extraMinutes), look: VTafelLook.anzeige),
-                    ),
-                    const SizedBox(height: 10),
-                    Container(height: 1, color: VColors.red),
-                    const SizedBox(height: 8),
-                    const VTafelCaption('Minuten, von uns allen zusammen', look: VTafelLook.anzeige),
-                  ],
-                ),
+        return VTabScaffold(
+          sceneHeart: true,
+          onRefresh: () async => refresh(),
+          header: VTabHeader(
+            title: 'Wir',
+            subtitle: '${fmtInt(c.users)} Fahrgäste',
+            tagline: 'Gemeinsam mehr bewegen.',
+            narrow: true,
+            onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
+          ),
+          children: [
+            // The community's big number first (docs/18); no community euro totals here. Wir takes
+            // the red board and Home the dark one, so the two copies of the same figure read as
+            // two looks of one object rather than as two different claims (docs/43).
+            VBoard(
+              look: VBoardLook.red,
+              onTap: () => showSourceSheet(
+                context,
+                title: 'Minuten zusammen gewartet',
+                origin: 'Die Summe aller endgültigen Verspätungen aller Fahrgäste, Minute für Minute.',
+                freshness: 'Live',
               ),
-              const VGap.s(),
-              // docs/27 §2: the collective number, which nobody's own ego is in — which is
-              // exactly why it is the one people pass on.
-              VGhostButton(
-                label: 'Teilen',
-                icon: Icons.ios_share,
-                color: VColors.ink2,
-                onTap: () => showShareSheet(
-                  context,
-                  lines: ShareLines.wir(minutes: c.minutes + _extraMinutes),
-                  build: ({fahrgast, strecke, date, line}) => TicketData.wir(
-                    minutes: c.minutes + _extraMinutes,
-                    people: c.users,
-                    line: line,
+              aside: const Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  VHandNote(
+                    'Aus\nVerspätung\nwird\nGutes.',
+                    angle: -0.09,
+                    align: TextAlign.right,
+                    color: VColors.inkOnDark2,
+                  ),
+                  VGap.s(),
+                  VHeartMark(),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const VBoardLabel('Zusammen gewartet', icon: Icons.groups_outlined),
+                  const VGap.s(),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      fmtInt(c.minutes + _extraMinutes),
+                      style: VText.number.copyWith(color: VColors.inkOnDark),
+                    ),
+                  ),
+                  const VGap.md(),
+                  const VBoardCaption('Minuten, von uns allen zusammen'),
+                ],
+              ),
+            ),
+
+            // docs/27 §2: the collective number, which nobody's own ego is in — which is exactly
+            // why it is the one people pass on.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: VTintButton(
+                    label: 'Teilen',
+                    icon: Icons.ios_share,
+                    onTap: () => showShareSheet(
+                      context,
+                      lines: ShareLines.wir(minutes: c.minutes + _extraMinutes),
+                      build: ({fahrgast, strecke, date, line}) => TicketData.wir(
+                        minutes: c.minutes + _extraMinutes,
+                        people: c.users,
+                        line: line,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-              const VGap.l(),
-
-              // Every block on this screen stands on a card (issue #13, docs/37): the section
-              // label outside it, the content on it. Nothing sits loose on the paper any more.
-              const VSection('Vereine'),
-              const VGap.m(),
-              VTafel(
-                // A list on a card keeps a narrow gutter: with the full 16 px, „Bahnhofsmission
-                // Köln" broke into two lines next to its figure (issue #13).
-                padding: const EdgeInsets.symmetric(horizontal: VSpace.s),
-                child: Column(
-                  children: [for (final n in c.ngos) _ngoRow(context, n)],
-                ),
-              ),
-              const VGap.xl(),
-              VSection('Ranglisten', trailing: Text('7 Tage', style: VText.caption)),
-              const VGap.m(),
-              VTafel(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (st.board != null) ...[
-                      _RankLine(board: st.board!),
-                      const VGap.m(),
+                const SizedBox(width: VSpace.s),
+                const Expanded(
+                  flex: 2,
+                  child: Row(
+                    children: [
+                      VHandArrow(),
+                      SizedBox(width: VSpace.xs),
+                      Flexible(
+                        child: VHandNote('Zeig, was wir\ngemeinsam schaffen!', angle: -0.06),
+                      ),
                     ],
-                    SegmentTabs(labels: const ['Meine Linie', 'Meine Stadt', 'Deutschland'], index: _board, onChanged: (i) => setState(() => _board = i)),
-                    const VGap.s(),
-                    Text(
-                      switch (_board) { 0 => 'Deine häufigste Linie', 1 => session.me?.homeStation.isNotEmpty == true ? session.me!.homeStation : 'Deine Stadt', _ => 'Alle Fahrgäste' },
-                      style: VText.caption,
-                    ),
-                    const VGap.s(),
-                    IndexedStack(
-                      index: _board,
-                      alignment: Alignment.topLeft,
-                      sizing: StackFit.loose,
-                      children: [for (final scope in _boardScopes) _Board(board: data.boards[scope])],
-                    ),
-                    const VGap.s(),
-                    Text(
-                      (session.me?.settings.showOnBoards ?? true) ? 'Nur verifizierte Fahrten zählen.' : 'Nur verifizierte Fahrten zählen. Du bist in den Ranglisten verborgen.',
-                      style: VText.caption,
-                    ),
-                  ],
+                  ),
                 ),
+              ],
+            ),
+
+            // Every block on this screen stands on a card (issue #13, docs/37). Each Verein is its
+            // own card now rather than a row in a shared one: three cards read as three partners,
+            // where three rules read as a table of them.
+            VSectionHeader(
+              'Vereine',
+              wide: true,
+              onCard: false,
+              linkLabel: 'Mehr erfahren',
+              onLink: () => context.push(Routes.zweck),
+            ),
+            for (final n in c.ngos) _NgoCard(ngo: n),
+
+            VCard(
+              tone: VCardTone.sunken,
+              padding: const EdgeInsets.all(VSpace.cardTight),
+              child: Row(
+                children: [
+                  const VIconBadge(
+                    icon: Icons.groups,
+                    tone: VBadgeTone.neutral,
+                    size: VControl.badgeSmall,
+                  ),
+                  const SizedBox(width: VSpace.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${fmtInt(c.users)} Menschen machen mit.', style: VText.bodyStrong),
+                        Text('Danke, dass du Teil davon bist.', style: VText.bodyS),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: VSpace.s),
+                  const VHeartMark(size: 20, color: VColors.redTint),
+                  const SizedBox(width: VSpace.xs),
+                  const VHandNote('Gemeinsam\nwirken.', angle: -0.12),
+                ],
               ),
-            ],
-          ),
+            ),
+
+            // No mockup covers the boards. They keep the structure they had and take the new card.
+            VSectionHeader('Ranglisten', wide: true, onCard: false),
+            VCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (st.board != null) ...[
+                    _RankLine(board: st.board!),
+                    const VGap.m(),
+                  ],
+                  SegmentTabs(
+                    labels: const ['Meine Linie', 'Meine Stadt', 'Deutschland'],
+                    index: _board,
+                    onChanged: (i) => setState(() => _board = i),
+                  ),
+                  const VGap.s(),
+                  Text(
+                    switch (_board) {
+                      0 => 'Deine häufigste Linie',
+                      1 => session.me?.homeStation.isNotEmpty == true
+                          ? session.me!.homeStation
+                          : 'Deine Stadt',
+                      _ => 'Alle Fahrgäste',
+                    },
+                    style: VText.caption,
+                  ),
+                  const VGap.s(),
+                  IndexedStack(
+                    index: _board,
+                    alignment: Alignment.topLeft,
+                    sizing: StackFit.loose,
+                    children: [for (final scope in _boardScopes) _Board(board: data.boards[scope])],
+                  ),
+                  const VGap.s(),
+                  Text(
+                    (session.me?.settings.showOnBoards ?? true)
+                        ? 'Nur verifizierte Fahrten zählen.'
+                        : 'Nur verifizierte Fahrten zählen. Du bist in den Ranglisten verborgen.',
+                    style: VText.caption,
+                  ),
+                ],
+              ),
+            ),
+          ],
         );
       },
     );
   }
+}
 
-  Widget _ngoRow(BuildContext context, ApiNgoTotal ngo) {
-    return InkWell(
+/// One Verein, on its own card.
+///
+/// The circle carries the partner's identity, and identity is the one job colour has in this app.
+/// The glyph and the tint are guessed from the name here, which is a stand-in: they belong in the
+/// managed NGO data next to the logo, so a new partner does not need an app release (docs/43 §5).
+class _NgoCard extends StatelessWidget {
+  const _NgoCard({required this.ngo});
+  final ApiNgoTotal ngo;
+
+  /// Keyword first, so the three partners we ship with look drawn rather than generated; then a
+  /// stable fallback off the id, so a fourth partner is at least consistent with itself.
+  (IconData, VBadgeTone) get _mark {
+    final n = ngo.name.toLowerCase();
+    if (n.contains('wald') || n.contains('baum') || n.contains('natur')) {
+      return (Icons.forest, VBadgeTone.greenBright);
+    }
+    if (n.contains('hospiz') || n.contains('kinder')) {
+      return (Icons.house, VBadgeTone.blue);
+    }
+    if (n.contains('bahnhofsmission') || n.contains('mission')) {
+      return (Icons.volunteer_activism, VBadgeTone.red);
+    }
+    const rest = [VBadgeTone.teal, VBadgeTone.blueDeep, VBadgeTone.green, VBadgeTone.red];
+    final id = ngo.id.isEmpty ? ngo.name : ngo.id;
+    return (Icons.volunteer_activism, rest[id.codeUnits.fold(0, (a, b) => a + b) % rest.length]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, tone) = _mark;
+    return VListCard(
+      leading: VIconBadge(icon: icon, tone: tone, size: VControl.badgeSmall),
+      title: ngo.name,
+      subtitle: 'Geschichte und Zweck',
+      trailing: Text(fmtEuroWhole(ngo.confirmedCents / 100), style: VText.numberS),
       onTap: () => context.push('${Routes.zweck}?id=${ngo.id}'),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(ngo.name, style: VText.bodyStrong),
-                      const SizedBox(height: 2),
-                      Text('Geschichte und Zweck', style: VText.caption),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(fmtEuroWhole(ngo.confirmedCents / 100), style: VText.numberM),
-                const SizedBox(width: 8),
-                const Icon(Icons.chevron_right, size: 20, color: VColors.ink3),
-              ],
-            ),
-          ),
-          const VRule(),
-        ],
-      ),
     );
   }
 }
 
-/// One board's rows, already in hand (docs/22 §2). Switching tabs must never load, because
-/// a loader is shorter than a board and the page would jump under the reader's thumb.
 class _Board extends StatelessWidget {
   const _Board({required this.board});
   final _BoardData? board;

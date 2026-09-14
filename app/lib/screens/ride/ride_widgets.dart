@@ -208,26 +208,19 @@ class LineBadge extends StatelessWidget {
   const LineBadge(this.line, {super.key, this.cancelled = false, this.large = false});
   final String line;
   final bool cancelled;
+
+  /// The train you are actually on. It takes the inverted dark badge, which is the one thing on a
+  /// screen full of tinted pills that reads as "this one".
   final bool large;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: large ? 10 : 8, vertical: large ? 5 : 3),
-      decoration: BoxDecoration(
-        color: cancelled ? VColors.red : VColors.ink,
-        borderRadius: BorderRadius.circular(3),
-      ),
-      child: Text(
+  Widget build(BuildContext context) => VLineBadge(
         line,
-        style: (large ? VText.bodyStrong : VText.captionInk).copyWith(
-          color: VColors.paper,
-          fontWeight: FontWeight.w800,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
-      ),
-    );
-  }
+        // The class, cancelled or not: colour on a line badge is identity, and a cancelled
+        // S-Bahn is still an S-Bahn. „Ausfall" under the route is what carries the news.
+        cls: vLineClassOf(line),
+        dark: large,
+      );
 }
 
 /// A fixed-width slot for a [LineBadge] in list rows, so the destination column

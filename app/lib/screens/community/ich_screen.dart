@@ -85,28 +85,29 @@ class IchScreen extends StatelessWidget {
               // The points and the level on one board, the four figures on the next (docs/33):
               // the same surface Home and Wir use for the same kind of statement. They used to
               // be bare figures on paper here and boxed numbers there.
-              VTafel(
-                look: VTafelLook.anzeige,
+              VBoard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const VTafelLabel('Geduldspunkte', look: VTafelLook.anzeige),
-                    const SizedBox(height: 10),
+                    const VBoardLabel('Geduldspunkte', icon: Icons.workspace_premium_outlined),
+                    const VGap.s(),
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
-                      child: VTafelZahl(fmtInt(me.pointsTotal), look: VTafelLook.anzeige),
+                      child: Text(
+                        fmtInt(me.pointsTotal),
+                        style: VText.number.copyWith(color: VColors.inkOnDark),
+                      ),
                     ),
-                    const SizedBox(height: 10),
-                    Container(height: 1, color: VColors.red),
-                    // The level (docs/20 §5): the same line Home shows under "Deine Woche".
+                    // The level (docs/20 §5): the same line Home shows under „Deine Woche".
                     if (lvl != null) ...[
-                      const SizedBox(height: 10),
-                      VProgress(confirmed: lvl.progress, track: const Color(0xFF2A2A2A)),
-                      const SizedBox(height: 6),
-                      VTafelCaption(
-                        lvl.pointsToNext > 0 ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“' : '${lvl.name} · höchste Stufe erreicht',
-                        look: VTafelLook.anzeige,
+                      const VGap.md(),
+                      VProgressBar(value: lvl.progress, ground: VProgressGround.dark),
+                      const VGap.s(),
+                      VBoardCaption(
+                        lvl.pointsToNext > 0
+                            ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“'
+                            : '${lvl.name} · höchste Stufe erreicht',
                         maxLines: 1,
                       ),
                     ],

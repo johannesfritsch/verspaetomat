@@ -12,7 +12,6 @@ import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'checkin_flow.dart';
-import '../community/community_widgets.dart';
 import 'ride_widgets.dart';
 
 /// Home, second version (docs/16). Six blocks, everything above the fold: the action
@@ -144,115 +143,108 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     final arrived = ride.arrived && ride.rideLive != null;
     final st = _standing;
 
-    return VScreen(
-      showBack: false,
-      padding: const EdgeInsets.fromLTRB(
-        VSpace.page,
-        VSpace.s,
-        VSpace.page,
-        VSpace.l,
+    return VTabScaffold(
+      onRefresh: _load,
+      header: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // The masthead carries the app's own name and the gear. Home is the one tab that wears
+          // it: the other three are places inside the app, and this is the front door.
+          VAppMasthead(
+            onSettings: () => context.push(Routes.einstellungen).then((_) => _load()),
+            caption: _nearby.simulated ? 'Standort: Stellwerk · ${_nearby.label ?? ''}' : null,
+          ),
+          const VGap.l(),
+          const VTabHeader(
+            title: 'Willkommen',
+            subtitle: 'Jede verspätete Minute kann etwas bewegen.',
+            narrow: true,
+          ),
+        ],
       ),
-      child: RefreshIndicator(
-        onRefresh: _load,
-        color: VColors.ink,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // The same header as the other tabs (issue #14): a title, a quiet line under it, the
-            // settings button. Home had only the button, which made it the one screen without a
-            // name. The Stellwerk line keeps its place as the caption, because that is what it
-            // is — a note about where the app thinks it is.
-            TabHeader(
-              title: 'Willkommen',
-              caption: _nearby.simulated ? 'Standort: Stellwerk · ${_nearby.label ?? ''}' : null,
-              onSettings: () => context.push(Routes.einstellungen).then((_) => _load()),
-            ),
-            const VGap.m(),
-            if (_error != null) ...[
-              const VGap.m(),
-              OfflineBanner(stamp: null),
-              ErrorLine(message: _error!, onRetry: _load),
-            ],
-            // The one place a running pause is advertised (docs/24 §3), so it can never be
-            // forgotten silently. Tapping it lifts the pause.
-            if (session.nudgesSnoozed)
-              InkWell(
-                key: const Key('stumm-bis'),
-                onTap: session.unsnoozeNudges,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 6, bottom: 2),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.notifications_off_outlined, size: 15, color: VColors.ink2),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          me?.settings.snoozedOpenEnded == true
-                              ? 'Hinweise aus · aufheben'
-                              : 'Stumm bis ${fmtLocal(session.nudgeSnoozeUntil)} · aufheben',
-                          style: VText.caption,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            const VGap.s(),
+      children: [
+        if (_error != null) ...[
+          OfflineBanner(stamp: null),
+          ErrorLine(message: _error!, onRetry: _load),
+        ],
 
-            // Wir first (docs/30): the collective minutes are the thing this app is for, and
-            // they are true whether or not anybody is travelling right now. The action follows.
-            const VSection('Wir'),
-            const VGap.m(),
-            _WirBlock(
-              standing: st,
-              tick: _minuteTick,
-              onTap: () => context.go(Routes.wir),
-            ),
-            const VGap.l(),
-
-            // 1 · Action, sized by the moment. Under way, the ride card (docs/20 §2) opens the
-            // sheet; the check-in card waits until the journey is over.
-            if (_loading && ride.loading)
-              const LoadingLine(label: 'Bahnsteig wird geladen …')
-            else if (underWay)
-              _RideCard(monitor: ride)
-            else if (arrived)
-              _ArrivedBlock(
-                live: ride.rideLive!,
-                journey: ride.journey?.journey,
-                onDismiss: () => ride.dismiss().then((_) => _load()),
-              )
-            else ...[
-              const VSection('Einchecken'),
-              const VGap.m(),
-              _CheckinCard(onTap: () => runCheckinFlow(context)),
-            ],
-            // Under the card: yesterday's forgotten check-in, only for people who ride most days.
-            if (st.next?.kind == 'nachtrag') ...[
-              const VGap.s(),
-              InkWell(
-                onTap: () => context.push(Routes.nachtrag),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+        // The one place a running pause is advertised (docs/24 §3), so it can never be forgotten
+        // silently. Tapping it lifts the pause.
+        if (session.nudgesSnoozed)
+          VCard(
+            key: const Key('stumm-bis'),
+            padding: const EdgeInsets.all(VSpace.cardTight),
+            onTap: session.unsnoozeNudges,
+            child: Row(
+              children: [
+                const Icon(Icons.notifications_off_outlined, size: 18, color: VColors.ink2),
+                const SizedBox(width: VSpace.s),
+                Expanded(
                   child: Text(
-                    'Gestern vergessen einzuchecken?',
-                    style: VText.caption.copyWith(
-                      decoration: TextDecoration.underline,
-                    ),
+                    me?.settings.snoozedOpenEnded == true
+                        ? 'Hinweise aus · aufheben'
+                        : 'Stumm bis ${fmtLocal(session.nudgeSnoozeUntil)} · aufheben',
+                    style: VText.bodyS,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              ),
-            ],
-            const VGap.l(),
+              ],
+            ),
+          ),
 
-            const VSection('Deine Woche'),
-            const VGap.m(),
-            _Momentum(standing: st, onTap: () => context.go(Routes.ich)),
-          ],
+        // Wir first (docs/30): the collective minutes are the thing this app is for, and they are
+        // true whether or not anybody is travelling right now. The action follows.
+        _WirBlock(
+          standing: st,
+          tick: _minuteTick,
+          onTap: () => context.go(Routes.wir),
         ),
-      ),
+
+        // 1 · Action, sized by the moment. Under way, the ride card (docs/20 §2) opens the sheet;
+        // the check-in card waits until the journey is over.
+        if (_loading && ride.loading)
+          const LoadingLine(label: 'Bahnsteig wird geladen …')
+        else if (underWay)
+          _RideCard(monitor: ride)
+        else if (arrived)
+          _ArrivedBlock(
+            live: ride.rideLive!,
+            journey: ride.journey?.journey,
+            onDismiss: () => ride.dismiss().then((_) => _load()),
+          )
+        else
+          _CheckinCard(onTap: () => runCheckinFlow(context)),
+
+        // Under the card: yesterday's forgotten check-in, only for people who ride most days.
+        if (st.next?.kind == 'nachtrag')
+          VCard(
+            padding: const EdgeInsets.all(VSpace.cardTight),
+            onTap: () => context.push(Routes.nachtrag),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text('Gestern vergessen einzuchecken?', style: VText.bodyS),
+                ),
+                const VChevron(),
+              ],
+            ),
+          ),
+
+        _Momentum(standing: st, onTap: () => context.go(Routes.ich)),
+
+        // What the minutes are for. The mockup puts it at the foot of Home, and it is the one
+        // line on this screen that is about somebody other than you.
+        VCard(
+          child: VCardRow(
+            leading: const VIconBadge(icon: Icons.card_giftcard, tone: VBadgeTone.red),
+            title: 'Deine Minuten helfen.',
+            body: 'Gemeinsam spenden wir an nachhaltige und soziale Projekte.',
+            chevron: true,
+            onTap: () => context.go(Routes.wir),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -271,18 +263,24 @@ class _CheckinCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return VFahrkarte(
+    return VCard(
+      tone: VCardTone.cta,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Fährst du gleich?', style: VText.title),
-          const SizedBox(height: 2),
-          Text('Von wo, wohin, welcher Zug. Ab dann zählen wir mit.', style: VText.caption),
+          VCardRow(
+            leading: const VIconBadge(icon: Icons.train, tone: VBadgeTone.red),
+            eyebrow: 'Einchecken',
+            title: 'Fährst du gleich?',
+            body: 'Von wo, wohin, welcher Zug. Ab dann zählen wir mit.',
+            chevron: true,
+            onTap: onTap,
+          ),
           const VGap.m(),
           VPrimaryButton(
             key: const Key('einchecken-cta'),
             label: 'Einchecken',
-            icon: Icons.train,
+            icon: Icons.crop_free,
             onTap: onTap,
           ),
         ],
@@ -490,58 +488,73 @@ class _Momentum extends StatelessWidget {
   final ApiStanding standing;
   final VoidCallback onTap;
 
+  /// What the week came to, against what the last one came to.
+  ///
+  /// The design draws seven bars here. The standing endpoint carries this week and last week, not
+  /// a daily series, so the chart shows the two columns the app actually has — a week history at
+  /// the resolution we have rather than an empty slot until the API grows one. When a series does
+  /// arrive this becomes `VWeekBars(values: series, todayIndex: weekday, labels: [Mo … So])` and
+  /// nothing else on the screen has to move.
   @override
   Widget build(BuildContext context) {
     final st = standing;
     final quiet = st.pointsThisWeek == 0;
-    // The same box as Wir (docs/30): elevated paper, a hairline border, the big number on top
-    // and one quiet line under it. Two blocks that say the same kind of thing should look the
-    // same; this one used to be bare text next to a bordered box.
-    return VTafel(
+    final never = quiet && st.pointsLastWeek == 0;
+    final diff = st.pointsThisWeek - st.pointsLastWeek;
+
+    final line = never
+        ? 'Jede Minute Verspätung wird ein Geduldspunkt.'
+        : diff > 0
+            ? '${fmtInt(diff)} mehr als letzte Woche'
+            : diff < 0
+                ? '${fmtInt(-diff)} weniger als letzte Woche'
+                : 'Genauso viel wie letzte Woche';
+
+    return VCard(
       onTap: onTap,
       child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // `VText.number`, not `display`: with `display` (168 px) inside a FittedBox that only
-            // ever shrinks, the size on screen depended on the number itself — 1.208.473 came out
-            // at about 65 px while +60 stayed huge. Two boxes above each other share one size
-            // (app/STYLE.md), which is what the Wir screen has always done. The FittedBox stays
-            // as a net for very long numbers.
-            const VTafelLabel('Geduldspunkte diese Woche'),
-            const SizedBox(height: 10),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: VTafelZahl(quiet ? '0' : '+${fmtInt(st.pointsThisWeek)}'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          VSectionHeader('Deine Woche', linkLabel: 'Alle Wochen', onLink: onTap),
+          const VGap.md(),
+          VPanel(
+            tone: VPanelTone.redFaint,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const VEyebrow('Geduldspunkte diese Woche', size: VEyebrowSize.s),
+                      const VGap.xs(),
+                      // A FittedBox as a net for a very long figure, not as the size itself: it
+                      // only ever shrinks, so the size on screen would otherwise depend on the
+                      // number.
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          quiet ? '0' : '+${fmtInt(st.pointsThisWeek)}',
+                          style: VText.numberM,
+                        ),
+                      ),
+                      const VGap.s(),
+                      Text(line, style: VText.bodyS, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: VSpace.s),
+                VWeekBars(
+                  values: [st.pointsLastWeek, st.pointsThisWeek],
+                  todayIndex: 1,
+                  labels: const ['Letzte', 'Diese'],
+                ),
+              ],
             ),
-            const SizedBox(height: 10),
-            Container(height: 1, color: VColors.red),
-            const SizedBox(height: 12),
-            // Last week as the bar, so the two numbers can be compared at a glance rather than
-            // read. A quiet week shows an empty track, which is the honest picture of it.
-            LayoutBuilder(
-              builder: (context, box) {
-                final last = st.pointsLastWeek;
-                final most = [st.pointsThisWeek, last, 1].reduce((a, b) => a > b ? a : b);
-                final share = (st.pointsThisWeek / most).clamp(0.0, 1.0);
-                final filled = (box.maxWidth * share).clamp(st.pointsThisWeek > 0 ? 6.0 : 0.0, box.maxWidth);
-                return Stack(
-                  children: [
-                    Container(height: 6, decoration: BoxDecoration(color: VColors.ruleSoft, borderRadius: BorderRadius.circular(3))),
-                    Container(height: 6, width: filled, decoration: BoxDecoration(color: VColors.red, borderRadius: BorderRadius.circular(3))),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 6),
-            Text(
-              st.pointsLastWeek > 0
-                  ? '${fmtInt(st.pointsLastWeek)} letzte Woche'
-                  : 'Jede Minute Verspätung wird ein Geduldspunkt.',
-              style: VText.caption,
-            ),
-          ],
-        ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -559,47 +572,41 @@ class _WirBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = standing.community;
-    const look = VTafelLook.anzeige;
-    return VTafel(
-      look: look,
+    if (c == null) {
+      return VBoard(
+        onTap: onTap,
+        child: const VBoardCaption('Wir haben zusammen gewartet. Zahlen folgen.'),
+      );
+    }
+    final total = c.minutesTotal <= 0 ? 1 : c.minutesTotal;
+    return VBoard(
       onTap: onTap,
-      child: c == null
-            ? const VTafelCaption('Wir haben zusammen gewartet. Zahlen folgen.', look: look)
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const VTafelLabel('Minuten haben wir gewartet', look: look),
-                  const SizedBox(height: 10),
-                  // The same size as „Deine Woche" below it and as the Wir screen.
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: VTafelZahl(fmtInt(c.minutesTotal + tick), look: look),
-                  ),
-                  const SizedBox(height: 10),
-                  Container(height: 1, color: VColors.red),
-                  const SizedBox(height: 12),
-                  // The share is tiny; the filled part keeps a visible minimum.
-                  LayoutBuilder(
-                    builder: (context, box) {
-                      final total = c.minutesTotal <= 0 ? 1 : c.minutesTotal;
-                      final share = (c.myMinutes / total).clamp(0.0, 1.0);
-                      final filled = (box.maxWidth * share).clamp(c.myMinutes > 0 ? 6.0 : 0.0, box.maxWidth);
-                      return Stack(
-                        children: [
-                          Container(height: 6, decoration: BoxDecoration(color: const Color(0xFF2A2A2A), borderRadius: BorderRadius.circular(3))),
-                          Container(height: 6, width: filled, decoration: BoxDecoration(color: VColors.red, borderRadius: BorderRadius.circular(3))),
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 6),
-                  VTafelCaption(
-                    c.myMinutes > 0 ? '${fmtInt(c.myMinutes)} davon deine' : 'Deine ersten Minuten kommen mit der ersten Fahrt.',
-                    look: look,
-                  ),
-                ],
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const VBoardLabel('Minuten haben wir gewartet', icon: Icons.schedule),
+          const VGap.s(),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              fmtInt(c.minutesTotal + tick),
+              style: VText.number.copyWith(color: VColors.inkOnDark),
+            ),
+          ),
+          const VGap.md(),
+          VProgressBar(
+            value: (c.myMinutes / total).clamp(0.0, 1.0),
+            ground: VProgressGround.dark,
+          ),
+          const VGap.s(),
+          VBoardCaption(
+            c.myMinutes > 0
+                ? '${fmtInt(c.myMinutes)} davon deine'
+                : 'Deine ersten Minuten kommen mit der ersten Fahrt.',
+          ),
+        ],
+      ),
     );
   }
 }
