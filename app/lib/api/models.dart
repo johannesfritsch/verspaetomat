@@ -870,7 +870,10 @@ class ApiClaim {
   final String accountHolder;
   final String iban;
   final List<String> ticketMonths;
-  final List<String> attachments;
+
+  /// The files already on the form: the tickets, and the signature once it is drawn. They come
+  /// back with their upload ids, so a draft picked up again knows what is attached already.
+  final List<ApiClaimAttachment> attachments;
   final String? signedBy;
   final ApiClaimStatus status;
   final DateTime? sentAt;
@@ -890,7 +893,7 @@ class ApiClaim {
         accountHolder: _s(j['account_holder']),
         iban: _s(j['iban']),
         ticketMonths: _sl(j['ticket_months']),
-        attachments: _labels(j['attachments']),
+        attachments: _attachments(j['attachments']),
         signedBy: _sn(j['signed_by']),
         status: claimStatusFromWire(_sn(j['status'])),
         sentAt: _dt(j['sent_at']),
@@ -917,6 +920,21 @@ class ApiClaimDraft {
         relayAddress: _sn(j['relay_address']),
       );
 }
+
+/// One file on a claim: the upload it points at and the name it carries on the form.
+/// The label becomes the attachment's file name in the mail to the railway (docs/18).
+class ApiClaimAttachment {
+  const ApiClaimAttachment({required this.uploadId, required this.label});
+  final String uploadId;
+  final String label;
+
+  factory ApiClaimAttachment.fromJson(Map<String, dynamic> j) => ApiClaimAttachment(uploadId: _s(j['upload_id']), label: _s(j['label']));
+
+  Map<String, dynamic> toJson() => {'upload_id': uploadId, 'label': label};
+}
+
+List<ApiClaimAttachment> _attachments(dynamic v) =>
+    (v as List? ?? const []).whereType<Map>().map((e) => ApiClaimAttachment.fromJson(e.cast<String, dynamic>())).where((a) => a.uploadId.isNotEmpty).toList();
 
 class ApiUpload {
   const ApiUpload({required this.uploadId});

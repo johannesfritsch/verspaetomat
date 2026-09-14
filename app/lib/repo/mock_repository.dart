@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart' show TimeOfDay;
 import 'package:flutter/services.dart' show rootBundle;
 
+import '../content/labels.dart';
 import '../mock/mock_data.dart';
 import '../state/demo_state.dart';
 import 'app_repository.dart';
@@ -514,7 +515,9 @@ class MockRepository implements AppRepository {
       accountHolder: ngo.accountHolder,
       iban: ngo.iban,
       ticketMonths: months,
-      attachments: state.draftTicketAttached ? const ['ticket.png'] : const [],
+      attachments: state.draftTicketAttached
+          ? [for (final m in months.isEmpty ? const ['Ticket'] : months) ApiClaimAttachment(uploadId: 'mock-ticket-$m', label: ticketLabel(m))]
+          : const [],
       signedBy: state.draftSigned ? Mock.userName : null,
       status: ApiClaimStatus.draft,
       amountClaimedCents: _cents(state.draftAmount),
@@ -831,9 +834,9 @@ class MockRepository implements AppRepository {
   }
 
   @override
-  Future<ApiClaim> patchClaim(String id, {String? ngoId, List<String>? attachmentUploadIds}) async {
+  Future<ApiClaim> patchClaim(String id, {String? ngoId, List<ApiClaimAttachment>? attachments}) async {
     if (ngoId != null) state.setDraftNgo(ngoId);
-    if (attachmentUploadIds != null && attachmentUploadIds.isNotEmpty) state.attachTicket();
+    if (attachments != null && attachments.isNotEmpty) state.attachTicket();
     return _draftClaim();
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/client.dart' show ApiException;
 import '../../api/models.dart';
 import '../../mock/mock_data.dart' show Mock;
 import '../../repo/repo_scope.dart';
@@ -28,9 +29,15 @@ class AntragScreen extends StatefulWidget {
 class _AntragScreenState extends State<AntragScreen> {
   static const _steps = ['Prüfen', 'Ticket', 'Zweck', 'Unterschrift', 'Senden'];
 
+  /// The pre-step: what the five steps are, before the first one asks anything.
+  bool _intro = true;
   int _step = 0;
   ApiClaimDraft? _draft;
   List<ApiIncident> _incidents = const [];
+
+  /// Every open case at this desk, and the ones that go into this Antrag. Default: all of them.
+  List<ApiIncident> _available = const [];
+  Set<String> _selected = const {};
   List<ApiNgo> _ngos = const [];
   Object? _error;
   bool _loading = true;
@@ -88,6 +95,38 @@ class _AntragScreenState extends State<AntragScreen> {
     }
   }
 
+  /// Take a case out of this Antrag, or put it back. The backend rebuilds the draft around the
+  /// new selection; a selection that no longer reaches 4 € is refused and the old one stands.
+  /// Different from taking a case out for good, which the evidence sheet does (docs/21 §4).
+  Future<void> _toggleCase(String id) async {
+    final next = Set<String>.from(_selected);
+    if (!next.remove(id)) next.add(id);
+    if (next.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ein Fall muss drin bleiben.')));
+      return;
+    }
+    final session = RepoScope.read(context);
+    setState(() => _busy = true);
+    try {
+      final draft = await session.repo.draftClaim(desk: widget.desk, incidentIds: next.toList());
+      final ids = draft.claim.incidentIds.toSet();
+      // The draft is a new one: its ticket and its signature are gone with the old form.
+      _draft = draft;
+      _incidents = _available.where((i) => ids.contains(i.id)).toList();
+      _selected = ids;
+      _signed = draft.claim.signedBy != null;
+      _readAttachments();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      final msg = e.status == 412 ? 'Ohne diesen Fall kommen keine 4 € zusammen. Er bleibt drin.' : 'Ging nicht: ${e.message}';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ging nicht: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _load() async {
     final session = RepoScope.read(context);
     setState(() {
@@ -99,14 +138,28 @@ class _AntragScreenState extends State<AntragScreen> {
       final ledger = await session.repo.incidents();
       final ids = _draft!.claim.incidentIds.toSet();
       _incidents = ledger.incidents.where((i) => ids.contains(i.id)).toList()..sort((a, b) => a.date.compareTo(b.date));
+      _available = ledger.incidents.where((i) => i.desk == widget.desk && (i.isOpen || ids.contains(i.id))).toList()..sort((a, b) => a.date.compareTo(b.date));
+      _selected = ids;
       _ngos = session.ngos.isNotEmpty ? session.ngos : await session.repo.ngos();
       final me = session.me ?? await session.repo.getMe();
       _showPersonal = _draft!.personalDataRequired || me.personalData == null;
       _signed = _draft!.claim.signedBy != null;
+      _readAttachments();
     } catch (e) {
       _error = e;
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// What is already on this form. A draft left lying about keeps its tickets, so the Ticket
+  /// step shows them instead of asking a second time — and a second upload does not replace
+  /// the first one under a new id.
+  void _readAttachments() {
+    _uploads.clear();
+    for (final m in _months) {
+      final a = _draft?.claim.attachments.where((a) => a.label == ticketLabel(m)).firstOrNull;
+      if (a != null) _uploads[m] = a.uploadId;
     }
   }
 
@@ -148,7 +201,10 @@ class _AntragScreenState extends State<AntragScreen> {
         final png = await renderTicketPng(name: name, ticketNumber: number, month: month == 'Ticket' ? 'Fahrkarte' : monthLabel(month));
         final up = await session.repo.upload(kind: 'ticket', filename: 'Ticket_$month.png', bytes: png);
         _uploads[month] = up.uploadId;
-        final claim = await session.repo.patchClaim(_claim!.id, attachmentUploadIds: _uploads.values.toList());
+        final claim = await session.repo.patchClaim(
+          _claim!.id,
+          attachments: [for (final e in _uploads.entries) ApiClaimAttachment(uploadId: e.value, label: ticketLabel(e.key))],
+        );
         _draft = _withClaim(claim);
       }, failure: 'Anhängen fehlgeschlagen');
 
@@ -220,11 +276,25 @@ class _AntragScreenState extends State<AntragScreen> {
       );
     }
 
+    if (_intro) {
+      return _Ueberblick(
+        desk: widget.desk,
+        steps: _steps,
+        cases: _incidents.length,
+        amountCents: _draft!.claim.amountClaimedCents,
+        onStart: () => setState(() => _intro = false),
+      );
+    }
+
     final me = session.me;
     final content = switch (_step) {
       0 => _Pruefen(
           draft: _draft!,
           incidents: _incidents,
+          available: _available,
+          selected: _selected,
+          busy: _busy,
+          onToggle: _toggleCase,
           onDiscard: _discardFromDraft,
           me: me,
           desk: widget.desk,
@@ -238,7 +308,7 @@ class _AntragScreenState extends State<AntragScreen> {
           },
         ),
       1 => _Ticket(months: _months, uploads: _uploads, me: me, busy: _busy, onAttach: _attach),
-      2 => _Zweck(ngos: _ngos, selected: _ngo, other: _otherNgo, onToggle: (v) => setState(() => _otherNgo = v), onChoose: _chooseNgo),
+      2 => _Zweck(ngos: _ngos, selected: _ngo, other: _otherNgo, onOther: () => setState(() => _otherNgo = !_otherNgo), onChoose: _chooseNgo),
       3 => _Unterschrift(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, signed: _signed, busy: _busy, controller: _signature, onSign: _sign),
       _ => _Senden(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, paperOnly: _paperOnly),
     };
@@ -321,6 +391,84 @@ class _AntragScreenState extends State<AntragScreen> {
   }
 }
 
+/// The pre-step: what is about to happen, before the first question is asked. The Antrag is
+/// the one place in this app where a passenger signs something, so it says up front what the
+/// five steps want and what leaves the house at the end.
+class _Ueberblick extends StatelessWidget {
+  const _Ueberblick({required this.desk, required this.steps, required this.cases, required this.amountCents, required this.onStart});
+  final String desk;
+  final List<String> steps;
+  final int cases;
+  final int amountCents;
+  final VoidCallback onStart;
+
+  static const _what = [
+    'Welche Verspätungen mitkommen, an welche Stelle sie gehen und mit welchen Angaben.',
+    'Ein Bild deines Tickets. Das will die Bahn sehen, mehr Nachweis braucht es nicht.',
+    'Wohin die Entschädigung überwiesen wird. Der Verein steht auf dem Formular, nicht wir.',
+    'Das ausgefüllte EU-Formular lesen und mit deinem Namen bestätigen.',
+    'Abschicken. Von deiner Verspätomat-Adresse, mit Kopie in dein Postfach.',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return VScreen(
+      eyebrow: 'Antrag · ${deskDisplay(desk)}',
+      title: 'So läuft das',
+      scroll: true,
+      bottom: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          VPrimaryButton(label: 'Los geht\'s', onTap: onStart),
+          const VGap.xs(),
+          VGhostButton(label: 'Später', onTap: () => context.canPop() ? context.pop() : context.go(Routes.antraege)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const VGap.s(),
+          Text('$cases ${cases == 1 ? 'Fall' : 'Fälle'} · ${fmtCents(amountCents)}', style: VText.h2),
+          const VGap.s(),
+          Text('Fünf Schritte, keine zwei Minuten. Zurück kommst du jederzeit.', style: VText.caption),
+          const VGap.l(),
+          for (var i = 0; i < steps.length; i++) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 26,
+                  child: Text('${i + 1}', style: VText.title.copyWith(color: VColors.red)),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(steps[i], style: VText.bodyStrong),
+                      const SizedBox(height: 2),
+                      Text(_what[i], style: VText.bodyS.copyWith(color: VColors.ink2)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (i < steps.length - 1) ...[
+              const VGap.s(),
+              const VRule(),
+              const VGap.s(),
+            ],
+          ],
+          const VGap.xl(),
+          const VRule.red(),
+          const VGap.m(),
+          Text('Der Antrag ist deiner. Wir füllen ihn aus und überbringen ihn, wir schreiben der Bahn nie von uns aus.', style: VText.bodyS.copyWith(color: VColors.ink2)),
+          const VGap.xl(),
+        ],
+      ),
+    );
+  }
+}
+
 class _StepIndicator extends StatelessWidget {
   const _StepIndicator({required this.steps, required this.current});
   final List<String> steps;
@@ -374,6 +522,10 @@ class _Pruefen extends StatelessWidget {
   const _Pruefen({
     required this.draft,
     required this.incidents,
+    required this.available,
+    required this.selected,
+    required this.busy,
+    required this.onToggle,
     required this.onDiscard,
     required this.me,
     required this.desk,
@@ -385,6 +537,12 @@ class _Pruefen extends StatelessWidget {
   });
   final ApiClaimDraft draft;
   final List<ApiIncident> incidents;
+
+  /// Every open case at this desk: the ticked ones go in, the others wait for the next Antrag.
+  final List<ApiIncident> available;
+  final Set<String> selected;
+  final bool busy;
+  final Future<void> Function(String id) onToggle;
   final Future<void> Function(String id, String reason) onDiscard;
   final ApiCustomer? me;
   final String desk;
@@ -397,6 +555,7 @@ class _Pruefen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final amount = draft.claim.amountClaimedCents;
+    final cases = available.isNotEmpty ? available : incidents;
     final pd = me?.personalData;
     final relay = me?.relayAddress ?? draft.relayAddress;
 
@@ -405,18 +564,33 @@ class _Pruefen extends StatelessWidget {
       children: [
         Text('Diese Verspätungen gehen in den Antrag.', style: VText.h2),
         const VGap.s(),
-        Text('Alle offenen Fälle dieser Stelle. Jede steht einzeln im Formular.', style: VText.caption),
+        Text('Alle offenen Fälle dieser Stelle sind angehakt. Jeder steht einzeln im Formular.', style: VText.caption),
         const VGap.m(),
-        VSection('Fälle', trailing: Text(fmtCents(amount), style: VText.captionInk)),
-        if (incidents.isEmpty)
+        VSection('Fälle', trailing: Text('${selected.length} von ${cases.length} · ${fmtCents(amount)}', style: VText.captionInk)),
+        if (cases.isEmpty)
           Padding(
             padding: const EdgeInsets.only(top: VSpace.m),
             child: Text('Keine offenen Fälle für diese Stelle.', style: VText.caption),
           ),
-        for (final i in incidents)
-          IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i, onDiscard: (reason) => onDiscard(i.id, reason))),
+        for (final i in cases)
+          Opacity(
+            opacity: selected.contains(i.id) ? 1 : 0.5,
+            child: IncidentRow(
+              incident: i,
+              leading: VCheckbox(
+                checked: selected.contains(i.id),
+                label: '${i.line} am ${Mock.shortDate(i.date)}',
+                onTap: busy ? null : () => onToggle(i.id),
+              ),
+              onTap: () => showEvidenceSheet(context, i, onDiscard: (reason) => onDiscard(i.id, reason)),
+            ),
+          ),
         const VGap.xs(),
-        Text('Gehört ein Fall nicht dazu? Tipp ihn an und nimm ihn raus.', style: VText.caption),
+        Text(
+          'Abhaken nimmt einen Fall nur aus diesem Antrag; er bleibt liegen und kommt in den nächsten. '
+          'Tipp die Zeile an, wenn du den Nachweis sehen oder den Fall ganz verwerfen willst.',
+          style: VText.caption,
+        ),
         const VGap.xl(),
         const VSection('Geht an'),
         const VGap.m(),
@@ -600,9 +774,7 @@ class _Ticket extends StatelessWidget {
             const VGap.s(),
           ],
           if (!uploads.containsKey(m)) ...[
-            VOutlineButton(label: busy ? 'Lädt hoch …' : 'Aus Fotos', icon: Icons.photo_library_outlined, onTap: busy ? null : () => onAttach(m)),
-            const VGap.s(),
-            VOutlineButton(label: 'Aus Ticket-App', icon: Icons.confirmation_number_outlined, onTap: busy ? null : () => onAttach(m)),
+            VOutlineButton(label: busy ? 'Lädt hoch …' : 'Ticket anhängen', icon: Icons.photo_library_outlined, onTap: busy ? null : () => onAttach(m)),
           ] else ...[
             MockTicket(name: me?.personalData?.name ?? me?.nickname ?? 'Fahrgast', ticketNumber: me?.personalData?.ticketNumber ?? '–', month: m == 'Ticket' ? 'Fahrkarte' : monthLabel(m)),
             const VGap.s(),
@@ -616,7 +788,11 @@ class _Ticket extends StatelessWidget {
           ],
           const VGap.l(),
         ],
-        Text('Vorführung: das Bild wird erzeugt, nicht aus deinen Fotos geholt.', style: VText.caption),
+        Text(
+          'Noch eine Attrappe: Verspätomat malt hier ein Ticket, statt eines aus deinen Fotos oder '
+          'der Ticket-App zu holen. Der Weg zur Bahn ist echt, das Bild noch nicht.',
+          style: VText.caption,
+        ),
       ],
     );
   }
@@ -627,11 +803,13 @@ class _Ticket extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _Zweck extends StatelessWidget {
-  const _Zweck({required this.ngos, required this.selected, required this.other, required this.onToggle, required this.onChoose});
+  const _Zweck({required this.ngos, required this.selected, required this.other, required this.onOther, required this.onChoose});
   final List<ApiNgo> ngos;
   final ApiNgo? selected;
+
+  /// True once the list of other Zwecke is open.
   final bool other;
-  final ValueChanged<bool> onToggle;
+  final VoidCallback onOther;
   final Future<void> Function(String id) onChoose;
 
   @override
@@ -644,44 +822,26 @@ class _Zweck extends StatelessWidget {
         const VGap.l(),
         if (ngo == null)
           Text('Kein Verein gewählt.', style: VText.body)
-        else
-          Container(
-            padding: const EdgeInsets.all(VSpace.m),
-            decoration: BoxDecoration(
-              color: VColors.paperElevated,
-              border: Border.all(color: VColors.ink, width: 1.5),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(ngo.name, style: VText.title),
-                const SizedBox(height: 2),
-                Text(ngo.tagline, style: VText.caption),
-                const VGap.m(),
-                const VRule(),
-                VKeyValue('Kontoinhaber', ngo.accountHolder, strong: true),
-                const VRule(),
-                VKeyValue('IBAN', ngo.iban, valueStyle: VText.mono),
-              ],
-            ),
-          ),
+        else ...[
+          NgoAccountBox(ngo: ngo),
+          const VGap.xs(),
+          VGhostButton(label: 'Was ist ${ngo.name}?', icon: Icons.info_outline, onTap: () => showNgoSheet(context, ngo)),
+        ],
         const VGap.s(),
         Text('So steht es im Formular unter „Name des Kontoinhabers“. Die Bahn überweist dorthin, nicht an dich.', style: VText.caption),
         const VGap.l(),
-        Row(
-          children: [
-            Expanded(child: Text('Anderen Zweck für diesen Antrag wählen', style: VText.bodyS)),
-            Switch(value: other, onChanged: onToggle),
-          ],
-        ),
-        if (other) ...[
-          const VGap.m(),
-          for (final n in ngos)
-            Padding(
-              padding: const EdgeInsets.only(bottom: VSpace.s),
-              child: VChoiceCard(title: n.name, subtitle: n.tagline, selected: n.id == ngo?.id, onTap: () => onChoose(n.id)),
-            ),
+        if (!other)
+          VOutlineButton(label: 'Anderen Zweck wählen', icon: Icons.swap_horiz, onTap: onOther)
+        else ...[
+          Row(
+            children: [
+              Expanded(child: Text('Nur für diesen Antrag', style: VText.eyebrow)),
+              VGhostButton(label: 'Schließen', onTap: onOther),
+            ],
+          ),
+          const VGap.s(),
+          NgoPicker(ngos: ngos, selectedId: ngo?.id, onChoose: onChoose),
+          Text('Das ⓘ erzählt, wofür ein Verein das Geld nimmt. Dein Standard bleibt, was im Profil steht.', style: VText.caption),
         ],
       ],
     );

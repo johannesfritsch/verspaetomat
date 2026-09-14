@@ -139,8 +139,8 @@ class HttpRepository implements AppRepository {
   @override
   Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds}) => client.draftClaim(desk: desk, incidentIds: incidentIds);
   @override
-  Future<ApiClaim> patchClaim(String id, {String? ngoId, List<String>? attachmentUploadIds}) =>
-      client.patchClaim(id, ngoId: ngoId, attachmentUploadIds: attachmentUploadIds);
+  Future<ApiClaim> patchClaim(String id, {String? ngoId, List<ApiClaimAttachment>? attachments}) =>
+      client.patchClaim(id, ngoId: ngoId, attachments: attachments);
   @override
   Future<ApiUpload> upload({required String kind, required String filename, required List<int> bytes}) =>
       client.upload(kind: kind, filename: filename, bytes: bytes);

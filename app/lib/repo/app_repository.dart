@@ -75,7 +75,7 @@ abstract class AppRepository {
   /// The claim card's thread was opened: its inbound mails count as seen (docs/18).
   Future<void> markClaimSeen(String claimId);
   Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds});
-  Future<ApiClaim> patchClaim(String id, {String? ngoId, List<String>? attachmentUploadIds});
+  Future<ApiClaim> patchClaim(String id, {String? ngoId, List<ApiClaimAttachment>? attachments});
   Future<ApiUpload> upload({required String kind, required String filename, required List<int> bytes});
   Future<ApiClaim> signClaim(String id, {required String typedName, String? signatureUploadId});
   Future<ApiSendResult> sendClaim(String id);

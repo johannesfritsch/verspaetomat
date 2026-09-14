@@ -953,6 +953,63 @@ class VProgress extends StatelessWidget {
   }
 }
 
+/// The round tick of a choice: one of these is on. Its own widget, so a card that puts
+/// something else beside it does not have to draw a second one from scratch.
+class VSelectedMark extends StatelessWidget {
+  const VSelectedMark({super.key, required this.selected});
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: selected ? VColors.red : Colors.transparent,
+        border: Border.all(color: selected ? VColors.red : VColors.rule, width: 1.5),
+      ),
+      child: selected ? const Icon(Icons.check, size: 14, color: VColors.paper) : null,
+    );
+  }
+}
+
+/// A square tick in ink. For a list where several things can be on at once — a round tick
+/// would promise that only one may be.
+class VCheckbox extends StatelessWidget {
+  const VCheckbox({super.key, required this.checked, required this.onTap, this.label});
+  final bool checked;
+  final VoidCallback? onTap;
+
+  /// For screen readers: what this tick decides.
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      checked: checked,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              color: checked ? VColors.ink : Colors.transparent,
+              border: Border.all(color: checked ? VColors.ink : VColors.rule, width: 1.5),
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: checked ? const Icon(Icons.check, size: 15, color: VColors.paper) : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// A big selectable card for the setup screens (ticket type, NGO).
 class VChoiceCard extends StatelessWidget {
   const VChoiceCard({
@@ -994,17 +1051,7 @@ class VChoiceCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            trailing ??
-                Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: selected ? VColors.red : Colors.transparent,
-                    border: Border.all(color: selected ? VColors.red : VColors.rule, width: 1.5),
-                  ),
-                  child: selected ? const Icon(Icons.check, size: 14, color: VColors.paper) : null,
-                ),
+            trailing ?? VSelectedMark(selected: selected),
           ],
         ),
       ),

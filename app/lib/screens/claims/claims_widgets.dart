@@ -5,11 +5,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import 'package:go_router/go_router.dart';
+
 import '../../mock/mock_data.dart' show Mock, IncidentStatus, IncidentStatusX, TicketType, TicketTypeX;
+import '../../router.dart';
 import '../../repo/app_repository.dart';
 import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+
+// The claims screens reach for monthLabel and ticketLabel through this file.
+export '../../content/labels.dart';
 
 /// One display name per claims desk, used on Konto, Antrag and Antwort.
 String deskDisplay(String desk) => desk == 'Servicecenter Fahrgastrechte' ? 'Servicecenter (DB, ODEG, NEB …)' : desk;
@@ -456,6 +462,132 @@ Future<Uint8List> renderTicketPng({required String name, required String ticketN
 }
 
 // ---------------------------------------------------------------------------
+// Zweck: one list, one explanation, used wherever an NGO is offered
+// ---------------------------------------------------------------------------
+
+/// Where the money lands: the name on the account and the IBAN, exactly as they go on the form.
+class NgoAccountBox extends StatelessWidget {
+  const NgoAccountBox({super.key, required this.ngo, this.showName = true});
+  final ApiNgo ngo;
+
+  /// Off inside a sheet, where the header already carries the name.
+  final bool showName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(VSpace.m),
+      decoration: BoxDecoration(
+        color: VColors.paperElevated,
+        border: Border.all(color: VColors.ink, width: 1.5),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showName) ...[
+            Text(ngo.name, style: VText.title),
+            const SizedBox(height: 2),
+            Text(ngo.tagline, style: VText.caption),
+            const VGap.m(),
+            const VRule(),
+          ],
+          VKeyValue('Kontoinhaber', ngo.accountHolder, strong: true),
+          const VRule(),
+          VKeyValue('IBAN', ngo.iban, valueStyle: VText.mono),
+        ],
+      ),
+    );
+  }
+}
+
+/// What one Zweck is, in a sheet: the story it tells and the account it collects on.
+/// [onChoose] adds the button that takes it; without it the sheet only explains.
+Future<void> showNgoSheet(BuildContext context, ApiNgo ngo, {Future<void> Function(String id)? onChoose}) {
+  return showVSheet(
+    context,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.l),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          VSheetHeader(title: ngo.name, subtitle: ngo.tagline),
+          for (final p in ngo.story) ...[
+            Text(p, style: VText.bodyS),
+            const VGap.s(),
+          ],
+          const VGap.xs(),
+          NgoAccountBox(ngo: ngo, showName: false),
+          const VGap.s(),
+          Text('Die Bahn überweist direkt dorthin. Wir sehen kein Geld, nur die Antwort.', style: VText.caption),
+          const VGap.l(),
+          if (onChoose != null) ...[
+            VPrimaryButton(
+              label: 'Diesen Zweck nehmen',
+              icon: Icons.check,
+              onTap: () {
+                Navigator.of(ctx).pop();
+                onChoose(ngo.id);
+              },
+            ),
+            const VGap.xs(),
+          ],
+          VGhostButton(
+            label: 'Alles über den Verein',
+            icon: Icons.open_in_new,
+            onTap: () {
+              Navigator.of(ctx).pop();
+              context.push('${Routes.zweck}?id=${Uri.encodeComponent(ngo.id)}');
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// The list of Zwecke to choose from. Each row takes the choice; the ⓘ explains it first.
+class NgoPicker extends StatelessWidget {
+  const NgoPicker({super.key, required this.ngos, required this.selectedId, required this.onChoose});
+  final List<ApiNgo> ngos;
+  final String? selectedId;
+  final Future<void> Function(String id) onChoose;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final n in ngos)
+          Padding(
+            padding: const EdgeInsets.only(bottom: VSpace.s),
+            child: VChoiceCard(
+              title: n.name,
+              subtitle: n.tagline,
+              selected: n.id == selectedId,
+              onTap: () => onChoose(n.id),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    onPressed: () => showNgoSheet(context, n, onChoose: onChoose),
+                    icon: const Icon(Icons.info_outline, size: 20, color: VColors.ink2),
+                    tooltip: 'Was ist ${n.name}?',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  const SizedBox(width: 4),
+                  VSelectedMark(selected: n.id == selectedId),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Signature
 // ---------------------------------------------------------------------------
 
@@ -673,16 +805,6 @@ String draftMailBody({required String accountHolder, required String claimantNam
 }
 
 String dmy(DateTime d) => '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
-
-/// "2026-08" → "August 2026"
-String monthLabel(String ym) {
-  const months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
-  final parts = ym.split('-');
-  if (parts.length != 2) return ym;
-  final m = int.tryParse(parts[1]);
-  if (m == null || m < 1 || m > 12) return ym;
-  return '${months[m - 1]} ${parts[0]}';
-}
 
 
 /// "Nicht einreichen": ask which of the three reasons it is (docs/21 §4).

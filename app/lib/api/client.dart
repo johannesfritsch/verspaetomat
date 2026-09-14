@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
 
 import '../platform/diagnose_log.dart';
 import 'models.dart';
@@ -280,9 +281,10 @@ class ApiClient {
   Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds}) async =>
       ApiClaimDraft.fromJson(_map(await _post('/v1/claims/draft', {'desk': desk, if (incidentIds != null) 'incident_ids': incidentIds})));
 
-  Future<ApiClaim> patchClaim(String id, {String? ngoId, List<String>? attachmentUploadIds}) async => ApiClaim.fromJson(_map(await _patch(
+  /// The backend takes `{upload_id, label}` per attachment; a bare list of ids is a 422.
+  Future<ApiClaim> patchClaim(String id, {String? ngoId, List<ApiClaimAttachment>? attachments}) async => ApiClaim.fromJson(_map(await _patch(
         '/v1/claims/${Uri.encodeComponent(id)}',
-        {if (ngoId != null) 'ngo_id': ngoId, if (attachmentUploadIds != null) 'attachments': attachmentUploadIds},
+        {if (ngoId != null) 'ngo_id': ngoId, if (attachments != null) 'attachments': attachments.map((a) => a.toJson()).toList()},
       )));
 
   /// The filled EU claim form as PDF (draft: unsigned; after signing: with the drawn signature).
@@ -295,10 +297,14 @@ class ApiClient {
   }
 
   Future<ApiUpload> upload({required String kind, required String filename, required List<int> bytes}) async {
+    // Say what the file is. Without a part content type the server sees bytes of unknown kind,
+    // and an unknown kind is not a signature the claim form can print.
+    final ext = filename.toLowerCase();
+    final type = ext.endsWith('.jpg') || ext.endsWith('.jpeg') ? MediaType('image', 'jpeg') : MediaType('image', 'png');
     final req = http.MultipartRequest('POST', _uri('/v1/uploads'))
       ..headers.addAll(await _headers(json: false))
       ..fields['kind'] = kind
-      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename, contentType: type));
     final r = await http.Response.fromStream(await _http.send(req).timeout(const Duration(seconds: 30)));
     return ApiUpload.fromJson(_map(_decode(r)));
   }
