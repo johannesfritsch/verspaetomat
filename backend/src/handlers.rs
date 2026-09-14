@@ -1,6 +1,6 @@
 //! HTTP handlers on Postgres. Thin: parse, call rules, write rows, answer.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use axum::{
     extract::{Multipart, Path, Query, State},
@@ -977,8 +977,12 @@ async fn claim_with_incidents(pool: &PgPool, claim: &ClaimRow) -> anyhow::Result
 /// Loads everything the form needs and renders it. Shared by the preview route and the send path.
 async fn render_claim_pdf(pool: &PgPool, claim: &ClaimRow, customer: &CustomerRow) -> anyhow::Result<Vec<u8>> {
     let incidents: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date").bind(claim.id).fetch_all(pool).await?;
+    // By the PNG magic bytes, not by the declared type: an older app build uploads its
+    // signature as application/octet-stream, and that signature still belongs on the form.
     let signature_png: Option<Vec<u8>> = sqlx::query_scalar(
-        "select u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1 and ca.label = 'Unterschrift' and u.content_type = 'image/png' limit 1",
+        "select u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id
+         where ca.claim_id = $1 and ca.label = 'Unterschrift'
+           and substring(u.bytes from 1 for 8) = '\\x89504e470d0a1a0a'::bytea limit 1",
     )
     .bind(claim.id)
     .fetch_optional(pool)
@@ -1000,6 +1004,38 @@ pub async fn claim_pdf(State(s): State<AppState>, c: Customer, Path(id): Path<Uu
         .into_response())
 }
 
+/// What happens to the draft that is already open at a desk. Coming back to the Antrag names
+/// no cases and means "the form I left lying here"; a named selection means exactly those cases,
+/// and a different selection is a different form, which wants signing again.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DraftAction {
+    Resume,
+    Rebuild,
+}
+
+pub(crate) fn draft_action(held: &[Uuid], wanted: Option<&[Uuid]>, still_open: &HashSet<Uuid>) -> DraftAction {
+    // A draft whose cases have meanwhile been discarded or run out of time is no form to return to.
+    if held.is_empty() || !held.iter().all(|id| still_open.contains(id)) {
+        return DraftAction::Rebuild;
+    }
+    match wanted {
+        None => DraftAction::Resume,
+        Some(w) => {
+            let mut held: Vec<Uuid> = held.to_vec();
+            let mut want: Vec<Uuid> = w.to_vec();
+            held.sort();
+            held.dedup();
+            want.sort();
+            want.dedup();
+            if held == want {
+                DraftAction::Resume
+            } else {
+                DraftAction::Rebuild
+            }
+        }
+    }
+}
+
 pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<DraftRequest>) -> ApiResult {
     let today = today();
     let rows = rules::refresh_statuses(&s.pool, c.0.id, today).await.map_err(internal)?;
@@ -1012,6 +1048,27 @@ pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<D
     }
     if !rules::bundle_ready(&selected) {
         return Err(err(StatusCode::PRECONDITION_FAILED, "bundle below the 4 € minimum; keep collecting"));
+    }
+    // One open draft per desk. Coming back to the Antrag finds the draft as it was left —
+    // with its ticket and its signature — and only a changed selection of cases replaces it,
+    // because a form whose cases changed is a different form and wants signing again.
+    let existing: Option<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and desk = $2 and status = 'draft' order by created_at desc limit 1")
+        .bind(c.0.id)
+        .bind(&d.desk)
+        .fetch_optional(&s.pool)
+        .await
+        .map_err(internal)?;
+    if let Some(old) = existing {
+        let held: Vec<Uuid> = sqlx::query_scalar("select incident_id from claim_incidents where claim_id = $1").bind(old.id).fetch_all(&s.pool).await.map_err(internal)?;
+        let still_open: HashSet<Uuid> = rows.iter().filter(|i| i.open() && i.desk == d.desk).map(|i| i.id).collect();
+        if draft_action(&held, d.incident_ids.as_deref(), &still_open) == DraftAction::Resume {
+            return Ok(Json(draft_json(&s, &c.0, &old, &d.desk).await?));
+        }
+        sqlx::query("delete from claim_attachments where claim_id = $1").bind(old.id).execute(&s.pool).await.map_err(internal)?;
+        sqlx::query("delete from claim_incidents where claim_id = $1").bind(old.id).execute(&s.pool).await.map_err(internal)?;
+        sqlx::query("update incidents set claim_id = null where claim_id = $1").bind(old.id).execute(&s.pool).await.map_err(internal)?;
+        sqlx::query("delete from claims where id = $1").bind(old.id).execute(&s.pool).await.map_err(internal)?;
+        rules::audit(&s.pool, "claim", old.id, Some("draft"), "deleted", "another selection of cases").await.map_err(internal)?;
     }
     let ngo: NgoRow = sqlx::query_as("select * from ngos where id = $1").bind(&c.0.ngo_id).fetch_one(&s.pool).await.map_err(internal)?;
     let amount: Cents = selected.iter().map(|i| i.amount_cents).sum();
@@ -1036,15 +1093,21 @@ pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<D
     for i in &selected {
         sqlx::query("insert into claim_incidents (claim_id, incident_id) values ($1, $2)").bind(id).bind(i.id).execute(&s.pool).await.map_err(internal)?;
     }
-    let op: Option<OperatorRow> = sqlx::query_as("select * from operators where desk = $1 limit 1").bind(&d.desk).fetch_optional(&s.pool).await.map_err(internal)?;
-    let mut v = claim_with_incidents(&s.pool, &claim).await.map_err(internal)?;
+    Ok(Json(draft_json(&s, &c.0, &claim, &d.desk).await?))
+}
+
+/// A draft with everything the Antrag screen needs around it: the desk, the passenger's own
+/// state, the relay address.
+async fn draft_json(s: &AppState, c: &CustomerRow, claim: &ClaimRow, desk: &str) -> Result<Value, (StatusCode, Json<Value>)> {
+    let op: Option<OperatorRow> = sqlx::query_as("select * from operators where desk = $1 limit 1").bind(desk).fetch_optional(&s.pool).await.map_err(internal)?;
+    let mut v = claim_with_incidents(&s.pool, claim).await.map_err(internal)?;
     v["desk_address"] = json!(op.as_ref().map(|o| o.postal_address.clone()));
     v["desk_email"] = json!(op.as_ref().and_then(|o| o.email.clone()));
     v["desk_accepts_email"] = json!(op.as_ref().map(|o| o.accepts_email).unwrap_or(false));
-    v["personal_data_required"] = json!(c.0.full_name.is_none());
-    v["relay_address"] = json!(c.0.relay_address);
-    v["needs_recovery_code"] = json!(sqlx::query_scalar::<_, bool>("select recovery_hash is null from devices where id = $1").bind(c.0.id).fetch_one(&s.pool).await.map_err(internal)?);
-    Ok(Json(v))
+    v["personal_data_required"] = json!(c.full_name.is_none());
+    v["relay_address"] = json!(c.relay_address);
+    v["needs_recovery_code"] = json!(sqlx::query_scalar::<_, bool>("select recovery_hash is null from devices where id = $1").bind(c.id).fetch_one(&s.pool).await.map_err(internal)?);
+    Ok(v)
 }
 
 #[derive(Deserialize)]
@@ -1072,9 +1135,12 @@ pub async fn claim_patch(State(s): State<AppState>, c: Customer, Path(id): Path<
         sqlx::query("update incidents set ngo_id = $2 where claim_id = $1 or id in (select incident_id from claim_incidents where claim_id = $1)").bind(id).bind(&ngo.id).execute(&s.pool).await.map_err(internal)?;
     }
     if let Some(atts) = p.attachments {
-        sqlx::query("delete from claim_attachments where claim_id = $1").bind(id).execute(&s.pool).await.map_err(internal)?;
+        // The tickets are replaced, the signature is not one of them. An app that attaches a
+        // ticket after signing — or after coming back to a draft it left — must not take the
+        // signature off the form on its way past.
+        sqlx::query("delete from claim_attachments where claim_id = $1 and label <> 'Unterschrift'").bind(id).execute(&s.pool).await.map_err(internal)?;
         for a in atts {
-            sqlx::query("insert into claim_attachments (claim_id, upload_id, label) select $1, $2, $3 where exists (select 1 from uploads where id = $2 and customer_id = $4)")
+            sqlx::query("insert into claim_attachments (claim_id, upload_id, label) select $1, $2, $3 where exists (select 1 from uploads where id = $2 and customer_id = $4) on conflict do nothing")
                 .bind(id)
                 .bind(a.upload_id)
                 .bind(a.label)
@@ -1088,6 +1154,34 @@ pub async fn claim_patch(State(s): State<AppState>, c: Customer, Path(id): Path<
     Ok(Json(claim_with_incidents(&s.pool, &claim).await.map_err(internal)?))
 }
 
+/// What an upload really is. Clients that send no part content type (or the generic
+/// `application/octet-stream`) used to land as bytes of unknown kind, and an unknown kind is
+/// not a signature the form can print — so the file name and the first bytes get a say.
+pub(crate) fn image_content_type(declared: &str, filename: &str, bytes: &[u8]) -> String {
+    let declared = declared.trim();
+    if declared.starts_with("image/") || declared == "application/pdf" {
+        return declared.to_string();
+    }
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return "image/png".to_string();
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return "image/jpeg".to_string();
+    }
+    let lower = filename.to_lowercase();
+    if lower.ends_with(".png") {
+        return "image/png".to_string();
+    }
+    if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        return "image/jpeg".to_string();
+    }
+    if declared.is_empty() {
+        "application/octet-stream".to_string()
+    } else {
+        declared.to_string()
+    }
+}
+
 /// Multipart: fields `kind` (ticket|signature|postal_reply) and `file`.
 pub async fn upload(State(s): State<AppState>, c: Customer, mut mp: Multipart) -> ApiResult {
     let mut kind = "ticket".to_string();
@@ -1096,9 +1190,10 @@ pub async fn upload(State(s): State<AppState>, c: Customer, mut mp: Multipart) -
         match field.name().unwrap_or("") {
             "kind" => kind = field.text().await.unwrap_or_default(),
             "file" => {
-                let ct = field.content_type().unwrap_or("application/octet-stream").to_string();
+                let ct = field.content_type().unwrap_or("").to_string();
+                let filename = field.file_name().unwrap_or("").to_string();
                 let data = field.bytes().await.map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?;
-                bytes = Some((ct, data.to_vec()));
+                bytes = Some((image_content_type(&ct, &filename, &data), data.to_vec()));
             }
             _ => {}
         }
@@ -1203,7 +1298,9 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     };
     let summary = claim_summary_text(&claim, &incidents, &name);
     let mut uploads: Vec<(String, String, Vec<u8>)> = sqlx::query_as::<_, (String, String, Vec<u8>)>(
-        "select ca.label || case when u.content_type like 'image/png' then '.png' when u.content_type like 'image/jpeg' then '.jpg' else '' end, u.content_type, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1",
+        "select ca.label || case when substring(u.bytes from 1 for 8) = '\\x89504e470d0a1a0a'::bytea then '.png'
+                when substring(u.bytes from 1 for 3) = '\\xffd8ff'::bytea then '.jpg' else '' end,
+         u.content_type, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1",
     )
     .bind(id)
     .fetch_all(&s.pool)
@@ -2037,6 +2134,70 @@ mod standing_tests {
         let picked = NextThing::pick(vec![NextThing::Badge { badge_id: "x".into(), name: "X".into() }, NextThing::Nachtrag]);
         assert_eq!(picked, Some(NextThing::Nachtrag));
         assert_eq!(NextThing::pick(vec![]), None);
+    }
+}
+
+#[cfg(test)]
+mod draft_tests {
+    use super::*;
+
+    fn ids(n: usize) -> Vec<Uuid> {
+        (0..n).map(|_| Uuid::new_v4()).collect()
+    }
+
+    /// Coming back to the Antrag names no cases. That is not "build me a form out of everything
+    /// open", it is "the form I left lying here", and it still carries its ticket.
+    #[test]
+    fn coming_back_without_a_selection_finds_the_draft_again() {
+        let i = ids(3);
+        let open: HashSet<Uuid> = i.iter().copied().collect();
+        assert_eq!(draft_action(&i[..2], None, &open), DraftAction::Resume);
+        // Even though a third case is open and waiting: it shows up unticked, it does not
+        // silently rewrite the form.
+        assert_eq!(draft_action(&i[..2], Some(&i), &open), DraftAction::Rebuild);
+    }
+
+    /// The same cases in another order are the same form; one case more or less is not.
+    #[test]
+    fn the_selection_decides_not_its_order() {
+        let i = ids(3);
+        let open: HashSet<Uuid> = i.iter().copied().collect();
+        let shuffled = vec![i[2], i[0], i[1]];
+        assert_eq!(draft_action(&i, Some(&shuffled), &open), DraftAction::Resume);
+        assert_eq!(draft_action(&i, Some(&i[..2]), &open), DraftAction::Rebuild);
+    }
+
+    /// A draft whose cases were discarded or ran out of time is no form to return to.
+    #[test]
+    fn a_draft_over_closed_cases_is_rebuilt() {
+        let i = ids(3);
+        let open: HashSet<Uuid> = i[..2].iter().copied().collect();
+        assert_eq!(draft_action(&i, None, &open), DraftAction::Rebuild);
+        assert_eq!(draft_action(&[], None, &open), DraftAction::Rebuild);
+        assert_eq!(draft_action(&i[..2], None, &open), DraftAction::Resume);
+    }
+}
+
+#[cfg(test)]
+mod upload_tests {
+    use super::*;
+
+    /// The app used to upload its signature without a part content type. The bytes said PNG all
+    /// along, and the form prints the signature only if the row says so too.
+    #[test]
+    fn a_png_is_a_png_whatever_the_client_called_it() {
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR".to_vec();
+        assert_eq!(image_content_type("application/octet-stream", "Unterschrift.png", &png), "image/png");
+        assert_eq!(image_content_type("", "", &png), "image/png");
+        assert_eq!(image_content_type("image/png", "Unterschrift.png", &png), "image/png");
+
+        // A JPEG photo of a ticket, and a name to go by when the bytes are unfamiliar.
+        assert_eq!(image_content_type("", "Ticket.jpg", &[0xFF, 0xD8, 0xFF, 0x00]), "image/jpeg");
+        assert_eq!(image_content_type("application/octet-stream", "Ticket.JPEG", b"whatever"), "image/jpeg");
+
+        // Nothing to go by stays unknown, and a type the client did declare is kept.
+        assert_eq!(image_content_type("", "notes", b"whatever"), "application/octet-stream");
+        assert_eq!(image_content_type("application/pdf", "Antrag.pdf", b"%PDF-1.7"), "application/pdf");
     }
 }
 
