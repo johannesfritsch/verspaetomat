@@ -136,6 +136,10 @@ class _WelcherZugListState extends State<WelcherZugList> {
     return e != null && a != null && a.isAfter(e);
   }
 
+  /// Which connection is ticked. The design picks first and confirms with „Weiter"; before it,
+  /// a tap on a row checked you in on the spot.
+  ApiItinerary? _chosen;
+
   @override
   Widget build(BuildContext context) {
     final session = RepoScope.of(context);
@@ -152,7 +156,12 @@ class _WelcherZugListState extends State<WelcherZugList> {
             child: Text('Gerade keine Verbindung in Sicht. Versuch es gleich noch mal oder nimm ein anderes Ziel.', style: VText.bodyS.copyWith(color: VColors.ink2)),
           ),
         if (_itineraries.isNotEmpty) ...[
-          Text(widget.continueJourneyId != null ? 'Tipp auf den Zug, mit dem du weiterfährst.' : 'Tipp auf den Zug, in dem du sitzt.', style: VText.bodyStrong),
+          Text(
+            widget.continueJourneyId != null
+                ? 'Tipp auf den Zug, mit dem du weiterfährst.'
+                : 'Tipp auf den Zug, in dem du sitzt.',
+            style: VText.bodyStrong,
+          ),
           const SizedBox(height: 2),
           Text(
             widget.continueJourneyId != null
@@ -160,36 +169,80 @@ class _WelcherZugListState extends State<WelcherZugList> {
                 : _itineraries.any(_hasLeft)
                     ? 'Auch der, der gerade weg ist — sitzt du drin, zählt die Fahrt. Umstiege folgen später von selbst.'
                     : 'Umstiege folgen später von selbst.',
-            style: VText.caption,
+            style: VText.bodyS,
           ),
         ],
         const VGap.m(),
         for (final it in _itineraries) ...[
-          ItineraryRow(itinerary: it, departed: _hasLeft(it), onTap: _sending ? null : () => _start(it)),
+          Builder(builder: (context) {
+            final leg = it.legs.isEmpty ? null : it.legs.first;
+            final arrival = it.liveArrival ?? it.plannedArrival;
+            final late = it.liveArrival != null &&
+                it.plannedArrival != null &&
+                it.liveArrival!.difference(it.plannedArrival!).inMinutes > 0;
+            return VConnectionCard(
+              departTime: fmtLocal(it.plannedDeparture),
+              departStation: leg?.fromStationName ?? widget.fromStationName,
+              departPlatform: leg?.platform == null || leg!.platform!.isEmpty ? null : 'Gl. ${leg.platform}',
+              arriveTime: fmtLocal(arrival),
+              arriveStation: widget.toStationName,
+              // No arrival platform: the timetable the app holds carries a platform for the
+              // departure only. The mockup shows one; inventing it would be a guess on a screen
+              // where somebody is about to run for a train.
+              duration: it.durationMin == null ? '—' : fmtMinutes(it.durationMin!),
+              line: leg?.line ?? '',
+              cls: vLineClassOf(leg?.line ?? ''),
+              selected: identical(_chosen, it),
+              onTap: _sending ? () {} : () => setState(() => _chosen = it),
+              tags: [
+                if (it.direct)
+                  const VConnectionTag('Direkt', icon: Icons.trending_flat, tone: VConnectionTone.good)
+                else
+                  VConnectionTag(
+                    '${it.transfers}× umsteigen in ${it.transferStations.join(', ')}',
+                    icon: Icons.swap_horiz,
+                  ),
+                if (late)
+                  VConnectionTag('an ${fmtLocal(arrival)} statt ${fmtLocal(it.plannedArrival)}', icon: Icons.schedule)
+                else
+                  const VConnectionTag('Pünktlich', icon: Icons.schedule, tone: VConnectionTone.good),
+                // No occupancy tag. Nothing in the app or the backend knows how full a train is.
+                if (_hasLeft(it)) const VConnectionTag('schon weg', icon: Icons.history),
+              ],
+            );
+          }),
           // A later train than the earliest one: the extra wait is the passenger's, not the railway's.
-          if (_later(it)) ...[
+          if (_later(it))
             Padding(
-              padding: const EdgeInsets.only(left: 4, bottom: VSpace.s),
-              child: Text('Deine Pause zählt nicht mit — es bleiben ${fmtMinutes(widget.countedMinutes ?? 0)}.', style: VText.caption),
+              padding: const EdgeInsets.only(left: VSpace.xs, top: VSpace.xs),
+              child: Text(
+                'Deine Pause zählt nicht mit — es bleiben ${fmtMinutes(widget.countedMinutes ?? 0)}.',
+                style: VText.caption,
+              ),
             ),
-          ],
+          const VGap.s(),
         ],
         if (_sending) const LoadingLine(label: 'Einchecken …'),
         // The ticket belongs to the claim, not to the train: quiet, and always reachable.
-        InkWell(
-          onTap: () => showTicketSheet(context),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                const Icon(Icons.confirmation_number_outlined, size: 20, color: VColors.ink2),
-                const SizedBox(width: 10),
-                Expanded(child: Text(ticket?.label ?? 'Ticket wählen', style: VText.bodySStrong)),
-                const Icon(Icons.expand_more, size: 20, color: VColors.ink2),
-              ],
-            ),
+        VOptionRow(
+          leading: const VIconBadge(
+            icon: Icons.confirmation_number_outlined,
+            tone: VBadgeTone.neutral,
+            size: VControl.badgeSmall,
           ),
+          title: ticket?.label ?? 'Ticket wählen',
+          divider: false,
+          onTap: () => showTicketSheet(context),
         ),
+        if (_itineraries.isNotEmpty) ...[
+          const VGap.m(),
+          VPrimaryButton(
+            label: 'Weiter',
+            icon: Icons.arrow_forward,
+            busy: _sending,
+            onTap: _chosen == null || _sending ? null : () => _start(_chosen!),
+          ),
+        ],
         const VGap.l(),
       ],
     );

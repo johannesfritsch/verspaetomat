@@ -37,28 +37,30 @@ ThemeData buildAppTheme() {
       titleTextStyle: VText.title,
       iconTheme: const IconThemeData(color: VColors.ink, size: 22),
     ),
-    dividerTheme: const DividerThemeData(color: VColors.rule, thickness: 1, space: 1),
+    dividerTheme: const DividerThemeData(color: VColors.hairline, thickness: VControl.hairline, space: VControl.hairline),
     bottomSheetTheme: const BottomSheetThemeData(
       backgroundColor: VColors.paper,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: VRadius.mdR)),
       showDragHandle: false,
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: VColors.paperElevated,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+      // A field is a quiet control on a card, not a card of its own: the grey fill carries it and
+      // the border only appears when it has focus.
+      fillColor: VColors.greyFill,
+      contentPadding: const EdgeInsets.symmetric(horizontal: VSpace.m, vertical: VSpace.md),
       border: const OutlineInputBorder(
-        borderRadius: BorderRadius.all(Radius.circular(4)),
-        borderSide: BorderSide(color: VColors.rule),
+        borderRadius: BorderRadius.all(VRadius.mdR),
+        borderSide: BorderSide.none,
       ),
       enabledBorder: const OutlineInputBorder(
-        borderRadius: BorderRadius.all(Radius.circular(4)),
-        borderSide: BorderSide(color: VColors.rule),
+        borderRadius: BorderRadius.all(VRadius.mdR),
+        borderSide: BorderSide.none,
       ),
       focusedBorder: const OutlineInputBorder(
-        borderRadius: BorderRadius.all(Radius.circular(4)),
-        borderSide: BorderSide(color: VColors.ink, width: 1.5),
+        borderRadius: BorderRadius.all(VRadius.mdR),
+        borderSide: BorderSide(color: VColors.red, width: 1.5),
       ),
       hintStyle: VText.body.copyWith(color: VColors.ink3),
       labelStyle: VText.caption,
@@ -68,7 +70,7 @@ ThemeData buildAppTheme() {
         (s) => s.contains(WidgetState.selected) ? VColors.paper : VColors.ink2,
       ),
       trackColor: WidgetStateProperty.resolveWith(
-        (s) => s.contains(WidgetState.selected) ? VColors.ink : VColors.ruleSoft,
+        (s) => s.contains(WidgetState.selected) ? VColors.red : VColors.track,
       ),
       trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
     ),

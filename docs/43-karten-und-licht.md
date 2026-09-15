@@ -142,3 +142,40 @@ In einer Woche, in der nichts passiert ist, bleibt **kein** Balken rot: jede Spa
 und einer davon leuchtend rot läse sich als ein bisschen was. Kommt die Tagesreihe in die API, wird
 aus dem Aufruf `VWeekBars(values: reihe, todayIndex: wochentag, labels: [Mo … So])` und sonst muss
 sich auf dem Schirm nichts bewegen.
+
+## 8. Fünf weitere Entwürfe, und was sich dadurch ändert
+
+Nachgereicht am 15. September 2026: Ich, das Teilen-Sheet und die drei Schritte des Check-ins.
+Sie lösen ein paar Sätze aus §1 und §4 ab.
+
+**Das rote Brett ist nicht mehr nur Wir.** Ich bekommt es auch. Home behält das dunkle. Die Regel
+heißt jetzt: das dunkle Brett ist das, dem man zuerst begegnet, und die roten stehen auf den beiden
+Schirmen, bei denen es um Menschen geht — um uns alle und um dich.
+
+**Das Linienschild hat drei Ansichten**, und die Farbe ist in allen dreien die Gattung: getönt für
+eine Zeile in einer Liste, gefüllt für den Zug, um den eine Karte geht, dunkel für den Zug, in dem
+man sitzt. Höchstens ein gefülltes pro Karte, sonst heißt es nicht mehr „dieser hier".
+
+**Abschnittsüberschriften sind zweierlei.** Eine Überschrift (voll, in Titelgröße) führt einen Teil
+des Schirms ein, zu dem man auch hätte navigieren können — Ichs „Abzeichen". Ein Kapitälchen-Label
+benennt den Block direkt darunter — Wirs „VEREINE". Beides steht in den Entwürfen; welches man
+nimmt, ist diese Frage und keine Geschmackssache.
+
+**Zwei Dinge aus den Entwürfen kommen nicht.** „Hohe Auslastung" in der Verbindungsauswahl: es gibt
+nirgends in App oder Backend eine Auslastung. Und das Ankunftsgleis: das Modell führt ein Gleis nur
+für die Abfahrt. Beides ersatzlos gestrichen, nicht erfunden.
+
+**Zwei Dinge macht die App anders als gezeichnet.** Der Untertitel auf Ich endet im Entwurf auf ein
+Herz-Emoji; die App setzt die Worte und zeichnet das Herz. Und das Teilen-Sheet zeigt eine Reihe
+Fremdlogos; die App öffnet stattdessen das System-Sheet, das als einziges weiß, was jemand
+überhaupt installiert hat, und dafür keine fremden Marken ins Binary holt.
+
+**Eine Interaktion ändert sich.** Bisher checkte ein Tipp auf einen Zug direkt ein — „eine Zeile,
+ein Tipp", und der Chevron sagte es. Der Entwurf setzt einen Haken und einen „Weiter"-Knopf
+dahinter. Auswählen und Bestätigen sind jetzt zwei Handlungen.
+
+**Die Hintergründe der Check-in-Sheets** liegen als Bild bei (`assets/header/checkin-platform.webp`,
+`checkin-clock.webp`): der Kölner Dom, die Hohenzollernbrücke, ein Bahnsteig mit Vordach, einmal mit
+Bahnhofsuhr. Ihre untere Hälfte ist schon fast weiß — sie sind gezeichnet, um beschrieben zu werden.
+Auf dem einen war ein Keks auf der Nase, auf dem anderen ein beleuchtetes DB-Schild; beide sind raus,
+aus dem Grund aus §5.

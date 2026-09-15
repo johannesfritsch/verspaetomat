@@ -60,7 +60,6 @@ class IchScreen extends StatelessWidget {
         final minutesThisYear = thisYear.fold(0, (s, r) => s + (r.finalDelayMinutes ?? 0));
         // An abandoned ride was not a trip: neither "aufgegeben" nor "nicht gefahren" counts (docs/21 §3).
         final recent = rides.where((r) => r.status != ApiRideStatus.abandoned && DateTime.now().difference(r.date).inDays <= 14).length;
-        final earned = data.badges.where((b) => b.earned).length;
         final name = displayName(me) ?? 'Fahrgast';
         final lvl = data.standing.level;
         final my = data.standing.community;
@@ -70,143 +69,187 @@ class IchScreen extends StatelessWidget {
         final ngoId = me.settings.ngoId;
         final ngoName = session.ngos.where((n) => n.id == ngoId).map((n) => n.name).firstOrNull;
 
-        return VScreen(
-          showBack: false,
-          padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.l, VSpace.page, VSpace.xl),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TabHeader(
-                title: name,
-                caption: me.levelName,
-                onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
-              ),
-              const VGap.xl(),
-              // The points and the level on one board, the four figures on the next (docs/33):
-              // the same surface Home and Wir use for the same kind of statement. They used to
-              // be bare figures on paper here and boxed numbers there.
-              VBoard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const VBoardLabel('Geduldspunkte', icon: Icons.workspace_premium_outlined),
-                    const VGap.s(),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        fmtInt(me.pointsTotal),
-                        style: VText.number.copyWith(color: VColors.inkOnDark),
-                      ),
-                    ),
-                    // The level (docs/20 §5): the same line Home shows under „Deine Woche".
-                    if (lvl != null) ...[
-                      const VGap.md(),
-                      VProgressBar(value: lvl.progress, ground: VProgressGround.dark),
-                      const VGap.s(),
-                      VBoardCaption(
-                        lvl.pointsToNext > 0
-                            ? '${lvl.name} · ${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“'
-                            : '${lvl.name} · höchste Stufe erreicht',
-                        maxLines: 1,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const VGap.m(),
-              VTafel(
-                child: Column(
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: BigFigure(
-                            value: fmtEuro(confirmedCents / 100),
-                            label: 'Bestätigt, durch dich',
-                            onTap: () => context.go(Routes.antraege),
-                          ),
-                        ),
-                        Expanded(child: BigFigure(value: fmtEuro(submittedCents / 100), label: 'Eingereicht, unterwegs')),
-                      ],
-                    ),
-                    const VGap.m(),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: BigFigure(value: '+${me.pointsThisWeek}', label: 'Diese Woche')),
-                        Expanded(child: BigFigure(value: '$recent', label: 'Fahrten, letzte 14 Tage')),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const VGap.xl(),
-              // Every block on this screen stands on a card (issue #13, docs/37): the section
-              // label outside it, the content on it.
-              VSection('Abzeichen', trailing: Text('$earned von ${data.badges.length}', style: VText.caption)),
-              const VGap.m(),
-              VTafel(
-                // A tile is 64 px of artwork plus two caption lines: a fixed height, so the ratio
-                // has to follow the width the card's padding leaves (issue #13).
-                padding: const EdgeInsets.symmetric(horizontal: VSpace.xs, vertical: VSpace.s),
-                child: GridView.count(
-                  crossAxisCount: 3,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  mainAxisSpacing: 6,
-                  crossAxisSpacing: 6,
-                  childAspectRatio: 0.80,
-                  children: [
-                    for (final b in data.badges) BadgeTile(badge: b, onTap: () => _showBadge(context, b)),
-                  ],
-                ),
-              ),
-              const VGap.xl(),
-              const VSection('Meine Statistik'),
-              const VGap.m(),
-              VTafel(
-                padding: const EdgeInsets.symmetric(horizontal: VSpace.s, vertical: VSpace.s),
-                child: Column(
-                  children: [
-                    VKeyValue('Durchschnittliche Verspätung', '$avg Minuten', strong: true),
-                    const VRule.soft(),
-                    VKeyValue('Geduldigste Linie', patientLine, strong: true),
-                    const VRule.soft(),
-                    VKeyValue('Längste Wartezeit', '$longest Minuten', strong: true),
-                    const VRule.soft(),
-                    VKeyValue('Minuten dieses Jahr', fmtInt(minutesThisYear), strong: true),
-                    const VRule.soft(),
-                    VKeyValue('Fahrten dieses Jahr', fmtInt(thisYear.length), strong: true),
-                  ],
-                ),
-              ),
-              const VGap.xl(),
-              const VSection('Mehr'),
-              const VGap.m(),
-              VTafel(
-                padding: const EdgeInsets.symmetric(horizontal: VSpace.s),
-                child: Column(
-                  children: [
-                    VListRow(
-                      title: 'Dein Zweck',
-                      subtitle: ngoName ?? 'Noch nicht gewählt',
-                      chevron: true,
-                      // The row is about which Zweck is yours, so it opens the choice — the same
-                      // sheet Einstellungen opens. The Zweck's own page is where "Trotzdem spenden"
-                      // belongs, and that is reached from a claim, not from here.
-                      onTap: () => pickNgo(context, session, ngoId.isEmpty ? null : ngoId),
-                    ),
-                    const VRule.soft(),
-                    VListRow(title: 'Alle Fahrten', subtitle: '${rides.length} zuletzt', chevron: true, onTap: () => context.push(Routes.historie)),
-                  ],
-                ),
-              ),
-            ],
+        return VTabScaffold(
+          onRefresh: () async => refresh(),
+          header: VTabHeader(
+            title: name,
+            // The mockup ends this line on a heart emoji. The words are the app's and the heart is
+            // on the board below, where it has something to sit beside; floating between the name
+            // and the gear it read as a stray mark rather than as a sign-off.
+            subtitle: 'Gemeinsam für pünktlichere Züge',
+            narrow: true,
+            onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
           ),
+          children: [
+            // The red board, like Wir: the two screens that are about people take it, and Home
+            // keeps the dark one (docs/43 §8).
+            VBoard(
+              look: VBoardLook.red,
+              // The mockup puts a handwritten note here as well as on Wir. It is not built: at
+              // Ich's share of the board the note cannot set „Verspätung" without being cut by
+              // the card's own edge, and a margin note that is trimmed reads as a rendering fault
+              // rather than as a hand. Wir keeps its note, which fits; the heart carries this one.
+              aside: const Align(
+                alignment: Alignment.topRight,
+                child: VHeartMark(color: VColors.inkOnDark2),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const VBoardLabel('Geduldspunkte', icon: Icons.workspace_premium_outlined),
+                  const VGap.s(),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      fmtInt(me.pointsTotal),
+                      style: VText.number.copyWith(color: VColors.inkOnDark),
+                    ),
+                  ),
+                  if (lvl != null) ...[
+                    const VGap.md(),
+                    VProgressBar(value: lvl.progress, ground: VProgressGround.red),
+                    const VGap.s(),
+                    VBoardCaption(
+                      lvl.pointsToNext > 0
+                          ? '${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“'
+                          : '${lvl.name} · höchste Stufe erreicht',
+                      maxLines: 1,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            // The four figures as one block rather than two rows of two: a quadrant reads as one
+            // statement about the account, which is what it is.
+            VCard(
+              child: VStatQuad(
+                stats: [
+                  VStat(
+                    icon: Icons.train,
+                    value: fmtEuro(confirmedCents / 100),
+                    label: 'Bestätigt, durch dich gespendet',
+                  ),
+                  VStat(
+                    icon: Icons.mail_outline,
+                    value: fmtEuro(submittedCents / 100),
+                    label: 'Eingereicht, unterwegs',
+                  ),
+                  VStat(
+                    icon: Icons.bar_chart,
+                    value: '+${fmtInt(me.pointsThisWeek)}',
+                    label: 'Diese Woche',
+                  ),
+                  VStat(
+                    icon: Icons.route_outlined,
+                    value: '$recent',
+                    label: 'Fahrten, letzte 14 Tage',
+                  ),
+                ],
+              ),
+            ),
+
+            VSectionHeader(
+              'Abzeichen',
+              heading: true,
+              onCard: false,
+              linkLabel: 'Alle ansehen',
+              onLink: () => _showAllBadges(context, data.badges),
+            ),
+            VCard(
+              padding: const EdgeInsets.symmetric(
+                horizontal: VSpace.cardTight,
+                vertical: VSpace.card,
+              ),
+              child: VAchievementStrip(
+                items: [
+                  for (final b in data.badges)
+                    VAchievement(
+                      label: b.name,
+                      art: BadgeIcon(badge: b, size: 40),
+                      earned: b.earned,
+                    ),
+                ],
+              ),
+            ),
+
+            const VSectionHeader('Meine Statistik', heading: true, onCard: false),
+            VCard(
+              child: Column(
+                children: [
+                  VKeyValue('Durchschnittliche Verspätung', '$avg Minuten', strong: true),
+                  const VDivider(),
+                  VKeyValue('Geduldigste Linie', patientLine, strong: true),
+                  const VDivider(),
+                  VKeyValue('Längste Wartezeit', '$longest Minuten', strong: true),
+                  const VDivider(),
+                  VKeyValue('Minuten dieses Jahr', fmtInt(minutesThisYear), strong: true),
+                  const VDivider(),
+                  VKeyValue('Fahrten dieses Jahr', fmtInt(thisYear.length), strong: true),
+                ],
+              ),
+            ),
+
+            // The mockup's menu names three screens that do not exist — Profil bearbeiten, Meine
+            // Spenden, Statistiken. These are the three that do.
+            VMenuCard(
+              rows: [
+                VMenuRow(
+                  icon: Icons.favorite_outline,
+                  label: 'Dein Zweck · ${ngoName ?? 'noch nicht gewählt'}',
+                  onTap: () => pickNgo(context, session, ngoId.isEmpty ? null : ngoId),
+                ),
+                VMenuRow(
+                  icon: Icons.route_outlined,
+                  label: 'Alle Fahrten',
+                  onTap: () => context.push(Routes.historie),
+                ),
+                VMenuRow(
+                  icon: Icons.settings_outlined,
+                  label: 'Einstellungen',
+                  onTap: () => context.push(Routes.einstellungen).then((_) => refresh()),
+                ),
+              ],
+            ),
+          ],
         );
       },
+    );
+  }
+
+  /// Every badge, when four on the strip are not enough. The strip is the glance; this is the shelf.
+  void _showAllBadges(BuildContext context, List<ApiBadge> badges) {
+    showVSheet<void>(
+      context,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.only(bottom: VSpace.l),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            VSheetHeader(
+              title: 'Abzeichen',
+              subtitle: '${badges.where((b) => b.earned).length} von ${badges.length} verdient',
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: VSpace.sheet),
+              child: GridView.count(
+                crossAxisCount: 3,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: VSpace.s,
+                crossAxisSpacing: VSpace.s,
+                childAspectRatio: 0.80,
+                children: [
+                  for (final b in badges)
+                    BadgeTile(badge: b, onTap: () => _showBadge(context, b)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

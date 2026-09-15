@@ -606,7 +606,7 @@ class VLegRow extends StatelessWidget {
         children: [
           VTransportIcon(_kindOf(cls)),
           const SizedBox(width: VSpace.s),
-          VLineBadge(line, cls: cls, dark: true),
+          VLineBadge(line, cls: cls, look: VLineBadgeLook.dark),
           // The mockup sets 28 pt here; VSpace.l is the nearest token and it also gives a long
           // destination more room to breathe before the chevron.
           const SizedBox(width: VSpace.l),

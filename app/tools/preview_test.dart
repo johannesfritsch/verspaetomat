@@ -415,6 +415,25 @@ void main() {
     );
   });
 
+  // The two check-in backgrounds, straight from the asset bundle. Nothing composes them yet; this
+  // is here to prove the files load and that WebP is decoded, before four screens depend on it.
+  _preview('checkin-backgrounds', height: 420, (context) {
+    Widget band(String path) => ClipRect(
+          child: SizedBox(
+            height: 190,
+            width: double.infinity,
+            child: Image.asset(path, fit: BoxFit.fitWidth, alignment: Alignment.topCenter),
+          ),
+        );
+    return Column(
+      children: [
+        band('assets/header/checkin-platform.webp'),
+        const VGap.m(),
+        band('assets/header/checkin-clock.webp'),
+      ],
+    );
+  });
+
   // Over the real thing: a title set across the faded half, which is the only test that matters
   // for a background.
   _preview('header-scene-with-title', height: 230, (context) {
@@ -490,6 +509,16 @@ void _preview(
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    // Images do not decode in a widget test unless you make them. Without this every preview
+    // holding an asset comes out blank, which is worse than no preview: it looks like a bug in
+    // the thing being reviewed rather than a bug in the bench.
+    await tester.runAsync(() async {
+      for (final element in find.byType(Image).evaluate()) {
+        await precacheImage((element.widget as Image).image, element);
+      }
+    });
     await tester.pumpAndSettle();
 
     await tester.runAsync(() async {

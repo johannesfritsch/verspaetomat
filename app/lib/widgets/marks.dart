@@ -196,14 +196,35 @@ VLineClass vLineClassOf(String line) {
   return VLineClass.unknown;
 }
 
+/// How loud a line badge is.
+///
+/// Three, because the mockups use three and each one means something different. The colour is the
+/// line's class in all of them: colour on a line badge is identity, and a cancelled S-Bahn is
+/// still an S-Bahn.
+enum VLineBadgeLook {
+  /// The class colour at a tint, with the class colour as ink. A line in a list.
+  tint,
+
+  /// The class colour filled, with white ink. The train a card is *about* — the share card's own
+  /// journey. One per card, or it stops meaning "this one".
+  solid,
+
+  /// Ink filled, white ink, and a size larger. The train in hand, which on a screen full of
+  /// tinted pills is the one thing that reads as now.
+  dark,
+}
+
 class VLineBadge extends StatelessWidget {
-  const VLineBadge(this.line, {super.key, this.cls = VLineClass.regional, this.dark = false});
+  const VLineBadge(
+    this.line, {
+    super.key,
+    this.cls = VLineClass.regional,
+    this.look = VLineBadgeLook.tint,
+  });
 
   final String line;
   final VLineClass cls;
-
-  /// The inverted look, for the train in hand.
-  final bool dark;
+  final VLineBadgeLook look;
 
   Color get _fill => switch (cls) {
         VLineClass.regional => VColors.redTint,
@@ -225,7 +246,7 @@ class VLineBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (dark) {
+    if (look == VLineBadgeLook.dark) {
       return Container(
         // Measured 26.3 pt tall, which no control token carries. The padding makes the height
         // instead, so the badge grows with its own type rather than clipping it.
@@ -242,10 +263,16 @@ class VLineBadge extends StatelessWidget {
         ),
       );
     }
+    final solid = look == VLineBadgeLook.solid;
     return Container(
       height: VControl.pill,
       padding: const EdgeInsets.symmetric(horizontal: VSpace.s),
-      decoration: BoxDecoration(color: _fill, borderRadius: BorderRadius.circular(VRadius.full)),
+      decoration: BoxDecoration(
+        color: solid ? _ink : _fill,
+        // The solid one is a block with a name cut out of it, so it takes the card corner rather
+        // than the pill's stadium — a filled stadium at this size reads as a button.
+        borderRadius: BorderRadius.circular(solid ? VRadius.sm : VRadius.full),
+      ),
       // Center with a width factor, not `alignment:` on the Container. A Container that is given
       // an alignment and no width takes every point it is offered, and the badge came out as wide
       // as the row it sat in.
@@ -253,7 +280,7 @@ class VLineBadge extends StatelessWidget {
         widthFactor: 1,
         child: Text(
           line,
-          style: vPillLabel(_ink, tabular: true),
+          style: vPillLabel(solid ? VColors.inkOnDark : _ink, tabular: true),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),

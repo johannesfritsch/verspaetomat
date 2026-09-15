@@ -11,7 +11,6 @@ import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'ride_widgets.dart';
 import 'welcher_zug_screen.dart';
-import 'wohin_screen.dart';
 
 /// The check-in, three steps, each a bottom sheet over the current tab (docs/24 §1).
 ///
@@ -131,6 +130,34 @@ class _Breadcrumb extends StatelessWidget {
   }
 }
 
+/// A sheet's header with the drawing behind it.
+///
+/// The same arrangement the tabs use: the picture is sized by the block in front of it rather than
+/// given a height of its own, so a step whose subtitle wraps to two lines gets a taller band and
+/// one that does not gets a shorter one. It bleeds past the sheet's gutter to both edges and a
+/// little below the header, so the first control sits on the tail of the wash rather than under a
+/// line.
+class _SheetTop extends StatelessWidget {
+  const _SheetTop({required this.art, required this.child});
+  final VSheetSceneArt art;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: -VSpace.l,
+            child: ClipRect(child: VSheetScene(art: art)),
+          ),
+          child,
+        ],
+      );
+}
+
 // ---------------------------------------------------------------------------
 // 1 · Von wo?
 // ---------------------------------------------------------------------------
@@ -224,30 +251,57 @@ class _VonSheetState extends State<_VonSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          VSheetHeader(
-            title: 'Von wo?',
-            subtitle: near?.caption ?? 'Wähle den Bahnhof, an dem du stehst.',
+          // The drawing sits behind the header, the way it does on a tab. It is the platform one
+          // here: this is the step where you say which platform you are standing on.
+          _SheetTop(
+            art: VSheetSceneArt.platform,
+            child: VSheetHeader(
+              eyebrow: 'Check-in · Schritt 1 von 3',
+              title: 'Von wo?',
+              subtitle: near?.caption ?? 'Wähle den Bahnhof, an dem du gerade in den Zug einsteigst.',
+              narrow: true,
+            ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.sheet),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (detected != null)
-                  VListRow(
+                Row(
+                  children: [
+                    Expanded(
+                      child: VSearchField(
+                        hint: 'Bahnhof suchen …',
+                        readOnly: true,
+                        onTap: () async {
+                          final st = await showStationSearch(context);
+                          if (st == null || !context.mounted) return;
+                          // A station chosen by hand is where the passenger is, for everything
+                          // else too.
+                          near?.pick(st);
+                          if (context.mounted) _pick(st);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: VSpace.s),
+                    VLocationButton(onTap: _locate),
+                  ],
+                ),
+
+                // The one station the phone actually thinks you are at, called out above the
+                // lists so it is not one row among many.
+                if (detected != null) ...[
+                  const VGap.md(),
+                  VNoticeRow(
                     key: const Key('von-detected'),
+                    icon: Icons.near_me,
                     title: detected.name,
-                    subtitle: detected.distanceM == null ? null : _dist(detected.distanceM!),
-                    chevron: true,
+                    subtitle: detected.distanceM == null ? null : '${_dist(detected.distanceM!)} entfernt',
+                    trailing: const VPill('In deiner Nähe', tone: VPillTone.red),
                     onTap: () => _pick(detected),
                   ),
-                for (final s in others)
-                  VListRow(
-                    title: s.name,
-                    subtitle: s.distanceM == null ? null : _dist(s.distanceM!),
-                    chevron: true,
-                    onTap: () => _pick(s),
-                  ),
+                ],
+
                 if (nothingKnown)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: VSpace.s),
@@ -255,40 +309,92 @@ class _VonSheetState extends State<_VonSheet> {
                       near?.checking == true
                           ? 'Wir schauen noch, wo du bist.'
                           : 'Wir wissen gerade nicht, wo du bist.',
-                      style: VText.bodyS.copyWith(color: VColors.ink2),
+                      style: VText.bodyS,
                     ),
                   ),
+
                 if (frequent.isNotEmpty) ...[
                   const VGap.m(),
-                  const VSection('Deine Bahnhöfe'),
-                  for (final f in frequent)
-                    VListRow(
-                      title: f.name,
-                      subtitle: f.name == _homeStation ? 'Stammbahnhof' : null,
-                      chevron: true,
-                      onTap: () => _pick(ApiStation(id: f.id, name: f.name, lat: f.lat, lon: f.lon)),
+                  const VSectionHeader('Deine Bahnhöfe', wide: true, onCard: false),
+                  const VGap.s(),
+                  VCard(
+                    padding: const EdgeInsets.symmetric(vertical: VSpace.xs),
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < frequent.length; i++)
+                          VOptionRow(
+                            leading: const VIconBadge(
+                              icon: Icons.train,
+                              tone: VBadgeTone.neutral,
+                              size: VControl.badgeSmall,
+                            ),
+                            title: frequent[i].name,
+                            subtitle: frequent[i].name == _homeStation ? 'Stammbahnhof' : null,
+                            divider: i != frequent.length - 1,
+                            onTap: () => _pick(ApiStation(
+                              id: frequent[i].id,
+                              name: frequent[i].name,
+                              lat: frequent[i].lat,
+                              lon: frequent[i].lon,
+                            )),
+                          ),
+                      ],
                     ),
+                  ),
                 ],
+
+                if (others.isNotEmpty) ...[
+                  const VGap.m(),
+                  const VSectionHeader('In der Nähe', wide: true, onCard: false),
+                  const VGap.s(),
+                  VCard(
+                    padding: const EdgeInsets.symmetric(vertical: VSpace.xs),
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < others.length; i++)
+                          VOptionRow(
+                            leading: const VIconBadge(
+                              icon: Icons.train,
+                              tone: VBadgeTone.neutral,
+                              size: VControl.badgeSmall,
+                            ),
+                            title: others[i].name,
+                            trailing: others[i].distanceM == null
+                                ? null
+                                : Text(_dist(others[i].distanceM!), style: VText.caption),
+                            divider: i != others.length - 1,
+                            onTap: () => _pick(others[i]),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+
                 const VGap.m(),
-                VOutlineButton(
-                  label: 'Bahnhof suchen',
-                  icon: Icons.search,
+                VOptionRow(
+                  leading: const VIconBadge(
+                    icon: Icons.search,
+                    tone: VBadgeTone.neutral,
+                    size: VControl.badgeSmall,
+                  ),
+                  title: 'Anderen Bahnhof suchen',
+                  divider: false,
                   onTap: () async {
-                    final s = await showStationSearch(context);
-                    if (s == null || !context.mounted) return;
-                    // A station chosen by hand is where the passenger is, for everything else too.
-                    near?.pick(s);
-                    if (context.mounted) _pick(s);
+                    final st = await showStationSearch(context);
+                    if (st == null || !context.mounted) return;
+                    near?.pick(st);
+                    if (context.mounted) _pick(st);
                   },
                 ),
-                // Only when the phone is the missing piece: with a fix the list above is the answer.
+
+                // Only when the phone is the missing piece: with a fix the lists above answer it.
                 if (nothingKnown && near?.position == null && near?.checking != true) ...[
                   const VGap.s(),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton(
                       onPressed: _locate,
-                      child: Text('Standort erlauben', style: VText.bodySStrong.copyWith(color: VColors.red)),
+                      child: Text('Standort erlauben', style: VText.buttonS.copyWith(color: VColors.red)),
                     ),
                   ),
                 ],
@@ -365,51 +471,100 @@ class _WohinSheetState extends State<_WohinSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const VSheetHeader(title: 'Wohin?'),
-          _Breadcrumb(
-            label: 'Ab ${widget.from.name}',
-            onTap: () => Navigator.of(context).pop(const StepResult<ApiStation>.back()),
+          _SheetTop(
+            art: VSheetSceneArt.platform,
+            child: VSheetHeader(
+              eyebrow: 'Check-in · Schritt 2 von 3',
+              title: 'Wohin?',
+              subtitle: 'Wähle den Bahnhof, an dem du aus dem Zug aussteigst.',
+              narrow: true,
+            ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.sheet),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const VGap.s(),
-                if (_loading) const LoadingLine(label: 'Deine Ziele werden geladen …'),
-                if (_error != null) ErrorLine(message: _error!, onRetry: _load),
-                if (!_loading && predicted.isEmpty && recent.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: VSpace.m),
-                    child: Text(
-                      'Beim ersten Mal suchst du dein Ziel. Ab dann steht es hier.',
-                      style: VText.body.copyWith(color: VColors.ink2),
-                    ),
-                  ),
-                for (final d in predicted) ...[
-                  DestinationButton(
-                    destination: d,
-                    primary: identical(d, predicted.first),
-                    onTap: () => _pick(d.station),
-                  ),
-                  const VGap.s(),
-                ],
-                if (recent.isNotEmpty) ...[
-                  const VGap.s(),
-                  const VSection('Zuletzt'),
-                  for (final d in recent) VListRow(title: d.stationName, chevron: true, onTap: () => _pick(d.station)),
-                  const VGap.m(),
-                ],
-                VOutlineButton(
-                  label: 'Bahnhof suchen',
-                  icon: Icons.search,
+                // Where you got on, and the way back to changing it. The step before is one tap
+                // away rather than a back-navigation (docs/24 §1).
+                VNoticeRow(
+                  icon: Icons.place_outlined,
+                  title: 'Ab ${widget.from.name}',
+                  subtitle: 'Zugverbindung erkannt',
+                  actionLabel: 'Ändern',
+                  onAction: () => Navigator.of(context).pop(const StepResult<ApiStation>.back()),
+                ),
+                const VGap.md(),
+                VSearchField(
+                  hint: 'Bahnhof suchen …',
+                  readOnly: true,
                   onTap: () async {
-                    final s = await showStationSearch(context);
-                    if (s != null && context.mounted) _pick(s);
+                    final st = await showStationSearch(context);
+                    if (st != null && context.mounted) _pick(st);
                   },
                 ),
+
+                if (_loading) ...[
+                  const VGap.m(),
+                  const LoadingLine(label: 'Deine Ziele werden geladen …'),
+                ],
+                if (_error != null) ...[
+                  const VGap.m(),
+                  ErrorLine(message: _error!, onRetry: _load),
+                ],
+                if (!_loading && predicted.isEmpty && recent.isEmpty) ...[
+                  const VGap.m(),
+                  Text(
+                    'Beim ersten Mal suchst du dein Ziel. Ab dann steht es hier.',
+                    style: VText.body,
+                  ),
+                ],
+
+                if (predicted.isNotEmpty) ...[
+                  const VGap.m(),
+                  const VSectionHeader('Vorschläge', wide: true, onCard: false),
+                  const VGap.s(),
+                  for (final d in predicted) ...[
+                    VSelectCard(
+                      leading: VIconBadge(
+                        icon: Icons.train,
+                        tone: identical(d, predicted.first) ? VBadgeTone.red : VBadgeTone.neutral,
+                        size: VControl.badgeSmall,
+                      ),
+                      title: d.stationName,
+                      // The first suggestion is the one the history points at; the tick shows it
+                      // is already the answer rather than making you find it.
+                      selected: identical(d, predicted.first),
+                      onTap: () => _pick(d.station),
+                    ),
+                    const VGap.s(),
+                  ],
+                ],
+
+                if (recent.isNotEmpty) ...[
+                  const VGap.s(),
+                  const VSectionHeader('Letzte Ziele', wide: true, onCard: false),
+                  const VGap.s(),
+                  for (final d in recent) ...[
+                    VSelectCard(
+                      leading: const VIconBadge(
+                        icon: Icons.schedule,
+                        tone: VBadgeTone.neutral,
+                        size: VControl.badgeSmall,
+                      ),
+                      title: d.stationName,
+                      selected: false,
+                      onTap: () => _pick(d.station),
+                    ),
+                    const VGap.s(),
+                  ],
+                ],
+
                 const VGap.s(),
-                Text('Der Ausstieg ergibt sich aus der Verbindung. Wir fragen nicht danach.', style: VText.caption),
+                Text(
+                  'Der Ausstieg ergibt sich aus der Verbindung. Wir fragen nicht danach.',
+                  style: VText.caption,
+                ),
               ],
             ),
           ),
@@ -468,9 +623,15 @@ class _WelcherZugSheet extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        VSheetHeader(
-          title: 'Welcher Zug?',
-          subtitle: continueJourneyId == null ? null : 'Deine Fahrt läuft weiter. Die Verspätung zählt am Ziel.',
+        // The clock scene here, not the platform: this is the step that is about a time.
+        _SheetTop(
+          art: VSheetSceneArt.clock,
+          child: VSheetHeader(
+            eyebrow: continueJourneyId == null ? 'Check-in · Schritt 3 von 3' : 'Weiterfahrt',
+            title: 'Welcher Zug?',
+            subtitle: '${from.name} → ${to.name}',
+            narrow: true,
+          ),
         ),
         _Breadcrumb(
           label: '${from.name} → ${to.name}',
@@ -478,7 +639,7 @@ class _WelcherZugSheet extends StatelessWidget {
         ),
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.sheet),
             child: WelcherZugList(
               fromStationId: from.id,
               fromStationName: from.name,

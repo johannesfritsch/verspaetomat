@@ -38,6 +38,7 @@ class VSectionHeader extends StatelessWidget {
     this.onLink,
     this.wide = false,
     this.onCard = true,
+    this.heading = false,
   });
 
   final String label;
@@ -53,6 +54,14 @@ class VSectionHeader extends StatelessWidget {
   /// Whether the header sits inside a card. See the class doc.
   final bool onCard;
 
+  /// Set as a heading rather than a small-caps label.
+  ///
+  /// Ich names its sections this way — „Abzeichen" in full ink at title size, with the link beside
+  /// it — while Wir and Home use the small caps. Both are in the design, so both are here, and the
+  /// rule is which kind of thing the label names: a *heading* introduces a part of the screen you
+  /// could have navigated to on its own, a *label* names the block right under it.
+  final bool heading;
+
   @override
   Widget build(BuildContext context) {
     final hasLink = linkLabel != null;
@@ -60,12 +69,14 @@ class VSectionHeader extends StatelessWidget {
     Widget row = Row(
       children: [
         Expanded(
-          child: VEyebrow(
-            label,
-            size: wide ? VEyebrowSize.wide : VEyebrowSize.m,
-            // A section label is a heading, not a footnote to the block under it.
-            tone: VEyebrowTone.ink,
-          ),
+          child: heading
+              ? Text(label, style: VText.h3, maxLines: 1, overflow: TextOverflow.ellipsis)
+              : VEyebrow(
+                  label,
+                  size: wide ? VEyebrowSize.wide : VEyebrowSize.m,
+                  // A section label is a heading, not a footnote to the block under it.
+                  tone: VEyebrowTone.ink,
+                ),
         ),
         if (hasLink) ...[
           const SizedBox(width: VSpace.s),

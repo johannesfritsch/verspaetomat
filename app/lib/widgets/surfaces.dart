@@ -168,6 +168,14 @@ class VBoard extends StatelessWidget {
   /// a surface rather than on paper.
   final bool glow;
 
+  /// How the board divides between its figure and its margin note.
+  ///
+  /// The note needs enough to set its longest word — „Verspätung" — without breaking it, and the
+  /// figure can always shrink inside its FittedBox. So the note gets a fixed share and the figure
+  /// takes the rest, rather than the other way round.
+  static const _figureFlex = 58;
+  static const _asideFlex = 42;
+
   @override
   Widget build(BuildContext context) {
     final shape = BorderRadius.circular(VRadius.lg);
@@ -178,9 +186,12 @@ class VBoard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: child),
+            Expanded(flex: _figureFlex, child: child),
             const SizedBox(width: VSpace.md),
-            aside!,
+            // A loose share: the aside may take up to its portion of the board and no more, but
+            // it is not made to fill it. Expanded stretched a heart across a third of the card;
+            // a bare maximum let the row hand the note sixty points and break a word in half.
+            Flexible(flex: _asideFlex, fit: FlexFit.loose, child: aside!),
           ],
         ),
       );

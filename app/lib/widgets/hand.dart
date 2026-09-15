@@ -103,13 +103,20 @@ class VHandNote extends StatelessWidget {
         final scaler = MediaQuery.textScalerOf(context);
         final painter = TextPainter(
           textWidthBasis: TextWidthBasis.longestLine,
+          // A margin note breaks where it was written to break and nowhere else. Left to wrap, a
+          // narrow column split „Verspätung" into „Verspätun" and „g", which is not handwriting,
+          // it is a fault.
+          maxLines: null,
           text: span,
           textAlign: align,
           textDirection: direction,
           textScaler: scaler,
         );
 
-        final ceiling = constraints.maxWidth;
+        // Measured unwrapped: the width the note asks for is the width of its longest
+        // authored line, and the caller gives it that or the note overhangs — which on a board is
+        // fine, because the board is wider than the column the note sits in.
+        final ceiling = double.infinity;
         painter.layout(maxWidth: ceiling);
         var width = painter.width;
         var height = painter.height + _inkSlack(span, direction, scaler, ceiling);
@@ -142,7 +149,7 @@ class VHandNote extends StatelessWidget {
                   // which is the centre of the SizedBox, so the painted bounds fill it exactly.
                   child: SizedBox(
                     width: width,
-                    child: Text(text, style: style, textAlign: align),
+                    child: Text(text, style: style, textAlign: align, softWrap: false),
                   ),
                 ),
               ),

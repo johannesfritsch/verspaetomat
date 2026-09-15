@@ -8,11 +8,15 @@ import 'surfaces.dart';
 /// The kit is one import for the whole design system. The pieces live in several files because
 /// one file of three thousand lines is not a system, it is a drawer — but a screen should never
 /// have to know which drawer a widget came out of, so everything comes back out here.
+export 'connection.dart';
 export 'figures.dart';
 export 'hand.dart';
+export 'inputs.dart';
 export 'marks.dart';
+export 'profile.dart';
 export 'rows.dart';
 export 'scaffold.dart';
+export 'sheet_scene.dart';
 export 'surfaces.dart';
 export 'timeline.dart';
 
@@ -1503,10 +1507,25 @@ Future<T?> showVSheet<T>(BuildContext context, {required WidgetBuilder builder, 
 
 /// The little grabber + optional title at the top of a sheet.
 class VSheetHeader extends StatelessWidget {
-  const VSheetHeader({super.key, this.title, this.subtitle, this.trailing});
+  const VSheetHeader({
+    super.key,
+    this.eyebrow,
+    this.title,
+    this.subtitle,
+    this.trailing,
+    this.narrow = false,
+  });
+
+  /// The small-caps line over the title: "Check-in · Schritt 1 von 3".
+  final String? eyebrow;
+
   final String? title;
   final String? subtitle;
   final Widget? trailing;
+
+  /// Keeps the text column to the left of the sheet. With a drawing behind it the right third
+  /// belongs to the picture, and a subtitle running the full width sets straight across a train.
+  final bool narrow;
 
   @override
   Widget build(BuildContext context) {
@@ -1523,7 +1542,7 @@ class VSheetHeader extends StatelessWidget {
 
   Widget _body(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(VSpace.page, 10, VSpace.page, VSpace.s),
+      padding: const EdgeInsets.fromLTRB(VSpace.sheet, 10, VSpace.sheet, VSpace.s),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1548,16 +1567,23 @@ class VSheetHeader extends StatelessWidget {
           if (title != null) ...[
             const SizedBox(height: 18),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
+                  flex: narrow ? 66 : 100,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (eyebrow != null) ...[
+                        VEyebrow(eyebrow!),
+                        const SizedBox(height: 3),
+                      ],
                       Text(title!, style: VText.h2, maxLines: 2, overflow: TextOverflow.ellipsis),
                       if (subtitle != null) ...[const SizedBox(height: 3), Text(subtitle!, style: VText.body)],
                     ],
                   ),
                 ),
+                if (narrow) const Spacer(flex: 34),
                 if (trailing != null) trailing!,
               ],
             ),

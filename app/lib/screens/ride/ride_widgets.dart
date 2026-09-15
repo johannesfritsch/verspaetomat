@@ -219,7 +219,7 @@ class LineBadge extends StatelessWidget {
         // The class, cancelled or not: colour on a line badge is identity, and a cancelled
         // S-Bahn is still an S-Bahn. „Ausfall" under the route is what carries the news.
         cls: vLineClassOf(line),
-        dark: large,
+        look: large ? VLineBadgeLook.dark : VLineBadgeLook.tint,
       );
 }
 
