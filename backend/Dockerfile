@@ -25,6 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 COPY --from=builder /src/target/release/verspaetomat-api /usr/local/bin/verspaetomat-api
 COPY --from=builder /src/target/release/stellwerk /usr/local/bin/stellwerk
+# The uploads volume is mounted here. Creating the directory in the image and giving it to the
+# service user is what makes the volume usable: Docker seeds a fresh named volume from the image's
+# contents at the mount point, ownership included. Without this the volume arrives owned by root,
+# the process runs as `verspaetomat`, and the first ticket photo fails with EACCES.
+RUN mkdir -p /data/uploads && chown -R verspaetomat:verspaetomat /data
 USER verspaetomat
 ENV BIND=0.0.0.0:8080 RUST_LOG=info,tower_http=info,sqlx=warn
 EXPOSE 8080

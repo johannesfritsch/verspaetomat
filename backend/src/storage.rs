@@ -29,6 +29,13 @@ pub fn dir() -> PathBuf {
 pub fn init() -> std::io::Result<PathBuf> {
     let d = dir();
     std::fs::create_dir_all(&d)?;
+    // create_dir_all succeeds on a directory that already exists, including one this process
+    // cannot write to — which is exactly what a root-owned volume under a non-root service user
+    // looks like. Probe a real write, so a misconfigured mount is a failed boot rather than a 500
+    // on the first passenger's ticket.
+    let probe = d.join(".write-probe");
+    std::fs::write(&probe, b"ok")?;
+    std::fs::remove_file(&probe)?;
     Ok(d)
 }
 
