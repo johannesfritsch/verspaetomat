@@ -175,7 +175,10 @@ class _WirScreenState extends State<WirScreen> {
                       VHandArrow(),
                       SizedBox(width: VSpace.xs),
                       Flexible(
-                        child: VHandNote('Zeig, was wir\ngemeinsam schaffen!', angle: -0.06),
+                        // Three lines, as the design draws it. Two put „gemeinsam schaffen!"
+                        // on one line, and a hand note does not re-wrap — so the word ran
+                        // off the screen edge and read „…gemeinsam scha".
+                        child: VHandNote('Zeig, was wir\ngemeinsam\nschaffen!', angle: -0.06),
                       ),
                     ],
                   ),

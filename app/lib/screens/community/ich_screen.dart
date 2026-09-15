@@ -169,6 +169,7 @@ class IchScreen extends StatelessWidget {
                       label: b.name,
                       art: BadgeIcon(badge: b, size: 40),
                       earned: b.earned,
+                      onTap: () => _showBadge(context, b),
                     ),
                 ],
               ),

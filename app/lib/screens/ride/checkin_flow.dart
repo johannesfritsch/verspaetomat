@@ -532,6 +532,8 @@ class _WohinSheetState extends State<_WohinSheet> {
                         size: VControl.badgeSmall,
                       ),
                       title: d.stationName,
+                      // What this place is to you — „Nach Hause" — where the history knows it.
+                      subtitle: d.label,
                       // The first suggestion is the one the history points at; the tick shows it
                       // is already the answer rather than making you find it.
                       selected: identical(d, predicted.first),

@@ -237,7 +237,7 @@ site/
   static/
     verspaetomat.css    the tokens of §3, hand-written
     fonts/archivo-*.woff2 + OFL.txt
-    shots/*.png         out of the tour
+    shots/*.webp        out of the tour, 640 px wide
     og.png, favicon.svg
   og/og.html            the source of og.png, rendered once in a browser
   tests/legal.rs        the drift tests of §4

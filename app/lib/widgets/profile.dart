@@ -202,6 +202,7 @@ class VAchievement extends StatelessWidget {
     required this.label,
     required this.art,
     required this.earned,
+    this.onTap,
   });
 
   /// The disc. Measured 56.9 pt, which no control token carries: it is bigger than
@@ -225,6 +226,10 @@ class VAchievement extends StatelessWidget {
 
   final String label;
 
+  /// What a badge is for: tapping it says what it took to earn, and offers it as a card to share.
+  /// A badge you cannot open is a picture, and the shelf is not a picture gallery.
+  final VoidCallback? onTap;
+
   /// The badge artwork, usually an `Image.asset`. Drawn inside a square of [_artRatio] of the
   /// disc, so artwork of any aspect lands on the same optical size.
   final Widget art;
@@ -232,7 +237,21 @@ class VAchievement extends StatelessWidget {
   final bool earned;
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) {
+    final tile = _tile(context);
+    if (onTap == null) return tile;
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(VRadius.md),
+        child: tile,
+      ),
+    );
+  }
+
+  Widget _tile(BuildContext context) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(

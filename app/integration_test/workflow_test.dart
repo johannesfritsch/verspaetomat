@@ -24,9 +24,8 @@ import 'package:verspaetomat/mock/mock_data.dart' show Mock;
 import 'package:verspaetomat/api/token_store.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart';
-import 'package:verspaetomat/widgets/kit.dart' show VCheckbox;
+import 'package:verspaetomat/widgets/kit.dart' show VCheckbox, VSelectCard;
 import 'package:verspaetomat/screens/ride/welcher_zug_screen.dart';
-import 'package:verspaetomat/screens/ride/wohin_screen.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 
 const adminToken = String.fromEnvironment('ADMIN_TOKEN', defaultValue: 'stellwerk');
@@ -230,7 +229,7 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
   // Step 2: the destinations from history, or the search behind "Bahnhof suchen".
   await pumpUntilFound(tester, find.text('Wohin?'), timeout: const Duration(seconds: 30));
   await settle(tester, 600);
-  final predicted = find.byWidgetPredicate((w) => w is DestinationButton && w.destination.stationName.contains(match));
+  final predicted = find.byWidgetPredicate((w) => w is VSelectCard && w.title.contains(match));
   if (predicted.evaluate().isNotEmpty) {
     // ignore: avoid_print
     print('destination $match: from history');

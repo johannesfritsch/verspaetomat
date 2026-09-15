@@ -86,11 +86,16 @@ pub struct Schuss {
     pub height: u32,
 }
 
+/// The size a shot is actually served at: the tour's 1179x2556 capture, resampled to 640 px wide.
+///
+/// These are only reached when an entry leaves the dimensions out, and they exist so the markup
+/// always carries a width and a height — without them the page reflows as each image lands. They
+/// used to be the raw capture size, which was wrong for every image the site has ever shipped.
 fn shot_width() -> u32 {
-    1179
+    640
 }
 fn shot_height() -> u32 {
-    2556
+    1387
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -16,8 +16,7 @@ import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/state/ride_monitor.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow;
 import 'package:verspaetomat/screens/community/community_widgets.dart' show BadgeIcon;
-import 'package:verspaetomat/screens/ride/wohin_screen.dart' show DestinationButton;
-import 'package:verspaetomat/widgets/kit.dart' show VGhostButton, VListRow, VOutlineButton, VPrimaryButton;
+import 'package:verspaetomat/widgets/kit.dart' show VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
 
 // docs/29: there is one check-in and it is the sheets in `checkin_flow.dart`. The screens that
 // used to be listed here — the departures board, "Wo steigst du aus?", the Wohin? and
@@ -187,7 +186,7 @@ void main() {
     await tester.tap(find.byKey(const Key('von-detected')));
     await wait(tester, 1400);
     await shot('einchecken-wohin-sheet');
-    await tester.tap(find.byType(DestinationButton).last);
+    await tester.tap(find.byType(VSelectCard).first);
     await wait(tester, 1800);
     await shot('einchecken-zug-sheet');
     await dismissSheet(tester);

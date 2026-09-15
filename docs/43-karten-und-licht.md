@@ -179,3 +179,28 @@ dahinter. Auswählen und Bestätigen sind jetzt zwei Handlungen.
 Bahnhofsuhr. Ihre untere Hälfte ist schon fast weiß — sie sind gezeichnet, um beschrieben zu werden.
 Auf dem einen war ein Keks auf der Nase, auf dem anderen ein beleuchtetes DB-Schild; beide sind raus,
 aus dem Grund aus §5.
+
+## 9. Die Website zieht nach
+
+Hausregel: eine sichtbare Änderung in der App ist nicht fertig, solange die Bilder auf
+verspaetomat.de die alte zeigen. Alle fünf sind neu aus der Tour, und zwei Bildunterschriften
+stimmten nicht mehr:
+
+- Home versprach „eine perforierte Fahrkarte mit dem Knopf zum Einchecken". Die Fahrkarte ist aus
+  den Schirmen verschwunden (§2); dort steht jetzt eine Karte.
+- Die Fahrt hieß „Unterwegs, mit Umstieg" und zeigte einen Umstieg. Die Aufnahme aus der Tour ist
+  eine Fahrt ohne — „Zug 1 von 1". Jetzt heißt sie „Unterwegs, Halt für Halt".
+- Der Antragsschalter sprach von drei Verspätungen und 4,50 €. Es sind vier und 6,00 €.
+
+Die Bilder liegen jetzt als **WebP** statt PNG. Mit der neuen Haut — Illustration, Verläufe,
+Schatten — wogen die fünf als PNG zusammen 1,2 MB gegen vorher 848 kB; als WebP sind es 288 kB bei
+denselben 640 px. Für eine Startseite, die jemand unterwegs im Zug öffnet, ist das der
+Unterschied, um den es hier die ganze Zeit geht.
+
+Dabei fielen zwei Regressionen auf, die der Umbau hinterlassen hatte und die nur die Tour findet:
+der Check-in-Schritt 2 tippte noch auf `DestinationButton`, den es nicht mehr gibt, und die
+Abzeichen auf Ich waren nicht mehr antippbar — ein Abzeichen, das sich nicht öffnen lässt, ist ein
+Bild, und das Regal ist keine Galerie. Beides behoben; die Tour läuft wieder ganz durch (75
+Aufnahmen). Der Zielvorschlag trägt wieder sein Etikett („Nach Hause"), das beim Umbau auf
+`VSelectCard` verloren gegangen war.
+

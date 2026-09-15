@@ -52,40 +52,42 @@ text = "An den Verein, den du gewählt hast. Direkt auf sein Konto. Wir sehen da
 eyebrow = "Fünf Bilder"
 title = "Die ganze App."
 
-# Die Bilder kommen aus app/tools/tour.sh, ein Schuss pro Screen, auf 640 px verkleinert.
-# Kein Gerätrahmen, keine Perspektive, kein Schatten: in der App gibt es auch keine.
+# Die Bilder kommen aus app/tools/tour.sh, ein Schuss pro Screen, auf 640 px verkleinert und
+# als WebP gespeichert — als PNG wogen die fünf zusammen 1,2 MB, so sind es 280 kB.
+# Kein Gerätrahmen, keine Perspektive, kein Schlagschatten um das Bild herum: was innen an
+# Schatten zu sehen ist, sind die Karten der App selbst.
 
 [[bilder.schuss]]
-src = "shots/bahnsteig.png"
-alt = "Der Home-Screen: die gemeinsame Wartezeit aller Fahrgäste, darunter eine perforierte Fahrkarte mit dem Knopf zum Einchecken."
+src = "shots/bahnsteig.webp"
+alt = "Der Home-Screen: 1.208.312 gemeinsam gewartete Minuten auf einer dunklen Tafel, darunter der rote Knopf „Einchecken“ mit den drei Fragen „Von wo, wohin, welcher Zug“ und die Geduldspunkte dieser Woche, +96."
 caption = "Ein Knopf, drei Fragen"
 width = 640
 height = 1387
 
 [[bilder.schuss]]
-src = "shots/unterwegs.png"
-alt = "Eine laufende Fahrt: RE 7 nach Rheine, drei Minuten Verspätung, die Haltestellenliste mit Zustieg und Umstieg."
-caption = "Unterwegs, mit Umstieg"
+src = "shots/unterwegs.webp"
+alt = "Eine laufende Fahrt: RE 7 nach Rheine, drei Minuten Verspätung, daneben die neue Ankunftszeit, darunter jeder Halt von Köln Hbf bis Rheine."
+caption = "Unterwegs, Halt für Halt"
 width = 640
 height = 1387
 
 [[bilder.schuss]]
-src = "shots/antraege.png"
-alt = "Der Antragsschalter: drei gesammelte Verspätungen, zusammen 4,50 Euro für die Bahnhofsmission Köln."
-caption = "Der Antrag, fertig"
+src = "shots/antraege.webp"
+alt = "Der Antragsschalter: vier gesammelte Fälle — drei Verspätungen und ein Ausfall — zusammen 6,00 Euro für die Bahnhofsmission Köln, darunter ein zweites Bündel, das erst bei 4,00 Euro rausgeht."
+caption = "Der Antrag, bereit"
 width = 640
 height = 1387
 
 [[bilder.schuss]]
-src = "shots/karte.png"
-alt = "Die Fahrkarte zum Teilen: 68 Minuten Verspätung als große rote Zahl, mit Strecke und Datum."
+src = "shots/karte.webp"
+alt = "Eine Fahrkarte zum Teilen: 68 Minuten Verspätung als große rote Zahl, darunter die Strecke Köln Hbf → Rheine, das Datum und der Satz „68 Minuten zu spät nach Rheine. Immerhin zählt das jetzt für etwas.“"
 caption = "Die Fahrkarte zum Teilen"
 width = 640
 height = 1387
 
 [[bilder.schuss]]
-src = "shots/wir.png"
-alt = "Wir: 1.208.316 gemeinsam gewartete Minuten und was bei den Vereinen angekommen ist."
+src = "shots/wir.webp"
+alt = "Wir: 1.208.316 gemeinsam gewartete Minuten, darunter die drei Vereine mit dem, was bisher für sie bestätigt ist — 12.410 €, 8.730 € und 27.140 €."
 caption = "Wir alle zusammen"
 width = 640
 height = 1387
