@@ -109,8 +109,14 @@ flutter:
   # see https://flutter.dev/to/font-from-package
 
 flutter_launcher_icons:
+  # app_icon.png is the drawing centred on white and filling 80 % of the square: iOS rounds the
+  # corners off it, so nothing important may sit in them.
   image_path: "assets/icon/app_icon.png"
   ios: true
   android: true
-  adaptive_icon_background: "#F3F3F0"
-  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  # Android masks the foreground down to its middle, and only the inner two thirds are certain to
+  # survive — hence a second file, with the same drawing smaller and the white ground cut away
+  # from the corners. The train's own white body stays white, because the cut floods in from the
+  # edges rather than keying the colour.
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
