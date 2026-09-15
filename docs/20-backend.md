@@ -57,7 +57,22 @@ One binary, several loops:
 - Status machine for incidents: `gesammelt → bereit → eingereicht → bestätigt | abgelehnt`, plus `verfallen` from any open state, plus `gedeckelt`.
 - Points: one per minute late from minute 1; cancellation counts as 60; Nachtrag earns 1; only rides with a location fix at the station rank on boards.
 - Relay discipline: nothing is sent without a signed claim and an explicit send call; the server never composes mail to a railway on its own; every inbound mail is forwarded whole.
-- Rehearsals: with `CLAIM_MAIL_REDIRECT=<address>` in the environment, a claim send goes to that address instead of the desk, and subject and body name the desk it was addressed to. It is the only safe way to try the whole claim path against a live mail provider — the operator directory is re-seeded from `fixtures/operators.json` on every boot, so an edited `operators.email` row silently points at the railway again after the next deploy.
+- **Where mail goes is data, not code.** The destination of every outbound claim mail comes from the
+  `mail_routes` table and from nowhere else — no fixture seeds it, no migration inserts into it, and
+  no railway address exists anywhere in this repository. An empty table means nothing can be sent,
+  which is the correct state for a system nobody has told where to send. Manage it with
+  `stellwerk route list | set <desk> <address> [--label …] [--live] | remove <desk>`, and read the
+  answer to "where does this actually go" straight out of `route list`.
+  - This replaced `CLAIM_MAIL_REDIRECT`, an optional environment variable that had to be remembered
+    to be safe and failed open when it was not: unset, empty, whitespace, missing `@`, or the name
+    typed wrong all sent to the railway silently. Two paths never consulted it at all — answering an
+    inbound mail went to whatever `From` that mail carried, which for a `stellwerk reply` rehearsal
+    was a real address, and `stellwerk mail-test` took any address given. All three now read the
+    table; `mail-test` refuses an address no route points at.
+  - A route that is not marked `--live` says so on the subject line and in the first line of the
+    body, so a rehearsal landing in a real inbox cannot be mistaken for a real claim.
+  - The passenger sees the route's address on the Senden step, because that is the address the mail
+    will really go to.
 
 ## What the backend does not do
 

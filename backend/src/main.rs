@@ -173,6 +173,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/ngos", get(admin::ngos_list))
         .route("/admin/ngos/{id}", put(admin::ngo_upsert).delete(admin::ngo_remove))
         .route("/admin/ngos/{id}/report", post(admin::ngo_report))
+        .route("/admin/routes", get(admin::routes).put(admin::route_set))
+        .route("/admin/routes/remove", post(admin::route_remove))
         .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
         .route("/admin/overrides", get(admin::overrides).delete(admin::clear_overrides))
         .layer(CorsLayer::permissive())

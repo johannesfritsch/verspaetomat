@@ -10,7 +10,6 @@ pub struct Fixtures {
     pub operators: Vec<Operator>,
     pub ngos: Vec<Ngo>,
     pub badges: Vec<Badge>,
-    pub community: Community,
     pub boards: Boards,
 }
 
@@ -20,7 +19,6 @@ impl Fixtures {
             operators: load("operators", include_str!("../fixtures/operators.json")),
             ngos: load("ngos", include_str!("../fixtures/ngos.json")),
             badges: load("badges", include_str!("../fixtures/badges.json")),
-            community: load("community", include_str!("../fixtures/community.json")),
             boards: load("boards", include_str!("../fixtures/boards.json")),
         }
     }

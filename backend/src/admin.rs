@@ -203,10 +203,13 @@ pub async fn reply(State(s): State<AppState>, _a: Admin, Path(key): Path<String>
         &s,
         InboundMail {
             to: relay,
-            from: "Servicecenter Fahrgastrechte <fahrgastrechte@deutschebahn.com>".into(),
+            // .invalid is reserved by RFC 2606 and can never be delivered to. A rehearsal must not
+            // put a real railway address anywhere, not even in a From that is only ever displayed:
+            // that string used to be what "Antworten" in the app sent to.
+            from: "Servicecenter Fahrgastrechte <fahrgastrechte@servicecenter.invalid>".into(),
             subject: format!("Ihr Antrag auf Entschädigung – Vorgang {}", &claim.id.simple().to_string()[..10]),
             body,
-            message_id: Some(format!("<stellwerk-{}@deutschebahn.com>", Uuid::new_v4())),
+            message_id: Some(format!("<stellwerk-{}@servicecenter.invalid>", Uuid::new_v4())),
             in_reply_to: None,
             claim_id: Some(claim.id),
             attachments: vec![],
@@ -1044,6 +1047,19 @@ pub async fn mail_test(State(s): State<AppState>, _a: Admin, Path(key): Path<Str
     if !to.contains('@') {
         return Err(err(StatusCode::BAD_REQUEST, "to must be an e-mail address"));
     }
+    // Only an address a route already points at. This command used to take any address at all and
+    // send to it, which made it the third way a real railway could be reached by accident.
+    let known: bool = sqlx::query_scalar("select exists(select 1 from mail_routes where lower(to_address) = lower($1))")
+        .bind(&to)
+        .fetch_one(&s.pool)
+        .await
+        .map_err(internal)?;
+    if !known {
+        return Err(err(
+            StatusCode::PRECONDITION_FAILED,
+            &format!("{to} is not the target of any mail route; add it with `stellwerk route set` first"),
+        ));
+    }
     let claim: Option<ClaimRow> = match b.claim.as_deref().map(str::trim).filter(|x| !x.is_empty()) {
         Some(key) => {
             let cl: Option<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and (id::text = $2 or id::text like $2 || '%') order by created_at desc limit 1")
@@ -1088,4 +1104,80 @@ pub async fn mail_test(State(s): State<AppState>, _a: Admin, Path(key): Path<Str
     .bind(Uuid::new_v4()).bind(c.id).bind(claim.as_ref().map(|cl| cl.id)).bind(&message_id).bind(&relay).bind(&to).bind(subject).bind(&body).bind(dry_run)
     .execute(&s.pool).await.map_err(internal)?;
     Ok(Json(json!({ "from": relay, "to": to, "message_id": message_id, "dry_run": dry_run, "claim_id": claim.map(|cl| cl.id) })))
+}
+
+// ---------------------------------------------------------------------------
+// Mail routes
+// ---------------------------------------------------------------------------
+
+/// Every route, so the question "where does a claim for this desk actually go" has an answer that
+/// can be read rather than reasoned about.
+pub async fn routes(State(s): State<AppState>, _a: Admin) -> ApiResult {
+    let rows: Vec<(String, String, String, bool, Option<String>)> =
+        sqlx::query_as("select desk, to_address, label, live, note from mail_routes order by desk")
+            .fetch_all(&s.pool)
+            .await
+            .map_err(internal)?;
+    Ok(Json(json!(rows
+        .into_iter()
+        .map(|(desk, to_address, label, live, note)| json!({
+            "desk": desk, "to_address": to_address, "label": label, "live": live, "note": note
+        }))
+        .collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+pub struct RouteBody {
+    pub desk: String,
+    pub to_address: Option<String>,
+    pub label: Option<String>,
+    #[serde(default)]
+    pub live: bool,
+    pub note: Option<String>,
+}
+
+/// Create or change one route. This is the only way a destination comes to exist.
+pub async fn route_set(State(s): State<AppState>, _a: Admin, Json(b): Json<RouteBody>) -> ApiResult {
+    let desk = b.desk.trim().to_string();
+    if desk.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "desk is required"));
+    }
+    let Some(to) = b.to_address.as_deref().map(str::trim).filter(|t| t.contains('@') && !t.starts_with('@') && !t.ends_with('@')) else {
+        return Err(err(StatusCode::BAD_REQUEST, "to_address must be an e-mail address"));
+    };
+    let label = b.label.unwrap_or_else(|| if b.live { "Echte Stelle".into() } else { "Probelauf".into() });
+    let row: (String, String, String, bool) = sqlx::query_as(
+        "insert into mail_routes (desk, to_address, label, live, note) values ($1,$2,$3,$4,$5)
+         on conflict (desk) do update set to_address = excluded.to_address, label = excluded.label,
+           live = excluded.live, note = excluded.note, updated_at = now()
+         returning desk, to_address, label, live",
+    )
+    .bind(&desk)
+    .bind(to)
+    .bind(&label)
+    .bind(b.live)
+    .bind(&b.note)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    // An address that decides where a stranger's legal claim lands belongs in the audit trail.
+    crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-set", &format!("{} → {} ({}, live={})", row.0, row.1, row.2, row.3))
+        .await
+        .map_err(internal)?;
+    Ok(Json(json!({ "desk": row.0, "to_address": row.1, "label": row.2, "live": row.3 })))
+}
+
+#[derive(Deserialize)]
+pub struct RouteRemoveBody {
+    pub desk: String,
+}
+
+/// Remove a route. Nothing can be sent to that desk afterwards, which is the point.
+pub async fn route_remove(State(s): State<AppState>, _a: Admin, Json(b): Json<RouteRemoveBody>) -> ApiResult {
+    let n = sqlx::query("delete from mail_routes where desk = $1").bind(b.desk.trim()).execute(&s.pool).await.map_err(internal)?.rows_affected();
+    if n == 0 {
+        return Err(err(StatusCode::NOT_FOUND, "no such route"));
+    }
+    crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-removed", b.desk.trim()).await.map_err(internal)?;
+    Ok(Json(json!({ "removed": b.desk.trim() })))
 }

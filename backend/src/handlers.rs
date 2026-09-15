@@ -1111,8 +1111,15 @@ async fn draft_json(s: &AppState, c: &CustomerRow, claim: &ClaimRow, desk: &str)
     let op: Option<OperatorRow> = sqlx::query_as("select * from operators where desk = $1 limit 1").bind(desk).fetch_optional(&s.pool).await.map_err(internal)?;
     let mut v = claim_with_incidents(&s.pool, claim).await.map_err(internal)?;
     v["desk_address"] = json!(op.as_ref().map(|o| o.postal_address.clone()));
-    v["desk_email"] = json!(op.as_ref().and_then(|o| o.email.clone()));
-    v["desk_accepts_email"] = json!(op.as_ref().map(|o| o.accepts_email).unwrap_or(false));
+    // The address the passenger sees on the Senden step is the address the mail will really go to,
+    // read from the same table the sender reads. Not the railway's published desk, not a label —
+    // the actual destination. If there is no route, there is no address and nothing can be sent,
+    // and the screen says so rather than offering a button that would fail.
+    let route = mail_route(&s.pool, desk).await?;
+    v["desk_email"] = json!(route.as_ref().map(|r| r.to_address.clone()));
+    v["desk_route_label"] = json!(route.as_ref().map(|r| r.label.clone()));
+    v["desk_route_live"] = json!(route.as_ref().map(|r| r.live).unwrap_or(false));
+    v["desk_accepts_email"] = json!(op.as_ref().map(|o| o.accepts_email).unwrap_or(false) && route.is_some());
     v["personal_data_required"] = json!(c.full_name.is_none());
     v["relay_address"] = json!(c.relay_address);
     v["needs_recovery_code"] = json!(sqlx::query_scalar::<_, bool>("select recovery_hash is null from devices where id = $1").bind(c.id).fetch_one(&s.pool).await.map_err(internal)?);
@@ -1328,19 +1335,28 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "max 5 claims per day"));
     }
     let op: Option<OperatorRow> = sqlx::query_as("select * from operators where desk = $1 limit 1").bind(&claim.desk).fetch_optional(&s.pool).await.map_err(internal)?;
-    let Some(desk_address) = op.as_ref().and_then(|o| if o.accepts_email { o.email.clone() } else { None }) else {
+    if !op.as_ref().map(|o| o.accepts_email).unwrap_or(false) {
         return Err(err(StatusCode::PRECONDITION_FAILED, "this desk takes no e-mail; use the paper route"));
+    }
+    // The destination comes from mail_routes and from nowhere else. No fixture seeds that table,
+    // no migration inserts into it, and nothing in this repository knows a railway's address — so
+    // an address exists only because somebody typed it on this machine (`stellwerk route set`).
+    // An empty table means nothing can be sent, which is the correct state for a system that has
+    // never been told where to send. This replaces CLAIM_MAIL_REDIRECT, which had to be remembered
+    // to be safe and failed open when it was not.
+    let Some(route) = mail_route(&s.pool, &claim.desk).await? else {
+        return Err(err(
+            StatusCode::PRECONDITION_FAILED,
+            &format!("no mail route for desk '{}': set one with `stellwerk route set`", claim.desk),
+        ));
     };
-    // A rehearsal must never reach a real railway. With CLAIM_MAIL_REDIRECT set, the claim goes
-    // to that address instead and says on its face whose desk it was addressed to. The operator
-    // directory is re-seeded from the fixture on every boot, so this is the switch to use —
-    // an edited `operators.email` row would quietly go back to the railway on the next deploy.
-    let redirect = std::env::var("CLAIM_MAIL_REDIRECT").ok().map(|r| r.trim().to_string()).filter(|r| r.contains('@'));
-    let to = redirect.clone().unwrap_or_else(|| desk_address.clone());
+    let to = route.to_address.clone();
     let incidents: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date").bind(id).fetch_all(&s.pool).await.map_err(internal)?;
     let body = format!(
         "{}Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
-        redirect.as_ref().map(|_| format!("— Testlauf des Verspätomat: dieser Antrag wäre an {desk_address} gegangen und ist stattdessen hier gelandet. —\n\n")).unwrap_or_default(),
+        // A route the operator has not marked live says so on the face of the mail, so a rehearsal
+        // that lands in a real inbox cannot be mistaken for a real claim.
+        if route.live { String::new() } else { format!("— Testlauf des Verspätomat über die Route \u{201e}{}\u{201c}. —\n\n", route.label) },
         claim.account_holder, name, name
     );
     let attachments = json!([
@@ -1348,9 +1364,10 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         { "name": "EU-Antrag.txt", "content_type": "text/plain", "text": claim_summary_text(&claim, &incidents, &name) },
     ]);
     let message_id = new_message_id();
-    let subject = match &redirect {
-        Some(_) => format!("[Testlauf → {desk_address}] Fahrgastrechte: EU-Antragsformular"),
-        None => "Fahrgastrechte: EU-Antragsformular".to_string(),
+    let subject = if route.live {
+        "Fahrgastrechte: EU-Antragsformular".to_string()
+    } else {
+        format!("[Testlauf · {}] Fahrgastrechte: EU-Antragsformular", route.label)
     };
     let summary = claim_summary_text(&claim, &incidents, &name);
     let rows: Vec<(String, String, Option<String>, Option<Vec<u8>>)> = sqlx::query_as(
@@ -1448,6 +1465,27 @@ pub struct Reply {
 /// The largest single upload. A phone photo sanitised by the app lands well under this; the cap is
 /// here for everything else. `DefaultBodyLimit` in main.rs is set from it, because axum's own
 /// default is 2 MiB and would otherwise reject the request long before this check ran.
+/// One row of [`mail_routes`]: where mail for a desk is allowed to go.
+pub struct MailRoute {
+    pub to_address: String,
+    pub label: String,
+    pub live: bool,
+}
+
+/// The destination for a desk, or None if nobody has set one.
+///
+/// Every outbound path that could reach a railway goes through here. There is deliberately no
+/// fallback, no environment variable and no default: an address exists because a person typed it
+/// into this database, or it does not exist and nothing is sent.
+pub async fn mail_route(pool: &PgPool, desk: &str) -> Result<Option<MailRoute>, (StatusCode, Json<Value>)> {
+    let row: Option<(String, String, bool)> = sqlx::query_as("select to_address, label, live from mail_routes where desk = $1")
+        .bind(desk)
+        .fetch_optional(pool)
+        .await
+        .map_err(internal)?;
+    Ok(row.map(|(to_address, label, live)| MailRoute { to_address, label, live }))
+}
+
 pub const MAX_UPLOAD: usize = 8 * 1024 * 1024;
 
 fn attachment_filename(label: &str, content_type: &str) -> String {
@@ -1470,15 +1508,32 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
         return Err(err(StatusCode::PRECONDITION_FAILED, "personal data required"));
     };
     // Answer from the address the thread belongs to: the claim's, or the customer's for old mail.
-    let relay = match orig.claim_id {
+    // And answer TO the desk's route, never to the inbound mail's own From.
+    //
+    // That From is attacker-controlled in the ordinary case and fabricated in the rehearsal case:
+    // `stellwerk reply` plants a simulated railway answer whose From was a real DB address, so
+    // pressing "Antworten" in the app used to send a real mail to a real railway, with no redirect
+    // consulted on this path at all. Reading the destination from mail_routes closes that by
+    // construction — this path can only reach an address somebody put in the table.
+    let (relay, to) = match orig.claim_id {
         Some(cid) => {
             let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1").bind(cid).fetch_optional(&s.pool).await.map_err(internal)?;
             match claim {
-                Some(cl) => ensure_claim_address(&s.pool, &cl).await.map_err(internal)?,
-                None => c.0.relay_address.clone().unwrap_or_else(|| relay_address_for(c.0.id)),
+                Some(cl) => {
+                    let Some(route) = mail_route(&s.pool, &cl.desk).await? else {
+                        return Err(err(
+                            StatusCode::PRECONDITION_FAILED,
+                            &format!("no mail route for desk '{}': set one with `stellwerk route set`", cl.desk),
+                        ));
+                    };
+                    (ensure_claim_address(&s.pool, &cl).await.map_err(internal)?, route.to_address)
+                }
+                None => return Err(err(StatusCode::PRECONDITION_FAILED, "the claim behind this thread is gone; nothing to answer")),
             }
         }
-        None => c.0.relay_address.clone().unwrap_or_else(|| relay_address_for(c.0.id)),
+        // A mail with no claim has no desk, so there is no route and no destination. Before this
+        // it would have been answered straight back to whatever From it carried.
+        None => return Err(err(StatusCode::PRECONDITION_FAILED, "this thread has no claim; there is no route to answer on")),
     };
     // Attachments: the claim's ticket uploads on request, plus any of the customer's own uploads.
     let mut files: Vec<(String, String, Vec<u8>, Uuid)> = Vec::new();
@@ -1523,7 +1578,7 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     let message_id = new_message_id();
     let sent = crate::mail::send(crate::mail::OutgoingMail {
         from: &format!("{name} <{relay}>"),
-        to: &orig.from_addr,
+        to: &to,
         bcc: Some(&email),
         subject: &format!("Re: {}", orig.subject),
         body: &r.body,
@@ -1874,13 +1929,17 @@ pub async fn community(State(s): State<AppState>, _c: Customer) -> ApiResult {
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
-    let seed = crate::fixtures::Fixtures::embedded().community;
     let ngos = ngo_totals(&s.pool).await.map_err(internal)?;
+    // Counted, not padded. These four used to have a fixture added to them — 1 208 311 minutes and
+    // 18 420 people who do not exist — so Home announced a crowd on a system with none. A figure
+    // this app prints about itself has to be one it can defend, and the honest early number is
+    // small. The per-NGO seeds stay: those record real donations a Verein received before this
+    // existed, and an operator enters them deliberately.
     Ok(Json(json!({
-        "minutes": seed.minutes + minutes,
-        "submitted_cents": seed.submitted_cents + submitted,
-        "confirmed_cents": seed.confirmed_cents + confirmed,
-        "users": seed.users + users,
+        "minutes": minutes,
+        "submitted_cents": submitted,
+        "confirmed_cents": confirmed,
+        "users": users,
         "ngos": ngos.into_iter().map(|n| json!({ "id": n["id"], "name": n["name"], "confirmed_cents": n["confirmed_total_cents"], "submitted_cents": n["submitted_total_cents"] })).collect::<Vec<_>>(),
     })))
 }
@@ -2101,7 +2160,6 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     .await
     .map_err(internal)?;
     let confirmed_all: i64 = sqlx::query_scalar("select coalesce(sum(amount_cents),0)::bigint from incidents where status = 'bestaetigt'").fetch_one(pool).await.map_err(internal)?;
-    let seed = crate::fixtures::Fixtures::embedded().community;
 
     // Next thing.
     let mut candidates = Vec::new();
@@ -2169,7 +2227,7 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
         "level": { "name": level_name, "next_name": next_name, "points_to_next": points_to_next, "progress": progress },
         "money": { "open_cents": open_cents, "missing_cents": missing_cents, "ready": ready, "ready_desk": ready_desk, "ngo_name": ngo_name },
         "board": board,
-        "community": { "minutes_total": seed.minutes + minutes, "my_minutes": points_total, "confirmed_cents": seed.confirmed_cents + confirmed_all, "my_confirmed_cents": my_confirmed },
+        "community": { "minutes_total": minutes, "my_minutes": points_total, "confirmed_cents": confirmed_all, "my_confirmed_cents": my_confirmed },
         "next": next,
     })))
 }

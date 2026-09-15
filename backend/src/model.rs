@@ -58,10 +58,3 @@ pub struct Boards {
     pub germany: Vec<BoardEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Community {
-    pub minutes: i64,
-    pub submitted_cents: i64,
-    pub confirmed_cents: i64,
-    pub users: i64,
-}

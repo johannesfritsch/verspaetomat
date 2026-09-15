@@ -15,6 +15,7 @@
 //!   stellwerk watch Johannes
 //!   stellwerk locate Johannes "Köln Hbf"   |  locate Johannes 50.943,6.9586  |  locate Johannes --clear
 //!   stellwerk forget Johannes
+//!   stellwerk route list | set <desk> <address> [--label …] [--live] | remove <desk>
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
 //!   stellwerk ngo-report bahnhofsmission statement.csv   (or .json)
@@ -179,6 +180,30 @@ enum NgoCmd {
     Import { file: std::path::PathBuf },
     /// Delete an NGO nobody references, otherwise deactivate it
     Remove { id: String },
+}
+
+/// Where claim mail is allowed to go.
+#[derive(Subcommand)]
+enum RouteCmd {
+    /// Every route, and whether its target is the real desk or a stand-in
+    List,
+    /// Point a desk's mail at an address. This is the ONLY way a destination comes to exist.
+    Set {
+        /// The desk, exactly as it appears on a claim, e.g. "Servicecenter Fahrgastrechte"
+        desk: String,
+        /// Where the mail actually goes
+        to: String,
+        /// What this represents, printed in `route list` and on a rehearsal's subject line
+        #[arg(long)]
+        label: Option<String>,
+        /// Assert this is the railway's real desk. Without it every mail says it is a rehearsal.
+        #[arg(long)]
+        live: bool,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Remove a route. Nothing can be sent to that desk afterwards.
+    Remove { desk: String },
 }
 
 #[derive(Subcommand)]
@@ -353,6 +378,11 @@ enum Cmd {
         customer: String,
         #[arg(long)]
         force: bool,
+    },
+    /// Where claim mail is allowed to go. An empty list means nothing can be sent.
+    Route {
+        #[command(subcommand)]
+        cmd: RouteCmd,
     },
     /// Manage the NGOs customers can choose (list, set, import, remove)
     Ngo {
@@ -632,6 +662,43 @@ async fn main() -> anyhow::Result<()> {
             let v = api.delete(&path).await?;
             println!("Vergessen: {} ({}), {} gesendete Anträge", s(&v, "nickname"), s(&v, "forgotten"), s(&v, "sent_claims"));
         }
+        Cmd::Route { cmd } => match cmd {
+            RouteCmd::List => {
+                let v = api.get("/admin/routes").await?;
+                let rows = v.as_array().cloned().unwrap_or_default();
+                if rows.is_empty() {
+                    println!("No routes. Nothing can be sent until one exists:");
+                    println!("  stellwerk route set \"Servicecenter Fahrgastrechte\" du@example.org --label \"Probelauf\"");
+                } else {
+                    println!("{:<34} {:<34} {:<22} echt?", "Schalter", "geht wirklich an", "Bezeichnung");
+                    for r in rows {
+                        println!(
+                            "{:<34} {:<34} {:<22} {}",
+                            r["desk"].as_str().unwrap_or("–"),
+                            r["to_address"].as_str().unwrap_or("–"),
+                            r["label"].as_str().unwrap_or("–"),
+                            if r["live"].as_bool().unwrap_or(false) { "JA — echte Stelle" } else { "nein, Probelauf" }
+                        );
+                    }
+                }
+            }
+            RouteCmd::Set { desk, to, label, live, note } => {
+                let mut body = serde_json::Map::new();
+                body.insert("to_address".into(), json!(to));
+                body.insert("label".into(), json!(label.unwrap_or_else(|| if live { "Echte Stelle".into() } else { "Probelauf".into() })));
+                body.insert("live".into(), json!(live));
+                if let Some(n) = note {
+                    body.insert("note".into(), json!(n));
+                }
+                body.insert("desk".into(), json!(desk));
+                let v = api.put("/admin/routes", Value::Object(body)).await?;
+                println!("{} → {}  ({})", desk, v["to_address"].as_str().unwrap_or("–"), if v["live"].as_bool().unwrap_or(false) { "echte Stelle" } else { "Probelauf" });
+            }
+            RouteCmd::Remove { desk } => {
+                api.post("/admin/routes/remove", json!({ "desk": desk })).await?;
+                println!("{desk}: Route entfernt. An diesen Schalter geht jetzt nichts mehr raus.");
+            }
+        },
         Cmd::Ngo { cmd } => match cmd {
             NgoCmd::List => {
                 let v = api.get("/admin/ngos").await?;
