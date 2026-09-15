@@ -264,7 +264,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 
 /* ── Abschnitte ───────────────────────────────────────────────── */
 
-section { padding-block: 4rem; }
+/* Die Kopfzeile klebt oben, also würde ein Sprung den Abschnittstitel darunter schieben.
+   scroll-margin-top hält ihn frei — etwas mehr als die Leiste hoch ist, damit die Überschrift
+   nicht an ihr klebt. */
+section { padding-block: 4rem; scroll-margin-top: 5.5rem; }
 .sec-kopf { margin-bottom: 2.5rem; }
 .sec-kopf h1, .sec-kopf h2 {
   font-variation-settings: 'wdth' 108;
