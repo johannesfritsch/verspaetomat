@@ -13,12 +13,14 @@ mod pdf;
 mod push;
 mod rules;
 mod scanner;
+mod storage;
 mod train;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{delete, get, patch, post, put},
     Router,
 };
@@ -138,7 +140,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/claims/{id}/sign", post(handlers::claim_sign))
         .route("/v1/claims/{id}/send", post(handlers::claim_send))
         .route("/v1/claims/{id}/seen", post(handlers::claim_seen))
-        .route("/v1/uploads", post(handlers::upload))
+        // axum's own default body limit is 2 MiB, which would reject a ticket photo long before
+        // the handler's 8 MB check could run. The route that takes files gets its own limit; every
+        // other route keeps the small default, which is the right cap for JSON. The layer is set
+        // to twice the handler's cap on purpose: the handler then answers an oversize file with
+        // 413 and the words "max 8 MB", where the layer would answer with an opaque parse error.
+        .route("/v1/uploads", post(handlers::upload).layer(DefaultBodyLimit::max(handlers::MAX_UPLOAD * 2)))
         .route("/v1/mails", get(handlers::mails))
         .route("/v1/mails/{id}/reply", post(handlers::mail_reply))
         .route("/internal/inbound-mail", post(handlers::inbound_mail))
@@ -171,6 +178,10 @@ async fn main() -> anyhow::Result<()> {
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
+
+    // Fail here rather than on the first passenger's ticket if the volume is not mounted.
+    let uploads = storage::init()?;
+    tracing::info!("uploads in {}", uploads.display());
 
     let addr = std::env::var("BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let listener = tokio::net::TcpListener::bind(&addr).await?;

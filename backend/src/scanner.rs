@@ -118,26 +118,51 @@ pub async fn retain_closed_claim(pool: &PgPool, claim_id: Uuid) -> anyhow::Resul
     if keep_correspondence || closed_at.is_none() {
         return Ok(false);
     }
-    let blanked = sqlx::query(
-        "update uploads u set bytes = ''::bytea
-         where octet_length(u.bytes) > 0
+    // Which files this closure releases. Read them first: the row is the only record of where the
+    // file is, so clearing the path before deleting the file would orphan it on the volume.
+    let doomed: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+        "select u.id, u.path from uploads u
+         where (u.path is not null or octet_length(coalesce(u.bytes, ''::bytea)) > 0)
            and u.id in (select upload_id from claim_attachments where claim_id = $1)
            and not exists (select 1 from claim_attachments ca2 join claims c2 on c2.id = ca2.claim_id
                            where ca2.upload_id = u.id and c2.id <> $1 and c2.status not in ('accepted','rejected'))",
     )
     .bind(claim_id)
-    .execute(pool)
-    .await?
-    .rows_affected();
-    let inbound = sqlx::query(
-        "delete from uploads u using mails m
-         where m.claim_id = $1 and m.direction = 'inbound' and u.kind = 'inbound'
-           and u.id::text in (select a->>'upload_id' from jsonb_array_elements(m.attachments) a)",
+    .fetch_all(pool)
+    .await?;
+    for (_, path) in &doomed {
+        if let Some(p) = path {
+            crate::storage::remove(p).await;
+        }
+    }
+    let ids: Vec<Uuid> = doomed.iter().map(|(id, _)| *id).collect();
+    let blanked = if ids.is_empty() {
+        0
+    } else {
+        sqlx::query("update uploads set bytes = ''::bytea, path = null where id = any($1)")
+            .bind(&ids)
+            .execute(pool)
+            .await?
+            .rows_affected()
+    };
+    let inbound_rows: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+        "select u.id, u.path from uploads u join mails m on m.claim_id = $1 and m.direction = 'inbound'
+         where u.kind = 'inbound' and u.id::text in (select a->>'upload_id' from jsonb_array_elements(m.attachments) a)",
     )
     .bind(claim_id)
-    .execute(pool)
-    .await?
-    .rows_affected();
+    .fetch_all(pool)
+    .await?;
+    for (_, path) in &inbound_rows {
+        if let Some(p) = path {
+            crate::storage::remove(p).await;
+        }
+    }
+    let inbound_ids: Vec<Uuid> = inbound_rows.iter().map(|(id, _)| *id).collect();
+    let inbound = if inbound_ids.is_empty() {
+        0
+    } else {
+        sqlx::query("delete from uploads where id = any($1)").bind(&inbound_ids).execute(pool).await?.rows_affected()
+    };
     if blanked + inbound > 0 {
         rules::audit(pool, "claim", claim_id, None, "attachments-deleted", &format!("retention: {blanked} claim uploads blanked, {inbound} inbound attachments deleted")).await?;
     }
@@ -149,7 +174,7 @@ async fn sweep_retention(pool: &PgPool) -> anyhow::Result<usize> {
     let closed: Vec<Uuid> = sqlx::query_scalar(
         "select distinct c.id from claims c join customers cu on cu.id = c.customer_id
          where c.status in ('accepted','rejected') and c.closed_at is not null and not cu.keep_correspondence
-           and (exists (select 1 from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = c.id and octet_length(u.bytes) > 0)
+           and (exists (select 1 from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = c.id and (u.path is not null or octet_length(coalesce(u.bytes, ''::bytea)) > 0))
              or exists (select 1 from mails m join uploads u on u.kind = 'inbound' and u.id::text in (select a->>'upload_id' from jsonb_array_elements(m.attachments) a) where m.claim_id = c.id and m.direction = 'inbound'))",
     )
     .fetch_all(pool)

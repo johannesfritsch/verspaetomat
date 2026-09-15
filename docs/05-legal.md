@@ -29,10 +29,10 @@ Giving each customer a mailbox on our domain and reading what arrives there may 
 
 - Systematic location monitoring plus behavioural triggers make a Datenschutz-Folgenabschätzung (DPIA) very likely mandatory. Commission it before launch.
 - The claim needs name, address, ticket number. Collect them at first claim, not at sign-up. Generate the PDF on the device where possible.
-- Keep the ticket image only while the claim is open, encrypted, so a railway follow-up can be answered; delete it with the claim's closure. The D-Ticket shows a date of birth the app never needs.
+- Keep the ticket image only while the claim is open, so a railway follow-up can be answered; delete it with the claim's closure. The D-Ticket shows a date of birth the app never needs. The bytes sit on the server's own encrypted disk; there is no second, application-level encryption, and the app must not claim one — deletion on our own schedule is the promise we can keep.
 - Sent claims, replies and attachments live in the relay only as long as the claim is open, then only the ledger entry remains, unless the customer chooses to keep the correspondence.
 - No location during the ride. The station nudge uses a geofence; the app may store "you were at Hbf at 08:12" only with the check-in.
-- Signature images are personal data: embed and discard, or store encrypted with separate consent.
+- Signature images are personal data: embed them in the form and delete them with the claim, the same schedule as the ticket.
 - Data export and delete-account must be one tap each.
 
 ## Tax receipts

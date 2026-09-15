@@ -121,6 +121,19 @@ Add:
 
 Copy dumps off the machine from time to time (`scp root@api.verspaetomat.de:/var/backups/verspaetomat-*.sql.gz ~/Backups/`). They contain personal data; keep them encrypted and in the EU.
 
+**The dump does not contain the uploads.** Since migration 0027 the ticket images, signatures and
+inbound attachments are files on the `uploads` Docker volume, not `bytea` in the database, and
+`pg_dump` carries only the row that names them. That is deliberate — it is what keeps the dump
+small enough to move around — and it is survivable, because an upload lives only until its claim
+closes and the passenger still has the original in their own photos. What it means in practice:
+
+- Restoring a dump onto an empty machine brings back every claim with its attachments *missing*.
+  A claim still open would have to have its ticket attached again.
+- If you want them, back the volume up separately:
+  `docker run --rm -v deploy_uploads:/data -v /var/backups:/out alpine tar czf /out/uploads-$(date +%F).tar.gz -C /data .`
+- Never `docker volume rm deploy_uploads` while a claim is open, for the same reason as
+  `docker compose down -v`.
+
 ### A9. Stellwerk against the server
 
 The admin API is reachable over HTTPS, guarded by the long random `ADMIN_TOKEN`. Once:

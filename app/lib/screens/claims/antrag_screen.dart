@@ -786,7 +786,7 @@ class _Ticket extends StatelessWidget {
                 size: VControl.chevron,
                 iconSize: 13,
               ),
-              text: 'Angehängt. Wird verschlüsselt aufbewahrt, bis der Antrag abgeschlossen ist. Dann gelöscht.',
+              text: 'Angehängt. Ort und Zeit sind aus dem Bild entfernt. Es bleibt liegen, bis der Antrag abgeschlossen ist, dann löschen wir es.',
             ),
           ],
           const VGap.l(),

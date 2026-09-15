@@ -979,14 +979,23 @@ async fn render_claim_pdf(pool: &PgPool, claim: &ClaimRow, customer: &CustomerRo
     let incidents: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date").bind(claim.id).fetch_all(pool).await?;
     // By the PNG magic bytes, not by the declared type: an older app build uploads its
     // signature as application/octet-stream, and that signature still belongs on the form.
-    let signature_png: Option<Vec<u8>> = sqlx::query_scalar(
-        "select u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id
-         where ca.claim_id = $1 and ca.label = 'Unterschrift'
-           and substring(u.bytes from 1 for 8) = '\\x89504e470d0a1a0a'::bytea limit 1",
+    let sig: Option<(Option<String>, Option<Vec<u8>>)> = sqlx::query_as(
+        "select u.path, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id
+         where ca.claim_id = $1 and ca.label = 'Unterschrift' limit 1",
     )
     .bind(claim.id)
     .fetch_optional(pool)
     .await?;
+    // The magic bytes are checked here rather than in SQL, because the bytes are a file now. The
+    // check itself stays: an older app build uploads its signature as application/octet-stream,
+    // and that signature still belongs on the form.
+    let signature_png = match sig {
+        Some((path, bytes)) => {
+            let data = crate::storage::load(path.as_deref(), bytes).await;
+            crate::storage::is_png(&data).then_some(data)
+        }
+        None => None,
+    };
     let claim = claim.clone();
     let customer = customer.clone();
     tokio::task::spawn_blocking(move || crate::pdf::render(&crate::pdf::ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png })).await?
@@ -1226,11 +1235,31 @@ pub async fn upload(State(s): State<AppState>, c: Customer, mut mp: Multipart) -
         }
     }
     let Some((ct, data)) = bytes else { return Err(err(StatusCode::BAD_REQUEST, "file missing")) };
-    if data.len() > 8 * 1024 * 1024 {
+    if data.len() > MAX_UPLOAD {
         return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "max 8 MB"));
     }
+    // Only the kinds the app actually sends. The column had no constraint and the value is
+    // load-bearing downstream — attach_ticket selects on kind='ticket', retention on
+    // kind='inbound' — so a typo used to store a file that could never be attached to anything.
+    if !matches!(kind.as_str(), "ticket" | "signature" | "postal_reply") {
+        return Err(err(StatusCode::BAD_REQUEST, "kind must be ticket, signature or postal_reply"));
+    }
     let id = Uuid::new_v4();
-    sqlx::query("insert into uploads (id, customer_id, kind, content_type, bytes) values ($1,$2,$3,$4,$5)").bind(id).bind(c.0.id).bind(&kind).bind(&ct).bind(&data).execute(&s.pool).await.map_err(internal)?;
+    let path = crate::storage::put(id, &data).await.map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &format!("storage: {e}")))?;
+    sqlx::query("insert into uploads (id, customer_id, kind, content_type, path) values ($1,$2,$3,$4,$5)")
+        .bind(id)
+        .bind(c.0.id)
+        .bind(&kind)
+        .bind(&ct)
+        .bind(&path)
+        .execute(&s.pool)
+        .await
+        .map_err(|e| {
+            // The row is the index; a file without one is unreachable, so do not leave it behind.
+            let p = path.clone();
+            tokio::spawn(async move { crate::storage::remove(&p).await });
+            internal(e)
+        })?;
     Ok(Json(json!({ "upload_id": id, "kind": kind, "content_type": ct, "size": data.len() })))
 }
 
@@ -1324,18 +1353,33 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         None => "Fahrgastrechte: EU-Antragsformular".to_string(),
     };
     let summary = claim_summary_text(&claim, &incidents, &name);
-    let mut uploads: Vec<(String, String, Vec<u8>)> = sqlx::query_as::<_, (String, String, Vec<u8>)>(
-        "select ca.label || case when substring(u.bytes from 1 for 8) = '\\x89504e470d0a1a0a'::bytea then '.png'
-                when substring(u.bytes from 1 for 3) = '\\xffd8ff'::bytea then '.jpg' else '' end,
-         u.content_type, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1",
+    let rows: Vec<(String, String, Option<String>, Option<Vec<u8>>)> = sqlx::query_as(
+        "select ca.label, u.content_type, u.path, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1",
     )
     .bind(id)
     .fetch_all(&s.pool)
     .await
     .map_err(internal)?;
+    let mut uploads: Vec<(String, String, Vec<u8>)> = Vec::new();
+    for (label, ct, path, bytes) in rows {
+        let data = crate::storage::load(path.as_deref(), bytes).await;
+        // A file cleared by retention, or one whose volume is not mounted, is skipped rather than
+        // mailed as a nameless nothing. The old query had no such guard.
+        if data.is_empty() {
+            continue;
+        }
+        uploads.push((attachment_filename(&label, &ct), ct, data));
+    }
     uploads.insert(0, ("EU-Antrag.txt".into(), "text/plain".into(), summary.into_bytes()));
     let pdf = render_claim_pdf(&s.pool, &claim, &c.0).await.map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &format!("pdf: {e}")))?;
     uploads.insert(0, ("EU-Antrag.pdf".into(), "application/pdf".into(), pdf));
+    // Postmark refuses a message over 10 MB, and every attachment is base64-encoded on the way out,
+    // which adds a third. Refusing here costs the passenger a message they can act on; letting it
+    // through costs them a 502 after the claim has already been marked sent.
+    let total: usize = uploads.iter().map(|(_, _, b)| b.len()).sum();
+    if total * 4 / 3 > 9 * 1024 * 1024 {
+        return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "attachments too large for one mail"));
+    }
     let sent = crate::mail::send(crate::mail::OutgoingMail {
         from: &format!("{name} <{relay}>"),
         to: &to,
@@ -1401,6 +1445,11 @@ pub struct Reply {
 }
 
 /// File name for an upload: the claim's label when it has one, else the kind, plus the extension.
+/// The largest single upload. A phone photo sanitised by the app lands well under this; the cap is
+/// here for everything else. `DefaultBodyLimit` in main.rs is set from it, because axum's own
+/// default is 2 MiB and would otherwise reject the request long before this check ran.
+pub const MAX_UPLOAD: usize = 8 * 1024 * 1024;
+
 fn attachment_filename(label: &str, content_type: &str) -> String {
     let ext = match content_type {
         ct if ct.starts_with("image/png") => ".png",
@@ -1435,16 +1484,22 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     let mut files: Vec<(String, String, Vec<u8>, Uuid)> = Vec::new();
     if r.attach_ticket {
         if let Some(cid) = orig.claim_id {
-            let rows: Vec<(Uuid, String, String, Vec<u8>)> = sqlx::query_as(
-                "select u.id, ca.label, u.content_type, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1 and u.customer_id = $2 and u.kind = 'ticket' and length(u.bytes) > 0 order by ca.label",
+            let rows: Vec<(Uuid, String, String, Option<String>, Option<Vec<u8>>)> = sqlx::query_as(
+                "select u.id, ca.label, u.content_type, u.path, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id
+                 where ca.claim_id = $1 and u.customer_id = $2 and u.kind = 'ticket'
+                   and (u.path is not null or octet_length(coalesce(u.bytes, ''::bytea)) > 0) order by ca.label",
             )
             .bind(cid)
             .bind(c.0.id)
             .fetch_all(&s.pool)
             .await
             .map_err(internal)?;
-            for (uid, label, ct, bytes) in rows {
-                files.push((attachment_filename(&label, &ct), ct, bytes, uid));
+            for (uid, label, ct, path, bytes) in rows {
+                let data = crate::storage::load(path.as_deref(), bytes).await;
+                if data.is_empty() {
+                    continue;
+                }
+                files.push((attachment_filename(&label, &ct), ct, data, uid));
             }
         }
     }
@@ -1452,8 +1507,9 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
         if files.iter().any(|f| &f.3 == uid) {
             continue;
         }
-        let row: Option<(String, String, Vec<u8>)> = sqlx::query_as("select kind, content_type, bytes from uploads where id = $1 and customer_id = $2").bind(uid).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
-        let Some((kind, ct, bytes)) = row else { return Err(err(StatusCode::NOT_FOUND, &format!("upload {uid} not found"))) };
+        let row: Option<(String, String, Option<String>, Option<Vec<u8>>)> = sqlx::query_as("select kind, content_type, path, bytes from uploads where id = $1 and customer_id = $2").bind(uid).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+        let Some((kind, ct, path, raw)) = row else { return Err(err(StatusCode::NOT_FOUND, &format!("upload {uid} not found"))) };
+        let bytes = crate::storage::load(path.as_deref(), raw).await;
         if bytes.is_empty() {
             return Err(err(StatusCode::GONE, &format!("upload {uid} was deleted by retention")));
         }
@@ -1705,12 +1761,13 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
     // Attachments become uploads of kind 'inbound'; retention deletes them when the claim closes.
     let mut stored: Vec<Value> = Vec::new();
     for (name, ct, bytes) in &m.attachments {
-        if bytes.len() > 8 * 1024 * 1024 {
+        if bytes.len() > MAX_UPLOAD {
             stored.push(json!({ "name": name, "content_type": ct, "size": bytes.len(), "upload_id": null, "skipped": "max 8 MB" }));
             continue;
         }
         let uid = Uuid::new_v4();
-        sqlx::query("insert into uploads (id, customer_id, kind, content_type, bytes) values ($1,$2,'inbound',$3,$4)").bind(uid).bind(cust.id).bind(ct).bind(bytes).execute(&s.pool).await.map_err(internal)?;
+        let path = crate::storage::put(uid, bytes).await.map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &format!("storage: {e}")))?;
+        sqlx::query("insert into uploads (id, customer_id, kind, content_type, path) values ($1,$2,'inbound',$3,$4)").bind(uid).bind(cust.id).bind(ct).bind(&path).execute(&s.pool).await.map_err(internal)?;
         stored.push(json!({ "name": name, "content_type": ct, "size": bytes.len(), "upload_id": uid }));
     }
     let mail: MailRow = sqlx::query_as(

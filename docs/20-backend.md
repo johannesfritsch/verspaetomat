@@ -28,7 +28,7 @@ Where Rust costs more: development speed for a solo developer new to it, and slo
 | Outbound mail | `lettre` over SMTP to a transactional provider (Postmark, Mailgun or SES) with SPF, DKIM, DMARC on the relay domain |
 | Inbound mail | Provider inbound webhook → `POST /internal/inbound-mail` (JSON) or `/internal/inbound-mail/raw` (RFC 822, parsed with `mail-parser`); attachments as uploads of kind `inbound` today, object storage later |
 | PDF | Typst template rendered server-side; signature PNG embedded |
-| Object storage | S3-compatible (ticket images, signatures, PDFs, inbound attachments), encrypted at rest, keyed per claim |
+| File storage | Ticket images, signatures and inbound attachments as files under `UPLOAD_DIR` (a Docker volume on the VPS), one per upload id; the row keeps the path, not the bytes. No application-level encryption: the host disk is encrypted and retention deletes the file. S3 later if one host stops being enough |
 | Push | APNs over HTTP/2 with token auth (`a2`, ring) and FCM HTTP v1 (service-account JWT via `jsonwebtoken`, `reqwest`); `backend/src/push.rs`; dry-run without credentials |
 | Auth | Anonymous device accounts with a bearer token; optional e-mail sign-in later for backup |
 | Observability | `tracing` with JSON logs, OpenTelemetry export |

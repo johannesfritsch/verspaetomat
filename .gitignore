@@ -7,3 +7,6 @@ deploy/secrets/*
 
 # Codex copy of CLAUDE.md, recreated by tooling; not part of the project.
 AGENTS.md
+
+# Uploads written by ./dev.sh. On the server these live on a Docker volume (deploy/docker-compose.yml).
+backend/uploads/
