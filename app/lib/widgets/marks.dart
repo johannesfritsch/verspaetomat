@@ -333,13 +333,17 @@ enum VBadgeTone { red, green, teal, blue, blueDeep, greenBright, neutral }
 class VIconBadge extends StatelessWidget {
   const VIconBadge({
     super.key,
-    required this.icon,
+    this.icon,
     this.tone = VBadgeTone.red,
     this.size = VControl.badge,
     this.iconSize,
-  });
+    this.child,
+    this.filled = false,
+    this.iconColor,
+  }) : assert(icon != null || child != null, 'a badge needs a glyph or a child');
 
-  final IconData icon;
+  /// The glyph in the disc. Null when [child] carries the contents instead.
+  final IconData? icon;
   final VBadgeTone tone;
 
   /// [VControl.badge] heads a block; [VControl.badgeSmall] heads a row in a list.
@@ -347,6 +351,18 @@ class VIconBadge extends StatelessWidget {
 
   /// Only for a glyph whose drawn ink sits far off its box — most Material icons do not.
   final double? iconSize;
+
+  /// Anything that is not a glyph: the step number on the Antrag overview, a partner's own mark
+  /// on the Zweck card. It takes the place of [icon] and inherits nothing but the disc.
+  final Widget? child;
+
+  /// Invert the disc: the tone's ink becomes the fill and the contents go white. The one filled
+  /// disc in a column of tinted ones is the step you are on, or the thing that is done.
+  final bool filled;
+
+  /// Overrides the tone's ink for the glyph only. For the neutral tone, whose ink2 is a shade
+  /// quieter than a glyph that names a block wants to be.
+  final Color? iconColor;
 
   Color get _fill => switch (tone) {
         VBadgeTone.red => VColors.redTint,
@@ -369,11 +385,14 @@ class VIconBadge extends StatelessWidget {
       };
 
   @override
-  Widget build(BuildContext context) => _disc(
-        fill: _fill,
-        size: size,
-        child: Icon(icon, size: iconSize ?? size * _glyphRatio(size), color: _ink),
-      );
+  Widget build(BuildContext context) {
+    final ink = filled ? VColors.inkOnDark : (iconColor ?? _ink);
+    return _disc(
+      fill: filled ? _ink : _fill,
+      size: size,
+      child: child ?? Icon(icon, size: iconSize ?? size * _glyphRatio(size), color: ink),
+    );
+  }
 }
 
 Widget _disc({required Color fill, required double size, required Widget child}) => Container(

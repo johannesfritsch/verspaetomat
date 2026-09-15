@@ -36,6 +36,7 @@ class VSectionHeader extends StatelessWidget {
     super.key,
     this.linkLabel,
     this.onLink,
+    this.trailing,
     this.wide = false,
     this.onCard = true,
     this.heading = false,
@@ -47,6 +48,11 @@ class VSectionHeader extends StatelessWidget {
   final String? linkLabel;
 
   final VoidCallback? onLink;
+
+  /// Anything else at the far end: a figure rather than a link — "4 von 4 · 31,41 €" over the
+  /// list of cases. It wins over [linkLabel], because a row with both has not decided what its
+  /// far end is for.
+  final Widget? trailing;
 
   /// Tracked wider, for a label with nothing around it to hold it together.
   final bool wide;
@@ -64,7 +70,8 @@ class VSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasLink = linkLabel != null;
+    final hasLink = trailing == null && linkLabel != null;
+    final hasEnd = trailing != null || hasLink;
 
     Widget row = Row(
       children: [
@@ -78,7 +85,10 @@ class VSectionHeader extends StatelessWidget {
                   tone: VEyebrowTone.ink,
                 ),
         ),
-        if (hasLink) ...[
+        if (trailing != null) ...[
+          const SizedBox(width: VSpace.s),
+          trailing!,
+        ] else if (hasLink) ...[
           const SizedBox(width: VSpace.s),
           _VSectionLink(label: linkLabel!, onTap: onLink),
         ],
@@ -87,7 +97,7 @@ class VSectionHeader extends StatelessWidget {
 
     // The link is drawn about 20 pt tall in the mockups. It is built at 44 pt of touch area
     // regardless, and that sets the height of the whole row so the label stays centred on it.
-    if (hasLink) {
+    if (hasEnd) {
       row = ConstrainedBox(
         constraints: const BoxConstraints(minHeight: VControl.touch),
         child: Center(child: row),

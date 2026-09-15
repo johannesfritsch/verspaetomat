@@ -493,6 +493,14 @@ enum VNoteTone {
 
   /// A fact. Grey tint.
   neutral,
+
+  /// Something that came out right: a ticket that is attached, a signature that is on file.
+  /// Green tint, green ink.
+  green,
+
+  /// A fact with nothing under it. No tint at all — the note stands on the page rather than in a
+  /// block, for the closing line of a screen where a tinted rectangle would read as an alert.
+  plain,
 }
 
 /// One promise, set apart inside a card: "Am Umstieg fragen wir einmal: bist du drin?".
@@ -503,34 +511,53 @@ enum VNoteTone {
 class VNoteBanner extends StatelessWidget {
   const VNoteBanner({
     super.key,
-    required this.icon,
+    this.icon,
     required this.text,
     this.tone = VNoteTone.red,
+    this.leading,
   });
 
-  final IconData icon;
+  final IconData? icon;
   final String text;
   final VNoteTone tone;
 
+  /// Replaces the bare glyph: the filled tick on "Angehängt" is a [VIconBadge], not an icon.
+  final Widget? leading;
+
+  Color get _ink => switch (tone) {
+        VNoteTone.red => VColors.red,
+        VNoteTone.green => VColors.green,
+        VNoteTone.neutral || VNoteTone.plain => VColors.ink2,
+      };
+
   @override
   Widget build(BuildContext context) {
-    final red = tone == VNoteTone.red;
+    final style = switch (tone) {
+      // Red type on a red tint fails contrast at this size, and a promise you cannot read is
+      // worse than no promise — this is the case redInk exists for.
+      VNoteTone.red => VText.bodyS.copyWith(color: VColors.redInk),
+      // No darkened twin needed here: green (#057D2E) already reads on greenTint, where red
+      // (#D61316) on redTintSoft does not.
+      VNoteTone.green => VText.bodyS.copyWith(color: VColors.green),
+      VNoteTone.neutral || VNoteTone.plain => VText.bodyS,
+    };
+    final row = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Measured at 18 pt; VControl.chevron (20) is the nearest token.
+        leading ?? Icon(icon, size: VControl.chevron, color: _ink),
+        const SizedBox(width: VSpace.md),
+        Expanded(child: Text(text, style: style)),
+      ],
+    );
+    if (tone == VNoteTone.plain) return row;
     return VPanel(
-      tone: red ? VPanelTone.red : VPanelTone.neutral,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Measured at 18 pt; VControl.chevron (20) is the nearest token.
-          Icon(icon, size: VControl.chevron, color: red ? VColors.red : VColors.ink2),
-          const SizedBox(width: VSpace.md),
-          Expanded(
-            child: Text(
-              text,
-              style: red ? VText.bodyS.copyWith(color: VColors.redInk) : VText.bodyS,
-            ),
-          ),
-        ],
-      ),
+      tone: switch (tone) {
+        VNoteTone.red => VPanelTone.red,
+        VNoteTone.green => VPanelTone.green,
+        _ => VPanelTone.neutral,
+      },
+      child: row,
     );
   }
 }

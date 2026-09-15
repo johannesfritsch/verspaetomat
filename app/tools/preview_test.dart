@@ -15,7 +15,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:verspaetomat/theme/tokens.dart';
-import 'package:verspaetomat/widgets/header_scene.dart';
 import 'package:verspaetomat/widgets/kit.dart';
 
 /// The phone the design mockups were drawn for, so a preview can be held against them.
@@ -42,7 +41,7 @@ void main() {
 
   _preview('header-scene-home', height: 210, (context) => const VHeaderScene(height: 190));
 
-  _preview('header-scene-wir', height: 210, (context) => const VHeaderScene(height: 190, heart: true));
+  _preview('header-scene-wir', height: 210, (context) => const VHeaderScene(height: 190, art: VHeaderSceneArt.landscapeHeart));
 
   // The scene has to survive being narrow and being wide: it bleeds off the right edge, and the
   // title stands over its left half at every width.

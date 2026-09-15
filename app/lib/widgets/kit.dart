@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../theme/tokens.dart';
+import 'header_scene.dart';
 import 'surfaces.dart';
 
 /// The kit is one import for the whole design system. The pieces live in several files because
@@ -11,12 +12,14 @@ import 'surfaces.dart';
 export 'connection.dart';
 export 'figures.dart';
 export 'hand.dart';
+export 'header_scene.dart';
 export 'inputs.dart';
 export 'marks.dart';
 export 'profile.dart';
 export 'rows.dart';
 export 'scaffold.dart';
 export 'sheet_scene.dart';
+export 'steps.dart';
 export 'surfaces.dart';
 export 'timeline.dart';
 
@@ -37,6 +40,7 @@ class VScreen extends StatelessWidget {
     this.showBack = true,
     this.scroll = true,
     this.bottom,
+    this.art,
     this.padding = const EdgeInsets.fromLTRB(VSpace.l, VSpace.m, VSpace.l, VSpace.l),
   });
 
@@ -56,6 +60,11 @@ class VScreen extends StatelessWidget {
   final bool showBack;
   final bool scroll;
   final Widget? bottom;
+
+  /// A drawing laid behind the header, running off the top and right of the screen. The Antrag
+  /// gives each of its steps one; most sub-screens have none.
+  final VHeaderSceneArt? art;
+
   final EdgeInsets padding;
 
   @override
@@ -101,6 +110,26 @@ class VScreen extends StatelessWidget {
           )
         : null;
 
+    // The drawing is laid behind the header and sized by it. The negative insets take it back out
+    // past the page gutter to the screen edges, and up under the status bar — Clip.none, or the
+    // Stack trims it to the content width and leaves a strip of bare paper down the right, which
+    // is the side the drawing runs out of.
+    final headerBlock = (header == null || art == null)
+        ? header
+        : Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: -VSpace.l,
+                right: -VSpace.l,
+                top: -(MediaQuery.paddingOf(context).top + VSpace.s),
+                bottom: -VSpace.l,
+                child: ClipRect(child: VHeaderScene(art: art!)),
+              ),
+              header,
+            ],
+          );
+
     final body = Padding(padding: padding, child: child);
 
     return Scaffold(
@@ -109,7 +138,7 @@ class VScreen extends StatelessWidget {
         bottom: bottom == null,
         child: Column(
           children: [
-            if (header != null) header,
+            if (headerBlock != null) headerBlock,
             Expanded(child: scroll ? SingleChildScrollView(child: body) : body),
             if (bottom != null)
               SafeArea(
@@ -626,6 +655,7 @@ class VPrimaryButton extends StatelessWidget {
     required this.label,
     this.onTap,
     this.icon,
+    this.trailingIcon,
     this.expanded = true,
     this.busy = false,
   });
@@ -633,6 +663,12 @@ class VPrimaryButton extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
   final IconData? icon;
+
+  /// A glyph pinned to the right edge while the label stays on the centre line: the arrow that
+  /// says this button goes onward rather than does something here. [icon], by contrast, rides
+  /// with the label and names the action — a paper plane on "Absenden".
+  final IconData? trailingIcon;
+
   final bool expanded;
 
   /// While something is in flight. The label stays, so the button does not change width and the
@@ -661,30 +697,39 @@ class VPrimaryButton extends StatelessWidget {
             splashColor: VColors.redPressed,
             highlightColor: VColors.redPressed,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: VSpace.l),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
+              // The trailing arrow needs room on the right that the label must not grow into,
+              // so both ends are reserved when it is there and the label keeps the centre.
+              padding: EdgeInsets.symmetric(horizontal: trailingIcon == null ? VSpace.l : VSpace.xxl),
+              child: Stack(
+                alignment: Alignment.center,
                 children: [
-                  if (busy) ...[
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: fg),
-                    ),
-                    const SizedBox(width: 10),
-                  ] else if (icon != null) ...[
-                    Icon(icon, size: 20, color: fg),
-                    const SizedBox(width: 10),
-                  ],
-                  Flexible(
-                    child: Text(
-                      label,
-                      style: VText.button.copyWith(color: fg),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (busy) ...[
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: fg),
+                        ),
+                        const SizedBox(width: 10),
+                      ] else if (icon != null) ...[
+                        Icon(icon, size: 20, color: fg),
+                        const SizedBox(width: 10),
+                      ],
+                      Flexible(
+                        child: Text(
+                          label,
+                          style: VText.button.copyWith(color: fg),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
+                  if (trailingIcon != null)
+                    Positioned(right: 0, child: Icon(trailingIcon, size: 20, color: fg)),
                 ],
               ),
             ),
@@ -708,10 +753,22 @@ class VPrimaryButton extends StatelessWidget {
 ///
 /// Give it a bounded slot: a Column, or an Expanded inside a Row.
 class VGhostButton extends StatelessWidget {
-  const VGhostButton({super.key, required this.label, this.onTap, this.icon, this.color = VColors.ink});
+  const VGhostButton({
+    super.key,
+    required this.label,
+    this.onTap,
+    this.icon,
+    this.trailingIcon,
+    this.color = VColors.ink,
+  });
   final String label;
   final VoidCallback? onTap;
   final IconData? icon;
+
+  /// A glyph after the label, inside the centred group rather than at the slot's edge — the
+  /// chevron on "Was ist dieser Verein?", which is a link wearing a button's clothes.
+  final IconData? trailingIcon;
+
   final Color color;
 
   @override
@@ -725,7 +782,10 @@ class VGhostButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null) ...[Icon(icon, size: 20, color: color), const SizedBox(width: 10)],
+            // Not Flexible: this Row may be laid out unbounded (the button shrink-wraps when its
+            // slot does), and a flex child under an unbounded main axis is an error.
             Text(label, style: VText.bodyStrong.copyWith(color: color)),
+            if (trailingIcon != null) ...[const SizedBox(width: 6), Icon(trailingIcon, size: 18, color: color)],
           ],
         ),
       ),
@@ -774,7 +834,7 @@ class VDemoControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
-      painter: _DashedBorderPainter(),
+      painter: const VDashedBorder(),
       child: SizedBox(
         height: 44,
         width: double.infinity,
@@ -794,27 +854,78 @@ class VDemoControl extends StatelessWidget {
   }
 }
 
-class _DashedBorderPainter extends CustomPainter {
+/// The app's one dash walk.
+///
+/// Dashed ink means *not filled in yet*: the showcase control that stands in for the real world,
+/// the dropzone waiting for a picture, the line between one step and the next. Three places, and
+/// the walk is fiddly enough that a second copy would drift — so it is written once and takes
+/// what differs. [VDashedBorder] draws the outline of a rounded rectangle; [VDashedLine] draws a
+/// bare vertical.
+class VDashedBorder extends CustomPainter {
+  const VDashedBorder({
+    this.color = VColors.ink3,
+    this.radius = 4,
+    this.dash = 5,
+    this.gap = 4,
+    this.width = 1,
+  });
+
+  final Color color;
+  final double radius;
+  final double dash;
+  final double gap;
+  final double width;
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = VColors.ink3
+      ..color = color
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    const dash = 5.0, gap = 4.0;
-    final rrect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(4));
-    final path = Path()..addRRect(rrect);
-    for (final metric in path.computeMetrics()) {
-      var d = 0.0;
-      while (d < metric.length) {
-        canvas.drawPath(metric.extractPath(d, math.min(d + dash, metric.length)), paint);
-        d += dash + gap;
-      }
-    }
+      ..strokeWidth = width;
+    final rrect = RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius));
+    _walk(canvas, Path()..addRRect(rrect), paint, dash, gap);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant VDashedBorder old) =>
+      old.color != color || old.radius != radius || old.dash != dash || old.gap != gap || old.width != width;
+}
+
+/// A dashed vertical, top to bottom of its box. The connector between two steps.
+class VDashedLine extends CustomPainter {
+  const VDashedLine({this.color = VColors.hairlineStrong, this.dash = 4, this.gap = 4, this.width = 1.5});
+
+  final Color color;
+  final double dash;
+  final double gap;
+  final double width;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width
+      ..strokeCap = StrokeCap.round;
+    final path = Path()
+      ..moveTo(size.width / 2, 0)
+      ..lineTo(size.width / 2, size.height);
+    _walk(canvas, path, paint, dash, gap);
+  }
+
+  @override
+  bool shouldRepaint(covariant VDashedLine old) =>
+      old.color != color || old.dash != dash || old.gap != gap || old.width != width;
+}
+
+void _walk(Canvas canvas, Path path, Paint paint, double dash, double gap) {
+  for (final metric in path.computeMetrics()) {
+    var d = 0.0;
+    while (d < metric.length) {
+      canvas.drawPath(metric.extractPath(d, math.min(d + dash, metric.length)), paint);
+      d += dash + gap;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -906,24 +1017,36 @@ enum VTone { neutral, ink, red, green }
 
 /// Label on the left, value on the right, on one baseline.
 class VKeyValue extends StatelessWidget {
-  const VKeyValue(this.label, this.value, {super.key, this.strong = false, this.valueStyle});
+  const VKeyValue(this.label, this.value, {super.key, this.strong = false, this.valueStyle, this.trailing});
   final String label;
   final String value;
   final bool strong;
   final TextStyle? valueStyle;
 
+  /// A control after the value: the copy button on an IBAN. It breaks the baseline alignment the
+  /// rest of the row keeps, so it is centred against the line instead.
+  final Widget? trailing;
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Expanded(child: Text(label, style: VText.bodyS.copyWith(color: VColors.ink2))),
-          Text(value, style: valueStyle ?? (strong ? VText.bodySStrong : VText.bodyS).copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
-        ],
-      ),
+    final line = Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Expanded(child: Text(label, style: VText.bodyS.copyWith(color: VColors.ink2))),
+        Text(value, style: valueStyle ?? (strong ? VText.bodySStrong : VText.bodyS).copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
+      ],
+    );
+    if (trailing == null) {
+      return Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: line);
+    }
+    // The control carries its own 44 pt box, so the row no longer needs its own vertical air.
+    return Row(
+      children: [
+        Expanded(child: line),
+        const SizedBox(width: VSpace.xs),
+        trailing!,
+      ],
     );
   }
 }
@@ -1088,12 +1211,17 @@ class VSelectedMark extends StatelessWidget {
 /// A square tick in ink. For a list where several things can be on at once — a round tick
 /// would promise that only one may be.
 class VCheckbox extends StatelessWidget {
-  const VCheckbox({super.key, required this.checked, required this.onTap, this.label});
+  const VCheckbox({super.key, required this.checked, required this.onTap, this.label, this.color = VColors.ink});
   final bool checked;
   final VoidCallback? onTap;
 
   /// For screen readers: what this tick decides.
   final String? label;
+
+  /// What a ticked box fills with. Ink by default, because a multi-select tick is a statement of
+  /// fact and not an action. Red is for the rare list where the ticks decide money: the cases
+  /// going into an Antrag are exactly that, and the sum above them moves as they are touched.
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
@@ -1109,8 +1237,8 @@ class VCheckbox extends StatelessWidget {
             width: 22,
             height: 22,
             decoration: BoxDecoration(
-              color: checked ? VColors.ink : Colors.transparent,
-              border: Border.all(color: checked ? VColors.ink : VColors.rule, width: 1.5),
+              color: checked ? color : Colors.transparent,
+              border: Border.all(color: checked ? color : VColors.rule, width: 1.5),
               borderRadius: BorderRadius.circular(3),
             ),
             child: checked ? const Icon(Icons.check, size: 15, color: VColors.paper) : null,

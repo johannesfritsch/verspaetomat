@@ -33,6 +33,15 @@ enum VCardTone {
   /// A card that sits *below* the page rather than above it: a footnote with a shape. It has no
   /// shadow and leans on its hairline, so use it only where being overlooked is acceptable.
   sunken,
+
+  /// A card tinted red and flattened: the one card in a stack that is *this one*. It keeps the
+  /// card's radius and padding and drops only the shadow, because a tinted card that also floats
+  /// reads as two emphases for one idea.
+  ///
+  /// This is a card, not a [VPanel]: a panel is a tinted block inside a card, and these stand on
+  /// the page next to their plain siblings — the step that is current on the Antrag overview, the
+  /// attachment about to go out with the mail.
+  tint,
 }
 
 /// White, rounded, shadowed. The default surface.
@@ -57,14 +66,18 @@ class VCard extends StatelessWidget {
     final shape = BorderRadius.circular(radius);
     final box = Container(
       decoration: BoxDecoration(
-        color: tone == VCardTone.sunken ? VColors.surfaceMuted : VColors.paperElevated,
+        color: switch (tone) {
+          VCardTone.sunken => VColors.surfaceMuted,
+          VCardTone.tint => VColors.redTintFaint,
+          _ => VColors.paperElevated,
+        },
         borderRadius: shape,
         border: tone == VCardTone.sunken ? Border.all(color: VColors.hairline) : null,
         boxShadow: switch (tone) {
           VCardTone.plain => VShadow.card,
           VCardTone.cta => VShadow.cardCta,
           VCardTone.raised => VShadow.cardRaised,
-          VCardTone.sunken => const <BoxShadow>[],
+          VCardTone.sunken || VCardTone.tint => const <BoxShadow>[],
         },
       ),
       child: Padding(padding: padding, child: child),

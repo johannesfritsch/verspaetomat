@@ -454,7 +454,7 @@ class VTabScaffold extends StatelessWidget {
                 right: -pad.right,
                 top: -top,
                 bottom: -VSpace.l,
-                child: ClipRect(child: VHeaderScene(heart: sceneHeart)),
+                child: ClipRect(child: VHeaderScene(art: sceneHeart ? VHeaderSceneArt.landscapeHeart : VHeaderSceneArt.landscape)),
               ),
               // The floor is on the header, not on the scene, because the scene is sized by the
               // header: a tab whose title block is one short word would otherwise squeeze the
