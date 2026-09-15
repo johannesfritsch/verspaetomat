@@ -1,4 +1,6 @@
-{# Die Bahnhofsuhr, einmal beschrieben. Im Kopf läuft der Sekundenzeiger, im Fuß steht er. #}
+{# Die Bahnhofsuhr, einmal beschrieben. Seit das gezeichnete Zeichen im Kopf steht, ruft sie
+   niemand mehr — sie bleibt, weil der Sekundenzeiger, der bei zwölf wartet, die eigene Geste
+   dieses Produkts ist und beim nächsten Wechsel nicht neu geschrieben werden soll. #}
 {% macro bahnhofsuhr(still=false) %}
     <svg class="clock{% if still %} clock--still{% endif %}" viewBox="0 0 100 100"{% if still %} aria-hidden="true"{% else %} role="img" aria-label="Bahnhofsuhr"{% endif %}>
       <circle cx="50" cy="50" r="48" fill="#FFFFFF" stroke="#111111" stroke-width="3"></circle>
@@ -44,7 +46,8 @@
 
   <header class="kopf">
     <a class="marke" href="/">
-      {{ bahnhofsuhr() }}
+      <img class="logo" src="/logo.webp" srcset="/logo.webp 1x, /logo@2x.webp 2x"
+           alt="" width="232" height="120" decoding="async">
       <span class="wordmark">Verspätomat</span>
     </a>
     {% if nav_seite %}
@@ -61,7 +64,8 @@
     <div class="fuss-oben">
       <div class="fuss-marke">
         <a class="marke" href="/">
-          {{ bahnhofsuhr(true) }}
+          <img class="logo" src="/logo.webp" srcset="/logo.webp 1x, /logo@2x.webp 2x"
+               alt="" width="232" height="120" decoding="async">
           <span class="wordmark">Verspätomat</span>
         </a>
         <p class="fuss-zeile">Verspätungen sammeln. Gutes tun.</p>
