@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:go_router/go_router.dart';
 
 import '../../api/client.dart' show ApiException;
@@ -28,6 +29,17 @@ class AntragScreen extends StatefulWidget {
 
 class _AntragScreenState extends State<AntragScreen> {
   static const _steps = ['Prüfen', 'Ticket', 'Zweck', 'Unterschrift', 'Senden'];
+
+  /// One drawing per step, behind the header. Each names what the step is about rather than
+  /// decorating it: the clock a delay is measured against, a ticket on a phone, a heart in a
+  /// hand, the form under a pen, the letter leaving.
+  static const _art = [
+    VHeaderSceneArt.antragPruefen,
+    VHeaderSceneArt.antragTicket,
+    VHeaderSceneArt.antragZweck,
+    VHeaderSceneArt.antragUnterschrift,
+    VHeaderSceneArt.antragSenden,
+  ];
 
   /// The pre-step: what the five steps are, before the first one asks anything.
   bool _intro = true;
@@ -318,6 +330,7 @@ class _AntragScreenState extends State<AntragScreen> {
       eyebrow: 'Antrag · ${deskDisplay(widget.desk)}',
       title: _steps[_step],
       scroll: true,
+      art: _art[_step],
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -339,7 +352,11 @@ class _AntragScreenState extends State<AntragScreen> {
               ),
             ],
           ] else
-            VPrimaryButton(label: 'Weiter', onTap: _canContinue && !_busy ? () => setState(() => _step += 1) : null),
+            VPrimaryButton(
+              label: 'Weiter',
+              trailingIcon: Icons.arrow_forward,
+              onTap: _canContinue && !_busy ? () => setState(() => _step += 1) : null,
+            ),
           if (_step > 0) ...[
             const VGap.xs(),
             VGhostButton(label: 'Zurück', onTap: () => setState(() => _step -= 1)),
@@ -349,7 +366,7 @@ class _AntragScreenState extends State<AntragScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _StepIndicator(steps: _steps, current: _step),
+          VStepIndicator(steps: _steps, current: _step),
           const VGap.l(),
           content,
           const VGap.xl(),
@@ -410,16 +427,27 @@ class _Ueberblick extends StatelessWidget {
     'Abschicken. Von deiner Verspätomat-Adresse, mit Kopie in dein Postfach.',
   ];
 
+  /// One glyph per step, and each names the step's object rather than its verb: the form, the
+  /// ticket, the Verein, the signature, the letter.
+  static const _icons = [
+    Icons.description_outlined,
+    Icons.confirmation_number_outlined,
+    Icons.favorite_border,
+    Icons.draw_outlined,
+    Icons.send_outlined,
+  ];
+
   @override
   Widget build(BuildContext context) {
     return VScreen(
       eyebrow: 'Antrag · ${deskDisplay(desk)}',
       title: 'So läuft das',
       scroll: true,
+      art: VHeaderSceneArt.antragPruefen,
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          VPrimaryButton(label: 'Los geht\'s', onTap: onStart),
+          VPrimaryButton(label: 'Los geht\'s', trailingIcon: Icons.arrow_forward, onTap: onStart),
           const VGap.xs(),
           VGhostButton(label: 'Später', onTap: () => context.canPop() ? context.pop() : context.go(Routes.antraege)),
         ],
@@ -430,86 +458,29 @@ class _Ueberblick extends StatelessWidget {
           const VGap.s(),
           Text('$cases ${cases == 1 ? 'Fall' : 'Fälle'} · ${fmtCents(amountCents)}', style: VText.h2),
           const VGap.s(),
-          Text('Fünf Schritte, keine zwei Minuten. Zurück kommst du jederzeit.', style: VText.caption),
+          // Broken where the mockup breaks it. The drawing comes down the right of this block,
+          // and one long line would run under the train.
+          Text('Fünf Schritte, keine zwei Minuten.\nZurück kommst du jederzeit.', style: VText.caption),
           const VGap.l(),
-          for (var i = 0; i < steps.length; i++) ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 26,
-                  child: Text('${i + 1}', style: VText.title.copyWith(color: VColors.red)),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(steps[i], style: VText.bodyStrong),
-                      const SizedBox(height: 2),
-                      Text(_what[i], style: VText.bodyS.copyWith(color: VColors.ink2)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (i < steps.length - 1) ...[
-              const VGap.s(),
-              const VRule(),
-              const VGap.s(),
+          VStepList(
+            steps: [
+              for (var i = 0; i < steps.length; i++)
+                VStep(title: steps[i], text: _what[i], icon: _icons[i]),
             ],
-          ],
-          const VGap.xl(),
-          const VRule.red(),
+          ),
+          const VGap.l(),
+          // The mockup closes this block with the thick red rule the redesign retired (docs/43).
+          // A hairline says the same thing without reopening a device that was put away.
+          const VDivider(strong: true),
           const VGap.m(),
-          Text('Der Antrag ist deiner. Wir füllen ihn aus und überbringen ihn, wir schreiben der Bahn nie von uns aus.', style: VText.bodyS.copyWith(color: VColors.ink2)),
+          const VNoteBanner(
+            tone: VNoteTone.plain,
+            icon: Icons.verified_user_outlined,
+            text: 'Der Antrag ist deiner. Wir füllen ihn aus und überbringen ihn, wir schreiben der Bahn nie von uns aus.',
+          ),
           const VGap.xl(),
         ],
       ),
-    );
-  }
-}
-
-class _StepIndicator extends StatelessWidget {
-  const _StepIndicator({required this.steps, required this.current});
-  final List<String> steps;
-  final int current;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 6,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            for (var i = 0; i < steps.length; i++) ...[
-              Text(
-                '${i + 1} ${steps[i]}',
-                style: VText.caption.copyWith(
-                  color: i == current ? VColors.ink : (i < current ? VColors.ink2 : VColors.ink3),
-                  fontWeight: i == current ? FontWeight.w700 : FontWeight.w500,
-                ),
-              ),
-              if (i < steps.length - 1) Text('·', style: VText.caption.copyWith(color: VColors.ink3)),
-            ],
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            for (var i = 0; i < steps.length; i++)
-              Expanded(
-                child: Container(
-                  height: 3,
-                  margin: EdgeInsets.only(right: i < steps.length - 1 ? 4 : 0),
-                  color: i <= current ? VColors.red : VColors.ruleSoft,
-                ),
-              ),
-          ],
-        ),
-      ],
     );
   }
 }
@@ -566,33 +537,45 @@ class _Pruefen extends StatelessWidget {
         const VGap.s(),
         Text('Alle offenen Fälle dieser Stelle sind angehakt. Jeder steht einzeln im Formular.', style: VText.caption),
         const VGap.m(),
-        VSection('Fälle', trailing: Text('${selected.length} von ${cases.length} · ${fmtCents(amount)}', style: VText.captionInk)),
+        VSectionHeader('Fälle', onCard: false, trailing: Text('${selected.length} von ${cases.length} · ${fmtCents(amount)}', style: VText.bodySStrong)),
         if (cases.isEmpty)
           Padding(
             padding: const EdgeInsets.only(top: VSpace.m),
             child: Text('Keine offenen Fälle für diese Stelle.', style: VText.caption),
           ),
-        for (final i in cases)
+        // Each case is its own card. They used to be rows inside one, which read as a table —
+        // and a table is a thing you scan, where this is a list of decisions with money on them.
+        for (final i in cases) ...[
+          const VGap.s(),
           Opacity(
             opacity: selected.contains(i.id) ? 1 : 0.5,
-            child: IncidentRow(
-              incident: i,
-              leading: VCheckbox(
-                checked: selected.contains(i.id),
-                label: '${i.line} am ${Mock.shortDate(i.date)}',
-                onTap: busy ? null : () => onToggle(i.id),
+            child: VCard(
+              padding: const EdgeInsets.symmetric(horizontal: VSpace.cardTight),
+              child: IncidentRow(
+                incident: i,
+                divider: false,
+                chevron: true,
+                leading: VCheckbox(
+                  checked: selected.contains(i.id),
+                  // Red, not ink: these ticks are the only ones in the app that move a sum.
+                  color: VColors.red,
+                  label: '${i.line} am ${Mock.shortDate(i.date)}',
+                  onTap: busy ? null : () => onToggle(i.id),
+                ),
+                onTap: () => showEvidenceSheet(context, i, onDiscard: (reason) => onDiscard(i.id, reason)),
               ),
-              onTap: () => showEvidenceSheet(context, i, onDiscard: (reason) => onDiscard(i.id, reason)),
             ),
           ),
-        const VGap.xs(),
-        Text(
-          'Abhaken nimmt einen Fall nur aus diesem Antrag; er bleibt liegen und kommt in den nächsten. '
-          'Tipp die Zeile an, wenn du den Nachweis sehen oder den Fall ganz verwerfen willst.',
-          style: VText.caption,
+        ],
+        const VGap.m(),
+        const VNoteBanner(
+          tone: VNoteTone.neutral,
+          icon: Icons.info_outline,
+          text: 'Abhaken nimmt einen Fall nur aus diesem Antrag; er bleibt liegen und kommt in den nächsten. '
+              'Tipp die Zeile an, wenn du den Nachweis sehen oder den Fall ganz verwerfen willst.',
         ),
         const VGap.xl(),
-        const VSection('Geht an'),
+        const VSectionHeader('Geht an', onCard: false),
         const VGap.m(),
         if (unknown || (draft.deskAddress == null && draft.deskEmail == null))
           _UnknownDesk(ctl: addressCtl, onChanged: onChanged)
@@ -609,7 +592,7 @@ class _Pruefen extends StatelessWidget {
           ),
         ],
         const VGap.xl(),
-        const VSection('Deine Angaben'),
+        const VSectionHeader('Deine Angaben', onCard: false),
         if (showPersonal || pd == null)
           _PersonalForm(initial: pd, onSaved: onPersonalSaved)
         else ...[
@@ -770,28 +753,49 @@ class _Ticket extends StatelessWidget {
         const VGap.l(),
         for (final m in months) ...[
           if (several) ...[
-            Text(monthLabel(m).toUpperCase(), style: VText.eyebrow),
+            VSectionHeader(monthLabel(m), onCard: false),
             const VGap.s(),
           ],
           if (!uploads.containsKey(m)) ...[
-            VOutlineButton(label: busy ? 'Lädt hoch …' : 'Ticket anhängen', icon: Icons.photo_library_outlined, onTap: busy ? null : () => onAttach(m)),
+            VDropzone(
+              title: busy ? 'Lädt hoch …' : 'Ticket anhängen',
+              text: 'Foto auswählen oder direkt aufnehmen.',
+              hint: 'PNG, JPG oder HEIC',
+              busy: busy,
+              onTap: () => onAttach(m),
+            ),
           ] else ...[
-            MockTicket(name: me?.personalData?.name ?? me?.nickname ?? 'Fahrgast', ticketNumber: me?.personalData?.ticketNumber ?? '–', month: m == 'Ticket' ? 'Fahrkarte' : monthLabel(m)),
+            // The drawn ticket sits on a sunken card, so it reads as a picture of a thing rather
+            // than as another block of this screen.
+            VCard(
+              tone: VCardTone.sunken,
+              padding: const EdgeInsets.all(VSpace.md),
+              child: MockTicket(
+                name: me?.personalData?.name ?? me?.nickname ?? 'Fahrgast',
+                ticketNumber: me?.personalData?.ticketNumber ?? '–',
+                month: m == 'Ticket' ? 'Fahrkarte' : monthLabel(m),
+              ),
+            ),
             const VGap.s(),
-            Row(
-              children: [
-                const Icon(Icons.check, size: 16, color: VColors.green),
-                const SizedBox(width: 6),
-                Expanded(child: Text('Angehängt. Wird verschlüsselt aufbewahrt, bis der Antrag abgeschlossen ist. Dann gelöscht.', style: VText.caption)),
-              ],
+            const VNoteBanner(
+              tone: VNoteTone.green,
+              leading: VIconBadge(
+                icon: Icons.check,
+                tone: VBadgeTone.green,
+                filled: true,
+                size: VControl.chevron,
+                iconSize: 13,
+              ),
+              text: 'Angehängt. Wird verschlüsselt aufbewahrt, bis der Antrag abgeschlossen ist. Dann gelöscht.',
             ),
           ],
           const VGap.l(),
         ],
-        Text(
-          'Noch eine Attrappe: Verspätomat malt hier ein Ticket, statt eines aus deinen Fotos oder '
-          'der Ticket-App zu holen. Der Weg zur Bahn ist echt, das Bild noch nicht.',
-          style: VText.caption,
+        const VNoteBanner(
+          tone: VNoteTone.neutral,
+          icon: Icons.info_outline,
+          text: 'Noch eine Attrappe: Verspätomat malt hier ein Ticket, statt eines aus deinen Fotos oder '
+              'der Ticket-App zu holen. Der Weg zur Bahn ist echt, das Bild noch nicht.',
         ),
       ],
     );
@@ -819,19 +823,40 @@ class _Zweck extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Die Entschädigung geht direkt an:', style: VText.h2),
+        const VGap.s(),
+        Text('Der Verein steht auf dem Formular. Die Bahn überweist direkt dorthin, nicht an dich.', style: VText.caption),
         const VGap.l(),
         if (ngo == null)
           Text('Kein Verein gewählt.', style: VText.body)
         else ...[
-          NgoAccountBox(ngo: ngo),
+          NgoAccountBox(
+            ngo: ngo,
+            onCopyIban: () {
+              Clipboard.setData(ClipboardData(text: ngo.iban));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('IBAN kopiert.')));
+            },
+          ),
           const VGap.xs(),
-          VGhostButton(label: 'Was ist ${ngo.name}?', icon: Icons.info_outline, onTap: () => showNgoSheet(context, ngo)),
+          VGhostButton(
+            label: 'Was ist ${ngo.name}?',
+            icon: Icons.info_outline,
+            trailingIcon: Icons.chevron_right,
+            onTap: () => showNgoSheet(context, ngo),
+          ),
         ],
-        const VGap.s(),
-        Text('So steht es im Formular unter „Name des Kontoinhabers“. Die Bahn überweist dorthin, nicht an dich.', style: VText.caption),
         const VGap.l(),
         if (!other)
-          VOutlineButton(label: 'Anderen Zweck wählen', icon: Icons.swap_horiz, onTap: onOther)
+          // A disclosure, not a button: it opens a list further down this same screen. The
+          // mockup draws it as a tinted row with a chevron, which is what VSelectCard is.
+          VSelectCard(
+            leading: const VIconBadge(icon: Icons.swap_horiz, tone: VBadgeTone.neutral, size: VControl.badgeSmall, iconColor: VColors.ink),
+            selected: false,
+            title: 'Anderen Zweck wählen',
+            // No names here: which Vereine exist is managed data (CLAUDE.md), and naming one the
+            // app has no relationship with implies a partnership that does not exist.
+            subtitle: 'Ein anderer gemeinnütziger Verein, nur für diesen Antrag.',
+            onTap: onOther,
+          )
         else ...[
           // The disclosure's own header: a label naming the list under it, and a quiet way to
           // fold it away again. A VGhostButton stood on the right once, and it is a block

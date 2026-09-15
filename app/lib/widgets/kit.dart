@@ -110,47 +110,45 @@ class VScreen extends StatelessWidget {
           )
         : null;
 
-    // The drawing is laid behind the header and sized by it. The negative insets take it back out
-    // past the page gutter to the screen edges, and up under the status bar — Clip.none, or the
-    // Stack trims it to the content width and leaves a strip of bare paper down the right, which
-    // is the side the drawing runs out of.
-    final headerBlock = (header == null || art == null)
-        ? header
-        : Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                left: -VSpace.l,
-                right: -VSpace.l,
-                top: -(MediaQuery.paddingOf(context).top + VSpace.s),
-                bottom: -VSpace.l,
-                child: ClipRect(child: VHeaderScene(art: art!)),
-              ),
-              header,
-            ],
-          );
-
     final body = Padding(padding: padding, child: child);
+
+    final content = SafeArea(
+      bottom: bottom == null,
+      child: Column(
+        children: [
+          if (header != null) header,
+          Expanded(child: scroll ? SingleChildScrollView(child: body) : body),
+          if (bottom != null)
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(VSpace.l, VSpace.s, VSpace.l, VSpace.m),
+                child: bottom!,
+              ),
+            ),
+        ],
+      ),
+    );
 
     return Scaffold(
       backgroundColor: VColors.paper,
-      body: SafeArea(
-        bottom: bottom == null,
-        child: Column(
-          children: [
-            if (headerBlock != null) headerBlock,
-            Expanded(child: scroll ? SingleChildScrollView(child: body) : body),
-            if (bottom != null)
-              SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(VSpace.l, VSpace.s, VSpace.l, VSpace.m),
-                  child: bottom!,
+      // The drawing hangs from the top of the SCREEN, not from the header: it runs up behind the
+      // status bar and down past the title into the first block, where its own gradients dissolve
+      // it. Sizing it by the header instead made it as tall as whatever the title happened to be
+      // and the art grew or shrank with the length of a word.
+      body: art == null
+          ? content
+          : Stack(
+              children: [
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: VHeaderScene(art: art!),
                 ),
-              ),
-          ],
-        ),
-      ),
+                content,
+              ],
+            ),
     );
   }
 }

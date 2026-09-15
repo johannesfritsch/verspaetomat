@@ -113,7 +113,7 @@ class VStepList extends StatelessWidget {
   /// The rail: a 28 pt disc with air either side of it, so the dashed line falls down its middle
   /// and the cards all start on one left edge.
   static const _disc = 28.0;
-  static const _rail = _disc + VSpace.md;
+  static const _rail = _disc + VSpace.s;
 
   @override
   Widget build(BuildContext context) {

@@ -13,6 +13,7 @@ import '../../repo/app_repository.dart';
 import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../../widgets/ticket.dart' show NgoLogo;
 import '../ride/ride_widgets.dart';
 
 // The claims screens reach for monthLabel and ticketLabel through this file.
@@ -147,10 +148,27 @@ class LoadError extends StatelessWidget {
 /// One incident in the ledger: date, line, route on the left; delay,
 /// amount and status on the right. Hairline below.
 class IncidentRow extends StatelessWidget {
-  const IncidentRow({super.key, required this.incident, this.onTap, this.leading, this.note, this.showStatus = false});
+  const IncidentRow({
+    super.key,
+    required this.incident,
+    this.onTap,
+    this.leading,
+    this.note,
+    this.showStatus = false,
+    this.chevron = false,
+    this.divider = true,
+  });
   final ApiIncident incident;
   final VoidCallback? onTap;
   final Widget? leading;
+
+  /// A chevron at the far end, for when the row is a card of its own and its edge no longer
+  /// says "there is more of me".
+  final bool chevron;
+
+  /// The hairline under the row. On in a list of rows inside one card; off when each case is its
+  /// own card, where the gap between cards already separates them.
+  final bool divider;
 
   /// Show the status chip. Off by default: sections already carry the status in their label.
   final bool showStatus;
@@ -216,10 +234,11 @@ class IncidentRow extends StatelessWidget {
                     ],
                   ],
                 ),
+                if (chevron) ...[const SizedBox(width: VSpace.s), const VChevron()],
               ],
             ),
           ),
-          const VRule(),
+          if (divider) const VRule(),
         ],
       ),
     );
@@ -473,34 +492,61 @@ Future<Uint8List> renderTicketPng({required String name, required String ticketN
 
 /// Where the money lands: the name on the account and the IBAN, exactly as they go on the form.
 class NgoAccountBox extends StatelessWidget {
-  const NgoAccountBox({super.key, required this.ngo, this.showName = true});
+  const NgoAccountBox({super.key, required this.ngo, this.showName = true, this.onCopyIban});
   final ApiNgo ngo;
 
   /// Off inside a sheet, where the header already carries the name.
   final bool showName;
 
+  /// Puts a copy button on the IBAN row. The one number on this screen anybody would want to
+  /// check against a bank statement.
+  final VoidCallback? onCopyIban;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(VSpace.m),
-      decoration: BoxDecoration(
-        color: VColors.paperElevated,
-        border: Border.all(color: VColors.ink, width: 1.5),
-        borderRadius: BorderRadius.circular(4),
-      ),
+    return VCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (showName) ...[
-            Text(ngo.name, style: VText.title),
-            const SizedBox(height: 2),
-            Text(ngo.tagline, style: VText.caption),
-            const VGap.m(),
-            const VRule(),
+            Row(
+              children: [
+                // The partner's own mark when it has sent one; otherwise a glyph. A logo is
+                // managed data (docs/05), never an asset in the bundle.
+                VIconBadge(
+                  icon: Icons.volunteer_activism_outlined,
+                  tone: VBadgeTone.green,
+                  size: VControl.badge,
+                  child: NgoLogo.decode(ngo.logo) == null
+                      ? null
+                      : NgoLogo(dataUri: ngo.logo, height: VControl.badge * 0.56),
+                ),
+                const SizedBox(width: VSpace.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(ngo.name, style: VText.title),
+                      const SizedBox(height: 2),
+                      Text(ngo.tagline, style: VText.caption),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const VGap.s(),
+            const VDivider(),
           ],
           VKeyValue('Kontoinhaber', ngo.accountHolder, strong: true),
-          const VRule(),
-          VKeyValue('IBAN', ngo.iban, valueStyle: VText.mono),
+          const VDivider(),
+          VKeyValue(
+            'IBAN',
+            ngo.iban,
+            valueStyle: VText.mono,
+            trailing: onCopyIban == null
+                ? null
+                : VIconButton(icon: Icons.content_copy_outlined, color: VColors.ink2, onTap: onCopyIban!),
+          ),
         ],
       ),
     );
