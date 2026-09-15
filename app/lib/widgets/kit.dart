@@ -696,6 +696,17 @@ class VPrimaryButton extends StatelessWidget {
   }
 }
 
+/// The third tier of the button ladder: a label on the page, no fill, no border.
+///
+/// It is a block control and fills the width it is given — the quiet second action under a
+/// [VPrimaryButton]. It does not *ask* for that width, though. It used to say
+/// `width: double.infinity`, which means the same thing under a bounded parent and is a trap under
+/// an unbounded one: in a Row's non-flex slot there is nothing finite to clamp against, so the
+/// button reports an infinite width, every flex sibling is laid out at zero, and the label is
+/// centred off the screen. The inner Row is [MainAxisSize.max] already, so a bounded parent still
+/// gets a full-width button and an unbounded one now gets a button the width of its label.
+///
+/// Give it a bounded slot: a Column, or an Expanded inside a Row.
 class VGhostButton extends StatelessWidget {
   const VGhostButton({super.key, required this.label, this.onTap, this.icon, this.color = VColors.ink});
   final String label;
@@ -707,7 +718,6 @@ class VGhostButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       height: 52,
-      width: double.infinity,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(4),

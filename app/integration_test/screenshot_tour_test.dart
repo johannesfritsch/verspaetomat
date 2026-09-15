@@ -98,6 +98,53 @@ void main() {
     await tester.tap(find.text('Los geht\'s'));
     await shot('antrag-pruefen');
 
+    // On to the Zweck step, and then open the list of other Vereine. This is the one corner of
+    // the flow the tour never reached, which is how a Row that put a full-width block button in
+    // a non-flex slot got as far as TestFlight: in release the label came out one letter per
+    // line and the button was centred off the screen (test/ghost_button_row_test.dart).
+    // Two gates stand in the way, and both are the point of their step: „Prüfen" holds until the
+    // passenger's own details are on file, and „Ticket" until a ticket hangs on the claim.
+    Future<void> weiter() async {
+      await tester.tap(find.widgetWithText(VPrimaryButton, 'Weiter').first);
+      await wait(tester, 1200);
+    }
+    Future<void> tapIt(Finder f) async {
+      await tester.ensureVisible(f);
+      await wait(tester, 400);
+      await tester.tap(f);
+    }
+    final speichern = find.widgetWithText(VOutlineButton, 'Speichern');
+    if (speichern.evaluate().isNotEmpty) {
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), 'Johannes Fritsch');
+      await tester.enterText(fields.at(1), 'Bahnhofstraße 1, 50667 Köln');
+      await tester.enterText(fields.at(2), 'johannes@example.org');
+      await wait(tester, 400);
+      await tapIt(speichern.first);
+      await wait(tester, 1500);
+      // Saving the details for the first time is also when the twelve words appear, once. The
+      // sheet covers the bottom bar, so it has to be answered before "Weiter" can be reached.
+      final notiert = find.widgetWithText(VPrimaryButton, 'Ich habe es notiert');
+      if (notiert.evaluate().isNotEmpty) {
+        await shot('wiederherstellungscode');
+        await tester.tap(notiert.first);
+        await wait(tester, 900);
+      }
+    }
+    await weiter();
+    // This claim spans two months, and every month is its own ticket, so the step holds until
+    // each one has a picture on it.
+    final anhaengen = find.widgetWithText(VOutlineButton, 'Ticket anhängen');
+    while (anhaengen.evaluate().isNotEmpty) {
+      await tapIt(anhaengen.first);
+      await wait(tester, 2500);
+    }
+    await weiter();
+    await shot('antrag-zweck');
+    await tapIt(find.widgetWithText(VOutlineButton, 'Anderen Zweck wählen').first);
+    await wait(tester, 900);
+    await shot('antrag-zweck-offen');
+
     RideMonitor monitor() => RideScope.read(tester.element(find.byType(Scaffold).first))!;
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
     await wait(tester, 600);

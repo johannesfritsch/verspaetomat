@@ -833,10 +833,15 @@ class _Zweck extends StatelessWidget {
         if (!other)
           VOutlineButton(label: 'Anderen Zweck wählen', icon: Icons.swap_horiz, onTap: onOther)
         else ...[
+          // The disclosure's own header: a label naming the list under it, and a quiet way to
+          // fold it away again. A VGhostButton stood on the right once, and it is a block
+          // control — full width by design — so in a Row's non-flex slot it claimed an infinite
+          // width and left the label none of it (test/ghost_button_row_test.dart). VIconButton
+          // brings its own 44 pt box, which is also what sets the height of this row.
           Row(
             children: [
-              Expanded(child: Text('Nur für diesen Antrag', style: VText.eyebrow)),
-              VGhostButton(label: 'Schließen', onTap: onOther),
+              const Expanded(child: VEyebrow('Nur für diesen Antrag', tone: VEyebrowTone.ink)),
+              VIconButton(icon: Icons.close, color: VColors.ink2, onTap: onOther),
             ],
           ),
           const VGap.s(),
