@@ -14,9 +14,9 @@ import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/state/ride_monitor.dart';
-import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow;
+import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow, SignaturePad;
 import 'package:verspaetomat/screens/community/community_widgets.dart' show BadgeIcon;
-import 'package:verspaetomat/widgets/kit.dart' show VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
+import 'package:verspaetomat/widgets/kit.dart' show VCard, VDropzone, VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
 
 // docs/29: there is one check-in and it is the sheets in `checkin_flow.dart`. The screens that
 // used to be listed here — the departures board, "Wo steigst du aus?", the Wohin? and
@@ -134,16 +134,38 @@ void main() {
     await weiter();
     // This claim spans two months, and every month is its own ticket, so the step holds until
     // each one has a picture on it.
-    final anhaengen = find.widgetWithText(VOutlineButton, 'Ticket anhängen');
+    final anhaengen = find.widgetWithText(VDropzone, 'Ticket anhängen');
     while (anhaengen.evaluate().isNotEmpty) {
       await tapIt(anhaengen.first);
       await wait(tester, 2500);
     }
     await weiter();
     await shot('antrag-zweck');
-    await tapIt(find.widgetWithText(VOutlineButton, 'Anderen Zweck wählen').first);
+    await tapIt(find.widgetWithText(VCard, 'Anderen Zweck wählen').first);
     await wait(tester, 900);
     await shot('antrag-zweck-offen');
+
+    // Fold the list away again, then on through the last two steps. Unterschrift will not let go
+    // until the claim is signed, so the tour draws on the pad and confirms.
+    await tapIt(find.byIcon(Icons.close).first);
+    await wait(tester, 700);
+    await weiter();
+    await shot('antrag-unterschrift');
+    final pad = find.byType(SignaturePad);
+    if (pad.evaluate().isNotEmpty) {
+      await tester.ensureVisible(pad);
+      await wait(tester, 400);
+      final c = tester.getCenter(pad);
+      await tester.dragFrom(c - const Offset(60, 10), const Offset(40, 20));
+      await wait(tester, 300);
+      await tester.dragFrom(c + const Offset(0, 10), const Offset(50, -25));
+      await wait(tester, 500);
+      await shot('antrag-unterschrift-gezeichnet');
+      await tapIt(find.widgetWithText(VOutlineButton, 'Bestätigen').first);
+      await wait(tester, 2500);
+    }
+    await weiter();
+    await shot('antrag-senden');
 
     RideMonitor monitor() => RideScope.read(tester.element(find.byType(Scaffold).first))!;
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);

@@ -70,14 +70,54 @@ class _ClaimPdfPreviewState extends State<ClaimPdfPreview> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: double.infinity,
-          height: widget.height,
-          decoration: BoxDecoration(color: VColors.paperElevated, border: Border.all(color: VColors.rule)),
-          child: _loading
+    return VCard(
+      padding: const EdgeInsets.all(VSpace.cardTight),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // The card's own header names the document and offers the full-screen view, so the
+          // preview underneath is only the page.
+          Row(
+            children: [
+              const VIconBadge(icon: Icons.description_outlined, size: VControl.badgeSmall),
+              const SizedBox(width: VSpace.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('EU-Antragsformular', style: VText.title),
+                    const SizedBox(height: 2),
+                    Text('Ausgefüllt mit deinen Angaben', style: VText.caption),
+                  ],
+                ),
+              ),
+              if (!_loading && _error == null)
+                TextButton(
+                  onPressed: () => _openFull(context),
+                  style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: VSpace.s)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('Vollbild', style: VText.bodySStrong.copyWith(color: VColors.red)),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.open_in_full, size: VControl.chevronSmall, color: VColors.red),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const VGap.s(),
+          // The page itself, sunk into the card so the white paper of the form reads as paper
+          // rather than as more card.
+          Container(
+            width: double.infinity,
+            height: widget.height,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: VColors.surfaceMuted,
+              borderRadius: BorderRadius.circular(VRadius.md),
+            ),
+            child: _loading
               ? Center(child: Text('Formular wird erzeugt …', style: VText.caption))
               : _error != null
                   ? Center(
@@ -94,19 +134,19 @@ class _ClaimPdfPreviewState extends State<ClaimPdfPreview> {
                       onTap: () => _openFull(context),
                       child: Image.memory(_firstPage!, fit: BoxFit.contain, alignment: Alignment.topCenter, gaplessPlayback: true),
                     ),
-        ),
-        if (!_loading && _error == null)
-          Row(
-            children: [
-              Expanded(child: Text(_pages > 1 ? 'Seite 1 von $_pages · EU-Antragsformular' : 'EU-Antragsformular', style: VText.caption)),
-              TextButton(
-                onPressed: () => _openFull(context),
-                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
-                child: Text('Vollbild', style: VText.bodySStrong.copyWith(color: VColors.red)),
-              ),
-            ],
           ),
-      ],
+          // The page count only when there is one to give. The mockup prints „1 / 4"; the form
+          // this app sends is one page, asserted in backend/src/pdf.rs, so a counter here would
+          // be a claim about a document the passenger is about to certify as true.
+          if (!_loading && _error == null && _pages > 1) ...[
+            const VGap.xs(),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text('Seite 1 von $_pages', style: VText.caption),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

@@ -67,11 +67,14 @@ class VHeaderScene extends StatelessWidget {
         // drawing is meant to run up behind the status bar and off the screen.
         child: ShaderMask(
           blendMode: BlendMode.dstIn,
-          shaderCallback: (rect) => const LinearGradient(
+          shaderCallback: (rect) => LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Colors.white, Colors.white, Colors.transparent],
-            stops: [0, 0.88, 1],
+            colors: const [Colors.white, Colors.white, Colors.transparent],
+            // The landscape holds almost to its own edge and only stops short of the first card.
+            // A corner vignette has to give way sooner: the step ribbon crosses its lower half,
+            // and five small words have to stay legible over whatever is behind them.
+            stops: _isAntrag ? const [0, 0.42, 0.78] : const [0, 0.88, 1],
           ).createShader(rect),
           child: ShaderMask(
             blendMode: BlendMode.dstIn,

@@ -697,28 +697,36 @@ class _SignaturePadState extends State<SignaturePad> {
               width: double.infinity,
               decoration: BoxDecoration(
                 color: VColors.paperElevated,
-                border: Border.all(color: VColors.rule),
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(VRadius.lg),
+                boxShadow: VShadow.card,
               ),
               child: Stack(
                 children: [
-                  Positioned(left: 14, right: 14, bottom: 30, child: Container(height: 1, color: VColors.rule)),
-                  Positioned(left: 14, bottom: 10, child: Text('Unterschrift', style: VText.caption)),
-                  if (_strokes.isEmpty) Center(child: Text('Hier unterschreiben', style: VText.body.copyWith(color: VColors.ink3))),
+                  // The baseline you sign on, and the invitation under it — the way a form on
+                  // paper is laid out, rather than a caption floating in a box.
+                  Positioned(left: VSpace.m, right: VSpace.m, bottom: 30, child: Container(height: 1, color: VColors.hairlineStrong)),
+                  Positioned(
+                    left: VSpace.m,
+                    right: VSpace.m,
+                    bottom: 8,
+                    child: Center(child: Text('Hier unterschreiben', style: VText.caption)),
+                  ),
                   CustomPaint(size: Size.infinite, painter: _StrokePainter(_strokes)),
+                  if (_strokes.isNotEmpty)
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: VIconButton(
+                        icon: Icons.delete_outline,
+                        color: VColors.ink2,
+                        onTap: () => setState(_strokes.clear),
+                      ),
+                    ),
                 ],
               ),
             ),
           ),
         ),
-        if (_strokes.isNotEmpty)
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: () => setState(_strokes.clear),
-              child: Text('Löschen', style: VText.caption),
-            ),
-          ),
       ],
     );
   }
@@ -765,10 +773,14 @@ class _StrokePainter extends CustomPainter {
 /// another surface (app/STYLE.md, docs/33). A box inside a box gave Anträge three different
 /// left edges on one screen.
 class MailView extends StatelessWidget {
-  const MailView({super.key, required this.mail, this.compact = false, this.bcc, this.boxed = true});
+  const MailView({super.key, required this.mail, this.compact = false, this.bcc, this.boxed = true, this.showAttachments = true});
   final ApiMail mail;
   final bool compact;
   final bool boxed;
+
+  /// The paperclip list at the foot of the mail. Off where the screen lists the files itself, so
+  /// the same attachments are not named twice.
+  final bool showAttachments;
 
   /// Overrides the BCC header line (e.g. "… (dein Postfach)").
   final String? bcc;
@@ -797,7 +809,7 @@ class MailView extends StatelessWidget {
           const VRule(),
           const VGap.s(),
           Text(mail.body, style: VText.bodyS, maxLines: compact ? 6 : null, overflow: compact ? TextOverflow.ellipsis : null),
-          if (mail.attachments.isNotEmpty) ...[
+          if (showAttachments && mail.attachments.isNotEmpty) ...[
             const VGap.m(),
             for (final a in mail.attachments)
               Padding(

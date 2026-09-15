@@ -848,14 +848,31 @@ class _Zweck extends StatelessWidget {
         if (!other)
           // A disclosure, not a button: it opens a list further down this same screen. The
           // mockup draws it as a tinted row with a chevron, which is what VSelectCard is.
-          VSelectCard(
-            leading: const VIconBadge(icon: Icons.swap_horiz, tone: VBadgeTone.neutral, size: VControl.badgeSmall, iconColor: VColors.ink),
-            selected: false,
-            title: 'Anderen Zweck wählen',
-            // No names here: which Vereine exist is managed data (CLAUDE.md), and naming one the
-            // app has no relationship with implies a partnership that does not exist.
-            subtitle: 'Ein anderer gemeinnütziger Verein, nur für diesen Antrag.',
+          VCard(
+            tone: VCardTone.sunken,
+            padding: const EdgeInsets.all(VSpace.cardTight),
             onTap: onOther,
+            child: Row(
+              children: [
+                const VIconBadge(icon: Icons.swap_horiz, tone: VBadgeTone.neutral, size: VControl.badgeSmall, iconColor: VColors.ink),
+                const SizedBox(width: VSpace.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Anderen Zweck wählen', style: VText.title),
+                      const SizedBox(height: 2),
+                      // No names here: which Vereine exist is managed data (CLAUDE.md), and
+                      // naming one the app has no relationship with implies a partnership that
+                      // does not exist.
+                      Text('Ein anderer gemeinnütziger Verein, nur für diesen Antrag.', style: VText.bodyS.copyWith(color: VColors.ink2)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: VSpace.s),
+                const VChevron(),
+              ],
+            ),
           )
         else ...[
           // The disclosure's own header: a label naming the list under it, and a quiet way to
@@ -916,7 +933,9 @@ class _Unterschrift extends StatelessWidget {
         const VGap.m(),
         ClaimPdfPreview(claimId: draft.claim.id, reloadKey: signed),
         const VGap.l(),
-        const VRule.red(),
+        // The mockup closes the document block with the thick red rule the redesign retired
+        // (docs/43 §1). The hairline is the device that replaced it.
+        const VDivider(strong: true),
         const VGap.m(),
         Text('Ich bestätige, dass die Angaben stimmen und ich Inhaber:in des Tickets bin.', style: VText.bodyStrong),
         const VGap.xs(),
@@ -933,16 +952,16 @@ class _Unterschrift extends StatelessWidget {
         ),
         const VGap.s(),
         SignaturePad(controller: controller, onSigned: () {}),
-        const VGap.xs(),
+        const VGap.s(),
         if (!signed)
           VOutlineButton(label: busy ? 'Speichert …' : 'Bestätigen', icon: Icons.check, onTap: busy ? null : onSign)
         else
-          Row(
-            children: [
-              const Icon(Icons.check, size: 16, color: VColors.green),
-              const SizedBox(width: 6),
-              Expanded(child: Text('Bestätigt. Deine Unterschrift bleibt nur in diesem Antrag.', style: VText.caption)),
-            ],
+          // Untinted, so the screen does not end in a coloured block under the signature — but
+          // the tick itself is green, which is the one word this line has to say.
+          const VNoteBanner(
+            tone: VNoteTone.plain,
+            leading: Icon(Icons.check, size: VControl.chevron, color: VColors.green),
+            text: 'Bestätigt. Deine Unterschrift bleibt nur in diesem Antrag.',
           ),
       ],
     );
@@ -996,13 +1015,70 @@ class _Senden extends StatelessWidget {
         if (paperOnly) ...[
           Text(draft.deskAddress ?? 'Adresse siehe Betreiber', style: VText.bodyStrong),
           const VGap.m(),
-        ] else
-          MailView(mail: mail),
-        const VGap.m(),
-        Text('ANHANG', style: VText.eyebrow),
-        const VGap.xs(),
-        ClaimPdfPreview(claimId: draft.claim.id, reloadKey: draft.claim.signedBy, height: 260),
-        const VGap.m(),
+        ] else ...[
+          VCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const VIconBadge(icon: Icons.mail_outline, size: VControl.badgeSmall),
+                    const SizedBox(width: VSpace.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('E-Mail-Vorschau', style: VText.title),
+                          const SizedBox(height: 2),
+                          Text('So wird deine E-Mail versendet.', style: VText.caption),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const VGap.s(),
+                const VDivider(),
+                const VGap.s(),
+                // No attachment list inside the mail: the rows under this card carry them, one
+                // per file, so what is listed is what actually leaves.
+                MailView(mail: mail, boxed: false, showAttachments: false),
+              ],
+            ),
+          ),
+          const VGap.s(),
+          // Every file that goes with the mail, under the name it will carry. The mockup draws a
+          // single „EU-Antragsformular (ausgefüllt) · PDF · 1,2 MB": one attachment of four, a
+          // name the mail does not use, and a size nothing in the app knows.
+          for (final a in mail.attachments) ...[
+            VCard(
+              tone: VCardTone.tint,
+              padding: const EdgeInsets.all(VSpace.cardTight),
+              onTap: a.endsWith('.pdf') ? () => ClaimPdfPage.open(context, draft.claim.id) : null,
+              child: Row(
+                children: [
+                  VIconBadge(
+                    icon: a.endsWith('.pdf') ? Icons.description_outlined : Icons.image_outlined,
+                    size: VControl.badgeSmall,
+                  ),
+                  const SizedBox(width: VSpace.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Anhang', style: VText.bodyStrong),
+                        const SizedBox(height: 2),
+                        Text(a, style: VText.caption),
+                      ],
+                    ),
+                  ),
+                  if (a.endsWith('.pdf')) const VChevron(),
+                ],
+              ),
+            ),
+            const VGap.xs(),
+          ],
+        ],
+        const VGap.s(),
         VKeyValue('Fälle', '${draft.claim.incidentIds.length}'),
         const VRule(),
         VKeyValue('Anspruch', fmtCents(draft.claim.amountClaimedCents), strong: true),
