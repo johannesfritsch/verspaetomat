@@ -72,6 +72,18 @@ class Session extends ChangeNotifier {
     return st;
   }
 
+  /// Point this install at an existing account, using its twelve words.
+  ///
+  /// Only meaningful against the real backend: Demo has no accounts to recover. The token this
+  /// device already has is replaced, and the old phone's token stops working — which is what
+  /// moving to a new phone means.
+  Future<void> recoverAccount(String code) async {
+    if (!isLocal) throw 'Im Demo-Modus gibt es kein Konto zum Zurückholen.';
+    await _http.recover(code);
+    await _bootstrap();
+    notifyListeners();
+  }
+
   /// The claim's thread was opened: mark seen, then let the badge follow.
   Future<void> markClaimSeen(String claimId) async {
     try {
@@ -84,6 +96,31 @@ class Session extends ChangeNotifier {
 
   EventStream? _events;
   final _eventsOut = StreamController<AppEvent>.broadcast();
+
+  Timer? _tick;
+
+  /// How often the shared figures are fetched again.
+  ///
+  /// Home and Wir show numbers that belong to everybody — the minutes this community has waited,
+  /// what the railways have confirmed — and those move because of other people, so no event of
+  /// this device's will ever announce them. Without a tick the number a passenger sees is the one
+  /// that happened to be true when the screen opened, which on a phone left on a table is hours.
+  /// Five minutes is far below anything a person would notice as stale and far above anything the
+  /// server would notice as load: it is two small aggregate queries.
+  static const _tickEvery = Duration(minutes: 5);
+
+  void _startTicking() {
+    _tick?.cancel();
+    _tick = Timer.periodic(_tickEvery, (_) async {
+      if (_eventsOut.isClosed) return;
+      try {
+        await loadStanding();
+      } catch (_) {
+        return; // offline, or the server is down: try again on the next tick
+      }
+      if (!_eventsOut.isClosed) _eventsOut.add(const AppEvent('tick', {}));
+    });
+  }
 
   /// Live events from the backend (local mode). Screens refresh what an event names.
   Stream<AppEvent> get events => _eventsOut.stream;
@@ -100,6 +137,7 @@ class Session extends ChangeNotifier {
     final local = forced == 'local' || (forced.isEmpty && stored == 'local') || (forced.isEmpty && stored == null && kReleaseMode);
     mode = local ? BackendMode.local : BackendMode.demo;
     await _bootstrap();
+    _startTicking();
     if (me?.settings.onboardingDone == true) await prefs.setBool(onboardingDoneKey, true);
   }
 
@@ -286,9 +324,9 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<String?> recoveryCode() async {
+  Future<String?> recoveryCode({bool rotate = false}) async {
     try {
-      return await repo.recoveryCode();
+      return await repo.recoveryCode(rotate: rotate);
     } catch (e) {
       error = e.toString();
       notifyListeners();
@@ -311,6 +349,7 @@ class Session extends ChangeNotifier {
 
   @override
   void dispose() {
+    _tick?.cancel();
     _events?.dispose();
     _eventsOut.close();
     demo.removeListener(_onDemoChanged);

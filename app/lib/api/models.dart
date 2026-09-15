@@ -906,18 +906,35 @@ class ApiClaim {
 }
 
 class ApiClaimDraft {
-  const ApiClaimDraft({required this.claim, this.deskAddress, this.deskEmail, this.personalDataRequired = false, this.relayAddress});
+  const ApiClaimDraft({
+    required this.claim,
+    this.deskAddress,
+    this.deskEmail,
+    this.personalDataRequired = false,
+    this.relayAddress,
+    this.routeLabel,
+    this.routeLive = false,
+  });
   final ApiClaim claim;
   final String? deskAddress;
   final String? deskEmail;
   final bool personalDataRequired;
   final String? relayAddress;
+
+  /// What the route this mail takes is called, and whether the operator has asserted that its
+  /// address is the railway's real desk. A draft with no route has neither, and no [deskEmail] —
+  /// which is the server saying nothing can be sent to this desk yet.
+  final String? routeLabel;
+  final bool routeLive;
+
   factory ApiClaimDraft.fromJson(Map<String, dynamic> j) => ApiClaimDraft(
         claim: ApiClaim.fromJson(_m(j['claim']) ?? j),
         deskAddress: _sn(j['desk_address']),
         deskEmail: _sn(j['desk_email']),
         personalDataRequired: _b(j['personal_data_required']),
         relayAddress: _sn(j['relay_address']),
+        routeLabel: _sn(j['desk_route_label']),
+        routeLive: j['desk_route_live'] == true,
       );
 }
 

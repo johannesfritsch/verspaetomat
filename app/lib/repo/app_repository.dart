@@ -16,7 +16,7 @@ abstract class AppRepository {
   /// The stations the phone should watch in the background (docs/15). Empty when unsupported.
   Future<ApiGeofence> geofence();
   Future<ApiCustomer> putPersonalData(ApiPersonalData data);
-  Future<String> recoveryCode();
+  Future<String?> recoveryCode({bool rotate = false});
   Future<void> deleteMe();
   /// Stores the phone's push token on the device row; a no-op in Demo mode.
   Future<void> putPushToken({required String platform, required String token});

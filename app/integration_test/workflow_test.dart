@@ -644,4 +644,69 @@ void main() {
       }
     }
   }, timeout: const Timeout(Duration(minutes: 10)));
+
+  /// Account recovery, which is the only way back into an account that has no e-mail and no
+  /// password. It is tested here rather than in a unit test because the interesting part is the
+  /// second device: a fresh install mints its own empty customer before anything else happens, and
+  /// recovering has to move that install onto the old account rather than merge the two.
+  testWidgets('recovery: twelve words move a second, empty device onto the first account', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Device A: its own keychain slot, as the other tests use.
+    final demoA = DemoState();
+    final a = Session(demo: demoA, prefs: prefs, apiUrl: apiUrl, tokens: TokenStore(namespace: 'e2e.'));
+    a.init();
+    await tester.pumpWidget(VerspaetomatApp(state: demoA, session: a));
+    await settle(tester, 1500);
+    await pumpUntilFound(tester, homeOrRide, timeout: const Duration(seconds: 40));
+    final idA = a.me?.id;
+    expect(idA, isNotNull, reason: 'device A should have an account after booting');
+
+    // The twelve words. Rotate, so the test does not depend on whether this slot had one already.
+    final code = await a.recoveryCode(rotate: true);
+    expect(code, isNotNull, reason: 'the server should mint a code when asked to rotate');
+    expect(code!.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length, 12, reason: 'twelve words');
+
+    // Asking again without rotating must NOT mint a new one: the words on the paper have to keep
+    // working. This is the bug that made the whole feature useless.
+    final again = await a.recoveryCode();
+    expect(again, isNull, reason: 'a second look must not replace the code already written down');
+
+    // Device B: a different keychain slot is a different install. It mints its own empty account.
+    final demoB = DemoState();
+    final b = Session(demo: demoB, prefs: prefs, apiUrl: apiUrl, tokens: TokenStore(namespace: 'e2e2.'));
+    // Not awaited. init() waits on a Future with a timeout inside it, and in a widget test the
+    // clock only moves when the tester pumps — awaiting it here starves the timer, the health
+    // check "times out" instantly and the session comes up offline. The other tests in this file
+    // start it the same way, for the same reason.
+    // Two attempts: the simulator's HTTP stack sometimes resets the first connection a new client
+    // opens, which is the same flake that troubles the journey tests in this file. The app's own
+    // client retries for the same reason.
+    for (var attempt = 0; attempt < 3 && b.me == null; attempt++) {
+      b.init();
+      for (var i = 0; i < 40 && b.me == null; i++) {
+        await settle(tester, 250);
+      }
+    }
+    final idBefore = b.me?.id;
+    expect(idBefore, isNotNull, reason: 'a fresh install has an account of its own; session error: ${b.error}, healthy: ${b.healthy}, url: [${b.apiUrl}]');
+    expect(idBefore, isNot(idA), reason: 'and it is a different, empty one');
+
+    // The twelve words, typed on the new phone.
+    await b.recoverAccount(code);
+    await settle(tester, 800);
+    expect(b.me?.id, idA, reason: 'device B is now the first account');
+
+    // A wrong code changes nothing and is refused.
+    var refused = false;
+    try {
+      await b.recoverAccount('gleis gleis gleis gleis gleis gleis gleis gleis gleis gleis gleis gleis');
+    } catch (_) {
+      refused = true;
+    }
+    expect(refused, isTrue, reason: 'unknown words must be refused');
+    expect(b.me?.id, idA, reason: 'and must not move the device anywhere');
+
+    b.dispose();
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }

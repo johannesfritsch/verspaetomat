@@ -538,11 +538,33 @@ pub async fn put_personal_data(State(s): State<AppState>, c: Customer, Json(p): 
     Ok(Json(customer_json(&s.pool, &row).await.map_err(internal)?))
 }
 
-/// Issues a new recovery code (the previous one stops working). Shown once in the app.
-pub async fn recovery_code(State(s): State<AppState>, c: Customer) -> ApiResult {
+/// The device's recovery code. Minted on first ask and then kept.
+///
+/// This used to mint a new one on every call, which quietly broke the feature it exists for: the
+/// twelve words are shown once and written on paper, and opening Einstellungen → Wiederherstellungs-
+/// code a month later to check them revoked the words on the paper. The code is the account, so it
+/// changes only when somebody asks for it to change (`?rotate=true`), and that answer says plainly
+/// that the old words stop working.
+pub async fn recovery_code(State(s): State<AppState>, c: Customer, Query(q): Query<RotateQuery>) -> ApiResult {
+    // The plaintext is never stored, so an existing code cannot be shown again — only replaced.
+    // `has_code` lets the app tell "you already have one, it is on your paper" from "you have none".
+    let has: bool = sqlx::query_scalar("select recovery_hash is not null from devices where id = $1")
+        .bind(c.0.id)
+        .fetch_one(&s.pool)
+        .await
+        .map_err(internal)?;
+    if has && !q.rotate {
+        return Ok(Json(json!({ "recovery_code": null, "has_code": true })));
+    }
     let code = crate::auth::recovery_code();
     sqlx::query("update devices set recovery_hash = $2 where id = $1").bind(c.0.id).bind(sha256(&code)).execute(&s.pool).await.map_err(internal)?;
-    Ok(Json(json!({ "recovery_code": code })))
+    Ok(Json(json!({ "recovery_code": code, "has_code": true, "replaced": has })))
+}
+
+#[derive(Deserialize, Default)]
+pub struct RotateQuery {
+    #[serde(default)]
+    pub rotate: bool,
 }
 
 pub async fn export_me(State(s): State<AppState>, c: Customer) -> ApiResult {

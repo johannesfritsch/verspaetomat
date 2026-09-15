@@ -35,7 +35,7 @@ class HttpRepository implements AppRepository {
   @override
   Future<ApiCustomer> putPersonalData(ApiPersonalData data) => client.putPersonalData(data);
   @override
-  Future<String> recoveryCode() => client.recoveryCode();
+  Future<String?> recoveryCode({bool rotate = false}) => client.recoveryCode(rotate: rotate);
   @override
   Future<void> putPushToken({required String platform, required String token}) => client.putPushToken(platform: platform, token: token);
 

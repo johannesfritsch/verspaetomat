@@ -11,7 +11,7 @@ class AppEvent {
   final Map<String, dynamic> data;
 
   bool get touchesRide => kind == 'ride' || kind == 'journey' || kind == 'reset' || kind == 'clock' || kind == 'resync';
-  bool get touchesLedger => kind == 'incident' || kind == 'claim' || kind == 'mail' || kind == 'ride' || kind == 'journey' || kind == 'reset' || kind == 'clock' || kind == 'resync';
+  bool get touchesLedger => kind == 'incident' || kind == 'claim' || kind == 'mail' || kind == 'ride' || kind == 'journey' || kind == 'reset' || kind == 'clock' || kind == 'resync' || kind == 'tick';
 
   /// A journey event (docs/17): transfer, arrived, finished.
   bool get isJourney => kind == 'journey';

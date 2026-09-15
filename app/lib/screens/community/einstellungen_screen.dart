@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
@@ -462,8 +463,14 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     }
   }
 
-  Future<void> _recoveryCode(BuildContext context, Session session) async {
-    final code = await session.recoveryCode();
+  /// The twelve words.
+  ///
+  /// Opening this used to mint a NEW code every time, which quietly broke the thing it exists for:
+  /// the words written on paper a month ago stopped working the moment somebody looked here to
+  /// check them. Now the server only mints when there is none, and replacing them is a deliberate
+  /// second step that says what it costs.
+  Future<void> _recoveryCode(BuildContext context, Session session, {bool rotate = false}) async {
+    final code = await session.recoveryCode(rotate: rotate);
     if (!context.mounted) return;
     showVSheet(
       context,
@@ -475,18 +482,45 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           children: [
             const VSheetHeader(title: 'Wiederherstellungscode', subtitle: 'Statt eines Kontos'),
             Text(
-              'Verspätomat hat kein Konto. Dieser Code holt dein Konto, deine Fahrten und deine Verspätomat-Adresse auf ein neues Gerät. Mach einen Screenshot.',
+              code == null
+                  ? 'Du hast schon zwölf Wörter. Wir bewahren sie nicht auf — nur einen Abdruck davon — also können wir sie dir nicht noch einmal zeigen. Wenn du sie nicht mehr hast, lass dir neue geben.'
+                  : 'Verspätomat hat kein Konto. Diese zwölf Wörter holen dein Konto, deine Fahrten und deine Verspätomat-Adresse auf ein neues Gerät.',
               style: VText.body,
             ),
-            const VGap.m(),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(VSpace.m),
-              decoration: BoxDecoration(border: Border.all(color: VColors.ink, width: 1.5), borderRadius: BorderRadius.circular(4)),
-              child: Text(code ?? (session.error ?? 'Kein Code verfügbar.'), style: VText.mono.copyWith(fontSize: 18)),
-            ),
+            if (code != null) ...[
+              const VGap.m(),
+              VCard(
+                child: SelectableText(code, style: VText.mono.copyWith(fontSize: 18, height: 1.5)),
+              ),
+              const VGap.s(),
+              VGhostButton(
+                label: 'Kopieren',
+                icon: Icons.content_copy_outlined,
+                color: VColors.ink2,
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: code));
+                  showSnack(ctx, 'Zwölf Wörter kopiert. Leg sie irgendwo hin, wo du sie wiederfindest.');
+                },
+              ),
+              const VGap.s(),
+              const VNoteBanner(
+                icon: Icons.lock_outline,
+                text: 'Wer diese Wörter hat, hat dein Konto. Behandle sie wie einen Schlüssel: aufschreiben ja, verschicken nein.',
+              ),
+            ],
             const VGap.l(),
             VPrimaryButton(label: 'Verstanden', onTap: () => Navigator.of(ctx).pop()),
+            if (code == null) ...[
+              const VGap.xs(),
+              VGhostButton(
+                label: 'Neue zwölf Wörter',
+                color: VColors.ink2,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _recoveryCode(context, session, rotate: true);
+                },
+              ),
+            ],
           ],
         ),
       ),

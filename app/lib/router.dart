@@ -9,6 +9,8 @@ import 'screens/ride/ride_routes.dart';
 import 'screens/ride/ride_sheet.dart';
 import 'repo/repo_scope.dart';
 import 'screens/claims/demo_antrag_screen.dart';
+import 'screens/claims/demo_weiter_screen.dart';
+import 'screens/onboarding/wiederherstellen_screen.dart';
 import 'screens/showcase_screen.dart';
 import 'state/demo_state.dart';
 import 'state/nearby_monitor.dart';
@@ -50,6 +52,12 @@ class Routes {
   /// what the tab is for before a train is ever an hour late.
   static const vorfuehrung = '/vorfuehrung';
 
+  /// The rest of the story, after the five steps: what the railway answers and what happens then.
+  static const vorfuehrungWeiter = '/vorfuehrung/weiter';
+
+  /// Typing the twelve words back in, on a phone that is not the one they were written on.
+  static const wiederherstellen = '/wiederherstellen';
+
   static const showcase = '/showcase';
 }
 
@@ -77,6 +85,8 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
       GoRoute(path: '/', redirect: (_, __) => Routes.showcase),
       GoRoute(path: Routes.showcase, builder: (_, __) => const ShowcaseScreen()),
       GoRoute(path: Routes.vorfuehrung, builder: (_, __) => const DemoAntragScreen()),
+      GoRoute(path: Routes.vorfuehrungWeiter, builder: (_, __) => const DemoWeiterScreen()),
+      GoRoute(path: Routes.wiederherstellen, builder: (_, __) => const WiederherstellenScreen()),
 
       // The four tabs live in a shell with the bottom navigation; the Einchecken square in the middle is not a tab.
       ShellRoute(

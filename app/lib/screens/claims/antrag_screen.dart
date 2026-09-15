@@ -314,6 +314,7 @@ class _AntragScreenState extends State<AntragScreen> {
     final session = RepoScope.of(context);
     if (_sent != null) {
       return _Sent(
+        demo: widget.demo,
         desk: widget.desk,
         dryRun: _sentDryRun,
         mail: _sent!.mail,
@@ -1128,6 +1129,17 @@ class _Senden extends StatelessWidget {
           Text(draft.deskAddress ?? 'Adresse siehe Betreiber', style: VText.bodyStrong),
           const VGap.m(),
         ] else ...[
+          // The address in the preview is the address the mail really goes to, read from the same
+          // table the server sends from. When that is not the railway's own desk, the screen says
+          // so — a rehearsal must never be able to pass for a filed claim.
+          if (!draft.routeLive) ...[
+            VNoteBanner(
+              icon: Icons.science_outlined,
+              text: 'Probelauf${draft.routeLabel == null ? '' : ' („${draft.routeLabel}")'}: '
+                  'diese E-Mail geht an ${draft.deskEmail ?? 'die eingetragene Adresse'} und nicht an das Eisenbahnunternehmen.',
+            ),
+            const VGap.s(),
+          ],
           VCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1222,12 +1234,15 @@ class _Senden extends StatelessWidget {
 /// The moment the Antrag is out. The one place in this app that celebrates, because it is the
 /// one thing that was the passenger's own doing (docs/27 §4).
 class _Sent extends StatefulWidget {
-  const _Sent({required this.desk, required this.dryRun, required this.mail, required this.claim, required this.incidents});
+  const _Sent({required this.desk, required this.dryRun, required this.mail, required this.claim, required this.incidents, this.demo = false});
   final String desk;
   final bool dryRun;
   final ApiMail mail;
   final ApiClaim? claim;
   final List<ApiIncident> incidents;
+
+  /// Reached from the walkthrough, where „Abgeschickt" is the middle of the story, not the end.
+  final bool demo;
 
   @override
   State<_Sent> createState() => _SentState();
@@ -1235,6 +1250,16 @@ class _Sent extends StatefulWidget {
 
 class _SentState extends State<_Sent> {
   bool _konfetti = true;
+
+  /// Where „Abgeschickt" leads. In the walkthrough the story is only half told at this point — the
+  /// interesting part is what the railway answers — so it goes on instead of stopping.
+  void _leave(BuildContext context) {
+    if (widget.demo) {
+      context.push(Routes.vorfuehrungWeiter);
+      return;
+    }
+    context.canPop() ? context.pop() : context.go(Routes.antraege);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1291,9 +1316,13 @@ class _SentState extends State<_Sent> {
                       ),
                     ),
                     const VGap.s(),
-                    VGhostButton(label: 'Zu den Anträgen', onTap: () => (context.canPop() ? context.pop() : context.go(Routes.antraege))),
+                    VGhostButton(label: widget.demo ? 'Und dann?' : 'Zu den Anträgen', onTap: () => _leave(context)),
                   ] else
-                    VPrimaryButton(label: 'Zu den Anträgen', onTap: () => (context.canPop() ? context.pop() : context.go(Routes.antraege))),
+                    VPrimaryButton(
+                      label: widget.demo ? 'Und dann?' : 'Zu den Anträgen',
+                      trailingIcon: widget.demo ? Icons.arrow_forward : null,
+                      onTap: () => _leave(context),
+                    ),
                 ],
               ),
             ),

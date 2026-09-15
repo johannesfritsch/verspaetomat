@@ -68,6 +68,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           if (_page == 2) ...[
             const VGap.s(),
             Text('Ohne Konto. Ohne Kreditkarte.', style: VText.caption),
+            const VGap.xs(),
+            // A person changing phones needs this before anything else happens, not buried in
+            // Einstellungen of an account they have not got back yet.
+            VGhostButton(
+              label: 'Schon dabei gewesen? Konto zurückholen',
+              color: VColors.ink2,
+              onTap: () => context.push(Routes.wiederherstellen),
+            ),
           ],
         ],
       ),

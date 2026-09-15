@@ -31,6 +31,10 @@ class _AntwortScreenState extends State<AntwortScreen> {
   String? _demoError;
 
   static const _bodies = {
+    // The wording matters: each of these has to land on the outcome it is named for when the
+    // backend classifies it, so the walkthrough shows the screen it promised.
+    'accepted':
+        'Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihren Antrag. Wir haben die angegebenen Fahrten geprüft und eine Entschädigung von insgesamt 4,50 EUR festgestellt. Der Betrag wird auf das angegebene Konto überwiesen.\n\nMit freundlichen Grüßen\nIhr Servicecenter Fahrgastrechte',
     'question':
         'Sehr geehrte Damen und Herren,\n\nzur Bearbeitung Ihres Antrags benötigen wir noch eine Kopie Ihres Deutschlandtickets für den Monat Juli 2026. Bitte senden Sie diese als Antwort auf diese E-Mail.\n\nMit freundlichen Grüßen\nIhr Servicecenter Fahrgastrechte',
     'rejected':

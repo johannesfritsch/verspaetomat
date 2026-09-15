@@ -67,6 +67,12 @@ pub async fn recover_device(State(s): State<AppState>, Json(r): Json<Recover>) -
         .await
         .map_err(internal)?;
     let Some(id) = id else {
+        // Twelve words out of a 2048-word list is 2^132, so blind guessing is hopeless — but a
+        // wrong answer should still cost something, and a burst of them should be visible rather
+        // than silent. The sleep is short enough that a person who mistyped one word does not
+        // notice and long enough that a script cannot run flat out.
+        tracing::warn!("recovery attempt with an unknown code");
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         return Err((StatusCode::NOT_FOUND, Json(json!({ "error": "unknown recovery code" }))));
     };
     let token = random_token();

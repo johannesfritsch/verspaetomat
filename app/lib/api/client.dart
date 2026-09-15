@@ -126,9 +126,17 @@ class ApiClient {
 
   // -- health / auth --------------------------------------------------------
 
+  /// Is the backend there? Asked before anything else, and deliberately without a token.
+  ///
+  /// It must not go through [_headers]: on a genuinely fresh install there is no token yet, so
+  /// [_headers] waits on `awaitDevice` — which the bootstrap only completes AFTER this very call
+  /// succeeds. The two waited for each other until the timeout, and a first launch against a
+  /// perfectly healthy server reported "Backend nicht erreichbar" and never registered a device.
+  /// `/health` is unauthenticated anyway, so it asks plainly.
   Future<bool> health() async {
     try {
-      final j = await _get('/health');
+      final r = await _http.get(_uri('/health'), headers: const {'accept': 'application/json'}).timeout(_timeout);
+      final j = _decode(r);
       return j is Map && j['ok'] == true;
     } catch (_) {
       return false;
@@ -140,7 +148,13 @@ class ApiClient {
   Future<DeviceAuth> recoverDevice(String recoveryCode) async =>
       DeviceAuth.fromJson(_map(await _post('/v1/devices/recover', {'recovery_code': recoveryCode})));
 
-  Future<String> recoveryCode() async => _map(await _get('/v1/me/recovery-code'))['recovery_code'].toString();
+  /// The twelve words. Null means one already exists and cannot be shown again — the plaintext is
+  /// never stored, only its hash — so the only way to see words is to replace the old ones.
+  Future<String?> recoveryCode({bool rotate = false}) async {
+    final m = _map(await _get('/v1/me/recovery-code', {if (rotate) 'rotate': 'true'}));
+    final code = m['recovery_code'];
+    return code?.toString();
+  }
 
   // -- reference ------------------------------------------------------------
 

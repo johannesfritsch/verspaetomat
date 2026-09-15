@@ -614,7 +614,7 @@ class MockRepository implements AppRepository {
   }
 
   @override
-  Future<String> recoveryCode() async => 'gleis sieben wartet ruhig am bahnsteig';
+  Future<String?> recoveryCode({bool rotate = false}) async => 'gleis sieben wartet ruhig am bahnsteig zwoelf uhr elf nach koeln';
 
   @override
   Future<void> deleteMe() async => state.reset();
