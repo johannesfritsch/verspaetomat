@@ -215,6 +215,9 @@ class VDropzone extends StatelessWidget {
     this.hint,
     this.icon = Icons.photo_camera_outlined,
     this.busy = false,
+    this.secondaryLabel,
+    this.secondaryIcon,
+    this.onSecondary,
   });
 
   final String title;
@@ -228,6 +231,13 @@ class VDropzone extends StatelessWidget {
 
   final IconData icon;
   final bool busy;
+
+  /// A second way in, under the hint: the camera beside the photo library. It lives inside the
+  /// dashed box rather than beside it, so a screen asking for several months does not turn into
+  /// a grid of boxes.
+  final String? secondaryLabel;
+  final IconData? secondaryIcon;
+  final VoidCallback? onSecondary;
 
   @override
   Widget build(BuildContext context) {
@@ -257,6 +267,15 @@ class VDropzone extends StatelessWidget {
                 if (hint != null) ...[
                   const SizedBox(height: VSpace.xs),
                   Text(hint!, style: VText.caption.copyWith(color: VColors.ink3), textAlign: TextAlign.center),
+                ],
+                if (secondaryLabel != null && onSecondary != null) ...[
+                  const SizedBox(height: VSpace.s),
+                  VGhostButton(
+                    label: secondaryLabel!,
+                    icon: secondaryIcon,
+                    color: VColors.ink2,
+                    onTap: busy ? null : onSecondary,
+                  ),
                 ],
               ],
             ),

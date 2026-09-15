@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Für das Foto deines Tickets. Das Bild geht nur an dein Eisenbahnunternehmen, Ort und Zeit entfernen wir vorher.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Nur das Bild, das du selbst auswählst. Wir sehen deine Mediathek nicht und merken uns nichts daraus.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Wir schauen nur, ob du an einem Bahnhof stehst. Während der Fahrt folgen wir dem Zug, nicht dir.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

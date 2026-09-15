@@ -8,6 +8,7 @@ import 'screens/ride/checkin_launcher.dart';
 import 'screens/ride/ride_routes.dart';
 import 'screens/ride/ride_sheet.dart';
 import 'repo/repo_scope.dart';
+import 'screens/claims/demo_antrag_screen.dart';
 import 'screens/showcase_screen.dart';
 import 'state/demo_state.dart';
 import 'state/nearby_monitor.dart';
@@ -44,6 +45,11 @@ class Routes {
   static const entwicklung = '/einstellungen/entwicklung';
   static const rechtlichesBase = '/rechtliches'; // /rechtliches/:id  (impressum | datenschutz | bote)
   static String rechtliches(String id) => '$rechtlichesBase/$id';
+  /// The Antrag walked through with example data, from the empty Anträge tab. Reachable in a
+  /// release build on purpose: it is how a new passenger — and an App Store reviewer — finds out
+  /// what the tab is for before a train is ever an hour late.
+  static const vorfuehrung = '/vorfuehrung';
+
   static const showcase = '/showcase';
 }
 
@@ -70,6 +76,7 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
     routes: [
       GoRoute(path: '/', redirect: (_, __) => Routes.showcase),
       GoRoute(path: Routes.showcase, builder: (_, __) => const ShowcaseScreen()),
+      GoRoute(path: Routes.vorfuehrung, builder: (_, __) => const DemoAntragScreen()),
 
       // The four tabs live in a shell with the bottom navigation; the Einchecken square in the middle is not a tab.
       ShellRoute(

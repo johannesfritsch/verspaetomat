@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData, PlatformException;
+import 'package:image_picker/image_picker.dart' show ImageSource;
 import 'package:go_router/go_router.dart';
 
 import '../../api/client.dart' show ApiException;
@@ -15,13 +18,18 @@ import '../share/share_lines.dart';
 import '../share/share_sheet.dart';
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
+import 'ticket_photo.dart';
 
 /// Antrag: the five-step claim flow. Prüfen · Ticket · Zweck · Unterschrift · Senden.
 class AntragScreen extends StatefulWidget {
-  const AntragScreen({super.key, required this.desk, this.claimId, this.draft});
+  const AntragScreen({super.key, required this.desk, this.claimId, this.draft, this.demo = false});
   final String desk;
   final String? claimId;
   final ApiClaimDraft? draft;
+
+  /// Reached from „Vorführung ansehen" rather than from a real claim. Says so on the first screen,
+  /// so nobody walks through five steps thinking their own delays are in it.
+  final bool demo;
 
   @override
   State<AntragScreen> createState() => _AntragScreenState();
@@ -57,6 +65,11 @@ class _AntragScreenState extends State<AntragScreen> {
   bool _showPersonal = false;
   bool _otherNgo = false;
   final Map<String, String> _uploads = {}; // month → upload id
+
+  /// What was actually attached, so the step can show it back. The bytes are only in memory: the
+  /// server has no route that serves an upload, and a passenger about to send a picture to a
+  /// railway should be able to see which picture it is.
+  final Map<String, Uint8List> _previews = {};
   bool _signed = false;
   bool _sentDryRun = false;
   ApiSendResult? _sent;
@@ -205,20 +218,58 @@ class _AntragScreenState extends State<AntragScreen> {
     }
   }
 
-  Future<void> _attach(String month) => _run(() async {
-        final session = RepoScope.read(context);
-        final me = session.me;
-        final name = me?.personalData?.name ?? me?.nickname ?? 'Fahrgast';
-        final number = me?.personalData?.ticketNumber ?? '–';
-        final png = await renderTicketPng(name: name, ticketNumber: number, month: month == 'Ticket' ? 'Fahrkarte' : monthLabel(month));
-        final up = await session.repo.upload(kind: 'ticket', filename: 'Ticket_$month.png', bytes: png);
-        _uploads[month] = up.uploadId;
-        final claim = await session.repo.patchClaim(
-          _claim!.id,
-          attachments: [for (final e in _uploads.entries) ApiClaimAttachment(uploadId: e.value, label: ticketLabel(e.key))],
-        );
-        _draft = _withClaim(claim);
-      }, failure: 'Anhängen fehlgeschlagen');
+  /// Attach a picture of the ticket for one month.
+  ///
+  /// The picker runs *before* [_run], so backing out of the photo sheet is a silent no-op rather
+  /// than a red „Anhängen fehlgeschlagen" — cancelling is not a failure.
+  ///
+  /// Demo mode draws the ticket instead of asking for one. That is not a fallback, it is the
+  /// point: the showcase and the screenshot tour run on a simulator with no camera and no photo
+  /// library worth the name, and neither should stall on a permission sheet.
+  Future<void> _attach(String month, ImageSource source) async {
+    final session = RepoScope.read(context);
+    Uint8List? bytes;
+    // A drawn ticket is drawn again by MockTicket when the step renders, so it needs no preview
+    // of its own; only a picked photo does.
+    var keepPreview = true;
+    if (!session.isLocal || TicketPhoto.automation) {
+      keepPreview = false;
+      final me = session.me;
+      bytes = await renderTicketPng(
+        name: me?.personalData?.name ?? me?.nickname ?? 'Fahrgast',
+        ticketNumber: me?.personalData?.ticketNumber ?? '–',
+        month: month == 'Ticket' ? 'Fahrkarte' : monthLabel(month),
+      );
+    } else {
+      try {
+        bytes = await TicketPhoto.pick(source);
+      } on PlatformException catch (e) {
+        if (!mounted) return;
+        // A permission that was refused for good is the one case a tap must not silently do
+        // nothing (docs/23 §1): say what is missing and where it is turned back on.
+        final denied = e.code == 'camera_access_denied' || e.code == 'photo_access_denied';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(denied
+              ? 'Verspätomat darf nicht auf ${source == ImageSource.camera ? 'die Kamera' : 'deine Fotos'} zugreifen. In den Einstellungen kannst du das ändern.'
+              : 'Das Bild ließ sich nicht öffnen: ${e.message ?? e.code}'),
+        ));
+        return;
+      }
+      if (bytes == null) return; // backed out of the sheet
+    }
+    final data = bytes;
+    if (!mounted) return;
+    await _run(() async {
+      final up = await session.repo.upload(kind: 'ticket', filename: 'Ticket_$month.jpg', bytes: data);
+      _uploads[month] = up.uploadId;
+      if (keepPreview) _previews[month] = data;
+      final claim = await session.repo.patchClaim(
+        _claim!.id,
+        attachments: [for (final e in _uploads.entries) ApiClaimAttachment(uploadId: e.value, label: ticketLabel(e.key))],
+      );
+      _draft = _withClaim(claim);
+    }, failure: 'Anhängen fehlgeschlagen');
+  }
 
   Future<void> _chooseNgo(String id) => _run(() async {
         final claim = await RepoScope.read(context).repo.patchClaim(_claim!.id, ngoId: id);
@@ -290,6 +341,7 @@ class _AntragScreenState extends State<AntragScreen> {
 
     if (_intro) {
       return _Ueberblick(
+        demo: widget.demo,
         desk: widget.desk,
         steps: _steps,
         cases: _incidents.length,
@@ -319,7 +371,14 @@ class _AntragScreenState extends State<AntragScreen> {
             await _maybeShowRecoveryCode();
           },
         ),
-      1 => _Ticket(months: _months, uploads: _uploads, me: me, busy: _busy, onAttach: _attach),
+      1 => _Ticket(
+          months: _months,
+          uploads: _uploads,
+          previews: _previews,
+          demo: !RepoScope.read(context).isLocal || TicketPhoto.automation,
+          busy: _busy,
+          onAttach: _attach,
+        ),
       2 => _Zweck(ngos: _ngos, selected: _ngo, other: _otherNgo, onOther: () => setState(() => _otherNgo = !_otherNgo), onChoose: _chooseNgo),
       3 => _Unterschrift(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, signed: _signed, busy: _busy, controller: _signature, onSign: _sign),
       _ => _Senden(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, paperOnly: _paperOnly),
@@ -412,7 +471,8 @@ class _AntragScreenState extends State<AntragScreen> {
 /// the one place in this app where a passenger signs something, so it says up front what the
 /// five steps want and what leaves the house at the end.
 class _Ueberblick extends StatelessWidget {
-  const _Ueberblick({required this.desk, required this.steps, required this.cases, required this.amountCents, required this.onStart});
+  const _Ueberblick({required this.desk, required this.steps, required this.cases, required this.amountCents, required this.onStart, this.demo = false});
+  final bool demo;
   final String desk;
   final List<String> steps;
   final int cases;
@@ -455,6 +515,14 @@ class _Ueberblick extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (demo) ...[
+            const VGap.s(),
+            const VNoteBanner(
+              icon: Icons.play_circle_outline,
+              text: 'Vorführung mit Beispieldaten. Du kannst alle fünf Schritte durchgehen; '
+                  'es wird nichts gespeichert und nichts verschickt.',
+            ),
+          ],
           const VGap.s(),
           Text('$cases ${cases == 1 ? 'Fall' : 'Fälle'} · ${fmtCents(amountCents)}', style: VText.h2),
           const VGap.s(),
@@ -729,12 +797,26 @@ class _PersonalFormState extends State<_PersonalForm> {
 // ---------------------------------------------------------------------------
 
 class _Ticket extends StatelessWidget {
-  const _Ticket({required this.months, required this.uploads, required this.me, required this.busy, required this.onAttach});
+  const _Ticket({
+    required this.months,
+    required this.uploads,
+    required this.previews,
+    required this.demo,
+    required this.busy,
+    required this.onAttach,
+  });
   final List<String> months;
   final Map<String, String> uploads;
-  final ApiCustomer? me;
+
+  /// The bytes of what was attached this session, so the step can show it back.
+  final Map<String, Uint8List> previews;
+
+  /// Demo draws a ticket instead of opening a picker, so the showcase and the tour run on a
+  /// simulator without stalling on a permission sheet.
+  final bool demo;
+
   final bool busy;
-  final Future<void> Function(String month) onAttach;
+  final Future<void> Function(String month, ImageSource source) onAttach;
 
   @override
   Widget build(BuildContext context) {
@@ -759,44 +841,74 @@ class _Ticket extends StatelessWidget {
           if (!uploads.containsKey(m)) ...[
             VDropzone(
               title: busy ? 'Lädt hoch …' : 'Ticket anhängen',
-              text: 'Foto auswählen oder direkt aufnehmen.',
-              hint: 'PNG, JPG oder HEIC',
+              text: demo ? 'In der Vorführung malen wir eins.' : 'Foto auswählen oder direkt aufnehmen.',
+              hint: demo ? null : 'PNG, JPG oder HEIC',
               busy: busy,
-              onTap: () => onAttach(m),
+              onTap: () => onAttach(m, ImageSource.gallery),
+              // One dashed box per month, with the camera as a named second way in, rather than
+              // two boxes side by side: with August and September on one screen, two entry points
+              // each is four boxes and no clearer.
+              secondaryLabel: demo ? null : 'Stattdessen fotografieren',
+              secondaryIcon: Icons.photo_camera_outlined,
+              onSecondary: demo ? null : () => onAttach(m, ImageSource.camera),
             ),
           ] else ...[
-            // The drawn ticket sits on a sunken card, so it reads as a picture of a thing rather
-            // than as another block of this screen.
+            // The picture sits on a sunken card so it reads as a picture of a thing rather than as
+            // another block of this screen.
             VCard(
               tone: VCardTone.sunken,
               padding: const EdgeInsets.all(VSpace.md),
-              child: MockTicket(
-                name: me?.personalData?.name ?? me?.nickname ?? 'Fahrgast',
-                ticketNumber: me?.personalData?.ticketNumber ?? '–',
-                month: m == 'Ticket' ? 'Fahrkarte' : monthLabel(m),
-              ),
+              child: previews[m] != null
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(VRadius.md),
+                      child: ConstrainedBox(
+                        // Tall enough to read a ticket number, bounded so a portrait photo does
+                        // not push the rest of the step off the screen.
+                        constraints: const BoxConstraints(maxHeight: 320),
+                        child: Image.memory(previews[m]!, fit: BoxFit.contain, width: double.infinity),
+                      ),
+                    )
+                  : MockTicket(
+                      name: 'Fahrgast',
+                      ticketNumber: '–',
+                      month: m == 'Ticket' ? 'Fahrkarte' : monthLabel(m),
+                    ),
             ),
             const VGap.s(),
-            const VNoteBanner(
+            VNoteBanner(
               tone: VNoteTone.green,
-              leading: VIconBadge(
+              leading: const VIconBadge(
                 icon: Icons.check,
                 tone: VBadgeTone.green,
                 filled: true,
                 size: VControl.chevron,
                 iconSize: 13,
               ),
-              text: 'Angehängt. Ort und Zeit sind aus dem Bild entfernt. Es bleibt liegen, bis der Antrag abgeschlossen ist, dann löschen wir es.',
+              text: demo
+                  ? 'Angehängt. Es bleibt liegen, bis der Antrag abgeschlossen ist, dann löschen wir es.'
+                  : 'Angehängt. Ort und Zeit sind aus dem Bild entfernt. Es bleibt liegen, bis der Antrag abgeschlossen ist, dann löschen wir es.',
             ),
+            if (!demo) ...[
+              const VGap.xs(),
+              // A drawn ticket never needed replacing. A photo picked by mistake does, and
+              // without this the only way back is to start the Antrag again.
+              VGhostButton(
+                label: 'Anderes Bild',
+                icon: Icons.refresh,
+                color: VColors.ink2,
+                onTap: busy ? null : () => onAttach(m, ImageSource.gallery),
+              ),
+            ],
           ],
           const VGap.l(),
         ],
-        const VNoteBanner(
-          tone: VNoteTone.neutral,
-          icon: Icons.info_outline,
-          text: 'Noch eine Attrappe: Verspätomat malt hier ein Ticket, statt eines aus deinen Fotos oder '
-              'der Ticket-App zu holen. Der Weg zur Bahn ist echt, das Bild noch nicht.',
-        ),
+        if (demo)
+          const VNoteBanner(
+            tone: VNoteTone.neutral,
+            icon: Icons.info_outline,
+            text: 'Vorführung: hier malt Verspätomat ein Ticket. In der echten App wählst du eines '
+                'aus deinen Fotos oder fotografierst es.',
+          ),
       ],
     );
   }

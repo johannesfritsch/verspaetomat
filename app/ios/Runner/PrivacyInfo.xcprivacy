@@ -119,6 +119,10 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>C617.1</string>
+				<!-- 3B52.1: the timestamp of a file the person picked themselves. Reading an
+				     XFile's attributes after the photo picker needs this; without it the archive
+				     is rejected as ITMS-91053. -->
+				<string>3B52.1</string>
 			</array>
 		</dict>
 		<dict>

@@ -545,6 +545,16 @@ class _EmptyAntraege extends StatelessWidget {
             Text('Anträge müssen innerhalb eines Jahres gestellt werden. Wir erinnern dich rechtzeitig.', style: VText.caption),
             const VGap.m(),
             VPrimaryButton(label: 'Einchecken', icon: Icons.train_outlined, onTap: () => startCheckin(context)),
+            const VGap.s(),
+            // Until a train is an hour late this tab has nothing to show, which can be weeks. The
+            // walkthrough is the only way to find out what it will look like — and the only way an
+            // App Store reviewer sees the flow at all.
+            VGhostButton(
+              label: 'Vorführung ansehen',
+              icon: Icons.play_circle_outline,
+              color: VColors.ink2,
+              onTap: () => context.push(Routes.vorfuehrung),
+            ),
           ],
         ),
       ),

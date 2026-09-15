@@ -46,6 +46,8 @@ dependencies:
   # docs/27: the native share sheet, and a place to put the rendered ticket on the way to it.
   share_plus: ^13.3.0
   path_provider: ^2.1.5
+  image_picker: ^1.2.3
+  flutter_image_compress: ^2.5.1
 
 dev_dependencies:
   integration_test:
