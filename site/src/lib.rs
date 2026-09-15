@@ -18,6 +18,7 @@ pub const BASE_URL: &str = "https://verspaetomat.de";
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Index {
     pub meta: Meta,
+    pub kopf: Kopf,
     pub hero: Hero,
     pub fahrplan: Fahrplan,
     pub bilder: Bilder,
@@ -32,14 +33,41 @@ pub struct Meta {
     pub description: String,
 }
 
+/// Die Kopfzeile der Startseite: die Sprungmarken und der Knopf rechts.
+///
+/// Die Ziele sind Anker auf derselben Seite, deshalb steht hier `href` und nicht `id` — ein
+/// Rechtstext bekommt diese Zeile gar nicht erst, weil ein Sprung zu `#holen` von dort ins Leere
+/// ginge.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Kopf {
+    pub cta: String,
+    #[serde(default)]
+    pub zeile: Vec<KopfZeile>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct KopfZeile {
+    pub label: String,
+    pub href: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Hero {
     pub eyebrow: String,
     pub headline: String,
+    /// The half of the headline that stands in red. The only sentence on the page that does.
+    pub headline_rot: String,
     pub lead: String,
-    pub cta: String,
     pub cta_secondary: String,
+    #[serde(default)]
+    pub haken: Vec<Haken>,
     pub karte: Karte,
+}
+
+/// One of the short reassurances under the hero's buttons.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Haken {
+    pub text: String,
 }
 
 /// The example Fahrkarte in the hero. Same fields the app prints on a real one (docs/27).
@@ -59,13 +87,25 @@ pub struct Karte {
 pub struct Fahrplan {
     pub eyebrow: String,
     pub title: String,
+    pub karte: FahrplanKarte,
     pub halt: Vec<Halt>,
+}
+
+/// The tinted card beside the stops: what the whole list is for, in two sentences.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FahrplanKarte {
+    pub title: String,
+    pub text: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Halt {
     pub label: String,
     pub text: String,
+    /// Which glyph stands in the disc beside the stop. The templates hold the drawings; this
+    /// names one of them, so the content file never contains markup.
+    #[serde(default)]
+    pub icon: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -108,6 +148,9 @@ pub struct Nicht {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Punkt {
     pub title: String,
+    /// Names one of the drawings in the template, the way a stop does.
+    #[serde(default)]
+    pub icon: String,
     pub text: String,
     #[serde(default)]
     pub link: Option<String>,
@@ -132,6 +175,7 @@ pub struct Frage {
 pub struct Holen {
     pub eyebrow: String,
     pub title: String,
+    pub lead: String,
     pub laden: Vec<Laden>,
 }
 
@@ -281,6 +325,10 @@ pub fn build(root: &Path, out: &Path, strict: bool) -> Result<Report> {
         holen => &site.index.holen,
         contact => &site.legal.contact,
         nav => nav,
+        // Only the front page carries the anchor nav: on a legal document the links would point
+        // at sections of a page the reader has left.
+        nav_seite => &site.index.kopf.zeile,
+        holen_cta => &site.index.kopf.cta,
         canonical => format!("{BASE_URL}/"),
     })?;
     std::fs::write(out.join("index.html"), page)?;

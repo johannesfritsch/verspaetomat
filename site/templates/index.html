@@ -1,69 +1,107 @@
 {% extends "base.html" %}
 {% block inhalt %}
 
+{# Die Halte-Symbole einmal gezeichnet. Der Inhalt nennt nur ihren Namen. #}
+{% macro halt_icon(name) %}
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  {%- if name == "zug" %}<rect x="5" y="3" width="14" height="13" rx="3"></rect><path d="M5 11h14M9 20l-2 2M15 20l2 2M12 16v0"></path>
+  {%- elif name == "uhr" %}<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>
+  {%- elif name == "halt" %}<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"></path><circle cx="12" cy="10" r="2.4"></circle>
+  {%- elif name == "blatt" %}<path d="M7 3h7l5 5v13H7z"></path><path d="M14 3v5h5M10 13h6M10 17h4"></path>
+  {%- elif name == "geld" %}<circle cx="12" cy="12" r="9"></circle><path d="M14.5 9.2A3.2 3.2 0 0 0 9 11.4v1.2a3.2 3.2 0 0 0 5.5 2.2M8 11.5h5M8 13.5h5"></path>
+  {%- elif name == "schloss" %}<rect x="5" y="10.5" width="14" height="9.5" rx="2.5"></rect><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"></path>
+  {%- elif name == "auge" %}<path d="M2.5 12S6 6.5 12 6.5 21.5 12 21.5 12 18 17.5 12 17.5 2.5 12 2.5 12z"></path><circle cx="12" cy="12" r="2.6"></circle><path d="M4 20 20 4"></path>
+  {%- elif name == "bote" %}<path d="M3 11.5 21 4l-7.5 17-2-7z"></path><path d="M11.5 14 21 4"></path>
+  {%- else %}<path d="M12 20s-7-4.6-7-9.4A4.1 4.1 0 0 1 12 8a4.1 4.1 0 0 1 7 2.6C19 15.4 12 20 12 20z"></path>
+  {%- endif %}
+  </svg>
+{% endmacro %}
+
 <div class="hero">
-  <div>
+  <div class="hero-text">
     <p class="eyebrow">{{ hero.eyebrow }}</p>
-    <h1>{{ hero.headline }}</h1>
+    <h1>{{ hero.headline }} <span class="rot">{{ hero.headline_rot }}</span></h1>
     <p class="lead">{{ hero.lead }}</p>
     <div class="cta-row">
-      <a class="btn" href="#holen">{{ hero.cta }}</a>
-      <a class="ghost" href="#fahrplan">{{ hero.cta_secondary }}</a>
+      {% for l in holen.laden %}
+      {% if l.state == "live" %}
+      <a class="btn" href="{{ l.url | safe }}">{{ l.label }}</a>
+      {% else %}
+      <span class="btn btn--wartet">{{ l.label }}</span>
+      {% endif %}
+      {% endfor %}
     </div>
+    <ul class="haken">
+      {% for h in hero.haken %}
+      <li><span class="hakenmark" aria-hidden="true">✓</span>{{ h.text }}</li>
+      {% endfor %}
+    </ul>
   </div>
 
-  <div class="fahrkarte-halter">
-    <div class="fahrkarte">
-      <div class="fk-kopf">
-        <span class="eyebrow">Verspätomat</span>
-        <span class="eyebrow">Fahrgastrechte</span>
-      </div>
-      <dl class="fk-felder">
-        <div class="fk-feld"><dt>Fahrgast</dt><dd>{{ hero.karte.fahrgast }}</dd></div>
-        <div class="fk-feld"><dt>Strecke</dt><dd>{{ hero.karte.strecke }}</dd></div>
-        <div class="fk-feld"><dt>Am</dt><dd>{{ hero.karte.am }}</dd></div>
-      </dl>
-      <hr class="rule rule--red">
-      <p class="eyebrow fk-oben">Verspätung</p>
-      <div class="fk-held">
-        <div>
-          <div class="fk-zahl">{{ hero.karte.minuten }}</div>
-          <div class="fk-einheit">Minuten</div>
+  {# Der Bahnsteig kommt aus der App (app/assets/header/checkin-clock.webp): dasselbe Bild, das
+     im Check-in hinter dem Kopf liegt. Das Schild im Bild bleibt leer: sein Platz wandert mit
+     dem Ausschnitt, und ein Satz, der bei manchen Breiten auf dem Zug landet, ist schlechter
+     als keiner. Was er sagen sollte, sagt die Überschrift ohnehin. #}
+  <div class="hero-bild">
+    <img class="bahnsteig" src="/hero-bahnsteig.webp" alt="" width="1100" height="838" fetchpriority="high" decoding="async">
+
+    <div class="fahrkarte-halter">
+      <div class="fahrkarte">
+        <div class="fk-kopf">
+          <span class="eyebrow">Verspätomat</span>
+          <span class="eyebrow">Fahrgastrechte</span>
         </div>
-        <div class="loch" aria-hidden="true"></div>
+        <dl class="fk-felder">
+          <div class="fk-feld"><dt>Fahrgast</dt><dd>{{ hero.karte.fahrgast }}</dd></div>
+          <div class="fk-feld"><dt>Strecke</dt><dd>{{ hero.karte.strecke }}</dd></div>
+          <div class="fk-feld"><dt>Am</dt><dd>{{ hero.karte.am }}</dd></div>
+        </dl>
+        <hr class="rule rule--red">
+        <p class="eyebrow fk-oben">Verspätung</p>
+        <div class="fk-held">
+          <div>
+            <div class="fk-zahl">{{ hero.karte.minuten }}</div>
+            <div class="fk-einheit">Minuten</div>
+          </div>
+          <div class="loch" aria-hidden="true"></div>
+        </div>
+        <hr class="rule rule--soft">
+        <dl class="fk-felder fk-felder--unten">
+          <div class="fk-feld"><dt>Zahlt an</dt><dd><span class="ngo"><span class="ngo-mark" aria-hidden="true"></span>{{ hero.karte.ngo }}</span></dd></div>
+          <div class="fk-feld"><dt>Betrag</dt><dd>{{ hero.karte.betrag }}</dd></div>
+        </dl>
+        <p class="fk-zitat">{{ hero.karte.zitat }}</p>
       </div>
-      <hr class="rule rule--soft">
-      <dl class="fk-felder fk-felder--unten">
-        <div class="fk-feld"><dt>Zahlt an</dt><dd><span class="ngo"><span class="ngo-mark" aria-hidden="true"></span>{{ hero.karte.ngo }}</span></dd></div>
-        <div class="fk-feld"><dt>Betrag</dt><dd>{{ hero.karte.betrag }}</dd></div>
-      </dl>
-      <p class="fk-zitat">{{ hero.karte.zitat }}</p>
+      <p class="beispiel">{{ hero.karte.hinweis }}</p>
     </div>
-    <p class="beispiel">{{ hero.karte.hinweis }}</p>
   </div>
 </div>
-
-<hr class="rule">
 
 <section id="fahrplan">
   <div class="sec-kopf">
     <p class="eyebrow">{{ fahrplan.eyebrow }}</p>
     <h2>{{ fahrplan.title }}</h2>
   </div>
-  <ol class="halte">
-    {% for h in fahrplan.halt %}
-    <li class="halt{% if loop.last %} halt--ziel{% endif %}">
-      <span class="punkt" aria-hidden="true"></span>
-      <div>
-        <h3>{{ h.label }}</h3>
-        <p>{{ h.text }}</p>
-      </div>
-    </li>
-    {% endfor %}
-  </ol>
+  <div class="fahrplan">
+    <ol class="halte">
+      {% for h in fahrplan.halt %}
+      <li class="halt{% if loop.last %} halt--ziel{% endif %}">
+        <span class="halt-nr" aria-hidden="true">{{ loop.index }}</span>
+        <span class="halt-icon" aria-hidden="true">{{ halt_icon(h.icon) }}</span>
+        <div>
+          <h3>{{ h.label }}</h3>
+          <p>{{ h.text }}</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    <aside class="fp-karte">
+      <span class="fp-herz" aria-hidden="true">{{ halt_icon("herz") }}</span>
+      <h3>{{ fahrplan.karte.title }}</h3>
+      <p>{{ fahrplan.karte.text }}</p>
+    </aside>
+  </div>
 </section>
-
-<hr class="rule">
 
 <section>
   <div class="sec-kopf">
@@ -80,21 +118,21 @@
   </div>
 </section>
 
-<hr class="rule">
-
-<section>
+<section id="nicht">
   <div class="sec-kopf">
     <p class="eyebrow">{{ nicht.eyebrow }}</p>
     <h2>{{ nicht.title }}</h2>
   </div>
   <div class="nicht">
     {% for p in nicht.punkt %}
-    <div><h3>{{ p.title }}</h3> <p>{{ p.text }}{% if p.link %} <a href="{{ p.link | safe }}">{{ p.link_text }}</a>{% endif %}</p></div>
+    <div class="nicht-karte">
+      <span class="nicht-mark" aria-hidden="true">{{ halt_icon(p.icon) }}</span>
+      <h3>{{ p.title }}</h3>
+      <p>{{ p.text }}{% if p.link %} <a href="{{ p.link | safe }}">{{ p.link_text }}</a>{% endif %}</p>
+    </div>
     {% endfor %}
   </div>
 </section>
-
-<hr class="rule">
 
 <section>
   <div class="sec-kopf">
@@ -111,25 +149,28 @@
   </div>
 </section>
 
-<hr class="rule">
-
 <section id="holen">
-  <div class="sec-kopf">
-    <p class="eyebrow">{{ holen.eyebrow }}</p>
-    <h2>{{ holen.title }}</h2>
-  </div>
-  <div class="holen">
-    {% for l in holen.laden %}
-    <div class="laden">
-      <p class="eyebrow">{{ l.platform }}</p>
-      {% if l.state == "live" %}
-      <p class="zustand"><a class="btn" href="{{ l.url | safe }}">{{ l.label }}</a></p>
-      {% else %}
-      <p class="zustand{% if l.state == "soon" %} wartet{% endif %}">{{ l.label }}</p>
-      {% endif %}
-      <p>{{ l.note }}{% if l.url and l.state != "live" %} <a href="{{ l.url | safe }}">{{ l.link_text }}</a>{% endif %}</p>
+  <div class="band">
+    <div class="band-text">
+      <p class="eyebrow">{{ holen.eyebrow }}</p>
+      <h2>{{ holen.title }}</h2>
+      <p class="band-lead">{{ holen.lead }}</p>
     </div>
-    {% endfor %}
+    <div class="band-laden">
+      {# Der Entwurf setzt hier die Store-Abzeichen von Apple und Google. Solange `state` nicht
+         "live" ist, gibt es sie nicht: die App ist nicht zu laden, und ein Abzeichen, das
+         nirgends hinführt, verspricht etwas, das es nicht gibt. #}
+      {% for l in holen.laden %}
+      <div class="laden">
+        {% if l.state == "live" %}
+        <a class="btn" href="{{ l.url | safe }}">{{ l.label }}</a>
+        {% else %}
+        <span class="btn btn--wartet">{{ l.label }}</span>
+        {% endif %}
+        <p>{{ l.note }}{% if l.url and l.state != "live" %} <a href="{{ l.url | safe }}">{{ l.link_text }}</a>{% endif %}</p>
+      </div>
+      {% endfor %}
+    </div>
   </div>
 </section>
 {% endblock %}

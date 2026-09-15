@@ -18,7 +18,7 @@
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#F3F3F0">
+<meta name="theme-color" content="#F7F7F8">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/verspaetomat.css">
 </head>
@@ -26,8 +26,8 @@
 <div class="wrap">
 
   <header class="kopf">
-    <a class="wordmark" href="/">Verspätomat</a>
-    
+    <a class="marke" href="/">
+      
     <svg class="clock" viewBox="0 0 100 100" role="img" aria-label="Bahnhofsuhr">
       <circle cx="50" cy="50" r="48" fill="#FFFFFF" stroke="#111111" stroke-width="3"></circle>
       <g stroke="#111111" stroke-width="4">
@@ -45,106 +45,163 @@
       <circle cx="50" cy="50" r="4" fill="#111111"></circle>
     </svg>
 
+      <span class="wordmark">Verspätomat</span>
+    </a>
+    
+    <nav class="kopf-zeilen">
+      <a href="#fahrplan">So funktioniert’s</a><a href="#bilder">Die App</a><a href="#nicht">Was fehlt</a><a href="#fragen">Fragen</a>
+    </nav>
+    <a class="btn btn--klein" href="#holen">App holen</a>
+    
   </header>
-  <hr class="rule">
 
   
 
+
+
+
 <div class="hero">
-  <div>
-    <p class="eyebrow">Fahrgastrechte, ohne Papierkrieg</p>
-    <h1>Die Bahn war zu spät. Jetzt zahlt sie dafür.</h1>
+  <div class="hero-text">
+    <p class="eyebrow">Verspätungen sammeln. Gutes tun.</p>
+    <h1>Die Bahn war zu spät. <span class="rot">Jetzt zahlt sie dafür.</span></h1>
     <p class="lead">Verspätomat merkt sich deine Verspätungen, füllt für dich den Antrag aus und schickt ihn ab. Das Geld geht an einen Verein, den du wählst. Kein Cent davon an uns.</p>
     <div class="cta-row">
-      <a class="btn" href="#holen">Im App Store laden</a>
-      <a class="ghost" href="#fahrplan">So funktioniert’s ↓</a>
+      
+      
+      <span class="btn btn--wartet">Bald im App Store</span>
+      
+      
+      
+      <span class="btn btn--wartet">Bald bei Google Play</span>
+      
+      
     </div>
+    <ul class="haken">
+      
+      <li><span class="hakenmark" aria-hidden="true">✓</span>Kostenlos</li>
+      
+      <li><span class="hakenmark" aria-hidden="true">✓</span>Kein Geldfluss über uns</li>
+      
+      <li><span class="hakenmark" aria-hidden="true">✓</span>Kein Tracking</li>
+      
+    </ul>
   </div>
 
-  <div class="fahrkarte-halter">
-    <div class="fahrkarte">
-      <div class="fk-kopf">
-        <span class="eyebrow">Verspätomat</span>
-        <span class="eyebrow">Fahrgastrechte</span>
-      </div>
-      <dl class="fk-felder">
-        <div class="fk-feld"><dt>Fahrgast</dt><dd>Johannes</dd></div>
-        <div class="fk-feld"><dt>Strecke</dt><dd>Köln Hbf → Rheine</dd></div>
-        <div class="fk-feld"><dt>Am</dt><dd>Fr, 11. September 2026</dd></div>
-      </dl>
-      <hr class="rule rule--red">
-      <p class="eyebrow fk-oben">Verspätung</p>
-      <div class="fk-held">
-        <div>
-          <div class="fk-zahl">204</div>
-          <div class="fk-einheit">Minuten</div>
+  
+  <div class="hero-bild">
+    <img class="bahnsteig" src="/hero-bahnsteig.webp" alt="" width="1100" height="838" fetchpriority="high" decoding="async">
+
+    <div class="fahrkarte-halter">
+      <div class="fahrkarte">
+        <div class="fk-kopf">
+          <span class="eyebrow">Verspätomat</span>
+          <span class="eyebrow">Fahrgastrechte</span>
         </div>
-        <div class="loch" aria-hidden="true"></div>
+        <dl class="fk-felder">
+          <div class="fk-feld"><dt>Fahrgast</dt><dd>Johannes</dd></div>
+          <div class="fk-feld"><dt>Strecke</dt><dd>Köln Hbf → Rheine</dd></div>
+          <div class="fk-feld"><dt>Am</dt><dd>Fr, 11. September 2026</dd></div>
+        </dl>
+        <hr class="rule rule--red">
+        <p class="eyebrow fk-oben">Verspätung</p>
+        <div class="fk-held">
+          <div>
+            <div class="fk-zahl">204</div>
+            <div class="fk-einheit">Minuten</div>
+          </div>
+          <div class="loch" aria-hidden="true"></div>
+        </div>
+        <hr class="rule rule--soft">
+        <dl class="fk-felder fk-felder--unten">
+          <div class="fk-feld"><dt>Zahlt an</dt><dd><span class="ngo"><span class="ngo-mark" aria-hidden="true"></span>Bahnhofsmission Köln</span></dd></div>
+          <div class="fk-feld"><dt>Betrag</dt><dd>12,00 €</dd></div>
+        </dl>
+        <p class="fk-zitat">„Ich habe die Bahn dazu gebracht, an die Bahnhofsmission Köln zu zahlen. Weil sie mich 204 Minuten warten ließ.“</p>
       </div>
-      <hr class="rule rule--soft">
-      <dl class="fk-felder fk-felder--unten">
-        <div class="fk-feld"><dt>Zahlt an</dt><dd><span class="ngo"><span class="ngo-mark" aria-hidden="true"></span>Bahnhofsmission Köln</span></dd></div>
-        <div class="fk-feld"><dt>Betrag</dt><dd>12,00 €</dd></div>
-      </dl>
-      <p class="fk-zitat">„Ich habe die Bahn dazu gebracht, an die Bahnhofsmission Köln zu zahlen. Weil sie mich 204 Minuten warten ließ.“</p>
+      <p class="beispiel">Beispiel. Deine Karte trägt deine Zahlen.</p>
     </div>
-    <p class="beispiel">Beispiel. Deine Karte trägt deine Zahlen.</p>
   </div>
 </div>
 
-<hr class="rule">
-
 <section id="fahrplan">
   <div class="sec-kopf">
-    <p class="eyebrow">Der Fahrplan</p>
-    <h2>Einchecken, warten, kassieren lassen.</h2>
+    <p class="eyebrow">So funktioniert’s</p>
+    <h2>Einchecken, warten, zahlen lassen.</h2>
   </div>
-  <ol class="halte">
-    
-    <li class="halt">
-      <span class="punkt" aria-hidden="true"></span>
-      <div>
-        <h3>Einchecken</h3>
-        <p>Am Bahnsteig ein Tipp. Dein Zug steht schon in der Liste, weil das Handy weiß, wo du stehst.</p>
-      </div>
-    </li>
-    
-    <li class="halt">
-      <span class="punkt" aria-hidden="true"></span>
-      <div>
-        <h3>Fahren</h3>
-        <p>Leg das Handy weg. Die Verspätung holt unser Server aus den öffentlichen Fahrplandaten — nicht aus deinem Standort.</p>
-      </div>
-    </li>
-    
-    <li class="halt">
-      <span class="punkt" aria-hidden="true"></span>
-      <div>
-        <h3>Ankommen</h3>
-        <p>Jede Minute wird gezählt. Unter 60 Minuten gibt es Geduldspunkte. Ab 60 Minuten einen Anspruch.</p>
-      </div>
-    </li>
-    
-    <li class="halt">
-      <span class="punkt" aria-hidden="true"></span>
-      <div>
-        <h3>Antrag stellen</h3>
-        <p>Das EU-Formular ist ausgefüllt. Du unterschreibst mit dem Finger, der Antrag geht von deiner eigenen Adresse an die Fahrgastrechte-Stelle.</p>
-      </div>
-    </li>
-    
-    <li class="halt halt--ziel">
-      <span class="punkt" aria-hidden="true"></span>
-      <div>
-        <h3>Die Bahn zahlt</h3>
-        <p>An den Verein, den du gewählt hast. Direkt auf sein Konto. Wir sehen das Geld nie.</p>
-      </div>
-    </li>
-    
-  </ol>
+  <div class="fahrplan">
+    <ol class="halte">
+      
+      <li class="halt">
+        <span class="halt-nr" aria-hidden="true">1</span>
+        <span class="halt-icon" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="13" rx="3"></rect><path d="M5 11h14M9 20l-2 2M15 20l2 2M12 16v0"></path>
+  </svg>
+</span>
+        <div>
+          <h3>Einchecken</h3>
+          <p>Am Bahnsteig ein Tipp. Dein Zug steht schon in der Liste, weil das Handy weiß, wo du stehst.</p>
+        </div>
+      </li>
+      
+      <li class="halt">
+        <span class="halt-nr" aria-hidden="true">2</span>
+        <span class="halt-icon" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>
+  </svg>
+</span>
+        <div>
+          <h3>Fahren</h3>
+          <p>Leg das Handy weg. Die Verspätung holt unser Server aus den öffentlichen Fahrplandaten — nicht aus deinem Standort.</p>
+        </div>
+      </li>
+      
+      <li class="halt">
+        <span class="halt-nr" aria-hidden="true">3</span>
+        <span class="halt-icon" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"></path><circle cx="12" cy="10" r="2.4"></circle>
+  </svg>
+</span>
+        <div>
+          <h3>Ankommen</h3>
+          <p>Jede Minute wird gezählt. Unter 60 Minuten gibt es Geduldspunkte. Ab 60 Minuten einen Anspruch.</p>
+        </div>
+      </li>
+      
+      <li class="halt">
+        <span class="halt-nr" aria-hidden="true">4</span>
+        <span class="halt-icon" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"></path><path d="M14 3v5h5M10 13h6M10 17h4"></path>
+  </svg>
+</span>
+        <div>
+          <h3>Antrag stellen</h3>
+          <p>Das EU-Formular ist ausgefüllt. Du unterschreibst mit dem Finger, der Antrag geht von deiner eigenen Adresse an die Fahrgastrechte-Stelle.</p>
+        </div>
+      </li>
+      
+      <li class="halt halt--ziel">
+        <span class="halt-nr" aria-hidden="true">5</span>
+        <span class="halt-icon" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7-4.6-7-9.4A4.1 4.1 0 0 1 12 8a4.1 4.1 0 0 1 7 2.6C19 15.4 12 20 12 20z"></path>
+  </svg>
+</span>
+        <div>
+          <h3>Die Bahn zahlt</h3>
+          <p>An den Verein, den du gewählt hast. Direkt auf sein Konto. Wir sehen das Geld nie.</p>
+        </div>
+      </li>
+      
+    </ol>
+    <aside class="fp-karte">
+      <span class="fp-herz" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7-4.6-7-9.4A4.1 4.1 0 0 1 12 8a4.1 4.1 0 0 1 7 2.6C19 15.4 12 20 12 20z"></path>
+  </svg>
+</span>
+      <h3>Deine Verspätung bewirkt etwas.</h3>
+      <p>Unter 60 Minuten gibt es Geduldspunkte. Ab 60 Minuten einen gesetzlichen Anspruch — und der geht an einen Verein, nicht an uns.</p>
+    </aside>
+  </div>
 </section>
-
-<hr class="rule">
 
 <section>
   <div class="sec-kopf">
@@ -181,34 +238,65 @@
   </div>
 </section>
 
-<hr class="rule">
-
-<section>
+<section id="nicht">
   <div class="sec-kopf">
-    <p class="eyebrow">Was wir nicht sind</p>
+    <p class="eyebrow">Darum Verspätomat</p>
     <h2>Fünf Dinge, die hier fehlen.</h2>
   </div>
   <div class="nicht">
     
-    <div><h3>Keine Provision.</h3> <p>Andere behalten 20 bis 30 Prozent. Wir behalten nichts — wir bekommen nichts.</p></div>
+    <div class="nicht-karte">
+      <span class="nicht-mark" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M14.5 9.2A3.2 3.2 0 0 0 9 11.4v1.2a3.2 3.2 0 0 0 5.5 2.2M8 11.5h5M8 13.5h5"></path>
+  </svg>
+</span>
+      <h3>Keine Provision.</h3>
+      <p>Andere behalten 20 bis 30 Prozent. Wir behalten nichts — wir bekommen nichts.</p>
+    </div>
     
-    <div><h3>Kein Konto.</h3> <p>Keine E-Mail, kein Passwort. Ein anonymes Gerätekonto und zwölf Wörter, falls du das Handy wechselst.</p></div>
+    <div class="nicht-karte">
+      <span class="nicht-mark" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10.5" width="14" height="9.5" rx="2.5"></rect><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"></path>
+  </svg>
+</span>
+      <h3>Kein Konto.</h3>
+      <p>Keine E-Mail, kein Passwort. Ein anonymes Gerätekonto und zwölf Wörter, falls du das Handy wechselst.</p>
+    </div>
     
-    <div><h3>Kein Tracking.</h3> <p>Keine Analyse-SDKs, keine Werbung, kein Datenverkauf. Diese Seite lädt nichts von Dritten.</p></div>
+    <div class="nicht-karte">
+      <span class="nicht-mark" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 6.5 12 6.5 21.5 12 21.5 12 18 17.5 12 17.5 2.5 12 2.5 12z"></path><circle cx="12" cy="12" r="2.6"></circle><path d="M4 20 20 4"></path>
+  </svg>
+</span>
+      <h3>Kein Tracking.</h3>
+      <p>Keine Analyse-SDKs, keine Werbung, kein Datenverkauf. Diese Seite lädt nichts von Dritten.</p>
+    </div>
     
-    <div><h3>Kein Standortverlauf.</h3> <p>Die App schaut einmal am Bahnsteig und einmal beim Einchecken. Den Zug verfolgt der Fahrplan, nicht dein Handy.</p></div>
+    <div class="nicht-karte">
+      <span class="nicht-mark" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"></path><circle cx="12" cy="10" r="2.4"></circle>
+  </svg>
+</span>
+      <h3>Kein Standortverlauf.</h3>
+      <p>Die App schaut einmal am Bahnsteig und einmal beim Einchecken. Den Zug verfolgt der Fahrplan, nicht dein Handy.</p>
+    </div>
     
-    <div><h3>Bote, kein Vertreter.</h3> <p>Der Antrag ist deiner, er trägt deinen Namen und deine Unterschrift. Wir füllen aus und leiten weiter. <a href="/bote">Wie das geht</a></p></div>
+    <div class="nicht-karte">
+      <span class="nicht-mark" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 21 4l-7.5 17-2-7z"></path><path d="M11.5 14 21 4"></path>
+  </svg>
+</span>
+      <h3>Bote, kein Vertreter.</h3>
+      <p>Der Antrag ist deiner, er trägt deinen Namen und deine Unterschrift. Wir füllen aus und leiten weiter. <a href="/bote">Wie das geht</a></p>
+    </div>
     
   </div>
 </section>
 
-<hr class="rule">
-
 <section>
   <div class="sec-kopf">
-    <p class="eyebrow">Fragen</p>
-    <h2>Was Leute zuerst wissen wollen.</h2>
+    <p class="eyebrow">Häufige Fragen</p>
+    <h2>Was du noch wissen möchtest.</h2>
   </div>
   <div class="fragen">
     
@@ -260,43 +348,40 @@
   </div>
 </section>
 
-<hr class="rule">
-
 <section id="holen">
-  <div class="sec-kopf">
-    <p class="eyebrow">Holen</p>
-    <h2>Noch nicht ganz da.</h2>
-  </div>
-  <div class="holen">
-    
-    <div class="laden">
-      <p class="eyebrow">iPhone</p>
-      
-      <p class="zustand wartet">Bald im App Store</p>
-      
-      <p>Die App liegt zur Prüfung bereit.</p>
+  <div class="band">
+    <div class="band-text">
+      <p class="eyebrow">Aus Verspätung wird Wirkung</p>
+      <h2>Noch nicht ganz da.</h2>
+      <p class="band-lead">Lade dir den Verspätomat, sobald er da ist, und mach deine nächste Verspätung sinnvoll.</p>
     </div>
-    
-    <div class="laden">
-      <p class="eyebrow">Android</p>
+    <div class="band-laden">
       
-      <p class="zustand wartet">Bald bei Google Play</p>
       
-      <p>Die App ist fertig, der Store noch nicht.</p>
+      <div class="laden">
+        
+        <span class="btn btn--wartet">Bald im App Store</span>
+        
+        <p>Die App liegt zur Prüfung bereit.</p>
+      </div>
+      
+      <div class="laden">
+        
+        <span class="btn btn--wartet">Bald bei Google Play</span>
+        
+        <p>Die App ist fertig, der Store noch nicht.</p>
+      </div>
+      
     </div>
-    
   </div>
 </section>
 
 
-  <hr class="rule">
   <footer>
     <div class="fuss-oben">
-      <nav class="fuss-zeilen">
-        <a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><a href="/bote">Wie wir Anträge weiterleiten</a><a href="/loeschen">Daten löschen</a>
-        <a href="mailto:info@zoom7.de">info@zoom7.de</a>
-      </nav>
-      
+      <div class="fuss-marke">
+        <a class="marke" href="/">
+          
     <svg class="clock clock--still" viewBox="0 0 100 100" aria-hidden="true">
       <circle cx="50" cy="50" r="48" fill="#FFFFFF" stroke="#111111" stroke-width="3"></circle>
       <g stroke="#111111" stroke-width="4">
@@ -314,7 +399,17 @@
       <circle cx="50" cy="50" r="4" fill="#111111"></circle>
     </svg>
 
+          <span class="wordmark">Verspätomat</span>
+        </a>
+        <p class="fuss-zeile">Verspätungen sammeln. Gutes tun.</p>
+      </div>
+      <nav class="fuss-zeilen">
+        <a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><a href="/bote">Wie wir Anträge weiterleiten</a><a href="/loeschen">Daten löschen</a>
+        <a href="mailto:info@zoom7.de">Kontakt</a>
+      </nav>
     </div>
+    
+    <p class="fuss-unten">Gebaut in Deutschland. Kein Tracking, keine Anfrage an Dritte.</p>
   </footer>
 
 </div>

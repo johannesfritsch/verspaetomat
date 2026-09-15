@@ -5,12 +5,45 @@
 title = "Verspätomat"
 description = "Verspätomat merkt sich deine Zugverspätungen, füllt den Fahrgastrechte-Antrag aus und schickt ihn ab. Die Entschädigung geht an einen Verein, den du wählst."
 
+# Die Kopfzeile. Die Ziele sind Anker auf dieser Seite; ein Rechtstext bekommt sie nicht.
+[kopf]
+cta = "App holen"
+
+[[kopf.zeile]]
+label = "So funktioniert’s"
+href = "#fahrplan"
+
+[[kopf.zeile]]
+label = "Die App"
+href = "#bilder"
+
+[[kopf.zeile]]
+label = "Was fehlt"
+href = "#nicht"
+
+[[kopf.zeile]]
+label = "Fragen"
+href = "#fragen"
+
 [hero]
-eyebrow = "Fahrgastrechte, ohne Papierkrieg"
-headline = "Die Bahn war zu spät. Jetzt zahlt sie dafür."
+eyebrow = "Verspätungen sammeln. Gutes tun."
+# Zweigeteilt, weil die zweite Hälfte rot steht — das ist die einzige Stelle auf der Seite,
+# an der Rot einen Satz trägt statt einen Knopf.
+headline = "Die Bahn war zu spät."
+headline_rot = "Jetzt zahlt sie dafür."
+# „erstellt automatisch Erstattungsanträge" stand so im Entwurf. Die App erstellt nichts von
+# selbst: sie füllt aus, du unterschreibst, sie leitet weiter (docs/05, Bote statt Vertreter).
 lead = "Verspätomat merkt sich deine Verspätungen, füllt für dich den Antrag aus und schickt ihn ab. Das Geld geht an einen Verein, den du wählst. Kein Cent davon an uns."
-cta = "Im App Store laden"
 cta_secondary = "So funktioniert’s ↓"
+
+[[hero.haken]]
+text = "Kostenlos"
+
+[[hero.haken]]
+text = "Kein Geldfluss über uns"
+
+[[hero.haken]]
+text = "Kein Tracking"
 
 # Ein Beispiel, und es steht auch so auf der Karte. Erfundene Zahlen als echte auszugeben
 # ist das Einzige, was diese Seite nicht tun darf.
@@ -25,27 +58,39 @@ zitat = "„Ich habe die Bahn dazu gebracht, an die Bahnhofsmission Köln zu zah
 hinweis = "Beispiel. Deine Karte trägt deine Zahlen."
 
 [fahrplan]
-eyebrow = "Der Fahrplan"
-title = "Einchecken, warten, kassieren lassen."
+eyebrow = "So funktioniert’s"
+title = "Einchecken, warten, zahlen lassen."
+
+# Die getönte Karte neben den Halten. „Statt Ärger einfach Gutes tun — für eine solidarische
+# Gesellschaft" stand im Entwurf; das ist nicht der Ton dieses Produkts (docs/10). Was hier
+# steht, ist nachprüfbar.
+[fahrplan.karte]
+title = "Deine Verspätung bewirkt etwas."
+text = "Unter 60 Minuten gibt es Geduldspunkte. Ab 60 Minuten einen gesetzlichen Anspruch — und der geht an einen Verein, nicht an uns."
 
 [[fahrplan.halt]]
 label = "Einchecken"
+icon = "zug"
 text = "Am Bahnsteig ein Tipp. Dein Zug steht schon in der Liste, weil das Handy weiß, wo du stehst."
 
 [[fahrplan.halt]]
 label = "Fahren"
+icon = "uhr"
 text = "Leg das Handy weg. Die Verspätung holt unser Server aus den öffentlichen Fahrplandaten — nicht aus deinem Standort."
 
 [[fahrplan.halt]]
 label = "Ankommen"
+icon = "halt"
 text = "Jede Minute wird gezählt. Unter 60 Minuten gibt es Geduldspunkte. Ab 60 Minuten einen Anspruch."
 
 [[fahrplan.halt]]
 label = "Antrag stellen"
+icon = "blatt"
 text = "Das EU-Formular ist ausgefüllt. Du unterschreibst mit dem Finger, der Antrag geht von deiner eigenen Adresse an die Fahrgastrechte-Stelle."
 
 [[fahrplan.halt]]
 label = "Die Bahn zahlt"
+icon = "herz"
 text = "An den Verein, den du gewählt hast. Direkt auf sein Konto. Wir sehen das Geld nie."
 
 [bilder]
@@ -93,34 +138,42 @@ width = 640
 height = 1387
 
 [nicht]
-eyebrow = "Was wir nicht sind"
+eyebrow = "Darum Verspätomat"
+# Der Entwurf setzt hier fünf positive Gründe („Einfach", „Sinnvoll", „Motivierend" …). Das ist
+# Prospektsprache und teils unwahr. Die fünf, die schon hier standen, sind nachprüfbar und sagen
+# dasselbe schärfer: was eine App über sich weglassen kann, ist das bessere Argument.
 title = "Fünf Dinge, die hier fehlen."
 
 [[nicht.punkt]]
 title = "Keine Provision."
+icon = "geld"
 text = "Andere behalten 20 bis 30 Prozent. Wir behalten nichts — wir bekommen nichts."
 
 [[nicht.punkt]]
 title = "Kein Konto."
+icon = "schloss"
 text = "Keine E-Mail, kein Passwort. Ein anonymes Gerätekonto und zwölf Wörter, falls du das Handy wechselst."
 
 [[nicht.punkt]]
 title = "Kein Tracking."
+icon = "auge"
 text = "Keine Analyse-SDKs, keine Werbung, kein Datenverkauf. Diese Seite lädt nichts von Dritten."
 
 [[nicht.punkt]]
 title = "Kein Standortverlauf."
+icon = "halt"
 text = "Die App schaut einmal am Bahnsteig und einmal beim Einchecken. Den Zug verfolgt der Fahrplan, nicht dein Handy."
 
 [[nicht.punkt]]
 title = "Bote, kein Vertreter."
+icon = "bote"
 text = "Der Antrag ist deiner, er trägt deinen Namen und deine Unterschrift. Wir füllen aus und leiten weiter."
 link = "/bote"
 link_text = "Wie das geht"
 
 [fragen]
-eyebrow = "Fragen"
-title = "Was Leute zuerst wissen wollen."
+eyebrow = "Häufige Fragen"
+title = "Was du noch wissen möchtest."
 
 [[fragen.frage]]
 q = "Was kostet das?"
@@ -159,8 +212,12 @@ q = "Was, wenn die Bahn ablehnt?"
 a = "Die Antwort landet in der App, im Klartext. Wenn du sie für falsch hältst, ist die Schlichtungsstelle söp kostenlos zuständig — zwischen dir und der Bahn, ohne uns."
 
 [holen]
-eyebrow = "Holen"
+eyebrow = "Aus Verspätung wird Wirkung"
 title = "Noch nicht ganz da."
+# Der Entwurf setzt hier die echten Store-Abzeichen von Apple und Google. Beide Zustände stehen
+# unten auf "soon": die App ist nicht zu laden, und Apple erlaubt das Abzeichen erst, wenn sie es
+# ist. Ein Abzeichen, das nirgends hinführt, ist eine Behauptung.
+lead = "Lade dir den Verspätomat, sobald er da ist, und mach deine nächste Verspätung sinnvoll."
 
 # state: soon | testflight | live. Am Tag der Freigabe ist das hier die einzige Änderung:
 # Apple erlaubt das Store-Abzeichen erst, wenn die App wirklich zu laden ist.

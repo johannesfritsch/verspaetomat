@@ -329,3 +329,42 @@ Alles oben, mit diesen Abweichungen — und einer Überraschung:
   lädt nichts von Dritten; deshalb braucht sie auch kein Einwilligungsbanner.
 - **Ungeprüft:** dass Caddy die beiden Zertifikate (Apex und www) wirklich bekommt. Das lässt sich
   erst auf dem Server sehen. Die Konfiguration selbst ist mit `caddy validate` geprüft.
+
+## Gebaut am 15. September 2026: die zweite Fassung
+
+Die Seite bekommt das Gesicht der neuen App (docs/43). Aus der einen langen Spalte werden die
+Abschnitte des Entwurfs in `docs/assets/redesign/website.png`: eine klebende Kopfzeile mit
+Sprungmarken, ein zweispaltiger Held mit dem Bahnsteig als Bild, die Halte als nummerierte Leiter
+neben einer getönten Karte, die fünf Aufnahmen als Reihe, die fünf Punkte als Karten, die Fragen
+als Klappkarten und ein getöntes Band vor dem Fuß.
+
+**Die Farben sind jetzt die der App.** `--paper` geht von `#F3F3F0` auf `#F7F7F8`, `--ink` von
+`#111111` auf `#0F1522`, `--red` von `#D92B1E` auf `#D61316`. Dazu Token für Ecken und Schatten,
+die es hier vorher nicht gab.
+
+**Das Bild im Helden ist das der App**: `app/assets/header/checkin-clock.webp`, derselbe Bahnsteig,
+der im Check-in hinter dem Kopf liegt, auf ein Seitenverhältnis beschnitten, in das die Fahrkarte
+hineinpasst.
+
+### Vier Sachen aus dem Entwurf, die nicht gebaut sind
+
+- **Die Store-Abzeichen von Apple und Google.** Beide Zustände stehen auf `soon`: die App ist nicht
+  zu laden. Apple erlaubt das Abzeichen erst, wenn sie es ist, und ein Abzeichen, das nirgends
+  hinführt, verspricht etwas, das es nicht gibt. Stattdessen steht dort, worauf man wartet.
+- **Instagram und X im Fuß.** Es gibt keine solchen Konten. Ein Symbol, das ins Leere führt, ist
+  eine Behauptung — und fremde Markenzeichen wären es doppelt.
+- **Die fünf gezeichneten Telefone.** Der Entwurf zeigt erfundene Schirme mit Vereinen, die nicht
+  die unseren sind (Rotes Kreuz, Ärzte ohne Grenzen, WWF, SOS-Kinderdörfer). Die Reihe zeigt die
+  fünf echten Aufnahmen aus der Tour.
+- **„Fünf Gründe, die für sich sprechen."** Der Entwurf setzt dort Prospektsprache („Einfach",
+  „Sinnvoll", „Motivierend"). Die fünf Punkte, die schon da waren, sagen dasselbe nachprüfbar:
+  was eine App über sich weglassen kann, ist das bessere Argument.
+
+Und zwei Sätze im Helden des Entwurfs stimmen nicht: „erstellt automatisch Erstattungsanträge"
+(die App erstellt nichts von selbst — sie füllt aus, du unterschreibst) und „spendet den Betrag"
+(Verspätomat sieht das Geld nie; die Bahn überweist an den Verein). Der Text, der dort stand,
+bleibt.
+
+Das Schild im Bild bleibt leer. Sein Platz wandert mit dem Ausschnitt, und ein Satz, der bei
+manchen Breiten auf dem Zug landet, ist schlechter als keiner.
+

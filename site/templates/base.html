@@ -35,7 +35,7 @@
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#F3F3F0">
+<meta name="theme-color" content="#F7F7F8">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/verspaetomat.css">
 </head>
@@ -43,22 +43,37 @@
 <div class="wrap">
 
   <header class="kopf">
-    <a class="wordmark" href="/">Verspätomat</a>
-    {{ bahnhofsuhr() }}
+    <a class="marke" href="/">
+      {{ bahnhofsuhr() }}
+      <span class="wordmark">Verspätomat</span>
+    </a>
+    {% if nav_seite %}
+    <nav class="kopf-zeilen">
+      {% for n in nav_seite %}<a href="{{ n.href | safe }}">{{ n.label }}</a>{% endfor %}
+    </nav>
+    <a class="btn btn--klein" href="#holen">{{ holen_cta }}</a>
+    {% endif %}
   </header>
-  <hr class="rule">
 
   {% block inhalt %}{% endblock %}
 
-  <hr class="rule">
   <footer>
     <div class="fuss-oben">
+      <div class="fuss-marke">
+        <a class="marke" href="/">
+          {{ bahnhofsuhr(true) }}
+          <span class="wordmark">Verspätomat</span>
+        </a>
+        <p class="fuss-zeile">Verspätungen sammeln. Gutes tun.</p>
+      </div>
       <nav class="fuss-zeilen">
         {% for d in nav %}<a href="/{{ d.id }}">{{ d.title }}</a>{% endfor %}
-        <a href="mailto:{{ contact }}">{{ contact }}</a>
+        <a href="mailto:{{ contact }}">Kontakt</a>
       </nav>
-      {{ bahnhofsuhr(true) }}
     </div>
+    {# Kein Instagram, kein X: es gibt keine solchen Konten, und ein Symbol, das ins Leere
+       führt, ist eine Behauptung. Die Zeile darunter sagt stattdessen, was wahr ist. #}
+    <p class="fuss-unten">Gebaut in Deutschland. Kein Tracking, keine Anfrage an Dritte.</p>
   </footer>
 
 </div>

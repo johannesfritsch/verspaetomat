@@ -26,15 +26,33 @@
 }
 
 :root {
-  --paper: #F3F3F0;
+  /* Die Farben der App (app/lib/theme/tokens.dart). Sie sind kühl: jeder neutrale Ton hat mehr
+     Blau als Rot, und nichts ist schwarz — die dunkelste Schrift ist ein Blauschwarz, und jeder
+     neutrale Schatten ist aus einem Schiefernavy gemacht. Bis September 2026 stand hier die warme
+     Vorgängerpalette; #F7F7F8 ist keine Verschiebung von #F3F3F0, sondern die andere Temperatur. */
+  --paper: #F7F7F8;
   --paper-elevated: #FFFFFF;
-  --ink: #111111;
-  --ink2: #6B6B66;
-  --ink3: #9C9C96;
-  --rule: #D2D2CC;
-  --rule-soft: #E6E6E1;
-  --red: #D92B1E;
-  --green: #2E7D4F;
+  --ink: #0F1522;
+  --ink2: #6E727C;
+  --ink3: #8A8E98;
+  --rule: #E2E3E8;
+  --rule-soft: #EDEFF3;
+  --red: #D61316;
+  --red-pressed: #B30F12;
+  --red-tint: #FEE3E3;
+  --red-tint-soft: #FBF0F1;
+  --green: #057D2E;
+  --green-tint: #E1F6E8;
+  --grey-fill: #F3F4F6;
+  --grey-circle: #EFF0F2;
+
+  /* Ecken und Schatten: in der App sind das Token, hier waren es Literale. */
+  --radius-card: 14px;
+  --radius-panel: 10px;
+  --radius-button: 12px;
+  --shadow-card: 0 2px 6px rgba(21, 48, 90, 0.06);
+  --shadow-card-raised: 0 3px 12px rgba(21, 48, 90, 0.10);
+  --glow-red: 0 8px 22px -6px rgba(214, 19, 22, 0.25);
 
   --measure: 40rem;
   --page: 1.5rem;
@@ -60,7 +78,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.wrap { max-width: 61rem; margin: 0 auto; padding-inline: var(--page); }
+.wrap { max-width: 68rem; margin: 0 auto; padding-inline: var(--page); }
 
 h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; }
 
@@ -86,7 +104,18 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 
 /* ── Kopf ─────────────────────────────────────────────────────── */
 
-.kopf { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1.125rem; }
+.kopf {
+  display: flex; align-items: center; gap: 1rem;
+  padding-block: 1.125rem;
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+.marke { display: inline-flex; align-items: center; gap: 0.625rem; border-bottom: 0; margin-right: auto; }
+.kopf-zeilen { display: flex; gap: 1.75rem; font-size: 0.9375rem; }
+.kopf-zeilen a { color: var(--ink2); border-bottom: 0; }
+.kopf-zeilen a:hover { color: var(--ink); }
+@media (max-width: 760px) { .kopf-zeilen { display: none; } }
 .wordmark {
   font-variation-settings: 'wdth' 70;
   font-weight: 700;
@@ -110,11 +139,30 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-  gap: 3.5rem;
-  align-items: start;
-  padding-block: 4.5rem 5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 3rem;
+  align-items: center;
+  padding-block: 3.5rem 4.5rem;
 }
+.hero-text { position: relative; z-index: 1; }
+.hero h1 .rot { color: var(--red); }
+
+/* Der Bahnsteig hinter der Fahrkarte. Das Bild bleibt hinten und nimmt keine Tipps an. */
+.hero-bild { position: relative; }
+/* Der Ausschnitt ist breiter als hoch, die Fahrkarte davor ist hoch: also wird das Bild auf ein
+   Format gebracht, in das die Karte hineinpasst, und an der rechten unteren Ecke beschnitten —
+   dort stehen Uhr, Vordach und Zug, also genau das, was man sehen soll. */
+.hero-bild .bahnsteig {
+  display: block; width: 100%; height: auto;
+  aspect-ratio: 11 / 10;
+  object-fit: cover;
+  object-position: 72% 60%;
+  border-radius: var(--radius-card);
+}
+
+.haken { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; list-style: none; margin: 1.5rem 0 0; padding: 0; }
+.haken li { display: inline-flex; align-items: center; gap: 0.4375rem; font-size: 0.875rem; color: var(--ink2); }
+.hakenmark { color: var(--green); font-weight: 700; }
 .hero h1 {
   font-variation-settings: 'wdth' 112;
   font-size: clamp(2.5rem, 6.2vw, 4rem);
@@ -124,24 +172,52 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 }
 .hero .lead { font-size: 1.1875rem; color: var(--ink2); max-width: 26rem; margin: 0; }
 
-.cta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1.5rem; margin-top: 2.25rem; }
+.cta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: 2rem; }
+@media (max-width: 520px) { .cta-row { display: grid; } }
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
-  min-height: 56px; padding-inline: 1.75rem;
-  background: var(--ink); color: var(--paper-elevated);
-  border: 0; border-radius: 4px;
-  font: inherit; font-weight: 600; font-size: 1.0625rem;
+  min-height: 52px; padding-inline: 1.5rem;
+  background: var(--red); color: var(--paper-elevated);
+  border: 0; border-radius: var(--radius-button);
+  box-shadow: var(--glow-red);
+  font: inherit; font-weight: 600; font-size: 1rem;
 }
-.btn:hover { background: #000; border-bottom: 0; }
+.btn:hover { background: var(--red-pressed); border-bottom: 0; }
+.btn--klein { min-height: 40px; padding-inline: 1.125rem; font-size: 0.9375rem; }
+/* Solange die App nicht zu laden ist, ist der Knopf kein Knopf: er sagt, worauf man wartet,
+   und sieht nicht aus, als könnte man ihn drücken. */
+.btn--wartet {
+  background: var(--ink); color: var(--paper-elevated);
+  box-shadow: none; cursor: default;
+}
 .ghost { border-bottom: 1px solid var(--rule); color: var(--ink2); }
 .ghost:hover { color: var(--ink); border-bottom-color: var(--ink); }
 
 /* Die Fahrkarte: ein Stück Papier, oben und unten perforiert, einmal gelocht. */
 
-.fahrkarte-halter { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; }
+/* Die Fahrkarte steht im Bild, nicht daneben: links unten, ein Stück über den Rand hinaus, so
+   wie das Telefon im Entwurf. Sie ist hier kleiner gesetzt als auf einer eigenen Seite — ein
+   Beispiel im Bild muss lesbar sein, nicht laut. */
+.fahrkarte-halter {
+  display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+  position: absolute; left: 3.5%; bottom: -1.5rem; width: 51%;
+  font-size: 0.875rem;
+}
+.hero-bild .fahrkarte { padding: 1.125rem 1rem; }
+.hero-bild .fk-felder { margin: 0.875rem 0 0.75rem; }
+.hero-bild .fk-feld { grid-template-columns: 4rem 1fr; padding-block: 0.0625rem; }
+.hero-bild .fk-feld dd { font-size: 0.8125rem; }
+.hero-bild .fk-zahl { font-size: 3.25rem; }
+.hero-bild .fk-held { padding-block: 0.75rem 0.875rem; }
+.hero-bild .loch { width: 22px; height: 22px; }
+.hero-bild .fk-zitat { font-size: 0.8125rem; margin-top: 0.875rem; }
+@media (max-width: 860px) {
+  .fahrkarte-halter { position: static; width: 100%; margin-top: 1.5rem; }
+}
 .fahrkarte {
   width: 100%; max-width: 23rem;
   background: var(--paper-elevated);
+  box-shadow: var(--shadow-card-raised);
   border-left: 1px solid var(--rule-soft);
   border-right: 1px solid var(--rule-soft);
   padding: 1.75rem 1.5rem;
@@ -199,78 +275,134 @@ section { padding-block: 4rem; }
 
 /* ── Der Fahrplan ─────────────────────────────────────────────── */
 
-.halte { list-style: none; margin: 0; padding: 0; max-width: var(--measure); }
-.halt { display: grid; grid-template-columns: 2.25rem 1fr; gap: 1.25rem; padding-bottom: 2.25rem; position: relative; }
+.fahrplan { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 3rem; align-items: start; }
+@media (max-width: 860px) { .fahrplan { grid-template-columns: 1fr; gap: 2rem; } }
+
+.halte { list-style: none; margin: 0; padding: 0; }
+.halt { display: grid; grid-template-columns: 1.75rem 2.75rem 1fr; gap: 0 1rem; padding-bottom: 2rem; position: relative; }
 .halt:last-child { padding-bottom: 0; }
+/* Die Linie läuft von Nummer zu Nummer und hört bei der letzten auf. */
 .halt:not(:last-child)::before {
-  content: ""; position: absolute; left: 0.5rem; top: 1.125rem; bottom: -0.375rem;
+  content: ""; position: absolute; left: 0.84rem; top: 2rem; bottom: -0.25rem;
   width: 1px; background: var(--rule);
 }
-.punkt {
-  width: 17px; height: 17px; border-radius: 50%;
-  background: var(--paper); box-shadow: inset 0 0 0 2px var(--ink);
-  margin-top: 0.3125rem; position: relative; z-index: 1;
+.halt-nr {
+  width: 1.75rem; height: 1.75rem; border-radius: 50%;
+  background: var(--ink); color: var(--paper-elevated);
+  display: grid; place-items: center;
+  font-size: 0.8125rem; font-weight: 600;
+  position: relative; z-index: 1;
 }
-.halt--ziel .punkt { box-shadow: inset 0 0 0 2px var(--red); background: var(--red); }
-.halt h3 {
-  font-size: 0.75rem; font-variation-settings: 'wdth' 70; font-weight: 600;
-  letter-spacing: 0.14em; text-transform: uppercase;
+.halt--ziel .halt-nr { background: var(--red); }
+.halt-icon {
+  width: 2.75rem; height: 2.75rem; border-radius: 50%;
+  background: var(--grey-circle); color: var(--ink);
+  display: grid; place-items: center;
 }
-.halt p { margin: 0.375rem 0 0; color: var(--ink2); }
+.halt--ziel .halt-icon { background: var(--red-tint); color: var(--red); }
+.halt-icon svg { width: 20px; height: 20px; }
+.halt h3 { font-size: 1rem; }
+.halt p { margin: 0.25rem 0 0; color: var(--ink2); font-size: 0.9375rem; }
+
+.fp-karte {
+  background: var(--red-tint-soft);
+  border-radius: var(--radius-card);
+  padding: 2rem 1.75rem;
+}
+.fp-herz {
+  width: 2.75rem; height: 2.75rem; border-radius: 50%;
+  background: var(--paper-elevated); color: var(--red);
+  display: grid; place-items: center; margin-bottom: 1.25rem;
+}
+.fp-herz svg { width: 20px; height: 20px; }
+.fp-karte h3 { font-size: 1.375rem; line-height: 1.2; letter-spacing: -0.01em; }
+.fp-karte p { margin: 0.75rem 0 0; color: var(--ink2); font-size: 0.9375rem; }
 
 /* ── Bildstreifen ─────────────────────────────────────────────── */
 
-.streifen { display: flex; gap: 1.25rem; overflow-x: auto; padding-bottom: 1rem; scroll-snap-type: x mandatory; }
-.schuss { flex: none; width: 15rem; scroll-snap-align: start; margin: 0; }
+.streifen { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1rem; }
+.schuss { margin: 0; }
+/* Unter der Breite, bei der fünf Bilder nebeneinander noch etwas zeigen, wird der Streifen
+   wieder ein Streifen: einer nach dem anderen, zum Wischen. */
+@media (max-width: 900px) {
+  .streifen {
+    display: flex; gap: 1rem; overflow-x: auto;
+    padding-bottom: 1rem; scroll-snap-type: x mandatory;
+    /* Damit das erste Bild nicht an der Rinne klebt und das letzte nicht daran endet. */
+    margin-inline: calc(var(--page) * -1); padding-inline: var(--page);
+  }
+  .schuss { flex: none; width: 13rem; scroll-snap-align: start; }
+}
 .schuss img {
   display: block; width: 100%; height: auto; max-width: 100%;
   background: var(--paper-elevated);
-  border: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
 }
-.schuss figcaption { font-size: 0.8125rem; color: var(--ink2); margin-top: 0.625rem; }
+.schuss figcaption { font-size: 0.8125rem; color: var(--ink2); margin-top: 0.875rem; text-align: center; }
 
 /* ── Was wir nicht sind ───────────────────────────────────────── */
 
-.nicht { max-width: var(--measure); }
-.nicht > div { padding-block: 1.375rem; border-top: 1px solid var(--rule); }
-.nicht > div:last-child { border-bottom: 1px solid var(--rule); }
-.nicht h3 { display: inline; font-size: 1.0625rem; }
-.nicht p { display: inline; margin: 0; color: var(--ink2); }
+.nicht { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1rem; }
+@media (max-width: 1000px) { .nicht { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .nicht { grid-template-columns: 1fr; } }
+.nicht-karte {
+  background: var(--paper-elevated);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 1.5rem 1.25rem;
+}
+.nicht-mark {
+  width: 2.75rem; height: 2.75rem; border-radius: 50%;
+  background: var(--red-tint); color: var(--red);
+  display: grid; place-items: center; margin-bottom: 1rem;
+}
+.nicht-mark svg { width: 20px; height: 20px; }
+.nicht h3 { font-size: 1rem; }
+.nicht p { margin: 0.375rem 0 0; color: var(--ink2); font-size: 0.875rem; }
 
 /* ── Fragen ───────────────────────────────────────────────────── */
 
-.fragen { max-width: var(--measure); }
-.fragen details { border-top: 1px solid var(--rule); }
-.fragen details:last-of-type { border-bottom: 1px solid var(--rule); }
+.fragen { display: grid; gap: 0.625rem; }
+.fragen details {
+  background: var(--paper-elevated);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-card);
+}
 .fragen summary {
   cursor: pointer; list-style: none;
-  padding-block: 1.25rem; padding-right: 2rem;
+  padding: 1.125rem 3rem 1.125rem 1.25rem;
   font-weight: 600; position: relative;
 }
 .fragen summary::-webkit-details-marker { display: none; }
 /* Ein Plus, das beim Öffnen zum Minus wird. Beide Striche hängen an der Mitte der Zeile,
    damit sie sich wirklich kreuzen — nicht fast. */
+/* Ein Winkel, der sich beim Öffnen dreht: zwei Striche, die an derselben Ecke hängen. */
 .fragen summary::after {
-  content: ""; position: absolute; right: 0.5rem; top: 50%;
-  width: 11px; height: 1px; background: var(--ink);
-  transform: translateY(-50%);
+  content: ""; position: absolute; right: 1.25rem; top: calc(50% - 4px);
+  width: 8px; height: 8px;
+  border-right: 1.5px solid var(--ink3); border-bottom: 1.5px solid var(--ink3);
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
 }
-.fragen summary::before {
-  content: ""; position: absolute; right: calc(0.5rem + 5px); top: 50%;
-  width: 1px; height: 11px; background: var(--ink);
-  transform: translateY(-50%);
-  transition: opacity 0.12s linear;
-}
-.fragen details[open] summary::before { opacity: 0; }
-.fragen details p { margin: 0 0 1.375rem; color: var(--ink2); max-width: 34rem; }
+.fragen details[open] summary::after { transform: rotate(-135deg); }
+.fragen details p { margin: 0 1.25rem 1.25rem; color: var(--ink2); font-size: 0.9375rem; max-width: 42rem; }
 
 /* ── Holen ────────────────────────────────────────────────────── */
 
-.holen { display: flex; flex-wrap: wrap; gap: 2.5rem; align-items: flex-start; }
-.laden { min-width: 13rem; }
-.laden .zustand { font-size: 1.375rem; font-weight: 600; margin: 0.5rem 0 0; }
-.laden .zustand.wartet { color: var(--ink3); }
-.laden p { margin: 0.375rem 0 0; color: var(--ink2); font-size: 0.9375rem; }
+.band {
+  background: var(--red-tint-soft);
+  border-radius: var(--radius-card);
+  padding: 2.5rem 2rem;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2rem; align-items: center;
+}
+@media (max-width: 860px) { .band { grid-template-columns: 1fr; padding: 2rem 1.5rem; } }
+.band-text h2 { font-size: clamp(1.5rem, 3vw, 2rem); line-height: 1.15; margin-top: 0.5rem; }
+.band-lead { margin: 0.625rem 0 0; color: var(--ink2); font-size: 0.9375rem; max-width: 30rem; }
+.band-laden { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+.laden { min-width: 11rem; }
+.laden p { margin: 0.5rem 0 0; color: var(--ink2); font-size: 0.8125rem; }
 
 /* ── Rechtstexte ──────────────────────────────────────────────── */
 
@@ -295,8 +427,10 @@ section { padding-block: 4rem; }
 
 /* ── Fuß ──────────────────────────────────────────────────────── */
 
-footer { padding-block: 2rem 4rem; }
-.fuss-oben { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding-block: 1.5rem; }
+footer { padding-block: 3rem 4rem; border-top: 1px solid var(--rule); margin-top: 4rem; }
+.fuss-oben { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap; }
+.fuss-zeile { margin: 0.5rem 0 0; color: var(--ink2); font-size: 0.875rem; }
+.fuss-unten { margin: 2rem 0 0; color: var(--ink3); font-size: 0.8125rem; }
 .fuss-zeilen { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; align-items: center; font-size: 0.9375rem; color: var(--ink2); }
 .fuss-zeilen a { color: var(--ink2); }
 .clock--still .second { animation: none; }
