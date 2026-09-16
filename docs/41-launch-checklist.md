@@ -8,7 +8,7 @@ Everything in the code that can be built without an account is built (see 30 for
 |---|---|---|---|
 | A1 | **Domain `verspaetomat.de`** at a registrar with a DNS panel | DNS propagation, mail warm-up | Access to the DNS panel, or add the records from `deploy/README.md` yourself |
 | A2 | **Mail provider** (Postmark recommended: one account does outbound and inbound) | Postmark approves new accounts manually, often within a day; a fresh sending domain needs DKIM verified and a few days of low volume | `SMTP_URL` (server token), the inbound webhook URL is ours, set `INBOUND_SECRET` |
-| A3 | **NGO agreement** with one organisation (Bahnhofsmission Köln is the mock; pick whoever says yes first) | People, not systems | Account holder, IBAN, written consent to appear as payee on claims, a contact for the monthly statement (`stellwerk ngo-report`) |
+| A3 | **NGO agreement** with one organisation (Bahnhofsmission Köln is the mock; pick whoever says yes first) | People, not systems | Account holder, IBAN, written consent to appear as payee on claims, a contact for questions |
 | A4 | **Apple Developer Program** (99 €/year) | Enrolment verification takes 1 to 2 days | Team ID; then an APNs key (.p8) with Key ID; the bundle id `de.verspaetomat.verspaetomat` registered with the Push capability |
 | A5 | **Google Play Console** (25 € once) | Identity verification takes days; new personal accounts must run a 14-day closed test with 12 testers before production | Service-account JSON for FCM (Firebase project) |
 

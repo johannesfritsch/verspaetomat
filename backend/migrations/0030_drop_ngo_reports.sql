@@ -1,0 +1,12 @@
+-- The bank-statement import is gone, and with it the only thing this table recorded.
+--
+-- The idea was that each Verein would send its monthly statement, we would match transfers to
+-- claims by amount and date, and that match would be the confirmation. It was never going to
+-- happen: these are large organisations, we cannot ask them for their bank statements, and a
+-- product that needs a charity's CSV before it can tell a passenger whether they were paid has not
+-- solved the problem it set out to solve.
+--
+-- The confirmation is the railway's own answer instead. The desk writes that it pays or has paid,
+-- `classify.rs` reads that, and the claim, the cases, the passenger's sum and the Verein's total
+-- all move from that one event. Which is also the honest source: the desk is the party that knows.
+drop table if exists ngo_reports;

@@ -1827,19 +1827,14 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
             (cust, claim)
         }
     };
-    let lower = m.body.to_lowercase();
-    let outcome = if lower.contains("nicht entsprechen") || lower.contains("abgelehnt") || lower.contains("keine entschädigung") {
-        MailOutcome::Rejected
-    } else if lower.contains("benötigen wir") || lower.contains("rückfrage") || lower.contains("bitte senden sie") {
-        MailOutcome::Question
-    } else if lower.contains("überwiesen") || lower.contains("entschädigung von") || lower.contains("wird ausgezahlt") {
-        MailOutcome::Accepted
-    } else if lower.contains("undeliverable") || lower.contains("unzustellbar") || lower.contains("mailer-daemon") {
-        MailOutcome::Bounce
-    } else {
-        MailOutcome::Other
-    };
-    let amount = extract_amount_cents(&m.body).or_else(|| if outcome == MailOutcome::Accepted { claim.as_ref().map(|c| c.amount_claimed_cents) } else { None });
+    // The desk's own words are the only confirmation this system has (see classify.rs). Every rule
+    // there fails towards "a human should read this", because a wrong `accepted` tells somebody
+    // their delay became money that never arrived and adds it to a Verein's public total.
+    let reading = crate::classify::read(&m.from, &m.subject, &m.body);
+    let outcome = reading.outcome;
+    // The amount is the one the desk named, never the one we asked for. Falling back to the
+    // claimed sum used to turn every partial award into a full one on the Wir screen.
+    let amount = reading.amount_cents;
     // Attachments become uploads of kind 'inbound'; retention deletes them when the claim closes.
     let mut stored: Vec<Value> = Vec::new();
     for (name, ct, bytes) in &m.attachments {
@@ -1892,7 +1887,16 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
                 let _ = sqlx::query("insert into badge_awards (customer_id, badge_id) values ($1, 'bestaetigt') on conflict do nothing").bind(cust.id).execute(&s.pool).await;
             }
         }
-        rules::audit(&s.pool, "claim", claim.id, Some("sent"), &format!("{:?}", claim_status).to_lowercase(), "inbound mail").await.map_err(internal)?;
+        rules::audit(&s.pool, "claim", claim.id, Some("sent"), &format!("{:?}", claim_status).to_lowercase(), &format!("inbound mail: {}", reading.because)).await.map_err(internal)?;
+        // The one event that says money was confirmed. It carries the amount the desk named, so the
+        // push and the app both report what the railway actually wrote rather than what we asked.
+        if claim_status == ClaimStatus::Accepted {
+            s.events.publish(
+                cust.id,
+                "claim",
+                json!({ "claim_id": claim.id, "status": "accepted", "amount_confirmed_cents": amount, "source": "railway_reply" }),
+            );
+        }
         if matches!(claim_status, ClaimStatus::Accepted | ClaimStatus::Rejected) {
             crate::scanner::retain_closed_claim(&s.pool, claim.id).await.map_err(internal)?;
         }
@@ -1916,33 +1920,6 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
     Ok(json!({ "mail": mail, "outcome": outcome, "claim_id": claim.map(|c| c.id) }))
 }
 
-/// "4,50 EUR" / "19,95 €" → cents.
-fn extract_amount_cents(text: &str) -> Option<Cents> {
-    let bytes: Vec<char> = text.chars().collect();
-    let mut best: Option<Cents> = None;
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i].is_ascii_digit() {
-            let start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == '.') {
-                i += 1;
-            }
-            if i < bytes.len() && bytes[i] == ',' && i + 2 < bytes.len() && bytes[i + 1].is_ascii_digit() && bytes[i + 2].is_ascii_digit() {
-                let whole: String = bytes[start..i].iter().filter(|c| c.is_ascii_digit()).collect();
-                let frac: String = bytes[i + 1..i + 3].iter().collect();
-                let rest: String = bytes[i + 3..(i + 8).min(bytes.len())].iter().collect();
-                if rest.contains("EUR") || rest.contains('€') {
-                    let v = whole.parse::<i64>().unwrap_or(0) * 100 + frac.parse::<i64>().unwrap_or(0);
-                    best = Some(best.map_or(v, |b| b.max(v)));
-                }
-                i += 3;
-            }
-        } else {
-            i += 1;
-        }
-    }
-    best
-}
 
 // ---------------------------------------------------------------------------
 // Community

@@ -43,7 +43,21 @@ One binary, several loops:
 - **Relay** — outbound queue (send claim mails with BCC, retry, record message ids), inbound processing (match by relay address and claim reference, classify accepted / question / rejected / bounce, extract amount, forward the original to the customer's private inbox, update the claim).
 - **Deadline scanner** (`backend/src/scanner.rs`, shipped 10 September 2026) — hourly on the simulated clock: warn 21 days before an incident's legal deadline (once, `warned_at`), mark `verfallen` at the deadline across all customers, nudge once when a sent claim passed its expected reply date without an answer (`nudged_at`), sweep retention. Events go out over SSE.
 - **Push sender** (`backend/src/push.rs`, shipped 10 September 2026) — taps the event bus and turns five events into notifications: arrival, post from the railway, deadline warning, reply nudge, NGO confirmation. Copy is composed server-side in the app's voice; the payload carries `kind` and the id so the app opens the right screen. APNs (token auth) and FCM v1; dead tokens are removed; `notifications=false` mutes; no credentials means one log line per push. `stellwerk push` for a test.
-- **NGO report matcher** (`POST /admin/ngos/{id}/report`, `stellwerk ngo-report`, shipped) — import of each NGO's statement as JSON or CSV; match transfers to sent claims by amount, a 90-day window and the claimant's name or claim reference; mark `bestätigt`; SSE event. Imports are recorded in `ngo_reports`.
+- **Confirmation comes from the railway's answer, and from nothing else** (`classify.rs`). The desk
+  writes that it pays or has paid; that is read, and the claim becomes `accepted`, its cases
+  `bestätigt`, the amount the desk named is recorded, the badge is awarded and the passenger's and
+  the Verein's totals move. There is no second path and no manual confirmation.
+  - Every rule fails towards "a human should read this". A wrong `accepted` tells somebody their
+    delay became money that never arrived and adds it to a Verein's public total; a wrong `other`
+    costs one look at an inbox. So a negated phrase, a mail that reads as both paid and refused, and
+    a payment that names no amount all land on `other`.
+  - Order is the design: a bounce is judged on the envelope first, because a delivery failure quotes
+    the mail it could not deliver; automatic and interim replies next; refusal before payment,
+    because a refusal often explains what would have been paid.
+  - The amount is the one the desk named, never the one we claimed — falling back to the claimed sum
+    turned every partial award into a full one.
+  - Removed: the NGO bank-statement import (`POST /admin/ngos/{id}/report`, `stellwerk ngo-report`,
+    the `ngo_reports` table). It required a monthly CSV from each Verein, which they will not send.
 - **Backdated test data** (`POST /admin/customers/{key}/backdate`, `stellwerk backdate`, shipped 13 September 2026) — a ride that already happened, with the delay it had: an arrived journey, its one leg and the case the rules allow, so bundles, the monthly cap, deadlines and the claim form can be tested without waiting for a real train. No feed is consulted; the evidence names the Stellwerk and the case counts as self-entered, so no claim ever dresses invented data up as live data.
 - **Aggregates** — community totals and seven-day boards computed on read from the rides and incidents tables (boards: real customers first, seeded rows fill the list).
 - **Retention** (shipped) — delete attachment bytes and inbound-mail attachments when a claim closes, unless the customer set "keep correspondence"; ledger, claim, mail and audit rows stay.

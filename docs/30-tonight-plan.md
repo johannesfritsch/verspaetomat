@@ -136,7 +136,6 @@ Shipped on 10 September 2026 (backend cut list, migration 0018):
 - Typst PDF: `GET /v1/claims/{id}/pdf`, `pdf_url` in the claim JSON, `EU-Antrag.pdf` attached to the claim mail.
 - 25 % monthly Deutschlandticket cap: incidents beyond the cap are `gedeckelt` per calendar month, released when an earlier one drops out; `capped_cents` in the ledger summary.
 - Deadline scanner loop (`backend/src/scanner.rs`, hourly, `stellwerk scan` for one pass): 21-day warnings, expiry across all customers, reply nudges after the expected reply date, retention of attachment bytes when a claim closes (unless "keep correspondence").
-- NGO monthly statement import: `POST /admin/ngos/{id}/report` (JSON or CSV), `stellwerk ngo-report <ngo> <file>`, matches confirm claims, recorded in `ngo_reports`.
 - Real boards: customers with `show_on_boards` ranked by verified seven-day points, seeded rows fill the rest, `is_me` on the caller.
 - `stellwerk forget <customer>` (`DELETE /admin/customers/{key}`).
 - Raw-MIME inbound: `POST /internal/inbound-mail/raw` parsed with mail-parser, attachments stored as uploads.

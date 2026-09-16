@@ -212,13 +212,16 @@ pub fn compose(kind: &str, payload: &Value, facts: &Facts) -> Option<Notificatio
                 data: json!({ "claim_id": s("claim_id") }),
             })
         }
-        "claim" if s("source").as_deref() == Some("ngo_report") && s("status").as_deref() == Some("accepted") => {
+        // The railway answered and said it pays. That is a confirmation of intent, not a receipt:
+        // we see the desk's letter, never the Verein's bank account. The wording says exactly that
+        // — it used to say the Verein "hat erhalten", which we cannot know.
+        "claim" if s("source").as_deref() == Some("railway_reply") && s("status").as_deref() == Some("accepted") => {
             let cents = payload.get("amount_confirmed_cents").and_then(|v| v.as_i64()).or(facts.claim.as_ref().and_then(|c| c.amount_confirmed_cents));
             let body = match cents {
-                Some(cents) => format!("{ngo} hat {} erhalten. Das warst du.", euro(cents)),
-                None => format!("{ngo} hat dein Geld erhalten. Das warst du."),
+                Some(cents) => format!("Die Bahn zahlt {} an {ngo}. Das warst du.", euro(cents)),
+                None => format!("Die Bahn zahlt an {ngo}. Das warst du."),
             };
-            Some(Notification { title: "Angekommen beim Verein".to_string(), body, kind: "claim", data: json!({ "claim_id": s("claim_id") }) })
+            Some(Notification { title: "Antrag bestätigt".to_string(), body, kind: "claim", data: json!({ "claim_id": s("claim_id") }) })
         }
         _ => None,
     }
@@ -678,8 +681,8 @@ mod tests {
         assert!(n.body.contains("vom 15.08. an Servicecenter"), "{}", n.body);
         assert!(compose("claim", &json!({ "claim_id": "c1", "status": "sent" }), &f).is_none());
 
-        let n = compose("claim", &json!({ "claim_id": "c1", "status": "accepted", "amount_confirmed_cents": 450, "source": "ngo_report" }), &f).unwrap();
-        assert_eq!(n.body, "Wald für morgen e.V. hat 4,50 € erhalten. Das warst du.");
+        let n = compose("claim", &json!({ "claim_id": "c1", "status": "accepted", "amount_confirmed_cents": 450, "source": "railway_reply" }), &f).unwrap();
+        assert_eq!(n.body, "Die Bahn zahlt 4,50 € an Wald für morgen e.V.. Das warst du.");
     }
 
     #[test]

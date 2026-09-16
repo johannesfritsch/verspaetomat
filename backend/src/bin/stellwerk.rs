@@ -18,7 +18,6 @@
 //!   stellwerk route list | set <desk> <address> [--label …] [--live] | remove <desk>
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
-//!   stellwerk ngo-report bahnhofsmission statement.csv   (or .json)
 //!   stellwerk scan
 //!
 //! Targets: `--dev` (default) talks to http://127.0.0.1:8080 with token `stellwerk`; `--prod`
@@ -402,12 +401,6 @@ enum Cmd {
         cmd: NgoCmd,
     },
     /// Import an NGO's monthly statement (CSV date,amount,reference,counterparty; amount "4,50" or "4.50") and confirm matching claims
-    NgoReport {
-        /// NGO id, e.g. bahnhofsmission
-        ngo: String,
-        /// CSV file; a .json file ({transfers:[…]}) is sent as is
-        file: std::path::PathBuf,
-    },
     /// Send one real test mail from the customer's relay address (assigned if missing); reply to it to test the inbound path
     MailTest {
         customer: String,
@@ -791,37 +784,6 @@ async fn main() -> anyhow::Result<()> {
         Cmd::MailTest { customer, to, claim } => {
             let v = api.post(&format!("/admin/customers/{customer}/mail-test"), json!({ "to": to, "claim": claim })).await?;
             println!("{} → {} · {}", s(&v, "from"), s(&v, "to"), if v["dry_run"].as_bool().unwrap_or(true) { "Trockenlauf (SMTP_URL nicht gesetzt)" } else { "gesendet" });
-        }
-        Cmd::NgoReport { ngo, file } => {
-            let text = std::fs::read_to_string(&file)?;
-            let body = if file.extension().and_then(|e| e.to_str()) == Some("json") {
-                serde_json::from_str::<Value>(&text)?
-            } else {
-                let transfers: Vec<Value> = text
-                    .lines()
-                    .map(str::trim)
-                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                    .filter_map(|l| {
-                        let sep = if l.matches(';').count() >= l.matches(',').count() { ';' } else { ',' };
-                        let f: Vec<&str> = l.splitn(4, sep).map(|x| x.trim().trim_matches('"')).collect();
-                        // The header line has no parsable date.
-                        let first = *f.first()?;
-                        let date = chrono::NaiveDate::parse_from_str(first, "%Y-%m-%d").or_else(|_| chrono::NaiveDate::parse_from_str(first, "%d.%m.%Y")).ok()?;
-                        Some(json!({ "date": date, "amount": f.get(1)?, "reference": f.get(2).unwrap_or(&""), "counterparty": f.get(3).unwrap_or(&"") }))
-                    })
-                    .collect();
-                json!({ "transfers": transfers })
-            };
-            let v = api.post(&format!("/admin/ngos/{ngo}/report"), body).await?;
-            let matched = v.get("matched").and_then(|m| m.as_array()).cloned().unwrap_or_default();
-            let unmatched = v.get("unmatched").and_then(|m| m.as_array()).cloned().unwrap_or_default();
-            println!("Bericht {}: {} Überweisungen, {} zugeordnet, {} offen", s(&v, "report_id"), s(&v, "rows"), matched.len(), unmatched.len());
-            for id in &matched {
-                println!("  ✓ Antrag {}", id.as_str().unwrap_or_default());
-            }
-            for u in &unmatched {
-                println!("  · {}  {:>8} ct  {}  {}", s(u, "date"), s(u, "amount_cents"), s(u, "reference"), s(u, "counterparty"));
-            }
         }
         Cmd::Push { customer, text } => {
             let v = api.post(&format!("/admin/customers/{customer}/push"), json!({ "text": text })).await?;
