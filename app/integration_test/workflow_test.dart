@@ -24,6 +24,7 @@ import 'package:verspaetomat/mock/mock_data.dart' show Mock;
 import 'package:verspaetomat/api/token_store.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart';
+import 'package:verspaetomat/screens/claims/signature_board.dart';
 import 'package:verspaetomat/widgets/kit.dart' show VCheckbox, VSelectCard;
 import 'package:verspaetomat/screens/ride/welcher_zug_screen.dart';
 import 'package:verspaetomat/state/demo_state.dart';
@@ -411,16 +412,17 @@ void main() {
       await settle(tester, 800);
       await tapText(tester, 'Weiter');
 
-      // Step 4: sign.
-      await pumpUntilFound(tester, find.byType(SignaturePad), timeout: const Duration(seconds: 20));
-      final pad = find.byType(SignaturePad);
-      await tester.ensureVisible(pad);
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.drag(pad, const Offset(120, 30));
+      // Step 4: sign. The line opens a board of its own; signing and confirming both happen there.
+      await pumpUntilFound(tester, find.text('Hier unterschreiben'), timeout: const Duration(seconds: 20));
+      await tapText(tester, 'Hier unterschreiben');
+      await pumpUntilFound(tester, find.byType(SignatureBoard), timeout: const Duration(seconds: 20));
+      final board = find.byType(SignatureBoard);
+      await tester.drag(board, const Offset(120, 30));
       await tester.pump(const Duration(milliseconds: 200));
-      await tester.drag(pad, const Offset(-60, 40));
+      await tester.drag(board, const Offset(-60, 40));
       await tester.pump(const Duration(milliseconds: 200));
       await tapText(tester, 'Bestätigen');
+      await pumpUntilGone(tester, find.byType(SignatureBoard), timeout: const Duration(seconds: 20));
       await pumpUntilGone(tester, find.text('Speichert …'), timeout: const Duration(seconds: 40));
       await tapText(tester, 'Weiter');
 

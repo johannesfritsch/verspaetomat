@@ -14,7 +14,8 @@ import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/state/ride_monitor.dart';
-import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow, SignaturePad;
+import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow;
+import 'package:verspaetomat/screens/claims/signature_board.dart';
 import 'package:verspaetomat/screens/community/community_widgets.dart' show BadgeIcon;
 import 'package:verspaetomat/widgets/kit.dart' show VCard, VDropzone, VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
 
@@ -151,18 +152,22 @@ void main() {
     await wait(tester, 700);
     await weiter();
     await shot('antrag-unterschrift');
-    final pad = find.byType(SignaturePad);
-    if (pad.evaluate().isNotEmpty) {
-      await tester.ensureVisible(pad);
-      await wait(tester, 400);
-      final c = tester.getCenter(pad);
-      await tester.dragFrom(c - const Offset(60, 10), const Offset(40, 20));
-      await wait(tester, 300);
-      await tester.dragFrom(c + const Offset(0, 10), const Offset(50, -25));
-      await wait(tester, 500);
-      await shot('antrag-unterschrift-gezeichnet');
-      await tapIt(find.widgetWithText(VOutlineButton, 'Bestätigen').first);
-      await wait(tester, 2500);
+    final line = find.text('Hier unterschreiben');
+    if (line.evaluate().isNotEmpty) {
+      await tapIt(line.first);
+      await wait(tester, 1200);
+      await shot('antrag-unterschrift-brett');
+      final board = find.byType(SignatureBoard);
+      if (board.evaluate().isNotEmpty) {
+        final c = tester.getCenter(board);
+        await tester.dragFrom(c - const Offset(80, 10), const Offset(60, 25));
+        await wait(tester, 300);
+        await tester.dragFrom(c + const Offset(10, 10), const Offset(70, -30));
+        await wait(tester, 600);
+        await shot('antrag-unterschrift-gezeichnet');
+        await tapIt(find.widgetWithText(VPrimaryButton, 'Bestätigen').first);
+        await wait(tester, 2500);
+      }
     }
     await weiter();
     await shot('antrag-senden');

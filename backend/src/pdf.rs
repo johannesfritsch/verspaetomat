@@ -319,6 +319,16 @@ mod tests {
         assert_eq!(compile(&signed_doc).expect("compile with signature").pages().len(), 1, "the signed form must fit on one page");
         let signed = render(&signed_doc).expect("render with signature");
         assert!(signed.starts_with(b"%PDF"));
+        // The drawing has to actually be in the document. Rendering "successfully" without it is
+        // exactly what a form missing its signature looks like from the outside, and the older
+        // assertions — starts with %PDF, fits on one page — both pass in that case. An embedded
+        // bitmap makes the file materially bigger; nothing else about these two renders differs.
+        assert!(
+            signed.len() > pdf.len() + 1000,
+            "the signature is not in the PDF: unsigned {} bytes, signed {} bytes",
+            pdf.len(),
+            signed.len()
+        );
         std::fs::write(std::env::temp_dir().join("verspaetomat-test.pdf"), &signed).ok();
 
         // A journey with a missed connection: the reason is ticked, the legs are listed, one page.

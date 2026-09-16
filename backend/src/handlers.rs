@@ -1002,8 +1002,11 @@ async fn render_claim_pdf(pool: &PgPool, claim: &ClaimRow, customer: &CustomerRo
     // By the PNG magic bytes, not by the declared type: an older app build uploads its
     // signature as application/octet-stream, and that signature still belongs on the form.
     let sig: Option<(Option<String>, Option<Vec<u8>>)> = sqlx::query_as(
+        // Newest first: signing again leaves the old attachment in place, and without an order the
+        // form could be stamped with the signature that was replaced.
         "select u.path, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id
-         where ca.claim_id = $1 and ca.label = 'Unterschrift' limit 1",
+         where ca.claim_id = $1 and ca.label = 'Unterschrift'
+         order by u.created_at desc limit 1",
     )
     .bind(claim.id)
     .fetch_optional(pool)

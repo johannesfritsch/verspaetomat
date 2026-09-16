@@ -18,6 +18,7 @@ import '../share/share_lines.dart';
 import '../share/share_sheet.dart';
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
+import 'signature_board.dart';
 import 'ticket_photo.dart';
 
 /// Antrag: the five-step claim flow. Prüfen · Ticket · Zweck · Unterschrift · Senden.
@@ -74,7 +75,9 @@ class _AntragScreenState extends State<AntragScreen> {
   bool _sentDryRun = false;
   ApiSendResult? _sent;
   final _unknownAddress = TextEditingController();
-  final _signature = SignatureController();
+  /// The signature as drawn, so the step can show it back. The server has no route that serves an
+  /// upload, and in Demo there is no upload at all.
+  Uint8List? _signaturePng;
 
   bool get _unknownDesk => widget.desk == 'Unbekannt';
   ApiClaim? get _claim => _draft?.claim;
@@ -276,18 +279,29 @@ class _AntragScreenState extends State<AntragScreen> {
         _draft = _withClaim(claim);
       });
 
-  Future<void> _sign() => _run(() async {
-        final session = RepoScope.read(context);
-        final name = session.me?.personalData?.name ?? session.me?.nickname ?? 'Fahrgast';
-        String? sigId;
-        final png = await _signature.toPng();
-        if (png != null) {
-          sigId = (await session.repo.upload(kind: 'signature', filename: 'Unterschrift.png', bytes: png)).uploadId;
-        }
-        final claim = await session.repo.signClaim(_claim!.id, typedName: name, signatureUploadId: sigId);
-        _draft = _withClaim(claim);
-        _signed = true;
-      }, failure: 'Unterschrift fehlgeschlagen');
+  /// Open the board, and if something is signed there, keep it.
+  ///
+  /// The board owns the whole interaction: it turns the phone sideways, takes the strokes and
+  /// hands back the ink. This step only stores the result. There is no separate „Bestätigen" in
+  /// the flow any more — confirming happens on the board, where the signature is, and a second
+  /// confirmation further down the page only invited people to press it without signing.
+  Future<void> _openSignatureBoard() async {
+    final session = RepoScope.read(context);
+    final name = session.me?.personalData?.name ?? session.me?.nickname ?? 'Fahrgast';
+    final png = await SignatureBoard.open(context, name: name);
+    if (png == null || !mounted) return;
+    setState(() => _signaturePng = png);
+    await _run(() async {
+      // Demo has no server to upload to; the signature lives in memory and the step shows it.
+      String? sigId;
+      if (session.isLocal) {
+        sigId = (await session.repo.upload(kind: 'signature', filename: 'Unterschrift.png', bytes: png)).uploadId;
+      }
+      final claim = await session.repo.signClaim(_claim!.id, typedName: name, signatureUploadId: sigId);
+      _draft = _withClaim(claim);
+      _signed = true;
+    }, failure: 'Unterschrift fehlgeschlagen');
+  }
 
   Future<void> _send() => _run(() async {
         final r = await RepoScope.read(context).repo.sendClaim(_claim!.id);
@@ -381,7 +395,16 @@ class _AntragScreenState extends State<AntragScreen> {
           onAttach: _attach,
         ),
       2 => _Zweck(ngos: _ngos, selected: _ngo, other: _otherNgo, onOther: () => setState(() => _otherNgo = !_otherNgo), onChoose: _chooseNgo),
-      3 => _Unterschrift(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, signed: _signed, busy: _busy, controller: _signature, onSign: _sign),
+      3 => _Unterschrift(
+          draft: _draft!,
+          incidents: _incidents,
+          me: me,
+          ngo: _ngo,
+          signed: _signed,
+          busy: _busy,
+          signaturePng: _signaturePng,
+          onSign: _openSignatureBoard,
+        ),
       _ => _Senden(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, paperOnly: _paperOnly),
     };
 
@@ -1139,7 +1162,7 @@ class _Unterschrift extends StatelessWidget {
     required this.ngo,
     required this.signed,
     required this.busy,
-    required this.controller,
+    required this.signaturePng,
     required this.onSign,
   });
   final ApiClaimDraft draft;
@@ -1148,7 +1171,10 @@ class _Unterschrift extends StatelessWidget {
   final ApiNgo? ngo;
   final bool signed;
   final bool busy;
-  final SignatureController controller;
+
+  /// The signature as drawn on the board, for showing it back.
+  final Uint8List? signaturePng;
+
   final Future<void> Function() onSign;
 
   @override
@@ -1183,18 +1209,51 @@ class _Unterschrift extends StatelessWidget {
           ],
         ),
         const VGap.s(),
-        SignaturePad(controller: controller, onSigned: () {}),
+        // The line, not a pad. Tapping it opens the board; signing happens there and is confirmed
+        // there, so this page has no second „Bestätigen" to press without having signed.
+        VCard(
+          onTap: busy ? null : onSign,
+          padding: const EdgeInsets.fromLTRB(VSpace.card, VSpace.m, VSpace.card, VSpace.s),
+          child: Column(
+            children: [
+              SizedBox(
+                height: 76,
+                child: signaturePng == null
+                    ? Center(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.draw_outlined, size: VControl.chevron, color: VColors.ink2),
+                            const SizedBox(width: VSpace.s),
+                            Text(busy ? 'Speichert …' : 'Hier unterschreiben', style: VText.bodyStrong.copyWith(color: VColors.ink2)),
+                          ],
+                        ),
+                      )
+                    : Center(child: Image.memory(signaturePng!, fit: BoxFit.contain)),
+              ),
+              Container(height: 1, color: VColors.hairlineStrong),
+              const SizedBox(height: 6),
+              Text(name, style: VText.caption),
+            ],
+          ),
+        ),
         const VGap.s(),
-        if (!signed)
-          VOutlineButton(label: busy ? 'Speichert …' : 'Bestätigen', icon: Icons.check, onTap: busy ? null : onSign)
-        else
+        if (signed)
           // Untinted, so the screen does not end in a coloured block under the signature — but
           // the tick itself is green, which is the one word this line has to say.
-          const VNoteBanner(
-            tone: VNoteTone.plain,
-            leading: Icon(Icons.check, size: VControl.chevron, color: VColors.green),
-            text: 'Bestätigt. Deine Unterschrift bleibt nur in diesem Antrag.',
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const VNoteBanner(
+                tone: VNoteTone.plain,
+                leading: Icon(Icons.check, size: VControl.chevron, color: VColors.green),
+                text: 'Bestätigt. Deine Unterschrift bleibt nur in diesem Antrag.',
+              ),
+              VGhostButton(label: 'Nochmal unterschreiben', icon: Icons.refresh, color: VColors.ink2, onTap: busy ? null : onSign),
+            ],
+          )
+        else
+          Text('Tipp auf die Linie. Das Telefon dreht sich, damit du so unterschreiben kannst wie auf Papier.', style: VText.caption),
       ],
     );
   }

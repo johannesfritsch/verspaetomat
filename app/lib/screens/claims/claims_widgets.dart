@@ -3,7 +3,6 @@ import 'dart:ui' as ui;
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 
 import 'package:go_router/go_router.dart';
 
@@ -643,124 +642,6 @@ class NgoPicker extends StatelessWidget {
 // Signature
 // ---------------------------------------------------------------------------
 
-class SignatureController {
-  _SignaturePadState? _state;
-  bool get hasStrokes => _state?._strokes.isNotEmpty ?? false;
-  Future<Uint8List?> toPng() => _state?._toPng() ?? Future.value(null);
-}
-
-/// A signature pad. Records strokes and calls [onSigned] after the first.
-class SignaturePad extends StatefulWidget {
-  const SignaturePad({super.key, required this.onSigned, this.height = 140, this.controller});
-  final VoidCallback onSigned;
-  final double height;
-  final SignatureController? controller;
-
-  @override
-  State<SignaturePad> createState() => _SignaturePadState();
-}
-
-class _SignaturePadState extends State<SignaturePad> {
-  final List<List<Offset>> _strokes = [];
-  final GlobalKey _boundary = GlobalKey();
-
-  @override
-  void initState() {
-    super.initState();
-    widget.controller?._state = this;
-  }
-
-  Future<Uint8List?> _toPng() async {
-    if (_strokes.isEmpty) return null;
-    final rb = _boundary.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-    if (rb == null) return null;
-    final img = await rb.toImage(pixelRatio: 2);
-    final data = await img.toByteData(format: ui.ImageByteFormat.png);
-    return data?.buffer.asUint8List();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        GestureDetector(
-          onPanStart: (d) => setState(() => _strokes.add([d.localPosition])),
-          onPanUpdate: (d) => setState(() => _strokes.last.add(d.localPosition)),
-          onPanEnd: (_) {
-            if (_strokes.isNotEmpty && _strokes.last.length > 1) widget.onSigned();
-          },
-          child: RepaintBoundary(
-            key: _boundary,
-            child: Container(
-              height: widget.height,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: VColors.paperElevated,
-                borderRadius: BorderRadius.circular(VRadius.lg),
-                boxShadow: VShadow.card,
-              ),
-              child: Stack(
-                children: [
-                  // The baseline you sign on, and the invitation under it — the way a form on
-                  // paper is laid out, rather than a caption floating in a box.
-                  Positioned(left: VSpace.m, right: VSpace.m, bottom: 30, child: Container(height: 1, color: VColors.hairlineStrong)),
-                  Positioned(
-                    left: VSpace.m,
-                    right: VSpace.m,
-                    bottom: 8,
-                    child: Center(child: Text('Hier unterschreiben', style: VText.caption)),
-                  ),
-                  CustomPaint(size: Size.infinite, painter: _StrokePainter(_strokes)),
-                  if (_strokes.isNotEmpty)
-                    Positioned(
-                      top: 0,
-                      right: 0,
-                      child: VIconButton(
-                        icon: Icons.delete_outline,
-                        color: VColors.ink2,
-                        onTap: () => setState(_strokes.clear),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _StrokePainter extends CustomPainter {
-  _StrokePainter(this.strokes);
-  final List<List<Offset>> strokes;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()
-      ..color = VColors.ink
-      ..strokeWidth = 2.2
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style = PaintingStyle.stroke;
-    for (final s in strokes) {
-      if (s.length < 2) {
-        canvas.drawCircle(s.first, 1.2, p..style = PaintingStyle.fill);
-        p.style = PaintingStyle.stroke;
-        continue;
-      }
-      final path = Path()..moveTo(s.first.dx, s.first.dy);
-      for (final o in s.skip(1)) {
-        path.lineTo(o.dx, o.dy);
-      }
-      canvas.drawPath(path, p);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _StrokePainter old) => true;
-}
 
 // ---------------------------------------------------------------------------
 // Mail
