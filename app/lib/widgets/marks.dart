@@ -559,36 +559,51 @@ class _HeartPainter extends CustomPainter {
   bool shouldRepaint(_HeartPainter old) => old.color != color;
 }
 
-/// The app's own tile, drawn rather than shipped as an image.
+/// The app's own mark, in the masthead on Home.
 ///
-/// It appears in the masthead, on the share card and in sheet headers, at sizes that do not agree,
-/// and an asset would either be resampled or arrive in three copies. Drawn, it also follows the
-/// tokens: when the red moves, the mark moves with it.
-///
-/// [VRadius.sm] is the corner at the default size and it scales with the tile, so a 72 pt mark is
-/// twice the mark and not a differently-shaped one. The corner is a plain circular arc, not an iOS
-/// continuous superellipse — this is the app *inside* the app, not the icon on the home screen.
+/// It used to be drawn rather than shipped, on the argument that the app inside the app need not
+/// be the icon on the home screen. Once the icon became an illustration that argument cost more
+/// than it saved: the first thing Home showed was a mark that matched neither the icon just tapped
+/// nor the logo on the website. So it is the icon now, corner and all.
 class VAppMark extends StatelessWidget {
-  const VAppMark({super.key, this.size = _base, this.mono = false});
+  const VAppMark({super.key, this.size = _base});
 
   static const double _base = 36;
 
   final double size;
 
-  /// The ink tile, for a sheet header or anywhere the red would compete with a nearby action.
-  final bool mono;
+  /// The app's own icon, the train at the Bahnhofsuhr — the same picture that sits on the home
+  /// screen, cut from `assets/icon/app_icon.png` at a size the bundle can afford.
+  ///
+  /// This used to be drawn in code: a red tile with a Material train glyph, from the first
+  /// mockups. When the illustrated icon shipped, the tile stayed, and Home greeted people with a
+  /// third, older mark that matched neither the icon they had just tapped nor the website's logo.
+  static const _asset = 'assets/brand/app-mark.webp';
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: size,
-        height: size,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          // redBright, not red: this is the "*this one*" red, and the mark is what it was named
-          // for. Measured #F72123 in the mockup.
-          color: mono ? VColors.ink : VColors.redBright,
-          borderRadius: BorderRadius.circular(VRadius.sm * size / _base),
+  Widget build(BuildContext context) {
+    // The corner is the iOS one: a continuous curve at about 22 % of the side, not a circular
+    // arc, so the tile reads as the same object as the icon on the home screen.
+    final radius = BorderRadius.circular(size * 0.2237);
+    return DecoratedBox(
+      // The icon's ground is white and the header behind it is a step off white, so without an
+      // edge the train floats with no tile around it. A hairline and the faintest shadow give it
+      // the outline it has on a home screen, and nothing more.
+      decoration: ShapeDecoration(
+        shape: RoundedSuperellipseBorder(borderRadius: radius, side: const BorderSide(color: VColors.hairline, width: VControl.hairline)),
+        shadows: VShadow.card,
+      ),
+      child: ClipRSuperellipse(
+        borderRadius: radius,
+        child: Image.asset(
+          _asset,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+          semanticLabel: 'Verspätomat',
         ),
-        child: Icon(Icons.train, size: size * 0.58, color: VColors.inkOnDark),
-      );
+      ),
+    );
+  }
 }
