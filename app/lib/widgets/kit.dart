@@ -41,6 +41,7 @@ class VScreen extends StatelessWidget {
     this.scroll = true,
     this.bottom,
     this.art,
+    this.onClose,
     this.padding = const EdgeInsets.fromLTRB(VSpace.l, VSpace.m, VSpace.l, VSpace.l),
   });
 
@@ -65,12 +66,18 @@ class VScreen extends StatelessWidget {
   /// gives each of its steps one; most sub-screens have none.
   final VHeaderSceneArt? art;
 
+  /// Turns the back arrow into a close. For a screen that is a flow of its own rather than a page
+  /// in a stack: an arrow promises "one step back", and on the Antrag it silently threw away every
+  /// step at once. The caller decides what closing costs and whether to ask first.
+  final VoidCallback? onClose;
+
   final EdgeInsets padding;
 
   @override
   Widget build(BuildContext context) {
     final canPop = Navigator.of(context).canPop();
-    final header = (title != null || eyebrow != null || (showBack && canPop))
+    final leading = onClose != null || (showBack && canPop);
+    final header = (title != null || eyebrow != null || leading)
         ? Padding(
             padding: const EdgeInsets.fromLTRB(VSpace.l, VSpace.s, VSpace.l, 0),
             child: Column(
@@ -79,12 +86,12 @@ class VScreen extends StatelessWidget {
                 // The arrow sits on its own line above the title rather than beside it. Beside it,
                 // the title had to start clear of a 44 pt button and the screen gained a second
                 // left edge for no reason anybody could see.
-                if (showBack && canPop)
+                if (leading)
                   Transform.translate(
                     offset: const Offset(-_glyphInset, 0),
                     child: VIconButton(
-                      icon: Icons.arrow_back,
-                      onTap: () => Navigator.of(context).maybePop(),
+                      icon: onClose != null ? Icons.close : Icons.arrow_back,
+                      onTap: onClose ?? () => Navigator.of(context).maybePop(),
                     ),
                   ),
                 Row(
@@ -1617,11 +1624,14 @@ TimeOfDay addMinutes(TimeOfDay t, int minutes) {
 }
 
 /// Show a standard bottom sheet in the paper style.
-Future<T?> showVSheet<T>(BuildContext context, {required WidgetBuilder builder, bool expand = false}) {
+Future<T?> showVSheet<T>(BuildContext context, {required WidgetBuilder builder, bool expand = false, bool dismissible = true}) {
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    // Off only for a sheet that must be answered: one that shows something once and never again.
+    isDismissible: dismissible,
+    enableDrag: dismissible,
     builder: (ctx) => expand
         ? FractionallySizedBox(heightFactor: 0.92, child: builder(ctx))
         // Not expanded: as tall as its content, but never taller than the screen. A sheet that
@@ -1650,7 +1660,12 @@ class VSheetHeader extends StatelessWidget {
     this.subtitle,
     this.trailing,
     this.narrow = false,
+    this.dismissible = true,
   });
+
+  /// False for a sheet that must be answered. The header is otherwise a handle — a drag or a tap on
+  /// the grabber closes the sheet — which would quietly undo `showVSheet(dismissible: false)`.
+  final bool dismissible;
 
   /// The small-caps line over the title: "Check-in · Schritt 1 von 3".
   final String? eyebrow;
@@ -1665,6 +1680,7 @@ class VSheetHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!dismissible) return _body(context);
     // The header is the handle: a drag anywhere on it closes the sheet, and so does a tap on
     // the grabber. Before this the only way out of a long sheet was a few pixels of dead space.
     return GestureDetector(
@@ -1682,7 +1698,10 @@ class VSheetHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(
+          // No grabber on a sheet that cannot be pulled away: a handle that does nothing is a lie.
+          if (!dismissible) const SizedBox(height: 24),
+          if (dismissible)
+            Center(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => Navigator.of(context).maybePop(),

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../mock/mock_data.dart';
@@ -95,6 +97,10 @@ class DemoState extends ChangeNotifier {
   String? personalAddress;
   String? personalEmail;
   String? personalTicketNumber;
+
+  /// The signature drawn on the board, as a transparent PNG. Only in memory: Demo saves nothing, but
+  /// the Senden step has to be able to show the form with the ink on it.
+  Uint8List? signaturePng;
   String nickname = Mock.userName;
   bool showOnBoards = true;
   bool keepCorrespondence = false;
@@ -747,6 +753,7 @@ class DemoState extends ChangeNotifier {
     personalAddress = null;
     personalEmail = null;
     personalTicketNumber = null;
+    signaturePng = null;
     bonusPoints = 0;
     unreadMails = 2;
     noHistory = false;

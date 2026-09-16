@@ -75,6 +75,14 @@ class _AntragScreenState extends State<AntragScreen> {
   bool _sentDryRun = false;
   ApiSendResult? _sent;
   final _unknownAddress = TextEditingController();
+
+  /// „Deine Angaben", held here rather than inside the form so „Weiter" can check and save them.
+  /// There used to be a separate „Speichern" in the form and „Weiter" stayed grey until it was
+  /// pressed, with nothing on the screen saying why. Now there is one button and it does the work.
+  final _pName = TextEditingController();
+  final _pAddress = TextEditingController();
+  final _pEmail = TextEditingController();
+  final _pTicket = TextEditingController();
   /// The signature as drawn, so the step can show it back. The server has no route that serves an
   /// upload, and in Demo there is no upload at all.
   Uint8List? _signaturePng;
@@ -93,6 +101,9 @@ class _AntragScreenState extends State<AntragScreen> {
   @override
   void dispose() {
     _unknownAddress.dispose();
+    for (final c in [_pName, _pAddress, _pEmail, _pTicket]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -171,6 +182,13 @@ class _AntragScreenState extends State<AntragScreen> {
       _ngos = session.ngos.isNotEmpty ? session.ngos : await session.repo.ngos();
       final me = session.me ?? await session.repo.getMe();
       _showPersonal = _draft!.personalDataRequired || me.personalData == null;
+      final pd = me.personalData;
+      if (pd != null && _pName.text.isEmpty && _pAddress.text.isEmpty && _pEmail.text.isEmpty) {
+        _pName.text = pd.name;
+        _pAddress.text = pd.address;
+        _pEmail.text = pd.email;
+        _pTicket.text = pd.ticketNumber ?? '';
+      }
       _signed = _draft!.claim.signedBy != null;
       _readAttachments();
     } catch (e) {
@@ -197,7 +215,9 @@ class _AntragScreenState extends State<AntragScreen> {
   }
 
   bool get _canContinue => switch (_step) {
-        0 => _incidents.isNotEmpty && !_showPersonal && (!_unknownDesk || _unknownAddress.text.trim().isNotEmpty),
+        // Only "is there anything to claim". What is still missing is said when Weiter is pressed,
+        // instead of a grey button that does not explain itself.
+        0 => _incidents.isNotEmpty,
         1 => _months.every(_uploads.containsKey),
         2 => true,
         3 => _signed,
@@ -292,11 +312,10 @@ class _AntragScreenState extends State<AntragScreen> {
     if (png == null || !mounted) return;
     setState(() => _signaturePng = png);
     await _run(() async {
-      // Demo has no server to upload to; the signature lives in memory and the step shows it.
-      String? sigId;
-      if (session.isLocal) {
-        sigId = (await session.repo.upload(kind: 'signature', filename: 'Unterschrift.png', bytes: png)).uploadId;
-      }
+      // Uploaded in both modes. Against the server it is stored and rendered into the form; in Demo
+      // the mock keeps it in memory and draws it into the example form, so the attachment on the
+      // Senden step is the form as signed in either case.
+      final sigId = (await session.repo.upload(kind: 'signature', filename: 'Unterschrift.png', bytes: png)).uploadId;
       final claim = await session.repo.signClaim(_claim!.id, typedName: name, signatureUploadId: sigId);
       _draft = _withClaim(claim);
       _signed = true;
@@ -323,8 +342,70 @@ class _AntragScreenState extends State<AntragScreen> {
         relayAddress: _draft?.relayAddress,
       );
 
+  void _leave() => context.canPop() ? context.pop() : context.go(Routes.antraege);
+
+  /// The X, and the swipe back, which is the same gesture with a different finger.
+  ///
+  /// Before the first step there is nothing to lose, so it just closes. Inside the steps it asks,
+  /// and the question says what leaving actually costs — which is less than it looks against the
+  /// server: the draft stays, with its tickets, its Zweck and its signature, and the next visit
+  /// resumes it (docs/39). In the walkthrough nothing is kept at all, and it says that instead.
+  Future<void> _close() async {
+    if (_intro || _sent != null || _loading || _draft == null) {
+      _leave();
+      return;
+    }
+    final demo = widget.demo;
+    final leave = await showVSheet<bool>(
+      context,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          VSheetHeader(title: demo ? 'Vorführung beenden?' : 'Antrag verlassen?'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(VSpace.sheet, 0, VSpace.sheet, VSpace.l),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  demo
+                      ? 'Die Vorführung hört hier auf. Nichts davon wird gespeichert, und verschickt wurde ohnehin nichts.'
+                      : 'Abgeschickt wird nichts. Was du schon angehängt, ausgewählt und unterschrieben hast, bleibt als Entwurf liegen — beim nächsten Mal machst du dort weiter.',
+                  style: VText.body,
+                ),
+                const VGap.l(),
+                VPrimaryButton(label: demo ? 'Weiter ansehen' : 'Weiter ausfüllen', onTap: () => Navigator.of(ctx).pop(false)),
+                const VGap.xs(),
+                VGhostButton(
+                  label: demo ? 'Vorführung beenden' : 'Antrag verlassen',
+                  color: VColors.ink2,
+                  onTap: () => Navigator.of(ctx).pop(true),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (leave == true && mounted) _leave();
+  }
+
   @override
   Widget build(BuildContext context) {
+    // A swipe from the edge on iOS, or the Android back button, used to leave the flow without a
+    // word. It goes through the same question as the X now.
+    return PopScope(
+      canPop: _intro || _sent != null || _loading || _draft == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _close();
+      },
+      child: _screen(context),
+    );
+  }
+
+  Widget _screen(BuildContext context) {
     final session = RepoScope.of(context);
     if (_sent != null) {
       return _Sent(
@@ -362,6 +443,7 @@ class _AntragScreenState extends State<AntragScreen> {
         cases: _incidents.length,
         amountCents: _draft!.claim.amountClaimedCents,
         onStart: () => setState(() => _intro = false),
+        onClose: _close,
       );
     }
 
@@ -381,10 +463,7 @@ class _AntragScreenState extends State<AntragScreen> {
           addressCtl: _unknownAddress,
           showPersonal: _showPersonal,
           onChanged: () => setState(() {}),
-          onPersonalSaved: () async {
-            setState(() => _showPersonal = false);
-            await _maybeShowRecoveryCode();
-          },
+          personal: (name: _pName, address: _pAddress, email: _pEmail, ticket: _pTicket),
         ),
       1 => _Ticket(
           months: _months,
@@ -414,6 +493,7 @@ class _AntragScreenState extends State<AntragScreen> {
       title: _steps[_step],
       scroll: true,
       art: _art[_step],
+      onClose: _close,
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -438,12 +518,12 @@ class _AntragScreenState extends State<AntragScreen> {
             VPrimaryButton(
               label: 'Weiter',
               trailingIcon: Icons.arrow_forward,
-              onTap: _canContinue && !_busy ? () => setState(() => _step += 1) : null,
+              onTap: _canContinue && !_busy ? () => _step == 0 ? _advanceFromPruefen() : setState(() => _step += 1) : null,
             ),
-          if (_step > 0) ...[
-            const VGap.xs(),
-            VGhostButton(label: 'Zurück', onTap: () => setState(() => _step -= 1)),
-          ],
+          // One step back, everywhere — on the first step that is the overview. Leaving the whole
+          // Antrag is the X at the top, never this.
+          const VGap.xs(),
+          VGhostButton(label: 'Zurück', onTap: () => setState(() => _step == 0 ? _intro = true : _step -= 1)),
         ],
       ),
       child: Column(
@@ -458,34 +538,92 @@ class _AntragScreenState extends State<AntragScreen> {
     );
   }
 
+  /// Weiter on „Prüfen": check what the form needs, save it, show the twelve words, move on.
+  Future<void> _advanceFromPruefen() async {
+    final missing = <String>[
+      if (_showPersonal && _pName.text.trim().isEmpty) 'dein Name',
+      if (_showPersonal && _pAddress.text.trim().isEmpty) 'deine Anschrift',
+      if (_showPersonal && !_pEmail.text.contains('@')) 'deine E-Mail-Adresse',
+      if (_unknownDesk && _unknownAddress.text.trim().isEmpty) 'die Anschrift der Stelle',
+    ];
+    if (missing.isNotEmpty) {
+      final list = missing.length == 1 ? missing.first : '${missing.sublist(0, missing.length - 1).join(', ')} und ${missing.last}';
+      final verb = missing.length == 1 ? 'fehlt' : 'fehlen';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Für das Formular $verb noch $list.')));
+      return;
+    }
+    if (_showPersonal) {
+      final session = RepoScope.read(context);
+      setState(() => _busy = true);
+      await session.savePersonalData(ApiPersonalData(
+        name: _pName.text.trim(),
+        address: _pAddress.text.trim(),
+        email: _pEmail.text.trim(),
+        ticketNumber: _pTicket.text.trim().isEmpty ? null : _pTicket.text.trim(),
+      ));
+      if (!mounted) return;
+      setState(() => _busy = false);
+      if (session.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Speichern fehlgeschlagen: ${session.error}')));
+        return;
+      }
+      setState(() => _showPersonal = false);
+      // The first time somebody gives us their name is the moment the account starts to matter,
+      // so this is where the twelve words are shown — once, and only on the way forward.
+      await _maybeShowRecoveryCode();
+      if (!mounted) return;
+    }
+    setState(() => _step = 1);
+  }
+
   Future<void> _maybeShowRecoveryCode() async {
     final session = RepoScope.read(context);
     final code = await session.recoveryCode();
     if (code == null || !mounted) return;
     await showVSheet(
       context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.l),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const VSheetHeader(title: 'Dein Wiederherstellungscode', subtitle: 'Einmal zeigen wir ihn. Mach einen Screenshot.'),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(VSpace.m),
-              decoration: BoxDecoration(border: Border.all(color: VColors.ink, width: 1.5), borderRadius: BorderRadius.circular(4)),
-              child: Text(code, style: VText.mono.copyWith(fontSize: 17, height: 1.6)),
+      // Not swipeable. These words are shown once and cannot be shown again — the server keeps only
+      // a hash — so the sheet waits for an answer instead of vanishing under a stray drag.
+      dismissible: false,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const VSheetHeader(title: 'Deine zwölf Wörter', subtitle: 'Schreib sie auf oder mach einen Screenshot.', dismissible: false),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(VSpace.sheet, 0, VSpace.sheet, VSpace.l),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Verspätomat hat kein Konto und kein Passwort. Mit diesen Wörtern holst du dein Konto, deine '
+                  'Fahrten und deine Anträge auf ein neues Telefon. Wir zeigen sie dir nur dieses eine Mal.',
+                  style: VText.body,
+                ),
+                const VGap.m(),
+                VCard(child: SelectableText(code, style: VText.mono.copyWith(fontSize: 18, height: 1.5))),
+                const VGap.s(),
+                VGhostButton(
+                  label: 'Kopieren',
+                  icon: Icons.content_copy_outlined,
+                  color: VColors.ink2,
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: code));
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Kopiert. Leg sie irgendwo hin, wo du sie wiederfindest.')));
+                  },
+                ),
+                const VGap.xs(),
+                const VNoteBanner(
+                  icon: Icons.lock_outline,
+                  text: 'Wer diese Wörter hat, hat dein Konto. Aufschreiben ja, verschicken nein.',
+                ),
+                const VGap.l(),
+                VPrimaryButton(label: 'Ich habe sie notiert', onTap: () => Navigator.of(ctx).pop()),
+              ],
             ),
-            const VGap.m(),
-            Text(
-              'Kein Konto, kein Passwort. Mit diesen zwölf Wörtern holst du dein Konto auf ein neues Telefon. Wer sie hat, hat dein Konto.',
-              style: VText.bodyS.copyWith(color: VColors.ink2),
-            ),
-            const VGap.l(),
-            VPrimaryButton(label: 'Ich habe es notiert', onTap: () => Navigator.of(ctx).pop()),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -495,8 +633,9 @@ class _AntragScreenState extends State<AntragScreen> {
 /// the one place in this app where a passenger signs something, so it says up front what the
 /// five steps want and what leaves the house at the end.
 class _Ueberblick extends StatelessWidget {
-  const _Ueberblick({required this.desk, required this.steps, required this.cases, required this.amountCents, required this.onStart, this.demo = false});
+  const _Ueberblick({required this.desk, required this.steps, required this.cases, required this.amountCents, required this.onStart, required this.onClose, this.demo = false});
   final bool demo;
+  final VoidCallback onClose;
   final String desk;
   final List<String> steps;
   final int cases;
@@ -528,6 +667,7 @@ class _Ueberblick extends StatelessWidget {
       title: 'So läuft das',
       scroll: true,
       art: VHeaderSceneArt.antragPruefen,
+      onClose: onClose,
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -596,7 +736,7 @@ class _Pruefen extends StatelessWidget {
     required this.addressCtl,
     required this.showPersonal,
     required this.onChanged,
-    required this.onPersonalSaved,
+    required this.personal,
   });
   final ApiClaimDraft draft;
   final List<ApiIncident> incidents;
@@ -613,7 +753,7 @@ class _Pruefen extends StatelessWidget {
   final TextEditingController addressCtl;
   final bool showPersonal;
   final VoidCallback onChanged;
-  final Future<void> Function() onPersonalSaved;
+  final ({TextEditingController name, TextEditingController address, TextEditingController email, TextEditingController ticket}) personal;
 
   @override
   Widget build(BuildContext context) {
@@ -686,7 +826,7 @@ class _Pruefen extends StatelessWidget {
         const VGap.xl(),
         const VSectionHeader('Deine Angaben', onCard: false),
         if (showPersonal || pd == null)
-          _PersonalForm(initial: pd, onSaved: onPersonalSaved)
+          _PersonalForm(fields: personal, onChanged: onChanged)
         else ...[
           VKeyValue('Name', pd.name, strong: true),
           const VRule(),
@@ -750,49 +890,13 @@ class _UnknownDesk extends StatelessWidget {
 }
 
 /// First claim only: name, address, private inbox, ticket number.
-class _PersonalForm extends StatefulWidget {
-  const _PersonalForm({required this.initial, required this.onSaved});
-  final ApiPersonalData? initial;
-  final Future<void> Function() onSaved;
-
-  @override
-  State<_PersonalForm> createState() => _PersonalFormState();
-}
-
-class _PersonalFormState extends State<_PersonalForm> {
-  late final _name = TextEditingController(text: widget.initial?.name ?? '');
-  late final _address = TextEditingController(text: widget.initial?.address ?? '');
-  late final _email = TextEditingController(text: widget.initial?.email ?? '');
-  late final _ticket = TextEditingController(text: widget.initial?.ticketNumber ?? '');
-  bool _saving = false;
-
-  @override
-  void dispose() {
-    for (final c in [_name, _address, _email, _ticket]) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  bool get _valid => _name.text.trim().isNotEmpty && _address.text.trim().isNotEmpty && _email.text.contains('@');
-
-  Future<void> _save() async {
-    setState(() => _saving = true);
-    final session = RepoScope.read(context);
-    await session.savePersonalData(ApiPersonalData(
-      name: _name.text.trim(),
-      address: _address.text.trim(),
-      email: _email.text.trim(),
-      ticketNumber: _ticket.text.trim().isEmpty ? null : _ticket.text.trim(),
-    ));
-    if (!mounted) return;
-    setState(() => _saving = false);
-    if (session.error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Speichern fehlgeschlagen: ${session.error}')));
-      return;
-    }
-    await widget.onSaved();
-  }
+/// „Deine Angaben": the fields and nothing else. Checking and saving belong to „Weiter", so this
+/// has no button of its own — a form with its own save next to a flow's own onward button asks the
+/// passenger to work out which one matters, and the answer used to be "both, in order".
+class _PersonalForm extends StatelessWidget {
+  const _PersonalForm({required this.fields, required this.onChanged});
+  final ({TextEditingController name, TextEditingController address, TextEditingController email, TextEditingController ticket}) fields;
+  final VoidCallback onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -818,8 +922,8 @@ class _PersonalFormState extends State<_PersonalForm> {
                 _Field(
                   label: 'Name',
                   hint: 'Vor- und Nachname',
-                  controller: _name,
-                  onChanged: () => setState(() {}),
+                  controller: fields.name,
+                  onChanged: onChanged,
                   autofill: const [AutofillHints.name],
                   capitalization: TextCapitalization.words,
                 ),
@@ -827,8 +931,8 @@ class _PersonalFormState extends State<_PersonalForm> {
                 _Field(
                   label: 'Anschrift',
                   hint: 'Straße, Hausnummer, PLZ und Ort',
-                  controller: _address,
-                  onChanged: () => setState(() {}),
+                  controller: fields.address,
+                  onChanged: onChanged,
                   autofill: const [AutofillHints.fullStreetAddress, AutofillHints.postalAddress],
                   capitalization: TextCapitalization.words,
                   lines: 2,
@@ -837,8 +941,8 @@ class _PersonalFormState extends State<_PersonalForm> {
                 _Field(
                   label: 'Postfach',
                   hint: 'Deine private E-Mail',
-                  controller: _email,
-                  onChanged: () => setState(() {}),
+                  controller: fields.email,
+                  onChanged: onChanged,
                   autofill: const [AutofillHints.email],
                   keyboard: TextInputType.emailAddress,
                 ),
@@ -846,8 +950,8 @@ class _PersonalFormState extends State<_PersonalForm> {
                 _Field(
                   label: 'Ticket-Nr.',
                   hint: 'Optional',
-                  controller: _ticket,
-                  onChanged: () => setState(() {}),
+                  controller: fields.ticket,
+                  onChanged: onChanged,
                   mono: true,
                 ),
               ],
@@ -861,8 +965,7 @@ class _PersonalFormState extends State<_PersonalForm> {
           text: 'Diese Angaben stehen nur auf dem Formular an das Eisenbahnunternehmen. '
               'Sie bleiben auf ${RepoScope.read(context).isLocal ? 'deinem Gerät und unserem Server' : 'diesem Gerät'}.',
         ),
-        const VGap.m(),
-        VPrimaryButton(label: 'Speichern', busy: _saving, onTap: _valid && !_saving ? _save : null),
+
       ],
     );
   }

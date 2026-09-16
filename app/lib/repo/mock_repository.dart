@@ -7,6 +7,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import '../content/labels.dart';
 import '../mock/mock_data.dart';
 import '../state/demo_state.dart';
+import 'demo_pdf.dart';
 import 'app_repository.dart';
 
 /// The built-in demo, exposed through the same interface as the backend.
@@ -856,12 +857,22 @@ class MockRepository implements AppRepository {
   @override
   Future<Uint8List> claimPdf(String id) async {
     final data = await rootBundle.load('assets/beispiel-antrag.pdf');
-    return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    final example = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    // Unsigned, the example is exactly what an unsigned form looks like. Signed, the ink has to be
+    // on it, or the Senden step shows the passenger a form that is not the one they just signed.
+    final ink = state.signaturePng;
+    if (ink == null) return example;
+    try {
+      return await DemoPdf.signed(example, ink);
+    } catch (_) {
+      return example; // a rendering hiccup must not take the whole Antrag down with it
+    }
   }
 
   @override
   Future<ApiUpload> upload({required String kind, required String filename, required List<int> bytes}) async {
     if (kind == 'ticket') state.attachTicket();
+    if (kind == 'signature') state.signaturePng = Uint8List.fromList(bytes);
     return ApiUpload(uploadId: 'mock-upload-${DateTime.now().millisecondsSinceEpoch}');
   }
 

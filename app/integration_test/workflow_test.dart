@@ -339,6 +339,23 @@ Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? known
   return customer;
 }
 
+/// Each case is a card now, taller than the rows they replaced, so the lower ticks sit under the
+/// bottom bar until scrolled to. A tap there lands on the bar instead.
+Future<void> tapTick(WidgetTester tester, Finder tick) async {
+  await tester.ensureVisible(tick);
+  await tester.pump(const Duration(milliseconds: 300));
+  await tester.tap(tick);
+}
+
+/// The twelve words appear once, after the first save. Answer the sheet if it is there.
+Future<void> answerWordsSheet(WidgetTester tester) async {
+  try {
+    await tapText(tester, 'Ich habe sie notiert', timeout: const Duration(seconds: 15));
+  } on TestFailure {
+    // no words this time: the customer already has a code
+  }
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -381,7 +398,7 @@ void main() {
       await tapText(tester, 'Los geht\'s');
 
       // Step 1: personal data and the recovery code appear on the first claim only.
-      await pumpUntilFound(tester, find.byWidgetPredicate((w) => w is TextField || (w is Text && (w.data ?? '').contains('@verspaetomat.de'))), timeout: const Duration(seconds: 40));
+      await pumpUntilFound(tester, find.text('DEINE ANGABEN'), timeout: const Duration(seconds: 40));
       if (find.byType(TextField).evaluate().length >= 4) {
         final fields = find.byType(TextField);
         await tester.enterText(fields.at(0), 'Johannes Test');
@@ -389,15 +406,10 @@ void main() {
         await tester.enterText(fields.at(2), 'johannes@example.de');
         await tester.enterText(fields.at(3), 'D-2026-0904-771-2201');
         await tester.pump(const Duration(milliseconds: 200));
-        await tapText(tester, 'Speichern');
-        try {
-          await tapText(tester, 'Ich habe es notiert', timeout: const Duration(seconds: 15));
-        } on TestFailure {
-          // no recovery code sheet this time
-        }
       }
-      await pumpUntilFound(tester, find.textContaining('@verspaetomat.de'), timeout: const Duration(seconds: 20));
+      // One button: Weiter checks the form, saves it and, the first time, shows the twelve words.
       await tapText(tester, 'Weiter');
+      await answerWordsSheet(tester);
 
       // Step 2: one ticket image per month covered.
       await pumpUntilFound(tester, find.text('Ticket anhängen'), timeout: const Duration(seconds: 20));
@@ -569,12 +581,10 @@ void main() {
       }
       await tapText(tester, 'Los geht\'s');
 
-      // Personal data and the recovery code: on the first claim of a fresh customer only.
-      await pumpUntilFound(
-        tester,
-        find.byWidgetPredicate((w) => w is TextField || (w is Text && (w.data ?? '').contains('@verspaetomat.de'))),
-        timeout: const Duration(seconds: 40),
-      );
+      // Personal data and the recovery code: on the first claim of a fresh customer only. Wait on the
+      // section itself — it is there whether the form or the saved details are shown, and the relay
+      // address it used to wait for only exists after the first save.
+      await pumpUntilFound(tester, find.text('DEINE ANGABEN'), timeout: const Duration(seconds: 40));
       if (find.byType(TextField).evaluate().length >= 4) {
         final fields = find.byType(TextField);
         await tester.enterText(fields.at(0), 'Johannes Test');
@@ -582,12 +592,6 @@ void main() {
         await tester.enterText(fields.at(2), 'johannes@example.de');
         await tester.enterText(fields.at(3), 'D-2026-0904-771-2201');
         await tester.pump(const Duration(milliseconds: 200));
-        await tapText(tester, 'Speichern');
-        try {
-          await tapText(tester, 'Ich habe es notiert', timeout: const Duration(seconds: 15));
-        } on TestFailure {
-          // no recovery code sheet this time
-        }
       }
 
       // Step 1: every open case at the desk is ticked.
@@ -596,12 +600,12 @@ void main() {
       expect(find.byType(VCheckbox), findsNWidgets(4));
 
       // Take the newest case out: it stays open for the next Antrag, the form asks for less.
-      await tester.tap(find.byType(VCheckbox).last);
+      await tapTick(tester, find.byType(VCheckbox).last);
       await pumpUntilFound(tester, find.textContaining('3 von 4'), timeout: const Duration(seconds: 30));
       expect(find.textContaining('4,50 €'), findsWidgets);
 
       // One more would fall through the 4 € floor. The backend refuses and the case stays in.
-      await tester.tap(find.byType(VCheckbox).at(2));
+      await tapTick(tester, find.byType(VCheckbox).at(2));
       await pumpUntilFound(tester, find.textContaining('keine 4 €'), timeout: const Duration(seconds: 30));
       expect(find.textContaining('3 von 4'), findsWidgets, reason: 'the refused case is still in the form');
       // The snackbar sits where the button is: wait it out, do not tap through it.
@@ -609,6 +613,7 @@ void main() {
 
       // Step 2: a ticket for every month the three cases cover.
       await tapText(tester, 'Weiter');
+      await answerWordsSheet(tester);
       await pumpUntilFound(tester, find.text('Ticket anhängen'), timeout: const Duration(seconds: 20));
       while (find.text('Ticket anhängen').evaluate().isNotEmpty) {
         await tapText(tester, 'Ticket anhängen');
@@ -617,8 +622,9 @@ void main() {
       }
       expect(find.byType(MockTicket), findsWidgets);
 
-      // Leave the Antrag half-finished.
-      await tapIcon(tester, Icons.arrow_back);
+      // Leave the Antrag half-finished. The X asks first; leaving keeps the draft.
+      await tapIcon(tester, Icons.close);
+      await tapText(tester, 'Antrag verlassen');
       await pumpUntilFound(tester, find.textContaining('Bereit ·'), timeout: const Duration(seconds: 30));
 
       // Come back: the same form is lying there — three cases, and its ticket still attached.
@@ -634,7 +640,7 @@ void main() {
       // Put the fourth case back: that is another form, and it wants its own ticket.
       await tapText(tester, 'Zurück');
       await pumpUntilFound(tester, find.textContaining('3 von 4'), timeout: const Duration(seconds: 30));
-      await tester.tap(find.byType(VCheckbox).last);
+      await tapTick(tester, find.byType(VCheckbox).last);
       await pumpUntilFound(tester, find.textContaining('4 von 4'), timeout: const Duration(seconds: 30));
       await tapText(tester, 'Weiter');
       await pumpUntilFound(tester, find.text('Ticket anhängen'), timeout: const Duration(seconds: 30));

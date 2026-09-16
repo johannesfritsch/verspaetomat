@@ -114,25 +114,27 @@ void main() {
       await wait(tester, 400);
       await tester.tap(f);
     }
-    final speichern = find.widgetWithText(VPrimaryButton, 'Speichern');
-    if (speichern.evaluate().isNotEmpty) {
-      final fields = find.byType(TextField);
+    final fields = find.byType(TextField);
+    if (fields.evaluate().length >= 3) {
+      // Weiter first with the form empty: it has to say what is missing rather than sit grey.
+      await weiter();
+      await shot('antrag-angaben-fehlen');
+      await wait(tester, 3500); // let the snackbar clear the button
       await tester.enterText(fields.at(0), 'Johannes Fritsch');
       await tester.enterText(fields.at(1), 'Bahnhofstraße 1, 50667 Köln');
       await tester.enterText(fields.at(2), 'johannes@example.org');
       await wait(tester, 400);
-      await tapIt(speichern.first);
-      await wait(tester, 1500);
-      // Saving the details for the first time is also when the twelve words appear, once. The
-      // sheet covers the bottom bar, so it has to be answered before "Weiter" can be reached.
-      final notiert = find.widgetWithText(VPrimaryButton, 'Ich habe es notiert');
-      if (notiert.evaluate().isNotEmpty) {
-        await shot('wiederherstellungscode');
-        await tester.tap(notiert.first);
-        await wait(tester, 900);
-      }
     }
+    // One button: Weiter checks the details, saves them and, the first time, shows the twelve
+    // words. The sheet cannot be swiped away, so it has to be answered.
     await weiter();
+    await wait(tester, 1500);
+    final notiert = find.widgetWithText(VPrimaryButton, 'Ich habe sie notiert');
+    if (notiert.evaluate().isNotEmpty) {
+      await shot('wiederherstellungscode');
+      await tester.tap(notiert.first);
+      await wait(tester, 1200);
+    }
     // This claim spans two months, and every month is its own ticket, so the step holds until
     // each one has a picture on it.
     final anhaengen = find.widgetWithText(VDropzone, 'Ticket anhängen');
@@ -148,8 +150,17 @@ void main() {
 
     // Fold the list away again, then on through the last two steps. Unterschrift will not let go
     // until the claim is signed, so the tour draws on the pad and confirms.
-    await tapIt(find.byIcon(Icons.close).first);
+    // `.last`: the header's own X comes first in the tree now, and that one leaves the Antrag.
+    await tapIt(find.byIcon(Icons.close).last);
     await wait(tester, 700);
+
+    // The header X asks before it throws anything away. Answer "stay".
+    await tester.tap(find.byIcon(Icons.close).first);
+    await wait(tester, 900);
+    await shot('antrag-verlassen');
+    await tester.tap(find.widgetWithText(VPrimaryButton, 'Weiter ausfüllen').first);
+    await wait(tester, 900);
+
     await weiter();
     await shot('antrag-unterschrift');
     final line = find.text('Hier unterschreiben');
@@ -169,8 +180,18 @@ void main() {
         await wait(tester, 2500);
       }
     }
+    await shot('antrag-unterschrift-fertig');
     await weiter();
     await shot('antrag-senden');
+    // The attachment is the form as signed: in Demo that PDF is composed with the ink in it.
+    final pdfRow = find.text('EU-Antrag.pdf');
+    if (pdfRow.evaluate().isNotEmpty) {
+      await tapIt(pdfRow.first);
+      await wait(tester, 3500);
+      await shot('antrag-senden-pdf');
+      await tester.pageBack();
+      await wait(tester, 900);
+    }
 
     RideMonitor monitor() => RideScope.read(tester.element(find.byType(Scaffold).first))!;
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);

@@ -221,13 +221,15 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
         ];
 
         return VTabScaffold(
-          // No landscape here. Anträge is a desk, not a view: the screen is a stack of open cases
-          // and a picture behind the title would be the app admiring itself over somebody's claim.
-          scene: false,
+          // The same band as Home and Wir, so the three top-level tabs read as one app. This was
+          // switched off once on the argument that Anträge is a desk and not a view; side by side
+          // with two illustrated tabs it read as a page from somewhere else instead. The landscape
+          // stands in until Anträge has a drawing of its own.
           onRefresh: () async => refresh(),
           header: VTabHeader(
             title: 'Anträge',
             subtitle: caption,
+            narrow: true,
             onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
           ),
           children: [

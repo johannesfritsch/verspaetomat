@@ -62,9 +62,23 @@ class _SignatureBoardState extends State<SignatureBoard> {
   Future<Uint8List?> _ink() async {
     if (!_hasInk || _area.isEmpty) return null;
     const scale = 3.0;
+    // Cropped to the ink, with a little air. The form sets the signature at a fixed height (34 pt in
+    // eu_form.typ), so the whole board area would shrink a signature written small in the middle
+    // down to a scribble. Cropped, the ink itself fills the field.
+    var box = Rect.zero;
+    var first = true;
+    for (final stroke in _strokes) {
+      for (final p in stroke) {
+        final r = Rect.fromCircle(center: p, radius: 2);
+        box = first ? r : box.expandToInclude(r);
+        first = false;
+      }
+    }
+    box = box.inflate(8).intersect(Offset.zero & _area);
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.scale(scale);
+    canvas.translate(-box.left, -box.top);
     final paint = Paint()
       ..color = VColors.ink
       ..strokeWidth = 2.6
@@ -81,7 +95,7 @@ class _SignatureBoardState extends State<SignatureBoard> {
       canvas.drawPath(path, paint);
     }
     final picture = recorder.endRecording();
-    final img = await picture.toImage((_area.width * scale).round(), (_area.height * scale).round());
+    final img = await picture.toImage((box.width * scale).round().clamp(1, 8000), (box.height * scale).round().clamp(1, 8000));
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
     return data?.buffer.asUint8List();
   }
