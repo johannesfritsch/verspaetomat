@@ -691,6 +691,14 @@ async fn main() -> anyhow::Result<()> {
                             r["label"].as_str().unwrap_or("–"),
                             if r["live"].as_bool().unwrap_or(false) { "JA — echte Stelle" } else { "nein, Probelauf" }
                         );
+                        if !r["matches_a_desk"].as_bool().unwrap_or(true) {
+                            println!(
+                                "  ⚠  Kein Antrag trägt diesen Schalter. Die Route greift nie. Bekannte Schalter: {}",
+                                api.get("/admin/desks").await.ok()
+                                    .and_then(|v| v.as_array().map(|a| a.iter().filter_map(|d| d.as_str()).collect::<Vec<_>>().join(", ")))
+                                    .unwrap_or_default()
+                            );
+                        }
                     }
                 }
             }

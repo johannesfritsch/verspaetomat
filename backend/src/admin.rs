@@ -1123,16 +1123,23 @@ pub async fn mail_test(State(s): State<AppState>, _a: Admin, Path(key): Path<Str
 /// Every route, so the question "where does a claim for this desk actually go" has an answer that
 /// can be read rather than reasoned about.
 pub async fn routes(State(s): State<AppState>, _a: Admin) -> ApiResult {
-    let rows: Vec<(String, String, String, bool, Option<String>, Option<String>)> =
-        sqlx::query_as("select desk, to_address, label, live, note, postal_address from mail_routes order by desk")
-            .fetch_all(&s.pool)
-            .await
-            .map_err(internal)?;
+    // `known` answers the question a route list must answer: will this ever fire? A route is keyed
+    // on the desk string frozen onto a claim, which comes from the operator directory — so a desk
+    // nobody is filed under is a route that silently never matches, and the claim is refused for
+    // "no mail route" while a route sits right there looking correct.
+    let rows: Vec<(String, String, String, bool, Option<String>, Option<String>, bool)> = sqlx::query_as(
+        "select r.desk, r.to_address, r.label, r.live, r.note, r.postal_address,
+                exists(select 1 from operators o where o.desk = r.desk) as known
+         from mail_routes r order by r.desk",
+    )
+    .fetch_all(&s.pool)
+    .await
+    .map_err(internal)?;
     Ok(Json(json!(rows
         .into_iter()
-        .map(|(desk, to_address, label, live, note, postal_address)| json!({
+        .map(|(desk, to_address, label, live, note, postal_address, known)| json!({
             "desk": desk, "to_address": to_address, "label": label, "live": live, "note": note,
-            "postal_address": postal_address
+            "postal_address": postal_address, "matches_a_desk": known
         }))
         .collect::<Vec<_>>())))
 }
@@ -1194,4 +1201,11 @@ pub async fn route_remove(State(s): State<AppState>, _a: Admin, Json(b): Json<Ro
     }
     crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-removed", b.desk.trim()).await.map_err(internal)?;
     Ok(Json(json!({ "removed": b.desk.trim() })))
+}
+
+/// `GET /admin/desks` — every desk a claim can be filed under, so a route can be pointed at one
+/// that exists rather than at a name somebody typed.
+pub async fn desks(State(s): State<AppState>, _a: Admin) -> ApiResult {
+    let rows: Vec<(String,)> = sqlx::query_as("select distinct desk from operators order by desk").fetch_all(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!(rows.into_iter().map(|(d,)| d).collect::<Vec<_>>())))
 }
