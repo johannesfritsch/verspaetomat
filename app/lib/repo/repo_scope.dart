@@ -99,26 +99,45 @@ class Session extends ChangeNotifier {
 
   Timer? _tick;
 
-  /// How often the shared figures are fetched again.
+  /// The shared figures, as the server last reported them. Null until the first poll answers.
+  Map<String, dynamic>? pulse;
+
+  /// How often the cheap endpoint is asked.
   ///
-  /// Home and Wir show numbers that belong to everybody — the minutes this community has waited,
-  /// what the railways have confirmed — and those move because of other people, so no event of
-  /// this device's will ever announce them. Without a tick the number a passenger sees is the one
-  /// that happened to be true when the screen opened, which on a phone left on a table is hours.
-  /// Five minutes is far below anything a person would notice as stale and far above anything the
-  /// server would notice as load: it is two small aggregate queries.
-  static const _tickEvery = Duration(minutes: 5);
+  /// The figures on Home and Wir belong to everybody — the minutes this community has waited, what
+  /// the railways have confirmed — so they move because of other people, and no event of this
+  /// device's will ever announce them. They used to be made to move by a client-side timer adding
+  /// a random number every second, which is not a slow number but an invented one.
+  ///
+  /// The shape is: poll something small often, refresh something big only when it moved.
+  /// `/v1/community/pulse` is two aggregates and a row count — no joins, no per-NGO breakdown — so
+  /// a minute is a sensible cadence. Only when one of those numbers actually differs does a `tick`
+  /// go out and the screens refetch the fuller payloads they draw from. A quiet system costs one
+  /// small query a minute and nothing else.
+  static const _pulseEvery = Duration(minutes: 1);
+
+  static const _pulseFields = ['minutes', 'users', 'submitted_cents', 'confirmed_cents'];
 
   void _startTicking() {
     _tick?.cancel();
-    _tick = Timer.periodic(_tickEvery, (_) async {
+    if (!isLocal) return; // Demo has no server to ask and nobody else to count.
+    _tick = Timer.periodic(_pulseEvery, (_) async {
       if (_eventsOut.isClosed) return;
+      Map<String, dynamic> next;
+      try {
+        next = await _http.client.communityPulse();
+      } catch (_) {
+        return; // offline, or the server is down: ask again next minute
+      }
+      if (_eventsOut.isClosed) return;
+      final changed = pulse == null || _pulseFields.any((k) => pulse![k] != next[k]);
+      pulse = next;
+      if (!changed) return;
       try {
         await loadStanding();
-      } catch (_) {
-        return; // offline, or the server is down: try again on the next tick
-      }
+      } catch (_) {}
       if (!_eventsOut.isClosed) _eventsOut.add(const AppEvent('tick', {}));
+      notifyListeners();
     });
   }
 

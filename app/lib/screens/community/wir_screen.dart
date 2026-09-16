@@ -47,10 +47,9 @@ class WirScreen extends StatefulWidget {
 class _WirScreenState extends State<WirScreen> {
   StreamSubscription<AppEvent>? _eventSub;
   final _loader = LoaderController();
+  StreamSubscription<AppEvent>? _eventSub2;
   int _board = 0;
-  int _extraMinutes = 0;
   Timer? _timer;
-  int _tick = 0;
 
   @override
   void initState() {
@@ -58,15 +57,17 @@ class _WirScreenState extends State<WirScreen> {
     _eventSub = RepoScope.read(context).events.listen((e) {
       if (mounted && e.touchesLedger) _loader.refresh();
     });
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _tick++;
-      setState(() => _extraMinutes += 1 + (_tick * 7) % 3);
+    // A timer used to add a made-up number here every second. See bahnsteig_screen.dart for why
+    // it is gone; the figure is refreshed from the server instead, and holds still between times.
+    _eventSub2 = RepoScope.read(context).events.listen((e) {
+      if (mounted && e.kind == 'tick') _loader.refresh();
     });
   }
 
   @override
   void dispose() {
     _eventSub?.cancel();
+    _eventSub2?.cancel();
     _timer?.cancel();
     super.dispose();
   }
@@ -136,7 +137,7 @@ class _WirScreenState extends State<WirScreen> {
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      fmtInt(c.minutes + _extraMinutes),
+                      fmtInt(c.minutes),
                       style: VText.number.copyWith(color: VColors.inkOnDark),
                     ),
                   ),
@@ -158,9 +159,9 @@ class _WirScreenState extends State<WirScreen> {
                     icon: Icons.ios_share,
                     onTap: () => showShareSheet(
                       context,
-                      lines: ShareLines.wir(minutes: c.minutes + _extraMinutes),
+                      lines: ShareLines.wir(minutes: c.minutes),
                       build: ({fahrgast, strecke, date, line}) => TicketData.wir(
-                        minutes: c.minutes + _extraMinutes,
+                        minutes: c.minutes,
                         people: c.users,
                         line: line,
                       ),

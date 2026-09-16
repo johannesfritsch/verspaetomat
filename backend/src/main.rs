@@ -152,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/internal/inbound-mail/raw", post(handlers::inbound_mail_raw))
         // community
         .route("/v1/community", get(handlers::community))
+        .route("/v1/community/pulse", get(handlers::community_pulse))
         .route("/v1/boards", get(handlers::boards))
         // Stellwerk (admin)
         .route("/admin/customers", get(admin::customers))

@@ -142,6 +142,9 @@ fn resolve(cli: &Cli, cfg: &ConfigFile) -> anyhow::Result<(String, Target)> {
     Ok((name, t))
 }
 
+// clap builds one enum variant per subcommand and `Set` carries a dozen optional strings, so it
+// dwarfs `List`. That is what a CLI argument enum looks like; boxing it would buy nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum NgoCmd {
     /// All NGOs, inactive ones included, with totals and how many customers chose them
@@ -164,6 +167,12 @@ enum NgoCmd {
         iban: Option<String>,
         #[arg(long = "donation-url")]
         donation_url: Option<String>,
+        /// What this Verein had received before Verspätomat, in cents. Added to what we can account for.
+        #[arg(long = "seed-confirmed")]
+        seed_confirmed: Option<i64>,
+        /// What had been submitted for it before Verspätomat, in cents.
+        #[arg(long = "seed-submitted")]
+        seed_submitted: Option<i64>,
         /// Date of the written consent to appear as payee (YYYY-MM-DD)
         #[arg(long)]
         consent: Option<String>,
@@ -196,6 +205,9 @@ enum RouteCmd {
         /// What this represents, printed in `route list` and on a rehearsal's subject line
         #[arg(long)]
         label: Option<String>,
+        /// Where this route's paper would go. Without it the operator directory's address is shown.
+        #[arg(long = "postal")]
+        postal: Option<String>,
         /// Assert this is the railway's real desk. Without it every mail says it is a rehearsal.
         #[arg(long)]
         live: bool,
@@ -682,11 +694,14 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            RouteCmd::Set { desk, to, label, live, note } => {
+            RouteCmd::Set { desk, to, label, postal, live, note } => {
                 let mut body = serde_json::Map::new();
                 body.insert("to_address".into(), json!(to));
                 body.insert("label".into(), json!(label.unwrap_or_else(|| if live { "Echte Stelle".into() } else { "Probelauf".into() })));
                 body.insert("live".into(), json!(live));
+                if let Some(p) = postal {
+                    body.insert("postal_address".into(), json!(p));
+                }
                 if let Some(n) = note {
                     body.insert("note".into(), json!(n));
                 }
@@ -717,13 +732,15 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
             }
-            NgoCmd::Set { id, name, tagline, story, holder, iban, donation_url, consent, logo, active, inactive } => {
+            NgoCmd::Set { id, name, tagline, story, holder, iban, donation_url, seed_confirmed, seed_submitted, consent, logo, active, inactive } => {
                 let mut body = serde_json::Map::new();
                 if let Some(v) = name { body.insert("name".into(), json!(v)); }
                 if let Some(v) = tagline { body.insert("tagline".into(), json!(v)); }
                 if !story.is_empty() { body.insert("story".into(), json!(story)); }
                 if let Some(v) = holder { body.insert("account_holder".into(), json!(v)); }
                 if let Some(v) = iban { body.insert("iban".into(), json!(v)); }
+                if let Some(v) = seed_confirmed { body.insert("seed_confirmed_cents".into(), json!(v)); }
+                if let Some(v) = seed_submitted { body.insert("seed_submitted_cents".into(), json!(v)); }
                 if let Some(v) = donation_url { body.insert("donation_url".into(), json!(v)); }
                 if let Some(v) = consent { body.insert("consent_date".into(), json!(v)); }
                 if let Some(path) = logo {

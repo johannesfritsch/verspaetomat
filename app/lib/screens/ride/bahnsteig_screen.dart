@@ -34,7 +34,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   bool _loading = true;
   String? _error;
   Timer? _ticker;
-  int _minuteTick = 0;
   AppRepository? _lastRepo;
   String? _lastMeStamp;
   late final Session _session;
@@ -50,11 +49,10 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
       if (e.touchesLocation || e.touchesRide || e.touchesLedger) _load();
     });
     session.addListener(_onSession);
-    _ticker = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (mounted && _standing.community != null) {
-        setState(() => _minuteTick += 1 + DateTime.now().second % 3);
-      }
-    });
+    // There was a timer here that added a random number to the community's minutes every two
+    // seconds, so the figure climbed whether or not a single train was late. A product that argues
+    // it does not invent numbers cannot print an invented one on its front page. The figure now
+    // changes when the figure changes: the session polls a small endpoint and this screen redraws.
   }
 
   @override
@@ -120,7 +118,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
       if (!mounted) return;
       setState(() {
         _standing = st;
-        _minuteTick = 0;
         _error = null;
       });
     } catch (e) {
@@ -197,7 +194,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         // true whether or not anybody is travelling right now. The action follows.
         _WirBlock(
           standing: st,
-          tick: _minuteTick,
           onTap: () => context.go(Routes.wir),
         ),
 
@@ -566,9 +562,8 @@ class _Momentum extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _WirBlock extends StatelessWidget {
-  const _WirBlock({required this.standing, required this.tick, required this.onTap});
+  const _WirBlock({required this.standing, required this.onTap});
   final ApiStanding standing;
-  final int tick;
   final VoidCallback onTap;
 
   @override
@@ -592,7 +587,7 @@ class _WirBlock extends StatelessWidget {
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(
-              fmtInt(c.minutesTotal + tick),
+              fmtInt(c.minutesTotal),
               style: VText.number.copyWith(color: VColors.inkOnDark),
             ),
           ),

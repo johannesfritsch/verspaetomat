@@ -874,6 +874,13 @@ pub struct NgoUpsert {
     pub consent_date: Option<chrono::NaiveDate>,
     #[serde(default)]
     pub last_report: Option<chrono::NaiveDate>,
+    /// What this Verein had received before Verspätomat existed, in cents. It is added to the sums
+    /// this system can actually account for, and it is the one figure on the Wir screen that does
+    /// not come from our own rows — so it is entered by a person, deliberately, and never guessed.
+    #[serde(default)]
+    pub seed_confirmed_cents: Option<i64>,
+    #[serde(default)]
+    pub seed_submitted_cents: Option<i64>,
     /// docs/27 §5: the NGO's mark as a data URI. Explicit null removes it, which is why this is
     /// a nested Option — absent and null are different instructions.
     #[serde(default, deserialize_with = "crate::admin::double_option")]
@@ -959,12 +966,15 @@ pub async fn ngo_upsert(State(s): State<AppState>, _a: Admin, Path(id): Path<Str
             "update ngos set name = coalesce($2, name), tagline = coalesce($3, tagline), story = coalesce($4, story),
                 account_holder = coalesce($5, account_holder), iban = coalesce($6, iban), donation_url = coalesce($7, donation_url),
                 active = coalesce($8, active), consent_date = coalesce($9, consent_date), last_report = coalesce($10, last_report),
-                logo = case when $11 then $12 else logo end
+                logo = case when $11 then $12 else logo end,
+                seed_confirmed_cents = coalesce($13, seed_confirmed_cents),
+                seed_submitted_cents = coalesce($14, seed_submitted_cents)
              where id = $1",
         )
         .bind(&id).bind(&b.name).bind(&b.tagline).bind(&story).bind(&b.account_holder).bind(&iban).bind(&b.donation_url)
         .bind(b.active).bind(b.consent_date).bind(b.last_report)
         .bind(b.logo.is_some()).bind(b.logo.clone().flatten())
+        .bind(b.seed_confirmed_cents).bind(b.seed_submitted_cents)
         .execute(&s.pool).await.map_err(internal)?;
         crate::rules::audit(&s.pool, "ngo", Uuid::nil(), None, &id, "updated via admin").await.map_err(internal)?;
     } else {
@@ -1113,15 +1123,16 @@ pub async fn mail_test(State(s): State<AppState>, _a: Admin, Path(key): Path<Str
 /// Every route, so the question "where does a claim for this desk actually go" has an answer that
 /// can be read rather than reasoned about.
 pub async fn routes(State(s): State<AppState>, _a: Admin) -> ApiResult {
-    let rows: Vec<(String, String, String, bool, Option<String>)> =
-        sqlx::query_as("select desk, to_address, label, live, note from mail_routes order by desk")
+    let rows: Vec<(String, String, String, bool, Option<String>, Option<String>)> =
+        sqlx::query_as("select desk, to_address, label, live, note, postal_address from mail_routes order by desk")
             .fetch_all(&s.pool)
             .await
             .map_err(internal)?;
     Ok(Json(json!(rows
         .into_iter()
-        .map(|(desk, to_address, label, live, note)| json!({
-            "desk": desk, "to_address": to_address, "label": label, "live": live, "note": note
+        .map(|(desk, to_address, label, live, note, postal_address)| json!({
+            "desk": desk, "to_address": to_address, "label": label, "live": live, "note": note,
+            "postal_address": postal_address
         }))
         .collect::<Vec<_>>())))
 }
@@ -1131,6 +1142,7 @@ pub struct RouteBody {
     pub desk: String,
     pub to_address: Option<String>,
     pub label: Option<String>,
+    pub postal_address: Option<String>,
     #[serde(default)]
     pub live: bool,
     pub note: Option<String>,
@@ -1147,9 +1159,10 @@ pub async fn route_set(State(s): State<AppState>, _a: Admin, Json(b): Json<Route
     };
     let label = b.label.unwrap_or_else(|| if b.live { "Echte Stelle".into() } else { "Probelauf".into() });
     let row: (String, String, String, bool) = sqlx::query_as(
-        "insert into mail_routes (desk, to_address, label, live, note) values ($1,$2,$3,$4,$5)
+        "insert into mail_routes (desk, to_address, label, live, note, postal_address) values ($1,$2,$3,$4,$5,$6)
          on conflict (desk) do update set to_address = excluded.to_address, label = excluded.label,
-           live = excluded.live, note = excluded.note, updated_at = now()
+           live = excluded.live, note = excluded.note,
+           postal_address = coalesce(excluded.postal_address, mail_routes.postal_address), updated_at = now()
          returning desk, to_address, label, live",
     )
     .bind(&desk)
@@ -1157,6 +1170,7 @@ pub async fn route_set(State(s): State<AppState>, _a: Admin, Json(b): Json<Route
     .bind(&label)
     .bind(b.live)
     .bind(&b.note)
+    .bind(&b.postal_address)
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;

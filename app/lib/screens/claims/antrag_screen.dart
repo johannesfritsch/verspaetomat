@@ -779,16 +779,135 @@ class _PersonalFormState extends State<_PersonalForm> {
         const VGap.s(),
         Text('Einmal eintragen. Steht danach auf jedem Antrag.', style: VText.caption),
         const VGap.m(),
-        TextField(controller: _name, onChanged: (_) => setState(() {}), decoration: const InputDecoration(hintText: 'Vor- und Nachname'), style: VText.bodyS),
+        // One card, four labelled rows, hairlines between them — the shape every other list in the
+        // app has. It was four bare TextFields with hint text and an outlined button, which is the
+        // pre-redesign form and the last one left in this flow.
+        //
+        // The autofill hints matter as much as the look: an address and an e-mail are exactly what
+        // the keyboard already knows, and typing a postal address on a phone is the slowest thing
+        // this app asks anybody to do. AutofillGroup wraps them so iOS offers the whole contact
+        // card at once rather than field by field.
+        AutofillGroup(
+          child: VCard(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.card),
+            child: Column(
+              children: [
+                _Field(
+                  label: 'Name',
+                  hint: 'Vor- und Nachname',
+                  controller: _name,
+                  onChanged: () => setState(() {}),
+                  autofill: const [AutofillHints.name],
+                  capitalization: TextCapitalization.words,
+                ),
+                const VDivider(),
+                _Field(
+                  label: 'Anschrift',
+                  hint: 'Straße, Hausnummer, PLZ und Ort',
+                  controller: _address,
+                  onChanged: () => setState(() {}),
+                  autofill: const [AutofillHints.fullStreetAddress, AutofillHints.postalAddress],
+                  capitalization: TextCapitalization.words,
+                  lines: 2,
+                ),
+                const VDivider(),
+                _Field(
+                  label: 'Postfach',
+                  hint: 'Deine private E-Mail',
+                  controller: _email,
+                  onChanged: () => setState(() {}),
+                  autofill: const [AutofillHints.email],
+                  keyboard: TextInputType.emailAddress,
+                ),
+                const VDivider(),
+                _Field(
+                  label: 'Ticket-Nr.',
+                  hint: 'Optional',
+                  controller: _ticket,
+                  onChanged: () => setState(() {}),
+                  mono: true,
+                ),
+              ],
+            ),
+          ),
+        ),
         const VGap.s(),
-        TextField(controller: _address, onChanged: (_) => setState(() {}), decoration: const InputDecoration(hintText: 'Straße, Hausnummer, PLZ und Ort'), style: VText.bodyS, maxLines: 2),
-        const VGap.s(),
-        TextField(controller: _email, onChanged: (_) => setState(() {}), decoration: const InputDecoration(hintText: 'Privates Postfach (E-Mail)'), style: VText.bodyS, keyboardType: TextInputType.emailAddress),
-        const VGap.s(),
-        TextField(controller: _ticket, decoration: const InputDecoration(hintText: 'Deutschlandticket-Nummer'), style: VText.bodyS),
+        VNoteBanner(
+          tone: VNoteTone.neutral,
+          icon: Icons.lock_outline,
+          text: 'Diese Angaben stehen nur auf dem Formular an das Eisenbahnunternehmen. '
+              'Sie bleiben auf ${RepoScope.read(context).isLocal ? 'deinem Gerät und unserem Server' : 'diesem Gerät'}.',
+        ),
         const VGap.m(),
-        VOutlineButton(label: _saving ? 'Speichert …' : 'Speichern', icon: Icons.check, onTap: _valid && !_saving ? _save : null),
+        VPrimaryButton(label: 'Speichern', busy: _saving, onTap: _valid && !_saving ? _save : null),
       ],
+    );
+  }
+}
+
+/// One labelled row of the personal-data card: the label on the left, the field on the right,
+/// which is how [VKeyValue] renders the same facts once they are saved. A form that reads like the
+/// thing it becomes is easier to check than one that looks like a different screen.
+class _Field extends StatelessWidget {
+  const _Field({
+    required this.label,
+    required this.hint,
+    required this.controller,
+    required this.onChanged,
+    this.autofill,
+    this.keyboard,
+    this.capitalization = TextCapitalization.none,
+    this.lines = 1,
+    this.mono = false,
+  });
+
+  final String label;
+  final String hint;
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+  final List<String>? autofill;
+  final TextInputType? keyboard;
+  final TextCapitalization capitalization;
+  final int lines;
+  final bool mono;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: VSpace.s),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 96,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(label, style: VText.bodyS.copyWith(color: VColors.ink2)),
+            ),
+          ),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              onChanged: (_) => onChanged(),
+              autofillHints: autofill,
+              keyboardType: keyboard,
+              textCapitalization: capitalization,
+              maxLines: lines,
+              style: mono ? VText.mono : VText.bodySStrong,
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: VText.bodyS.copyWith(color: VColors.ink3),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: false,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

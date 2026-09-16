@@ -1141,6 +1141,10 @@ async fn draft_json(s: &AppState, c: &CustomerRow, claim: &ClaimRow, desk: &str)
     v["desk_email"] = json!(route.as_ref().map(|r| r.to_address.clone()));
     v["desk_route_label"] = json!(route.as_ref().map(|r| r.label.clone()));
     v["desk_route_live"] = json!(route.as_ref().map(|r| r.live).unwrap_or(false));
+    // A rehearsal's paper goes where the rehearsal says, not to the railway's published address.
+    if let Some(p) = route.as_ref().and_then(|r| r.postal_address.clone()) {
+        v["desk_address"] = json!(p);
+    }
     v["desk_accepts_email"] = json!(op.as_ref().map(|o| o.accepts_email).unwrap_or(false) && route.is_some());
     v["personal_data_required"] = json!(c.full_name.is_none());
     v["relay_address"] = json!(c.relay_address);
@@ -1492,6 +1496,7 @@ pub struct MailRoute {
     pub to_address: String,
     pub label: String,
     pub live: bool,
+    pub postal_address: Option<String>,
 }
 
 /// The destination for a desk, or None if nobody has set one.
@@ -1500,12 +1505,12 @@ pub struct MailRoute {
 /// fallback, no environment variable and no default: an address exists because a person typed it
 /// into this database, or it does not exist and nothing is sent.
 pub async fn mail_route(pool: &PgPool, desk: &str) -> Result<Option<MailRoute>, (StatusCode, Json<Value>)> {
-    let row: Option<(String, String, bool)> = sqlx::query_as("select to_address, label, live from mail_routes where desk = $1")
+    let row: Option<(String, String, bool, Option<String>)> = sqlx::query_as("select to_address, label, live, postal_address from mail_routes where desk = $1")
         .bind(desk)
         .fetch_optional(pool)
         .await
         .map_err(internal)?;
-    Ok(row.map(|(to_address, label, live)| MailRoute { to_address, label, live }))
+    Ok(row.map(|(to_address, label, live, postal_address)| MailRoute { to_address, label, live, postal_address }))
 }
 
 pub const MAX_UPLOAD: usize = 8 * 1024 * 1024;
@@ -1942,6 +1947,33 @@ fn extract_amount_cents(text: &str) -> Option<Cents> {
 // ---------------------------------------------------------------------------
 // Community
 // ---------------------------------------------------------------------------
+
+/// `GET /v1/community/pulse` — the three shared figures, and nothing else.
+///
+/// The app used to make these move by adding a random number to them every second, on two screens.
+/// That is not a slow number, it is a made-up one: it climbed whether or not a single train was
+/// late, and a product whose whole argument is "we do not invent figures" cannot print an invented
+/// one on its front page.
+///
+/// So the number moves when the number moves, and the app asks. This is the endpoint it asks: two
+/// aggregates over indexed columns and a row count, no joins, no per-NGO breakdown — the expensive
+/// half of `/v1/community`. It is small enough to poll on a timer without caching, which is the
+/// point; when that stops being true, it gets a cache here rather than a lie in the client.
+pub async fn community_pulse(State(s): State<AppState>, _c: Customer) -> ApiResult {
+    let (minutes, users): (i64, i64) = sqlx::query_as(
+        "select coalesce(sum(final_delay_min),0)::bigint, (select count(*) from customers)::bigint from rides where status = 'arrived'",
+    )
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    let (submitted, confirmed): (i64, i64) = sqlx::query_as(
+        "select coalesce(sum(amount_cents) filter (where status = 'eingereicht'),0)::bigint, coalesce(sum(amount_cents) filter (where status = 'bestaetigt'),0)::bigint from incidents",
+    )
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    Ok(Json(json!({ "minutes": minutes, "users": users, "submitted_cents": submitted, "confirmed_cents": confirmed })))
+}
 
 pub async fn community(State(s): State<AppState>, _c: Customer) -> ApiResult {
     let (minutes, users): (i64, i64) = sqlx::query_as("select coalesce(sum(final_delay_min),0)::bigint, (select count(*) from customers)::bigint from rides where status = 'arrived'").fetch_one(&s.pool).await.map_err(internal)?;
@@ -2499,8 +2531,8 @@ mod inbound_tests {
     #[test]
     fn postmark_payload_maps_to_inbound_mail() {
         let v = json!({
-            "FromFull": {"Email": "fahrgastrechte@deutschebahn.com", "Name": "Servicecenter Fahrgastrechte"},
-            "From": "Servicecenter Fahrgastrechte <fahrgastrechte@deutschebahn.com>",
+            "FromFull": {"Email": "fahrgastrechte@servicecenter.invalid", "Name": "Servicecenter Fahrgastrechte"},
+            "From": "Servicecenter Fahrgastrechte <fahrgastrechte@servicecenter.invalid>",
             "To": "fahrgast-0d8cffc4@users.verspaetomat.de",
             "ToFull": [{"Email": "fahrgast-0d8cffc4@users.verspaetomat.de", "Name": ""}],
             "Subject": "Ihr Antrag",
@@ -2512,7 +2544,7 @@ mod inbound_tests {
         });
         let m = inbound_from_json(v).unwrap();
         assert_eq!(m.to, "fahrgast-0d8cffc4@users.verspaetomat.de");
-        assert!(m.from.contains("deutschebahn.com"));
+        assert!(m.from.contains("servicecenter.invalid"));
         assert_eq!(m.subject, "Ihr Antrag");
         assert!(m.body.starts_with("Sehr geehrter"));
         assert_eq!(m.message_id.as_deref(), Some("<73e6d360-66eb-11e1-8e72-a8904824019b>"));

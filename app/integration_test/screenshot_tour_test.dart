@@ -113,7 +113,7 @@ void main() {
       await wait(tester, 400);
       await tester.tap(f);
     }
-    final speichern = find.widgetWithText(VOutlineButton, 'Speichern');
+    final speichern = find.widgetWithText(VPrimaryButton, 'Speichern');
     if (speichern.evaluate().isNotEmpty) {
       final fields = find.byType(TextField);
       await tester.enterText(fields.at(0), 'Johannes Fritsch');

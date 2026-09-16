@@ -156,6 +156,9 @@ class ApiClient {
     return code?.toString();
   }
 
+  /// The three shared figures and nothing else — cheap enough to poll on a timer.
+  Future<Map<String, dynamic>> communityPulse() async => _map(await _get('/v1/community/pulse'));
+
   // -- reference ------------------------------------------------------------
 
   Future<ApiNearby> stationsNearby({double? lat, double? lon}) async => ApiNearby.fromJson(await _get('/v1/stations/nearby', {
@@ -341,7 +344,7 @@ class ApiClient {
   Future<ApiInboundResult> simulateInbound({required String body, String? claimId, String? relayAddress}) async =>
       ApiInboundResult.fromJson(_map(await _post('/internal/inbound-mail', {
         'to': relayAddress ?? '',
-        'from': 'Servicecenter Fahrgastrechte <fahrgastrechte@deutschebahn.com>',
+        'from': 'Servicecenter Fahrgastrechte <fahrgastrechte@servicecenter.invalid>',
         'subject': 'Ihr Antrag auf Entschädigung',
         'body': body,
         if (claimId != null) 'claim_id': claimId,

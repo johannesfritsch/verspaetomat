@@ -535,7 +535,12 @@ class MockRepository implements AppRepository {
         nickname: state.nickname,
         relayAddress: state.personalDataEntered ? Mock.relayAddress : null,
         personalData: state.personalDataEntered
-            ? const ApiPersonalData(name: Mock.userName, address: Mock.userAddress, email: Mock.userEmail, ticketNumber: Mock.ticketNumber)
+            ? ApiPersonalData(
+                name: state.personalName ?? Mock.userName,
+                address: state.personalAddress ?? Mock.userAddress,
+                email: state.personalEmail ?? Mock.userEmail,
+                ticketNumber: state.personalTicketNumber ?? Mock.ticketNumber,
+              )
             : null,
         settings: ApiSettings(
           ticket: state.ticket,
@@ -609,7 +614,7 @@ class MockRepository implements AppRepository {
 
   @override
   Future<ApiCustomer> putPersonalData(ApiPersonalData data) async {
-    state.savePersonalData();
+    state.savePersonalData(name: data.name, address: data.address, email: data.email, ticketNumber: data.ticketNumber);
     return getMe();
   }
 
@@ -673,7 +678,7 @@ class MockRepository implements AppRepository {
             name: e.key,
             desk: e.value,
             postalAddress: (Mock.deskAddresses[e.value] ?? '').split('\n').first,
-            email: e.value == 'Servicecenter Fahrgastrechte' ? 'EUAntragFGR@deutschebahn.com' : null,
+            email: e.value == 'Servicecenter Fahrgastrechte' ? 'fahrgastrechte@servicecenter.invalid' : null,
             acceptsEmail: e.value == 'Servicecenter Fahrgastrechte',
           ))
       .toList();
@@ -824,12 +829,17 @@ class MockRepository implements AppRepository {
       }
     }
     final addr = Mock.deskAddresses[desk];
+    // Demo shows a route the same way the server does, and labels it a rehearsal — because it is
+    // one. There is no real railway address in this build at all: the demo address ends in
+    // `.invalid`, which RFC 2606 reserves precisely so it can never be delivered to.
     return ApiClaimDraft(
       claim: _draftClaim(),
       deskAddress: addr?.split('\n').first,
       deskEmail: addr != null && addr.contains('\n') ? addr.split('\n').last : null,
       personalDataRequired: !state.personalDataEntered,
       relayAddress: Mock.relayAddress,
+      routeLabel: 'Vorführung',
+      routeLive: false,
     );
   }
 
@@ -899,7 +909,7 @@ class MockRepository implements AppRepository {
       incidentIds: original?.incidentIds ?? const [],
       direction: MailDirection.out,
       from: '${Mock.userName} <${Mock.relayAddress}>',
-      to: original?.from ?? 'fahrgastrechte@deutschebahn.com',
+      to: original?.from ?? 'fahrgastrechte@servicecenter.invalid',
       subject: 'Re: ${original?.subject ?? 'Ihr Antrag'}',
       body: body,
       date: DateTime.now(),

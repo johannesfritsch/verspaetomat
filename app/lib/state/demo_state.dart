@@ -87,6 +87,14 @@ class DemoState extends ChangeNotifier {
   TicketType ticket = TicketType.deutschlandticket;
   String ngoId = 'bahnhofsmission';
   bool personalDataEntered = false;
+
+  /// What was actually typed on the Antrag's „Deine Angaben", rather than the canned Mock values.
+  /// Demo does not send anything anywhere, but a form that forgets what you just typed is a form
+  /// nobody can judge — and a walkthrough where the name is somebody else's reads as a mock-up.
+  String? personalName;
+  String? personalAddress;
+  String? personalEmail;
+  String? personalTicketNumber;
   String nickname = Mock.userName;
   bool showOnBoards = true;
   bool keepCorrespondence = false;
@@ -94,8 +102,12 @@ class DemoState extends ChangeNotifier {
 
   Ngo get ngo => Mock.ngoById(ngoId);
 
-  void savePersonalData() {
+  void savePersonalData({String? name, String? address, String? email, String? ticketNumber}) {
     personalDataEntered = true;
+    if (name != null && name.isNotEmpty) personalName = name;
+    if (address != null && address.isNotEmpty) personalAddress = address;
+    if (email != null && email.isNotEmpty) personalEmail = email;
+    personalTicketNumber = ticketNumber?.isEmpty ?? true ? personalTicketNumber : ticketNumber;
     notifyListeners();
   }
 
@@ -661,7 +673,7 @@ class DemoState extends ChangeNotifier {
         incidentIds: List.of(draftIncidentIds),
         direction: MailDirection.out,
         from: '${Mock.userName} <${Mock.relayAddress}>',
-        to: draftDesk == 'NordWestBahn' ? 'fahrgastrechte@nordwestbahn.de' : 'EUAntragFGR@deutschebahn.com',
+        to: draftDesk == 'NordWestBahn' ? 'fahrgastrechte@nordwestbahn.invalid' : 'fahrgastrechte@servicecenter.invalid',
         subject: 'Fahrgastrechte: EU-Antragsformular',
         body:
             'Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte Deutschlandticket). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: ${ngo.accountHolder}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist ${Mock.userName}.\n\nMit freundlichen Grüßen\n${Mock.userName}',
@@ -704,7 +716,7 @@ class DemoState extends ChangeNotifier {
       id: 'm-${DateTime.now().millisecondsSinceEpoch}-in',
       incidentIds: group.map((i) => i.id).toList(),
       direction: MailDirection.inbound,
-      from: 'Servicecenter Fahrgastrechte <fahrgastrechte@deutschebahn.com>',
+      from: 'Servicecenter Fahrgastrechte <fahrgastrechte@servicecenter.invalid>',
       to: Mock.relayAddress,
       subject: 'Ihr Antrag auf Entschädigung – Vorgang 2026-09-${DateTime.now().millisecondsSinceEpoch % 10000000}',
       body: body,
@@ -731,6 +743,10 @@ class DemoState extends ChangeNotifier {
   void reset() {
     onboardingDone = false;
     personalDataEntered = false;
+    personalName = null;
+    personalAddress = null;
+    personalEmail = null;
+    personalTicketNumber = null;
     bonusPoints = 0;
     unreadMails = 2;
     noHistory = false;
