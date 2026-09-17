@@ -212,6 +212,10 @@ enum RouteCmd {
         live: bool,
         #[arg(long)]
         note: Option<String>,
+        /// Domains the desk answers from, comma-separated ("bahn.de,info.bahn.de"). Only verified mail
+        /// from these can accept, refuse or ask. Without it: unchanged; "default" = the domain of TO
+        #[arg(long = "reply-from")]
+        reply_from: Option<String>,
     },
     /// Remove a route. Nothing can be sent to that desk afterwards.
     Remove { desk: String },
@@ -334,6 +338,28 @@ enum Cmd {
         /// Override the amount in cents (accepted only)
         #[arg(long)]
         amount: Option<i64>,
+    },
+    /// The latest desk answers: who read each (rules or model), what came of it, and why
+    Replies,
+    /// Read a stored desk answer again and let it act — for mail that came in while the model was unavailable
+    Reread { mail: String },
+    /// How a desk's mail would be read — rules, model and the checks between them — without
+    /// touching any claim. Reads the mail text from FILE, or from stdin with "-"
+    ReadMail {
+        file: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        subject: Option<String>,
+        /// Read it as the answer to this claim id (its rides, its passenger taken out)
+        #[arg(long)]
+        claim: Option<String>,
+        /// Without --claim: cents claimed for the single made-up ride it is read against (default 150)
+        #[arg(long)]
+        claimed: Option<i64>,
+        /// Without --claim: that ride's date, YYYY-MM-DD (default today)
+        #[arg(long)]
+        date: Option<String>,
     },
     /// Show or shift the system clock (+100d, -2h, 90m, now)
     Clock { shift: Option<String> },
@@ -567,7 +593,8 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("[{name}] {url}");
     }
     let token = target.token.ok_or_else(|| anyhow::anyhow!("target \"{name}\" has no token"))?;
-    let api = Api { http: reqwest::Client::builder().timeout(Duration::from_secs(30)).build()?, url, token };
+    // Long enough for a reply read by the model (its budget is 25 s) with the server's own work on top.
+    let api = Api { http: reqwest::Client::builder().timeout(Duration::from_secs(60)).build()?, url, token };
 
     match cli.cmd {
         Cmd::Config { .. } => unreachable!(),
@@ -620,6 +647,58 @@ async fn main() -> anyhow::Result<()> {
             let outcome = if question { "question" } else if rejected { "rejected" } else { "accepted" };
             let v = api.post(&format!("/admin/customers/{customer}/reply"), json!({ "outcome": outcome, "amount_cents": amount })).await?;
             println!("Antwort der Bahn: {}  ·  Betrag {} ct  ·  Antrag {}", s(&v, "outcome"), s(&v["mail"], "amount_cents"), s(&v, "claim_id"));
+        }
+        Cmd::Replies => {
+            let v = api.get("/admin/replies").await?;
+            for r in v.as_array().into_iter().flatten() {
+                println!(
+                    "{}  {}  {:<9} {:>6}  {:<32} {}",
+                    s(r, "at").chars().take(16).collect::<String>(),
+                    s(r, "id"),
+                    s(r, "outcome"),
+                    r["amount_cents"].as_i64().map(|c| format!("{c} ct")).unwrap_or_default(),
+                    s(r, "read_by"),
+                    s(r, "from")
+                );
+                println!("    {}   (Absender geprüft: {})", s(r, "because"), r["sender_verified"].as_str().unwrap_or("nein"));
+            }
+        }
+        Cmd::Reread { mail } => {
+            let v = api.post(&format!("/admin/mails/{mail}/reread"), json!({})).await?;
+            println!("vorher:  {} {} ct  ({})  {}", s(&v["before"], "outcome"), s(&v["before"], "amount_cents"), s(&v["before"], "read_by"), s(&v["before"], "because"));
+            println!("jetzt:   {} {} ct  ({})  {}", s(&v["after"], "outcome"), s(&v["after"], "amount_cents"), s(&v["after"], "read_by"), s(&v["after"], "because"));
+            if v["changed"].as_bool() == Some(false) {
+                println!("Nichts geändert: {}", s(&v, "why_unchanged"));
+            } else {
+                println!("Antrag:  {}", v["claim_moved_to"].as_str().unwrap_or("unverändert"));
+            }
+        }
+        Cmd::ReadMail { file, from, subject, claim, claimed, date } => {
+            let body = if file == "-" {
+                let mut b = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut b)?;
+                b
+            } else {
+                std::fs::read_to_string(&file)?
+            };
+            let v = api.post("/admin/read-mail", json!({ "from": from, "subject": subject, "body": body, "claim_id": claim, "claimed_cents": claimed, "ride_date": date })).await?;
+            let verdict = &v["verdict"];
+            println!("Gelesen von: {}   (Modell eingerichtet: {})", s(&v, "read_by"), v["model_configured"].as_str().unwrap_or("nein"));
+            println!("Ergebnis:    {}   Betrag {} ct", s(verdict, "outcome"), s(verdict, "amount_cents"));
+            println!("Weil:        {}", s(verdict, "because"));
+            for r in verdict["rides"].as_array().into_iter().flatten() {
+                println!("  Fahrt {}  {} {}", s(r, "incident_id"), s(r, "decision"), r["cents"].as_i64().map(|c| format!("{c} ct")).unwrap_or_default());
+            }
+            let trace = &v["trace"];
+            if let Some(answer) = trace.get("answer") {
+                println!("\nModell sagt: {}", serde_json::to_string_pretty(answer)?);
+            }
+            if let Some(err) = trace["extra"].get("error").or_else(|| trace.get("error")) {
+                println!("\nModell nicht erreichbar: {err}");
+            }
+            if let Some(shown) = trace["shown"].as_str() {
+                println!("\nDas hat das Modell gesehen:\n{shown}");
+            }
         }
         Cmd::Clock { shift } => {
             let v = match shift {
@@ -675,13 +754,14 @@ async fn main() -> anyhow::Result<()> {
                     println!("No routes. Nothing can be sent until one exists:");
                     println!("  stellwerk route set \"Servicecenter Fahrgastrechte\" du@example.org --label \"Probelauf\"");
                 } else {
-                    println!("{:<34} {:<34} {:<22} echt?", "Schalter", "geht wirklich an", "Bezeichnung");
+                    println!("{:<34} {:<34} {:<22} {:<18} echt?", "Schalter", "geht wirklich an", "Bezeichnung", "antwortet von");
                     for r in rows {
                         println!(
-                            "{:<34} {:<34} {:<22} {}",
+                            "{:<34} {:<34} {:<22} {:<18} {}",
                             r["desk"].as_str().unwrap_or("–"),
                             r["to_address"].as_str().unwrap_or("–"),
                             r["label"].as_str().unwrap_or("–"),
+                            r["answers_from"].as_str().unwrap_or("–"),
                             if r["live"].as_bool().unwrap_or(false) { "JA — echte Stelle" } else { "nein, Probelauf" }
                         );
                         if !r["matches_a_desk"].as_bool().unwrap_or(true) {
@@ -695,7 +775,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            RouteCmd::Set { desk, to, label, postal, live, note } => {
+            RouteCmd::Set { desk, to, label, postal, live, note, reply_from } => {
                 let mut body = serde_json::Map::new();
                 body.insert("to_address".into(), json!(to));
                 body.insert("label".into(), json!(label.unwrap_or_else(|| if live { "Echte Stelle".into() } else { "Probelauf".into() })));
@@ -705,6 +785,9 @@ async fn main() -> anyhow::Result<()> {
                 }
                 if let Some(n) = note {
                     body.insert("note".into(), json!(n));
+                }
+                if let Some(r) = reply_from {
+                    body.insert("reply_from".into(), json!(r));
                 }
                 body.insert("desk".into(), json!(desk));
                 let v = api.put("/admin/routes", Value::Object(body)).await?;

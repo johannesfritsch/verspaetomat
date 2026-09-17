@@ -247,7 +247,7 @@ paths:
   #   incident {incident_id, warning: true, legal_deadline, days_left}   21 days before the deadline, once
   #   incident {expired: [ids]}                                          open incidents past the deadline became verfallen
   #   claim    {claim_id, nudge: true, expected_reply_by}                a sent claim passed its expected reply date without an answer, once
-  #   claim    {claim_id, status: accepted, source: ngo_report}          an NGO statement confirmed the transfer
+  #   claim    {claim_id, status: accepted, amount_confirmed_cents, source: railway_reply}   the desk's answer confirmed a payment
 
   # Stellwerk admin API (x-admin-token; dev and staging only)
   /admin/customers/{key}:
@@ -318,12 +318,12 @@ paths:
       security: [{ adminToken: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: '{deleted, deactivated}' }, '404': { description: No such NGO }, '409': { description: Last active NGO } }
-  /admin/ngos/{id}/report:
+  /admin/read-mail:
     post:
-      summary: "Import an NGO's monthly statement: JSON {transfers:[{date, amount_cents | amount \"4,50\", reference, counterparty}]} (CSV text `date,amount,reference,counterparty` is accepted too). Each transfer is matched to a sent/question claim of that NGO with exactly that amount, sent within the 60 days before the transfer date, oldest unmatched first (a claim named in reference/counterparty by claimant or id prefix wins). Matches become accepted (amount_confirmed_cents, closed_at), incidents bestätigt with an audit entry \"ngo report\", the bestaetigt badge is awarded, incident and claim events go to the customer, retention runs. One ngo_reports row per import."
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { transfers: { type: array, items: { type: object, required: [date], properties: { date: { type: string, format: date }, amount_cents: { type: integer }, amount: { type: string }, reference: { type: string }, counterparty: { type: string } } } } } } }, text/csv: { schema: { type: string } } } }
-      responses: { "200": { description: "{report_id, ngo_id, rows, matched:[claim ids], unmatched:[{date, amount_cents, reference, counterparty}]}" }, "400": { description: no transfers }, "404": { description: no such ngo } }
+      summary: "How a desk's mail would be read, without it touching anything: the same reader as inbound mail (rules, model when OPENAI_API_KEY is set, and the gate between them), no writes. With claim_id it reads against that claim's rides and takes that passenger out of the text; without, against one made-up ride (claimed_cents, ride_date)."
+      security: [{ adminToken: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string }, from: { type: string }, subject: { type: string }, claim_id: { type: string, format: uuid }, claimed_cents: { type: integer }, ride_date: { type: string, format: date } } } } } }
+      responses: { "200": { description: "{model_configured, read_by: rules | model:<snapshot>, verdict: {outcome, rides: [{incident_id, decision: paid | refused, cents}], amount_cents, because}, trace}" }, "404": { description: no such claim } }
 
 components:
   schemas:

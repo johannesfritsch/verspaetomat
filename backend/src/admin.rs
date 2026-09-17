@@ -213,11 +213,98 @@ pub async fn reply(State(s): State<AppState>, _a: Admin, Path(key): Path<String>
             in_reply_to: None,
             claim_id: Some(claim.id),
             attachments: vec![],
+            // The Stellwerk plays the desk here; there is no sender to check.
+            trusted: true,
+            headers: vec![],
+            headers_trusted: false,
+            from_addresses: vec![],
         },
     )
     .await?;
     // process_inbound already published the mail and incident events (and the push).
     Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+pub struct ReadMailBody {
+    #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
+    pub subject: Option<String>,
+    pub body: String,
+    /// Read it as the answer to this claim: its rides, and its passenger taken out of the text.
+    #[serde(default)]
+    pub claim_id: Option<Uuid>,
+    /// Without a claim: what was claimed for the single ride it is read against, in cents (150).
+    #[serde(default)]
+    pub claimed_cents: Option<i64>,
+    /// Without a claim: that ride's date. A desk names the date, and a reader that cannot tie the
+    /// answer to the ride rightly refuses to decide.
+    #[serde(default)]
+    pub ride_date: Option<chrono::NaiveDate>,
+}
+
+/// `POST /admin/read-mail`: how a desk's mail would be read, without it touching anything.
+///
+/// The same reader the inbound webhook uses — rules, model, gate — minus every write. It exists so
+/// a real answer from a desk can be tried before one arrives for real, and so the model's reading
+/// of a mail can be checked on the server that holds the key. Nothing is stored, no claim moves.
+pub async fn read_mail(State(s): State<AppState>, _a: Admin, Json(b): Json<ReadMailBody>) -> ApiResult {
+    let from = b.from.unwrap_or_else(|| "Servicecenter Fahrgastrechte <fahrgastrechte@servicecenter.invalid>".into());
+    let subject = b.subject.unwrap_or_else(|| "Ihr Antrag auf Entschädigung".into());
+    let (claim, claimed, rides, known) = match b.claim_id {
+        Some(id) => {
+            let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1").bind(id).fetch_optional(&s.pool).await.map_err(internal)?;
+            let Some(claim) = claim else { return Err(err(StatusCode::NOT_FOUND, "no such claim")) };
+            let cust: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(claim.customer_id).fetch_one(&s.pool).await.map_err(internal)?;
+            let rows = handlers::claim_rides(&s.pool, claim.id).await.map_err(internal)?;
+            let (claimed, rides) = crate::reply::rides_of(&rows);
+            let mut known = crate::reply::known_of(&cust, Some(&claim), None);
+            known.sent = handlers::sent_by_passenger(&s.pool, cust.id).await.map_err(internal)?;
+            (Some(claim), claimed, rides, known)
+        }
+        None => {
+            let date = b.ride_date.unwrap_or_else(|| clock::now().date_naive());
+            // A Deutschlandticket ride at the flat 1,50 EUR unless told otherwise: the cap on what a
+            // ride may be paid is one of the checks worth seeing, and a generous default hides it.
+            let claimed = vec![crate::reply::Claimed { incident_id: Uuid::nil(), reference: "F1".into(), claimed_cents: b.claimed_cents.unwrap_or(150) }];
+            let rides = vec![crate::openai::Ride { reference: "F1".into(), date, line: "RE 1".into(), from: "Köln Hbf".into(), to: "Bonn Hbf".into(), delay_min: 70 }];
+            (None, claimed, rides, crate::redact::Known::default())
+        }
+    };
+    let mut decision = crate::reply::read(&crate::reply::Mail { from: &from, subject: &subject, body: &b.body }, &known, &claimed, &rides, true).await;
+    // Against a real claim the sender check runs as it would on the webhook, with the verification
+    // taken as passed — a pasted mail has no provider headers. Without a claim there is no route to
+    // check against, and the dry run is about the reading.
+    if claim.is_some() {
+        handlers::guard_sender(&s.pool, claim.as_ref(), &from, false, &json!({ "aligned": true }), &mut decision).await?;
+    }
+    Ok(Json(json!({
+        "model_configured": crate::openai::Config::from_env().map(|c| c.model),
+        "read_by": decision.read_by,
+        "verdict": decision.verdict,
+        "trace": decision.trace,
+    })))
+}
+
+/// `GET /admin/replies`: the latest desk answers, with who read each and why — the list to go through
+/// after the model was unavailable, or to see why a claim did not move.
+pub async fn replies(State(s): State<AppState>, _a: Admin) -> ApiResult {
+    let rows: Vec<MailRow> = sqlx::query_as("select * from mails where direction = 'inbound' order by occurred_at desc limit 50").fetch_all(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!(rows
+        .into_iter()
+        .map(|m| json!({
+            "id": m.id, "claim_id": m.claim_id, "at": m.occurred_at, "from": m.from_addr, "subject": m.subject,
+            "outcome": m.outcome, "amount_cents": m.amount_cents, "read_by": m.read_by,
+            "because": m.reading.as_ref().and_then(|r| r["verdict"]["because"].as_str().map(str::to_string)),
+            "sender_verified": m.sender_auth.as_ref().and_then(|a| a["how"].as_str().map(str::to_string)),
+        }))
+        .collect::<Vec<_>>())))
+}
+
+/// `POST /admin/mails/{id}/reread`: read a stored desk answer again and let it act.
+pub async fn reread(State(s): State<AppState>, _a: Admin, Path(id): Path<Uuid>) -> ApiResult {
+    Ok(Json(handlers::reread_mail(&s, id).await?))
 }
 
 #[derive(Deserialize)]
@@ -755,7 +842,7 @@ async fn ngo_json(pool: &sqlx::PgPool, id: &str) -> Result<Value, (StatusCode, J
     let row: Option<(String, String, String, Value, String, String, String, Option<chrono::NaiveDate>, bool, Option<chrono::NaiveDate>, i64, i64, i64, i64, i64)> = sqlx::query_as(
         "select n.id, n.name, n.tagline, n.story, n.account_holder, n.iban, n.donation_url, n.last_report, n.active, n.consent_date,
                 n.seed_confirmed_cents, n.seed_submitted_cents,
-                coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'bestaetigt'), 0)::bigint,
+                coalesce((select sum(coalesce(i.confirmed_cents, i.amount_cents)) from incidents i where i.ngo_id = n.id and i.status = 'bestaetigt'), 0)::bigint,
                 coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'eingereicht'), 0)::bigint,
                 (select count(*) from customers c where c.ngo_id = n.id)::bigint
          from ngos n where n.id = $1",
@@ -962,9 +1049,9 @@ pub async fn routes(State(s): State<AppState>, _a: Admin) -> ApiResult {
     // on the desk string frozen onto a claim, which comes from the operator directory — so a desk
     // nobody is filed under is a route that silently never matches, and the claim is refused for
     // "no mail route" while a route sits right there looking correct.
-    let rows: Vec<(String, String, String, bool, Option<String>, Option<String>, bool)> = sqlx::query_as(
+    let rows: Vec<(String, String, String, bool, Option<String>, Option<String>, bool, Option<String>)> = sqlx::query_as(
         "select r.desk, r.to_address, r.label, r.live, r.note, r.postal_address,
-                exists(select 1 from operators o where o.desk = r.desk) as known
+                exists(select 1 from operators o where o.desk = r.desk) as known, r.reply_from
          from mail_routes r order by r.desk",
     )
     .fetch_all(&s.pool)
@@ -972,10 +1059,13 @@ pub async fn routes(State(s): State<AppState>, _a: Admin) -> ApiResult {
     .map_err(internal)?;
     Ok(Json(json!(rows
         .into_iter()
-        .map(|(desk, to_address, label, live, note, postal_address, known)| json!({
-            "desk": desk, "to_address": to_address, "label": label, "live": live, "note": note,
-            "postal_address": postal_address, "matches_a_desk": known
-        }))
+        .map(|(desk, to_address, label, live, note, postal_address, known, reply_from)| {
+            let answers_from = reply_from.clone().unwrap_or_else(|| to_address.rsplit_once('@').map(|(_, d)| d.to_string()).unwrap_or_default());
+            json!({
+                "desk": desk, "to_address": to_address, "label": label, "live": live, "note": note,
+                "postal_address": postal_address, "matches_a_desk": known, "reply_from": reply_from, "answers_from": answers_from
+            })
+        })
         .collect::<Vec<_>>())))
 }
 
@@ -988,6 +1078,9 @@ pub struct RouteBody {
     #[serde(default)]
     pub live: bool,
     pub note: Option<String>,
+    /// Comma-separated domains the desk answers from; unset keeps the current value, "default" goes
+    /// back to the domain of `to_address`.
+    pub reply_from: Option<String>,
 }
 
 /// Create or change one route. This is the only way a destination comes to exist.
@@ -1000,12 +1093,18 @@ pub async fn route_set(State(s): State<AppState>, _a: Admin, Json(b): Json<Route
         return Err(err(StatusCode::BAD_REQUEST, "to_address must be an e-mail address"));
     };
     let label = b.label.unwrap_or_else(|| if b.live { "Echte Stelle".into() } else { "Probelauf".into() });
-    let row: (String, String, String, bool) = sqlx::query_as(
-        "insert into mail_routes (desk, to_address, label, live, note, postal_address) values ($1,$2,$3,$4,$5,$6)
+    let row: (String, String, String, bool, Option<String>) = sqlx::query_as(
+        "insert into mail_routes (desk, to_address, label, live, note, postal_address, reply_from) values ($1,$2,$3,$4,$5,$6,$7)
          on conflict (desk) do update set to_address = excluded.to_address, label = excluded.label,
            live = excluded.live, note = excluded.note,
-           postal_address = coalesce(excluded.postal_address, mail_routes.postal_address), updated_at = now()
-         returning desk, to_address, label, live",
+           postal_address = coalesce(excluded.postal_address, mail_routes.postal_address),
+           -- A new destination forgets who answered for the old one: a test inbox's domain must not
+           -- stay authorised for the real desk.
+           reply_from = case when $8 then null
+                             when excluded.reply_from is not null then excluded.reply_from
+                             when lower(excluded.to_address) <> lower(mail_routes.to_address) then null
+                             else mail_routes.reply_from end, updated_at = now()
+         returning desk, to_address, label, live, reply_from",
     )
     .bind(&desk)
     .bind(to)
@@ -1013,11 +1112,15 @@ pub async fn route_set(State(s): State<AppState>, _a: Admin, Json(b): Json<Route
     .bind(b.live)
     .bind(&b.note)
     .bind(&b.postal_address)
+    // An empty list is no list: stored as '' it would block every answer for the desk.
+    .bind(b.reply_from.as_deref().map(|r| r.split(',').map(|d| d.trim().trim_start_matches('@').to_lowercase()).filter(|d| !d.is_empty() && d != "default").collect::<Vec<_>>().join(",")).filter(|r| !r.is_empty()))
+    .bind(b.reply_from.as_deref().is_some_and(|r| r.trim().eq_ignore_ascii_case("default")))
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
     // An address that decides where a stranger's legal claim lands belongs in the audit trail.
-    crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-set", &format!("{} → {} ({}, live={})", row.0, row.1, row.2, row.3))
+    // Who may answer for the desk decides who can confirm money, so it is in the line too.
+    crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-set", &format!("{} → {} ({}, live={}, reply_from={})", row.0, row.1, row.2, row.3, row.4.as_deref().unwrap_or("default")))
         .await
         .map_err(internal)?;
     Ok(Json(json!({ "desk": row.0, "to_address": row.1, "label": row.2, "live": row.3 })))

@@ -292,6 +292,10 @@ pub struct IncidentRow {
     pub discarded_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub discard_reason: Option<String>,
+    /// What the desk wrote it pays for this ride, once it has (migration 0031). Totals read this
+    /// before `amount_cents`, which is what we asked for.
+    #[sqlx(default)]
+    pub confirmed_cents: Option<i64>,
 }
 
 impl IncidentRow {
@@ -345,6 +349,20 @@ pub struct MailRow {
     pub occurred_at: DateTime<Utc>,
     /// Null = unread (inbound only; outbound mail is written by the customer).
     pub seen_at: Option<DateTime<Utc>>,
+    /// `rules` or `model:<snapshot>`: who decided what this inbound mail means (migration 0031).
+    /// Operator data: kept off the customer API, which is a contract every shipped build holds us to.
+    #[sqlx(default)]
+    #[serde(skip_serializing)]
+    pub read_by: Option<String>,
+    /// That reader's decision, evidence and, for a model, the redacted text it was shown and the
+    /// provider's error. Never sent to the app; `stellwerk read-mail` and the database show it.
+    #[sqlx(default)]
+    #[serde(skip_serializing)]
+    pub reading: Option<serde_json::Value>,
+    /// What the receiving side verified about the sender (see `handlers::sender_auth`).
+    #[sqlx(default)]
+    #[serde(skip_serializing)]
+    pub sender_auth: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

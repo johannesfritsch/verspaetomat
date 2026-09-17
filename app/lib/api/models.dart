@@ -731,6 +731,7 @@ class ApiIncident {
     this.evidence,
     this.discardedAt,
     this.discardReason,
+    this.confirmedCents,
   });
   final String id;
   final String? rideId;
@@ -756,6 +757,13 @@ class ApiIncident {
   /// Set when the passenger took this case out of the bundle (docs/21 §4).
   final DateTime? discardedAt;
   final String? discardReason;
+
+  /// What the desk wrote it pays for this ride, once confirmed. Can be less than [amountCents],
+  /// which is what was claimed; null on older servers and on rides confirmed before it existed.
+  final int? confirmedCents;
+
+  /// The figure this ride stands for: paid once the desk has confirmed it, claimed until then.
+  int get shownCents => status == IncidentStatus.bestaetigt ? (confirmedCents ?? amountCents) : amountCents;
 
   bool get discarded => discardedAt != null;
   bool get isOpen => !discarded && (status == IncidentStatus.gesammelt || status == IncidentStatus.bereit);
@@ -783,6 +791,7 @@ class ApiIncident {
         evidence: _m(j['evidence']) == null ? null : ApiEvidence.fromJson(_m(j['evidence'])!),
         discardedAt: _dt(j['discarded_at']),
         discardReason: _sn(j['discard_reason']),
+        confirmedCents: _in(j['confirmed_cents']),
       );
 }
 

@@ -10,8 +10,11 @@ mod handlers;
 mod journeys;
 mod mail;
 mod model;
+mod openai;
 mod pdf;
 mod push;
+mod redact;
+mod reply;
 mod rules;
 mod scanner;
 mod storage;
@@ -172,6 +175,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/poll", post(admin::poll))
         .route("/admin/scan", post(admin::scan))
         .route("/admin/customers/{key}/mail-test", post(admin::mail_test))
+        .route("/admin/read-mail", post(admin::read_mail))
+        .route("/admin/replies", get(admin::replies))
+        .route("/admin/mails/{id}/reread", post(admin::reread))
         .route("/admin/ngos", get(admin::ngos_list))
         .route("/admin/ngos/{id}", put(admin::ngo_upsert).delete(admin::ngo_remove))
         .route("/admin/desks", get(admin::desks))

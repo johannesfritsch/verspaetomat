@@ -264,6 +264,7 @@ mod tests {
             journey_id: None,
             discarded_at: None,
             discard_reason: None,
+            confirmed_cents: None,
         }
     }
 

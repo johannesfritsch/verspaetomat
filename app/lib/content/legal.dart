@@ -83,7 +83,7 @@ const datenschutz = LegalDoc(
   eyebrow: 'Rechtliches',
   title: 'Datenschutz',
   lead: 'Was wir speichern, warum, wie lange, und was du jederzeit selbst löschen kannst. Kurz: kein Konto, kein Tracking, keine Werbung, kein Standort während der Fahrt.',
-  stand: 'Stand: 11. September 2026',
+  stand: 'Stand: 17. September 2026',
   sections: [
     LegalSection('Verantwortlicher', [
       '$legalCompany\n$legalAddress\nE-Mail: $legalEmail. Siehe Impressum.',
@@ -108,17 +108,18 @@ const datenschutz = LegalDoc(
     ]),
     LegalSection('Deine Verspätomat-Adresse', [
       'Für Anträge bekommst du eine persönliche E-Mail-Adresse auf unserer Domain, zum Beispiel fahrgast-a1b2c3d4@users.verspaetomat.de. Von ihr gehen deine Anträge an das Eisenbahnunternehmen, in Kopie an dein privates Postfach. Antworten des Unternehmens kommen dort an, werden sofort und unverändert an dein privates Postfach weitergeleitet und in der App unter „Antwort“ angezeigt.',
-      'Wir behandeln dieses Postfach als deins. Das Fernmeldegeheimnis (§ 3 TDDDG) gilt. Eine Software liest jede eingehende Mail nur, um drei Dinge zu erkennen: ob der Antrag angenommen, abgelehnt oder mit einer Rückfrage versehen wurde, den genannten Betrag und ein Aktenzeichen. Mehr wird nicht ausgewertet, nichts wird zu anderen Zwecken verwendet, niemand liest mit. Antworten auf Rückfragen schreibst du selbst in der App; wir schicken nichts, was du nicht abgeschickt hast.',
+      'Wir behandeln dieses Postfach als deins. Das Fernmeldegeheimnis (§ 3 TDDDG) gilt. Eine Software liest jede eingehende Mail nur, um drei Dinge zu erkennen: welche Fahrten das Unternehmen bezahlt oder ablehnt, den Betrag, den es dafür nennt, und ob es eine Rückfrage stellt. Dafür lesen Sprachmodelle von OpenAI den Text der Antwort; bezahlt oder abgelehnt ist eine Fahrt nur, wenn zwei von ihnen dasselbe lesen. Vorher entfernen wir deinen Namen, deine Anschrift, E-Mail-Adressen, Ticketnummer, IBAN und Telefonnummern, soweit eine Software sie erkennen kann, und den zitierten Verlauf (siehe Dienstleister). Mehr wird nicht ausgewertet, nichts wird zu anderen Zwecken verwendet, niemand bei uns liest mit. Antworten auf Rückfragen schreibst du selbst in der App; wir schicken nichts, was du nicht abgeschickt hast.',
       'Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO; für die Adresse und die Auswertung deine Einwilligung beim ersten Antrag (Art. 6 Abs. 1 lit. a DSGVO).',
     ]),
     LegalSection('Wer was bekommt', [
       'Das Eisenbahnunternehmen, genauer seine Fahrgastrechte-Stelle, bekommt das ausgefüllte Formular mit deinen Angaben, Ticketbild und Unterschrift, weil du es dorthin schickst. Was es damit tut, regelt seine eigene Datenschutzerklärung.',
-      'Der Verein, den du als Zweck gewählt hast, bekommt Geld vom Eisenbahnunternehmen, nicht von uns. Er erfährt von uns nicht, wer du bist. Zur Abstimmung der Eingänge bekommen wir vom Verein eine Aufstellung der Überweisungen (Betrag, Datum, Verwendungszweck), die wir mit den Anträgen abgleichen.',
+      'Der Verein, den du als Zweck gewählt hast, bekommt Geld vom Eisenbahnunternehmen, nicht von uns. Er erfährt von uns nicht, wer du bist, und schickt uns nichts. Ob Geld fließt, entnehmen wir allein der Antwort des Eisenbahnunternehmens.',
       'Wir selbst geben deine Daten an niemanden weiter und verkaufen nichts.',
     ]),
     LegalSection('Dienstleister', [
       'Fahrplan- und Verspätungsdaten: Transitous (transitous.org), ein offener Dienst auf Basis öffentlicher Fahrplandaten. Er bekommt die Bahnhofs- und Zugabfragen unseres Servers, keine Kennung von dir.',
       'E-Mail: Postmark, ein Dienst der ActiveCampaign, LLC, Chicago, USA, stellt deine Anträge zu und übergibt Antworten an uns. Damit verlassen diese Mails die EU; Grundlage sind ein Auftragsverarbeitungsvertrag und die Standardvertragsklauseln der EU-Kommission.',
+      'Antworten lesen: OpenAI, San Francisco, USA. Sprachmodelle lesen eingehende Antworten der Eisenbahnunternehmen, um zu erkennen, ob und wie viel sie zahlen. Sie bekommen den Text ohne zitierten Verlauf und, soweit eine Software sie erkennen kann, ohne Namen, Anschrift, E-Mail-Adressen, Ticketnummer, IBAN und Telefonnummern, dazu Datum, Zug, Strecke und Verspätung der beantragten Fahrten. OpenAI verwendet diese Daten nicht zum Training und bewahrt sie höchstens 30 Tage zur Missbrauchserkennung auf. Grundlage sind ein Auftragsverarbeitungsvertrag und die Standardvertragsklauseln der EU-Kommission.',
       'Mitteilungen: Apple (APNs) und Google (Firebase Cloud Messaging) stellen Push-Nachrichten zu, wenn du Mitteilungen erlaubst. Sie sehen einen Zustellschlüssel und den Text der Mitteilung („Angekommen, +14“), sonst nichts.',
       'Server: Hetzner Online GmbH, Gunzenhausen. Der Dienst läuft auf Servern in der Europäischen Union.',
     ]),
@@ -159,11 +160,11 @@ const bote = LegalDoc(
       'Wir prüfen deinen Fall nicht, wir beraten nicht, wir streiten nicht. Wir treten gegenüber dem Unternehmen nicht als dein Bevollmächtigter auf und kaufen dir deinen Anspruch nicht ab. Eine Ablehnung ist eine Ablehnung an dich; ob du sie hinnimmst, bei der Schlichtungsstelle söp einreichst oder anders vorgehst, ist deine Sache. Die App hilft dir nur, nichts zu verpassen.',
     ]),
     LegalSection('Jede Antwort ganz', [
-      'Alles, was an deine Verspätomat-Adresse kommt, leiten wir vollständig und unverändert an dein privates Postfach weiter. In der App zeigen wir dieselbe Mail. Eine Software erkennt darin nur Ergebnis, Betrag und Aktenzeichen, damit dein Konto stimmt.',
+      'Alles, was an deine Verspätomat-Adresse kommt, leiten wir vollständig und unverändert an dein privates Postfach weiter. In der App zeigen wir dieselbe Mail. Eine Software erkennt darin nur, welche Fahrten bezahlt oder abgelehnt sind, den genannten Betrag und ob eine Rückfrage kommt, damit dein Konto stimmt. Ist sie sich nicht sicher, zählt nichts, bis die Antwort eindeutig ist.',
       'Antworten auf Rückfragen schreibst du selbst, in der App oder aus deinem Postfach. Wir bieten Textvorschläge an, abgeschickt wird nur, was du abschickst.',
     ]),
     LegalSection('Das Geld geht an den Verein, nie an uns', [
-      'Auf dem Formular steht das Konto des Vereins, den du gewählt hast. Das Eisenbahnunternehmen überweist dorthin. Wir haben kein Konto dafür, wir nehmen nichts entgegen, wir leiten nichts weiter. Der Verein bestätigt uns die Eingänge, damit die Zahlen in der App stimmen.',
+      'Auf dem Formular steht das Konto des Vereins, den du gewählt hast. Das Eisenbahnunternehmen überweist dorthin. Wir haben kein Konto dafür, wir nehmen nichts entgegen, wir leiten nichts weiter. Als bestätigt zählt ein Betrag, sobald das Unternehmen schreibt, dass es ihn zahlt; der Verein muss uns nichts melden.',
     ]),
     LegalSection('Warum das so ist', [
       'Wer für andere Ansprüche durchsetzt, braucht in Deutschland eine Zulassung als Rechtsdienstleister. Wer Geld weiterleitet, eine als Zahlungsdienstleister. Beides wollen wir nicht sein, und beides musst du nicht wollen: Dein Anspruch ist klar geregelt, das Formular ist amtlich, und die Bahn zahlt.',

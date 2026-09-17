@@ -10,8 +10,8 @@ What still needs the accounts (not in this file): Apple Developer team, bundle i
 - Location: one fix when the Bahnsteig opens (not stored) and one at check-in (stored on that ride as the verification fix). Never in the background, never during the ride.
 - Personal data (name, address, e-mail, ticket number) only at the first claim, printed on the EU form.
 - Ticket images and the signature per claim; deleted when the claim closes unless "Korrespondenz behalten" is on.
-- Relay mailbox per customer; inbound mail forwarded whole to the private inbox; a classifier reads outcome, amount and reference.
-- No analytics SDK, no ads, no tracking, no third-party sharing beyond the railway (the customer sends the form) and the mail provider (delivery).
+- Relay mailbox per customer; inbound mail forwarded whole to the private inbox; a reader decides per ride whether the desk pays, refuses or asks, and what it pays. With `OPENAI_API_KEY` set that reader includes an OpenAI model (USA): it receives the reply text with name, address, e-mail addresses, ticket number, IBANs, phone numbers and the quoted history removed as far as they are recognised, plus date, train, stations and minutes of each claimed ride; `store: false`; no training on API data; up to 30 days abuse-monitoring retention on OpenAI's side; DPA and SCCs.
+- No analytics SDK, no ads, no tracking, no third-party sharing beyond the railway (the customer sends the form), the mail provider (delivery) and, for reading replies, OpenAI as a processor. App Privacy: re-check "Other User Content" (the railway's replies) as collected and processed by a third-party processor, not used for tracking.
 - Push tokens stored once the customer allows notifications (delivery not live yet).
 
 ## App Store: App Privacy ("nutrition label")

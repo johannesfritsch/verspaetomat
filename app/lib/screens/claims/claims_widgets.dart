@@ -226,7 +226,7 @@ class IncidentRow extends StatelessWidget {
                   children: [
                     VDelayPill(i.delayMinutes),
                     const SizedBox(height: 4),
-                    Text(fmtCents(i.amountCents), style: VText.amountS),
+                    Text(fmtCents(i.shownCents), style: VText.amountS),
                     if (showStatus) ...[
                       const SizedBox(height: 4),
                       VChip(i.status.label, tone: toneFor(i.status)),
@@ -337,7 +337,11 @@ Future<void> showEvidenceSheet(BuildContext context, ApiIncident i,
                 const VRule(),
                 VKeyValue('Ticket', i.ticket.label),
                 const VRule(),
-                VKeyValue('Anspruch', fmtCents(i.amountCents), strong: true),
+                VKeyValue('Anspruch', fmtCents(i.amountCents), strong: i.confirmedCents == null),
+                if (i.status == IncidentStatus.bestaetigt && i.confirmedCents != null) ...[
+                  const VRule(),
+                  VKeyValue('Bestätigt', fmtCents(i.confirmedCents!), strong: true),
+                ],
                 if (i.fareCents != null) ...[
                   const VRule(),
                   VKeyValue('Fahrpreis', fmtCents(i.fareCents!)),

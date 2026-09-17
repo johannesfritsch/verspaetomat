@@ -124,7 +124,7 @@ async fn ngo_totals(pool: &PgPool) -> anyhow::Result<Vec<Value>> {
     let rows: Vec<(String, String, String, Value, String, String, String, Option<NaiveDate>, i64, i64, i64, i64, Option<String>)> = sqlx::query_as(
         "select n.id, n.name, n.tagline, n.story, n.account_holder, n.iban, n.donation_url, n.last_report,
                 n.seed_confirmed_cents, n.seed_submitted_cents,
-                coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'bestaetigt'), 0)::bigint,
+                coalesce((select sum(coalesce(i.confirmed_cents, i.amount_cents)) from incidents i where i.ngo_id = n.id and i.status = 'bestaetigt'), 0)::bigint,
                 coalesce((select sum(amount_cents) from incidents i where i.ngo_id = n.id and i.status = 'eingereicht'), 0)::bigint,
                 n.logo
          from ngos n where n.active order by n.name",
@@ -571,7 +571,21 @@ pub async fn export_me(State(s): State<AppState>, c: Customer) -> ApiResult {
     let rides: Vec<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 order by checked_in_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
     let incidents: Vec<IncidentRow> = sqlx::query_as("select * from incidents where customer_id = $1 order by ride_date desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
     let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 order by created_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
-    let mails: Vec<MailRow> = sqlx::query_as("select * from mails where customer_id = $1 order by occurred_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    let rows: Vec<MailRow> = sqlx::query_as("select * from mails where customer_id = $1 order by occurred_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    // The export is the passenger's right to see what was done with their mail (Art. 15), so it
+    // carries what the mail list leaves out: who read each answer, what a model was shown, and
+    // what the receiving side verified about the sender.
+    let mails: Vec<Value> = rows
+        .into_iter()
+        .map(|m| {
+            let (read_by, reading, sender_auth) = (m.read_by.clone(), m.reading.clone(), m.sender_auth.clone());
+            let mut v = json!(m);
+            v["read_by"] = json!(read_by);
+            v["reading"] = json!(reading);
+            v["sender_auth"] = json!(sender_auth);
+            v
+        })
+        .collect();
     Ok(Json(json!({ "customer": c.0, "rides": rides, "incidents": incidents, "claims": claims, "mails": mails, "exported_at": crate::clock::now() })))
 }
 
@@ -883,7 +897,7 @@ pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
         .collect();
     let ready_desk = by_desk.iter().find(|(_, l)| rules::bundle_ready(l)).map(|(d, _)| d.clone());
     let oldest = rows.iter().filter(|i| i.open()).min_by_key(|i| i.ride_date);
-    let confirmed: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Bestaetigt).map(|i| i.amount_cents).sum();
+    let confirmed: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Bestaetigt).map(|i| i.confirmed_cents.unwrap_or(i.amount_cents)).sum();
     let submitted: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Eingereicht).map(|i| i.amount_cents).sum();
     let capped: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).map(|i| i.amount_cents).sum();
     let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and status <> 'draft' order by sent_at desc nulls last").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
@@ -1656,6 +1670,23 @@ pub struct InboundMail {
     /// (file name, content type, bytes). Only the raw-MIME route fills this; the JSON webhook carries none.
     #[serde(skip)]
     pub attachments: Vec<(String, String, Vec<u8>)>,
+    /// Planted by the Stellwerk, not received: skips the check that the sender is the desk. Never set
+    /// from a request body.
+    #[serde(skip)]
+    pub trusted: bool,
+    /// The provider's verdict headers (`X-Spam-Tests`), every copy in order. Only the provider
+    /// routes fill these.
+    #[serde(skip)]
+    pub headers: Vec<(String, String)>,
+    /// Whether `headers` can be believed at all: a webhook guarded by its secret, from a provider
+    /// known to write them. Everything else — no secret configured, a raw MIME post from an unknown
+    /// upstream, our own JSON shape — cannot verify a sender.
+    #[serde(skip)]
+    pub headers_trusted: bool,
+    /// Every mailbox in the From header(s), parsed. A From with two mailboxes names two authors, and
+    /// a DKIM pass for one says nothing about the other.
+    #[serde(skip)]
+    pub from_addresses: Vec<String>,
 }
 
 fn inbound_secret_ok(q: &BTreeMap<String, String>) -> Result<(), (StatusCode, Json<Value>)> {
@@ -1671,22 +1702,51 @@ fn inbound_secret_ok(q: &BTreeMap<String, String>) -> Result<(), (StatusCode, Js
 /// address and claim reference, classify, forward, update statuses.
 pub async fn inbound_mail(State(s): State<AppState>, axum::extract::Query(q): axum::extract::Query<BTreeMap<String, String>>, Json(v): Json<Value>) -> ApiResult {
     inbound_secret_ok(&q)?;
-    let m = inbound_from_json(v).ok_or_else(|| err(StatusCode::BAD_REQUEST, "unrecognised inbound payload"))?;
-    Ok(Json(process_inbound(&s, m).await?))
+    let mut m = inbound_from_json(v).ok_or_else(|| err(StatusCode::BAD_REQUEST, "unrecognised inbound payload"))?;
+    // Postmark's verdicts count only on a webhook nobody else can call.
+    m.headers_trusted = std::env::var("INBOUND_SECRET").is_ok_and(|v| !v.is_empty());
+    Ok(Json(process_detached(s, m).await?))
+}
+
+/// Run `process_inbound` in its own task. A provider that gives up waiting drops the request, and
+/// with it everything the request was still doing — between writing an attachment and committing
+/// the transaction, or between committing and forwarding. Detached, the work finishes either way.
+async fn process_detached(s: AppState, m: InboundMail) -> Result<Value, (StatusCode, Json<Value>)> {
+    match tokio::spawn(async move { process_inbound(&s, m).await }).await {
+        Ok(result) => result,
+        Err(e) => Err(internal(e)),
+    }
 }
 
 /// Accepts our own shape (`to`, `from`, `subject`, `body`, …) and Postmark's inbound
 /// webhook (`To`, `From`/`FromFull`, `Subject`, `TextBody`, `MessageID`, `Headers`,
 /// base64 `Attachments`; with "include raw email" on, `RawEmail` wins and is parsed as MIME).
 pub fn inbound_from_json(v: Value) -> Option<InboundMail> {
+    // Postmark's own verdicts live in the JSON `Headers`, not in the raw message it received.
+    let provider_headers: Vec<(String, String)> = v
+        .get("Headers")
+        .and_then(|h| h.as_array())
+        .map(|h| {
+            h.iter()
+                .filter_map(|x| Some((x.get("Name")?.as_str()?.to_string(), x.get("Value")?.as_str()?.to_string())))
+                .filter(|(n, _)| AUTH_HEADERS.iter().any(|a| a.eq_ignore_ascii_case(n)))
+                .collect()
+        })
+        .unwrap_or_default();
     if let Some(raw) = v.get("RawEmail").and_then(|r| r.as_str()) {
-        return parse_raw_mail(raw.as_bytes());
+        return parse_raw_mail(raw.as_bytes()).map(|mut m| {
+            m.headers = provider_headers;
+            m
+        });
     }
     if v.get("To").is_some() || v.get("ToFull").is_some() {
         let str_of = |k: &str| v.get(k).and_then(|x| x.as_str()).map(|x| x.to_string());
         let to = v.get("ToFull").and_then(|t| t.as_array()).and_then(|a| a.first()).and_then(|t| t.get("Email")).and_then(|e| e.as_str()).map(|e| e.to_string()).or_else(|| str_of("To"))?;
         let from = str_of("From").or_else(|| v.get("FromFull").and_then(|f| f.get("Email")).and_then(|e| e.as_str()).map(|e| e.to_string()))?;
-        let body = str_of("TextBody").or_else(|| str_of("StrippedTextReply")).or_else(|| str_of("HtmlBody")).unwrap_or_default();
+        // HTML only as a last resort, and as text: entities like "M&uuml;ller" would slip past
+        // redaction, and a blockquote past the cut above the quoted claim.
+        let text = |k: &str| str_of(k).filter(|t| !t.trim().is_empty());
+        let body = text("TextBody").or_else(|| text("StrippedTextReply")).or_else(|| text("HtmlBody").map(|h| mail_parser::decoders::html::html_to_text(&h))).unwrap_or_default();
         let header = |name: &str| {
             v.get("Headers")
                 .and_then(|h| h.as_array())
@@ -1710,7 +1770,8 @@ pub fn inbound_from_json(v: Value) -> Option<InboundMail> {
                     .collect()
             })
             .unwrap_or_default();
-        return Some(InboundMail { to, from, subject: str_of("Subject").unwrap_or_default(), body, message_id, in_reply_to: header("In-Reply-To"), claim_id: None, attachments });
+        let from_addresses = v.get("FromFull").and_then(|f| f.get("Email")).and_then(|e| e.as_str()).map(|e| vec![e.to_lowercase()]).unwrap_or_else(|| vec![inbound_address(&from)]);
+        return Some(InboundMail { to, from, subject: str_of("Subject").unwrap_or_default(), body, message_id, in_reply_to: header("In-Reply-To"), claim_id: None, attachments, trusted: false, headers: provider_headers, headers_trusted: false, from_addresses });
     }
     serde_json::from_value(v).ok()
 }
@@ -1719,8 +1780,11 @@ pub fn inbound_from_json(v: Value) -> Option<InboundMail> {
 /// hand over the original mail. Parsed with mail-parser, then the same path as the JSON webhook.
 pub async fn inbound_mail_raw(State(s): State<AppState>, axum::extract::Query(q): axum::extract::Query<BTreeMap<String, String>>, body: axum::body::Bytes) -> ApiResult {
     inbound_secret_ok(&q)?;
-    let m = parse_raw_mail(&body).ok_or_else(|| err(StatusCode::BAD_REQUEST, "not a parseable RFC 822 message"))?;
-    Ok(Json(process_inbound(&s, m).await?))
+    let mut m = parse_raw_mail(&body).ok_or_else(|| err(StatusCode::BAD_REQUEST, "not a parseable RFC 822 message"))?;
+    // A bare message carries whatever headers its sender wrote. Only an upstream known to write
+    // X-Spam-Tests itself, and to drop copies that arrived with the mail, makes them a verdict.
+    m.headers_trusted = std::env::var("INBOUND_SECRET").is_ok_and(|v| !v.is_empty()) && std::env::var("INBOUND_RAW_TRUSTS_SPAM_TESTS").is_ok_and(|v| v == "1");
+    Ok(Json(process_detached(s, m).await?))
 }
 
 /// Raw MIME → InboundMail. The relay address is the To: entry on our domain when there is one.
@@ -1734,6 +1798,12 @@ pub fn parse_raw_mail(raw: &[u8]) -> Option<InboundMail> {
         (None, None) => String::new(),
     };
     let from = msg.from().or_else(|| msg.sender()).and_then(|a| a.first()).map(mailbox).unwrap_or_default();
+    // Every mailbox of every From header: mail_parser keeps only the last header, so count them too.
+    let from_headers = msg.headers().iter().filter(|h| h.name().eq_ignore_ascii_case("From")).count();
+    let mut from_addresses: Vec<String> = msg.from().map(|a| a.iter().filter_map(|x| x.address().map(|ad| ad.to_lowercase())).collect()).unwrap_or_default();
+    if from_headers > 1 {
+        from_addresses.push("(more than one From header)".into());
+    }
     let to = msg
         .to()
         .and_then(|a| {
@@ -1761,6 +1831,16 @@ pub fn parse_raw_mail(raw: &[u8]) -> Option<InboundMail> {
         in_reply_to: msg.in_reply_to().as_text().map(|id| format!("<{id}>")),
         claim_id: None,
         attachments,
+        trusted: false,
+        headers_trusted: false,
+        from_addresses,
+        // Every copy, in order: `header_raw` would return the lowest one, which the sender wrote.
+        headers: msg
+            .headers()
+            .iter()
+            .filter(|h| AUTH_HEADERS.iter().any(|a| a.eq_ignore_ascii_case(h.name())))
+            .filter_map(|h| Some((h.name().to_string(), msg.raw_message().get(h.offset_start() as usize..h.offset_end() as usize).map(|b| String::from_utf8_lossy(b).trim().to_string())?)))
+            .collect(),
     })
 }
 
@@ -1807,7 +1887,307 @@ pub async fn unread_mails(pool: &PgPool, customer_id: Uuid) -> anyhow::Result<i6
     Ok(sqlx::query_scalar("select count(*) from mails where customer_id = $1 and direction = 'inbound' and seen_at is null").bind(customer_id).fetch_one(pool).await?)
 }
 
-pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (StatusCode, Json<Value>)> {
+/// A claim's rides in the order a reader numbers them (F1, F2, …). One query for the webhook and the
+/// dry run, so `stellwerk read-mail --claim` shows what the webhook will do.
+pub async fn claim_rides(pool: &PgPool, claim_id: Uuid) -> Result<Vec<IncidentRow>, sqlx::Error> {
+    sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date, i.created_at, i.id").bind(claim_id).fetch_all(pool).await
+}
+
+/// The header in which the receiving provider records what it verified about a sender.
+const AUTH_HEADERS: &[&str] = &["X-Spam-Tests"];
+
+/// Whether the receiving side verified the From domain.
+///
+/// One verdict counts: SpamAssassin's `DKIM_VALID_AU` — a valid DKIM signature from the author's own
+/// domain — in the `X-Spam-Tests` header Postmark documents for inbound mail. Not `Received-SPF` or
+/// `Authentication-Results`: nothing says the provider writes those, so a copy there may well be the
+/// sender's. And only when `X-Spam-Tests` occurs exactly once: a sender can put the header into the
+/// mail too, and a second copy means nobody can say which one the provider wrote.
+///
+/// What is recorded is every copy as received, so the first real answers show whether the
+/// provider's format is what this expects.
+pub fn sender_auth(headers: &[(String, String)], trusted: bool, from: &str, from_addresses: &[String]) -> Value {
+    let tests: Vec<&str> = headers.iter().filter(|(n, _)| n.eq_ignore_ascii_case("X-Spam-Tests")).map(|(_, v)| v.as_str()).collect();
+    let dkim_author = trusted && tests.len() == 1 && tests[0].split([',', ' ', '\t', '\n']).any(|t| t.trim() == "DKIM_VALID_AU");
+    let from_domain = inbound_address(from).rsplit_once('@').map(|(_, d)| d.to_string()).unwrap_or_default();
+    json!({
+        "aligned": dkim_author,
+        "how": if dkim_author { Some("dkim (DKIM_VALID_AU)") } else { None },
+        "headers_trusted": trusted,
+        "from_domain": from_domain,
+        "from_addresses": from_addresses,
+        "x_spam_tests": tests,
+    })
+}
+
+/// Only the desk can move a claim. Everybody who holds the claim's reply address — including the
+/// passenger, who gets a copy of every claim — could otherwise write "wir überweisen 1,50 EUR" and
+/// confirm money. Two things have to hold for a mail to accept, refuse or ask: it is from the
+/// domains the route names (`reply_from`, by default the domain it is sent to), and the receiving
+/// side verified that domain ([`sender_auth`]). A mail that fails keeps its reading on record and
+/// moves nothing. Bounces are exempt: they come from mail servers, not from the desk.
+pub async fn guard_sender(pool: &PgPool, claim: Option<&ClaimRow>, from: &str, trusted: bool, auth: &Value, decision: &mut crate::reply::Decision) -> Result<(), (StatusCode, Json<Value>)> {
+    if trusted || !matches!(decision.verdict.outcome, MailOutcome::Accepted | MailOutcome::Rejected | MailOutcome::Question) {
+        return Ok(());
+    }
+    let row: Option<(String, Option<String>)> = match claim {
+        Some(c) => sqlx::query_as("select to_address, reply_from from mail_routes where desk = $1").bind(&c.desk).fetch_optional(pool).await.map_err(internal)?,
+        None => None,
+    };
+    let allowed: Vec<String> = match row {
+        Some((_, Some(list))) => list.split(',').map(|d| d.trim().trim_start_matches('@').to_lowercase()).filter(|d| !d.is_empty()).collect(),
+        Some((to, None)) => to.rsplit_once('@').map(|(_, d)| vec![d.to_lowercase()]).unwrap_or_default(),
+        None => vec![],
+    };
+    let sender = inbound_address(from);
+    // One mailbox. A second author ("From: Desk <antwort@desk.test>, x@evil.test", signed by
+    // evil.test) or a comment ("x@evil.test (<antwort@desk.test>)") would otherwise be judged by
+    // whichever address a parser picks. Parsed addresses decide when the provider gave them; a
+    // display name with parentheses is then no problem.
+    let parsed: Vec<&str> = auth["from_addresses"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+    let plain = if parsed.is_empty() { !from.contains('(') && from.matches('<').count() <= 1 && from.matches('@').count() == 1 } else { parsed.len() == 1 && parsed[0] == sender };
+    let why = if !plain || !crate::reply::sender_matches(&sender, &allowed) {
+        Some(if allowed.is_empty() { "no route says who answers for this desk".to_string() } else { format!("sender is not the desk ({})", allowed.join(", ")) })
+    } else if !auth["aligned"].as_bool().unwrap_or(false) {
+        Some("the sender's domain is not verified (no aligned DKIM or SPF pass)".to_string())
+    } else {
+        None
+    };
+    if let Some(why) = why {
+        decision.verdict = crate::reply::Verdict::other(format!("{why}; read as {:?}: {}", decision.verdict.outcome, decision.verdict.because).to_lowercase());
+        decision.trace["verdict"] = json!(decision.verdict);
+        decision.trace["sender_check"] = json!({ "sender": sender, "allowed": allowed });
+    }
+    Ok(())
+}
+
+/// A claim that is already accepted or refused is not re-decided by a later mail, and the mail must
+/// not say otherwise: its outcome is what the app labels it with and what the push announces, so a
+/// reply to an objection would tell a paid passenger "abgelehnt". The reading stays in the trace.
+pub fn guard_closed(claim: Option<&ClaimRow>, decision: &mut crate::reply::Decision) {
+    let closed = claim.is_some_and(|c| matches!(c.status, ClaimStatus::Accepted | ClaimStatus::Rejected));
+    if closed && decision.verdict.outcome != MailOutcome::Other {
+        decision.verdict = crate::reply::Verdict::other(format!("the claim was already closed; read as {:?}: {}", decision.verdict.outcome, decision.verdict.because).to_lowercase());
+        decision.trace["verdict"] = json!(decision.verdict);
+    }
+}
+
+/// What a reading does to its claim, inside the caller's transaction. Returns the status the claim
+/// moved to, if it moved.
+///
+/// A claim that is already accepted or refused is not re-decided by a later mail: a reply to an
+/// objection would otherwise refuse rides that were paid, and a second partial award overwrite the
+/// first. The reading is kept on the mail and in the audit line; a human takes it from there.
+/// `claim` must be the row as locked in this transaction (see [`lock_claim`]): a reading takes
+/// seconds, and a claim closed by another mail meanwhile must not be re-decided from a stale copy.
+pub async fn settle_claim(tx: &mut sqlx::PgConnection, customer_id: Uuid, claim: &ClaimRow, decision: &crate::reply::Decision) -> anyhow::Result<Option<ClaimStatus>> {
+    let verdict = &decision.verdict;
+    let closed = matches!(claim.status, ClaimStatus::Accepted | ClaimStatus::Rejected);
+    let amount = if verdict.outcome == MailOutcome::Accepted { verdict.amount_cents } else { None };
+    let next = match verdict.outcome {
+        _ if closed => None,
+        MailOutcome::Accepted => Some(ClaimStatus::Accepted),
+        MailOutcome::Rejected => Some(ClaimStatus::Rejected),
+        MailOutcome::Question => Some(ClaimStatus::Question),
+        MailOutcome::Bounce => Some(ClaimStatus::Bounced),
+        // Nothing decided: the claim keeps whatever status it has now, not the one read before the
+        // model was asked.
+        MailOutcome::Other => None,
+    };
+    if let Some(next) = next {
+        sqlx::query("update claims set status = $2, amount_confirmed_cents = coalesce($3, amount_confirmed_cents), closed_at = case when $2 in ('accepted','rejected') then now() else closed_at end where id = $1")
+            .bind(claim.id)
+            .bind(next)
+            .bind(amount)
+            .execute(&mut *tx)
+            .await?;
+        // Ride by ride: a partial award confirms some and refuses the others, and a confirmed ride
+        // carries the figure the desk wrote rather than the one we claimed. A ride already confirmed
+        // is never taken back by a mail.
+        let mut confirmed_any = false;
+        for ride in &verdict.rides {
+            match ride.outcome {
+                crate::reply::RideOutcome::Paid { cents } => {
+                    confirmed_any = true;
+                    sqlx::query("update incidents set status = 'bestaetigt', confirmed_cents = $2 where id = $1 and status <> 'bestaetigt'").bind(ride.incident_id).bind(cents).execute(&mut *tx).await?;
+                }
+                crate::reply::RideOutcome::Refused => {
+                    sqlx::query("update incidents set status = 'abgelehnt' where id = $1 and status <> 'bestaetigt'").bind(ride.incident_id).execute(&mut *tx).await?;
+                }
+            }
+        }
+        if confirmed_any {
+            sqlx::query("insert into badge_awards (customer_id, badge_id) values ($1, 'bestaetigt') on conflict do nothing").bind(customer_id).execute(&mut *tx).await?;
+        }
+    }
+    let reason = if closed {
+        format!("inbound mail on a closed claim, recorded only; read by {}: {}", decision.read_by, verdict.because)
+    } else {
+        format!("inbound mail, read by {}: {}", decision.read_by, verdict.because)
+    };
+    sqlx::query("insert into audit_log (entity, entity_id, from_status, to_status, reason) values ('claim', $1, $2, $3, $4)")
+        .bind(claim.id)
+        .bind(format!("{:?}", claim.status).to_lowercase())
+        .bind(format!("{:?}", next.unwrap_or(claim.status)).to_lowercase())
+        .bind(&reason)
+        .execute(&mut *tx)
+        .await?;
+    Ok(next)
+}
+
+/// What we sent for a passenger: the claims and the replies written in the app. An answer is read
+/// without these words (`redact::without_ours`).
+pub async fn sent_by_passenger(pool: &PgPool, customer_id: Uuid) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar("select body from mails where customer_id = $1 and direction = 'out' order by occurred_at desc limit 20").bind(customer_id).fetch_all(pool).await
+}
+
+/// The claim, re-read and locked inside the transaction that will change it.
+pub async fn lock_claim(tx: &mut sqlx::PgConnection, claim_id: Uuid) -> anyhow::Result<Option<ClaimRow>> {
+    Ok(sqlx::query_as("select * from claims where id = $1 for update").bind(claim_id).fetch_optional(&mut *tx).await?)
+}
+
+/// After the transaction: the event that says money was confirmed, and retention for a closed claim.
+/// Both are past the point of no return, so a failure is logged rather than answered with an error
+/// the provider would retry — the retry finds the mail and stops (the scanner's sweep retains later).
+async fn after_settle(s: &AppState, customer_id: Uuid, claim_id: Uuid, moved: Option<ClaimStatus>, amount: Option<i64>) {
+    // It carries the amount the desk named, so the push and the app both report what the railway
+    // actually wrote rather than what we asked.
+    if moved == Some(ClaimStatus::Accepted) {
+        s.events.publish(customer_id, "claim", json!({ "claim_id": claim_id, "status": "accepted", "amount_confirmed_cents": amount, "source": "railway_reply" }));
+    }
+    if matches!(moved, Some(ClaimStatus::Accepted | ClaimStatus::Rejected)) {
+        if let Err(e) = crate::scanner::retain_closed_claim(&s.pool, claim_id).await {
+            tracing::warn!(error = %e, claim = %claim_id, "retention after a closing answer failed; the scanner's sweep will retry");
+        }
+    }
+}
+
+/// Forward a desk's answer to the passenger's own inbox, and mark it forwarded only once it went.
+async fn forward_to_passenger(pool: &PgPool, cust: &CustomerRow, relay: &str, mail: &MailRow) {
+    let Some(email) = cust.email.as_deref() else { return };
+    // Claimed before sending, so two deliveries of one message racing here forward it once.
+    let claimed: Option<(Uuid,)> = match sqlx::query_as("update mails set forwarded_at = now() where id = $1 and forwarded_at is null returning id").bind(mail.id).fetch_optional(pool).await {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::warn!(error = %e, mail = %mail.id, "could not claim the forward of a desk answer");
+            return;
+        }
+    };
+    if claimed.is_none() {
+        return;
+    }
+    let fwd_body = format!("Weitergeleitet von deiner Verspätomat-Adresse {}.\nVon: {}\nBetreff: {}\n\n{}", relay, mail.from_addr, mail.subject, mail.body);
+    let sent = crate::mail::send(crate::mail::OutgoingMail {
+        from: &format!("Verspätomat <{}>", relay),
+        to: email,
+        bcc: None,
+        subject: &format!("Fwd: {}", mail.subject),
+        body: &fwd_body,
+        message_id: &new_message_id(),
+        in_reply_to: None,
+        attachments: vec![],
+    })
+    .await;
+    if let Err(e) = sent {
+        tracing::warn!(error = %e, mail = %mail.id, "forwarding a desk answer failed; a repeated delivery tries again");
+        let _ = sqlx::query("update mails set forwarded_at = null where id = $1").bind(mail.id).execute(pool).await;
+    }
+}
+
+/// The same message delivered again: nothing is read or moved twice, but a forward that did not go
+/// out the first time is tried once more.
+async fn delivered_before(s: &AppState, message_id: &str) -> Result<Option<Value>, (StatusCode, Json<Value>)> {
+    let seen: Option<MailRow> = sqlx::query_as("select * from mails where direction = 'inbound' and message_id = $1").bind(message_id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(mail) = seen else { return Ok(None) };
+    if mail.forwarded_at.is_none() {
+        let cust: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(mail.customer_id).fetch_one(&s.pool).await.map_err(internal)?;
+        forward_to_passenger(&s.pool, &cust, &inbound_address(&mail.to_addr), &mail).await;
+    }
+    Ok(Some(json!({ "mail": mail, "outcome": mail.outcome, "claim_id": mail.claim_id, "duplicate": true })))
+}
+
+/// Read a stored desk answer again and let it act, as if it had just arrived.
+///
+/// For the mail that came in while the model could not be asked: the rules alone neither confirm
+/// nor refuse, so it was recorded as "a human should read this" and waits here. The same checks run
+/// — the sender and its verification as recorded on arrival, the gate — and nothing is forwarded
+/// again. A mail whose claim is closed or gone is read but not changed: its stored outcome may be
+/// the one that closed the claim.
+pub async fn reread_mail(s: &AppState, mail_id: Uuid) -> Result<Value, (StatusCode, Json<Value>)> {
+    let mail: Option<MailRow> = sqlx::query_as("select * from mails where id = $1 and direction = 'inbound'").bind(mail_id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(mail) = mail else { return Err(err(StatusCode::NOT_FOUND, "no inbound mail with this id")) };
+    let cust: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(mail.customer_id).fetch_one(&s.pool).await.map_err(internal)?;
+    let claim: Option<ClaimRow> = match mail.claim_id {
+        Some(id) => sqlx::query_as("select * from claims where id = $1").bind(id).fetch_optional(&s.pool).await.map_err(internal)?,
+        None => None,
+    };
+    let rows = match &claim {
+        Some(c) => claim_rides(&s.pool, c.id).await.map_err(internal)?,
+        None => vec![],
+    };
+    let (claimed, rides) = crate::reply::rides_of(&rows);
+    let relay = inbound_address(&mail.to_addr);
+    let mut known = crate::reply::known_of(&cust, claim.as_ref(), Some(&relay));
+    known.sent = sent_by_passenger(&s.pool, cust.id).await.map_err(internal)?;
+    let mut decision = crate::reply::read(&crate::reply::Mail { from: &mail.from_addr, subject: &mail.subject, body: &mail.body }, &known, &claimed, &rides, true).await;
+    let auth = mail.sender_auth.clone().unwrap_or_else(|| json!({ "aligned": false }));
+    guard_sender(&s.pool, claim.as_ref(), &mail.from_addr, false, &auth, &mut decision).await?;
+    let before = json!({ "outcome": mail.outcome, "amount_cents": mail.amount_cents, "read_by": mail.read_by, "because": mail.reading.as_ref().and_then(|r| r["verdict"]["because"].as_str().map(str::to_string)) });
+
+    let mut tx = s.pool.begin().await.map_err(internal)?;
+    let current = match mail.claim_id {
+        Some(id) => lock_claim(&mut tx, id).await.map_err(internal)?,
+        None => None,
+    };
+    let open = current.as_ref().is_some_and(|c| !matches!(c.status, ClaimStatus::Accepted | ClaimStatus::Rejected));
+    if !open {
+        tx.rollback().await.map_err(internal)?;
+        return Ok(json!({
+            "mail_id": mail.id, "claim_id": mail.claim_id, "before": before, "changed": false,
+            "after": { "outcome": decision.verdict.outcome, "amount_cents": decision.verdict.amount_cents, "read_by": decision.read_by, "because": decision.verdict.because },
+            "why_unchanged": if current.is_none() { "the claim is gone" } else { "the claim is already closed" },
+        }));
+    }
+    let amount = if decision.verdict.outcome == MailOutcome::Accepted { decision.verdict.amount_cents } else { None };
+    sqlx::query("update mails set outcome = $2, amount_cents = $3, read_by = $4, reading = $5 where id = $1")
+        .bind(mail.id)
+        .bind(decision.verdict.outcome)
+        .bind(amount)
+        .bind(&decision.read_by)
+        .bind(&decision.trace)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+    let moved = match &current {
+        Some(c) => settle_claim(&mut tx, cust.id, c, &decision).await.map_err(internal)?,
+        None => None,
+    };
+    tx.commit().await.map_err(internal)?;
+    if let Some(c) = &current {
+        after_settle(s, cust.id, c.id, moved, amount).await;
+    }
+    s.events.publish(cust.id, "incident", json!({}));
+    Ok(json!({
+        "mail_id": mail.id, "claim_id": mail.claim_id, "before": before, "changed": true,
+        "after": { "outcome": decision.verdict.outcome, "amount_cents": amount, "read_by": decision.read_by, "because": decision.verdict.because },
+        "claim_moved_to": moved,
+    }))
+}
+
+pub async fn process_inbound(s: &AppState, mut m: InboundMail) -> Result<Value, (StatusCode, Json<Value>)> {
+    // A message without a Message-ID gets one from its content, so a repeated delivery is still
+    // recognised as one.
+    if m.message_id.as_deref().is_none_or(|id| id.trim().is_empty()) {
+        use sha2::Digest;
+        let digest = sha2::Sha256::digest(format!("{}\u{0}{}\u{0}{}\u{0}{}", m.from, m.to, m.subject, m.body).as_bytes());
+        m.message_id = Some(format!("<derived-{}@verspaetomat.invalid>", hex::encode(&digest[..12])));
+    }
+    // Delivered before: answer with what was recorded then, and read nothing again.
+    if let Some(mid) = &m.message_id {
+        if let Some(done) = delivered_before(s, mid).await? {
+            return Ok(done);
+        }
+    }
     let relay = inbound_address(&m.to);
     // Routing order (docs/18 §4): the claim's own address names customer and claim in one step;
     // the customer's old per-customer address falls back to threading and "newest open claim".
@@ -1830,15 +2210,24 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
             (cust, claim)
         }
     };
-    // The desk's own words are the only confirmation this system has (see classify.rs). Every rule
-    // there fails towards "a human should read this", because a wrong `accepted` tells somebody
-    // their delay became money that never arrived and adds it to a Verein's public total.
-    let reading = crate::classify::read(&m.from, &m.subject, &m.body);
-    let outcome = reading.outcome;
-    // The amount is the one the desk named, never the one we asked for. Falling back to the
-    // claimed sum used to turn every partial award into a full one on the Wir screen.
-    let amount = reading.amount_cents;
-    // Attachments become uploads of kind 'inbound'; retention deletes them when the claim closes.
+    // The desk's own words are the only confirmation this system has. `reply.rs` reads them — the
+    // rules always, a model when one is configured — and checks every answer against the mail
+    // before anything moves; each check that fails ends as "a human should read this", because a
+    // wrong `accepted` tells somebody their delay became money that never arrived and adds it to a
+    // Verein's public total.
+    let claimed_rows: Vec<IncidentRow> = match &claim {
+        Some(cl) => claim_rides(&s.pool, cl.id).await.map_err(internal)?,
+        None => vec![],
+    };
+    let (claimed, rides) = crate::reply::rides_of(&claimed_rows);
+    let mut known = crate::reply::known_of(&cust, claim.as_ref(), Some(&relay));
+    known.sent = sent_by_passenger(&s.pool, cust.id).await.map_err(internal)?;
+    let auth = sender_auth(&m.headers, m.headers_trusted, &m.from, &m.from_addresses);
+    let mut decision = crate::reply::read(&crate::reply::Mail { from: &m.from, subject: &m.subject, body: &m.body }, &known, &claimed, &rides, !m.trusted).await;
+    guard_sender(&s.pool, claim.as_ref(), &m.from, m.trusted, &auth, &mut decision).await?;
+    // Attachments are written to disk first; their rows go into the transaction, and the files are
+    // removed again if it does not commit. Retention deletes them when the claim closes.
+    let mut files: Vec<(Uuid, String, String)> = Vec::new();
     let mut stored: Vec<Value> = Vec::new();
     for (name, ct, bytes) in &m.attachments {
         if bytes.len() > MAX_UPLOAD {
@@ -1846,77 +2235,86 @@ pub async fn process_inbound(s: &AppState, m: InboundMail) -> Result<Value, (Sta
             continue;
         }
         let uid = Uuid::new_v4();
-        let path = crate::storage::put(uid, bytes).await.map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &format!("storage: {e}")))?;
-        sqlx::query("insert into uploads (id, customer_id, kind, content_type, path) values ($1,$2,'inbound',$3,$4)").bind(uid).bind(cust.id).bind(ct).bind(&path).execute(&s.pool).await.map_err(internal)?;
+        let path = match crate::storage::put(uid, bytes).await {
+            Ok(p) => p,
+            Err(e) => {
+                for (_, _, written) in &files {
+                    crate::storage::remove(written).await;
+                }
+                return Err(err(StatusCode::INTERNAL_SERVER_ERROR, &format!("storage: {e}")));
+            }
+        };
+        files.push((uid, ct.clone(), path));
         stored.push(json!({ "name": name, "content_type": ct, "size": bytes.len(), "upload_id": uid }));
     }
-    let mail: MailRow = sqlx::query_as(
-        "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, subject, body, attachments, outcome, amount_cents, forwarded_at)
-         values ($1,$2,$3,'inbound',$4,$5,$6,$7,$8,$9,$10,$11,$12,now()) returning *",
-    )
-    .bind(Uuid::new_v4())
-    .bind(cust.id)
-    .bind(claim.as_ref().map(|c| c.id))
-    .bind(m.message_id)
-    .bind(m.in_reply_to)
-    .bind(&m.from)
-    .bind(&m.to)
-    .bind(&m.subject)
-    .bind(&m.body)
-    .bind(json!(stored))
-    .bind(outcome)
-    .bind(if outcome == MailOutcome::Accepted { amount } else { None })
-    .fetch_one(&s.pool)
-    .await
-    .map_err(internal)?;
-    if let Some(claim) = &claim {
-        let (claim_status, inc_status): (ClaimStatus, Option<IncidentStatus>) = match outcome {
-            MailOutcome::Accepted => (ClaimStatus::Accepted, Some(IncidentStatus::Bestaetigt)),
-            MailOutcome::Rejected => (ClaimStatus::Rejected, Some(IncidentStatus::Abgelehnt)),
-            MailOutcome::Question => (ClaimStatus::Question, None),
-            MailOutcome::Bounce => (ClaimStatus::Bounced, None),
-            MailOutcome::Other => (claim.status, None),
+    // The mail, its uploads, the claim, its rides and the audit line land together or not at all: a
+    // failure halfway would leave the mail stored and the claim unmoved, and the provider's retry
+    // would then find the mail and never move it.
+    let written: anyhow::Result<(MailRow, Option<ClaimStatus>)> = async {
+        let mut tx = s.pool.begin().await?;
+        // The claim as it is now, locked: a reading takes seconds, and another answer may have
+        // closed it meanwhile.
+        let current = match &claim {
+            Some(c) => lock_claim(&mut tx, c.id).await?,
+            None => None,
         };
-        sqlx::query("update claims set status = $2, amount_confirmed_cents = coalesce($3, amount_confirmed_cents), closed_at = case when $2 in ('accepted','rejected') then now() else closed_at end where id = $1")
-            .bind(claim.id)
-            .bind(claim_status)
-            .bind(if outcome == MailOutcome::Accepted { amount } else { None })
-            .execute(&s.pool)
-            .await
-            .map_err(internal)?;
-        if let Some(st) = inc_status {
-            sqlx::query("update incidents set status = $2 where id in (select incident_id from claim_incidents where claim_id = $1)").bind(claim.id).bind(st).execute(&s.pool).await.map_err(internal)?;
-            if st == IncidentStatus::Bestaetigt {
-                let _ = sqlx::query("insert into badge_awards (customer_id, badge_id) values ($1, 'bestaetigt') on conflict do nothing").bind(cust.id).execute(&s.pool).await;
-            }
+        guard_closed(current.as_ref(), &mut decision);
+        for (uid, ct, path) in &files {
+            sqlx::query("insert into uploads (id, customer_id, kind, content_type, path) values ($1,$2,'inbound',$3,$4)").bind(uid).bind(cust.id).bind(ct).bind(path).execute(&mut *tx).await?;
         }
-        rules::audit(&s.pool, "claim", claim.id, Some("sent"), &format!("{:?}", claim_status).to_lowercase(), &format!("inbound mail: {}", reading.because)).await.map_err(internal)?;
-        // The one event that says money was confirmed. It carries the amount the desk named, so the
-        // push and the app both report what the railway actually wrote rather than what we asked.
-        if claim_status == ClaimStatus::Accepted {
-            s.events.publish(
-                cust.id,
-                "claim",
-                json!({ "claim_id": claim.id, "status": "accepted", "amount_confirmed_cents": amount, "source": "railway_reply" }),
-            );
-        }
-        if matches!(claim_status, ClaimStatus::Accepted | ClaimStatus::Rejected) {
-            crate::scanner::retain_closed_claim(&s.pool, claim.id).await.map_err(internal)?;
-        }
+        let amount = if decision.verdict.outcome == MailOutcome::Accepted { decision.verdict.amount_cents } else { None };
+        let mail: MailRow = sqlx::query_as(
+            "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, subject, body, attachments, outcome, amount_cents, read_by, reading, sender_auth)
+             values ($1,$2,$3,'inbound',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning *",
+        )
+        .bind(Uuid::new_v4())
+        .bind(cust.id)
+        .bind(claim.as_ref().map(|c| c.id))
+        .bind(&m.message_id)
+        .bind(&m.in_reply_to)
+        .bind(&m.from)
+        .bind(&m.to)
+        .bind(&m.subject)
+        .bind(&m.body)
+        .bind(json!(stored))
+        .bind(decision.verdict.outcome)
+        .bind(amount)
+        .bind(&decision.read_by)
+        .bind(&decision.trace)
+        .bind(&auth)
+        .fetch_one(&mut *tx)
+        .await?;
+        let moved = match &current {
+            Some(c) => settle_claim(&mut tx, cust.id, c, &decision).await?,
+            None => None,
+        };
+        tx.commit().await?;
+        Ok((mail, moved))
     }
-    if let Some(email) = cust.email.as_deref() {
-        let fwd_body = format!("Weitergeleitet von deiner Verspätomat-Adresse {}.\nVon: {}\nBetreff: {}\n\n{}", relay, m.from, m.subject, m.body);
-        let _ = crate::mail::send(crate::mail::OutgoingMail {
-            from: &format!("Verspätomat <{}>", relay),
-            to: email,
-            bcc: None,
-            subject: &format!("Fwd: {}", m.subject),
-            body: &fwd_body,
-            message_id: &new_message_id(),
-            in_reply_to: None,
-            attachments: vec![],
-        })
-        .await;
+    .await;
+    let (mail, moved) = match written {
+        Ok(done) => done,
+        Err(e) => {
+            for (_, _, path) in &files {
+                crate::storage::remove(path).await;
+            }
+            // Two deliveries of one message at once: the second loses the race on the unique index
+            // and answers like any repeated delivery.
+            let raced = e.downcast_ref::<sqlx::Error>().and_then(|x| x.as_database_error()).and_then(|d| d.constraint()) == Some("mails_inbound_message_id");
+            if raced {
+                if let Some(done) = delivered_before(s, m.message_id.as_deref().unwrap_or_default()).await? {
+                    return Ok(done);
+                }
+            }
+            return Err(internal(e));
+        }
+    };
+    let outcome = decision.verdict.outcome;
+    let amount = mail.amount_cents;
+    // Forward first: it is what the passenger was promised, and nothing after it may prevent it.
+    forward_to_passenger(&s.pool, &cust, &relay, &mail).await;
+    if let Some(c) = &claim {
+        after_settle(s, cust.id, c.id, moved, amount).await;
     }
     s.events.publish(cust.id, "mail", json!({ "claim_id": claim.as_ref().map(|c| c.id), "outcome": outcome }));
     s.events.publish(cust.id, "incident", json!({}));
@@ -1947,7 +2345,7 @@ pub async fn community_pulse(State(s): State<AppState>, _c: Customer) -> ApiResu
     .await
     .map_err(internal)?;
     let (submitted, confirmed): (i64, i64) = sqlx::query_as(
-        "select coalesce(sum(amount_cents) filter (where status = 'eingereicht'),0)::bigint, coalesce(sum(amount_cents) filter (where status = 'bestaetigt'),0)::bigint from incidents",
+        "select coalesce(sum(amount_cents) filter (where status = 'eingereicht'),0)::bigint, coalesce(sum(coalesce(confirmed_cents, amount_cents)) filter (where status = 'bestaetigt'),0)::bigint from incidents",
     )
     .fetch_one(&s.pool)
     .await
@@ -1958,7 +2356,7 @@ pub async fn community_pulse(State(s): State<AppState>, _c: Customer) -> ApiResu
 pub async fn community(State(s): State<AppState>, _c: Customer) -> ApiResult {
     let (minutes, users): (i64, i64) = sqlx::query_as("select coalesce(sum(final_delay_min),0)::bigint, (select count(*) from customers)::bigint from rides where status = 'arrived'").fetch_one(&s.pool).await.map_err(internal)?;
     let (submitted, confirmed): (i64, i64) = sqlx::query_as(
-        "select coalesce(sum(amount_cents) filter (where status = 'eingereicht'),0)::bigint, coalesce(sum(amount_cents) filter (where status = 'bestaetigt'),0)::bigint from incidents",
+        "select coalesce(sum(amount_cents) filter (where status = 'eingereicht'),0)::bigint, coalesce(sum(coalesce(confirmed_cents, amount_cents)) filter (where status = 'bestaetigt'),0)::bigint from incidents",
     )
     .fetch_one(&s.pool)
     .await
@@ -2187,13 +2585,13 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     // Community with my share.
     let (minutes, my_confirmed): (i64, i64) = sqlx::query_as(
         "select (select coalesce(sum(final_delay_min),0)::bigint from rides where status = 'arrived'),
-                (select coalesce(sum(amount_cents),0)::bigint from incidents where customer_id = $1 and status = 'bestaetigt')",
+                (select coalesce(sum(coalesce(confirmed_cents, amount_cents)),0)::bigint from incidents where customer_id = $1 and status = 'bestaetigt')",
     )
     .bind(c.0.id)
     .fetch_one(pool)
     .await
     .map_err(internal)?;
-    let confirmed_all: i64 = sqlx::query_scalar("select coalesce(sum(amount_cents),0)::bigint from incidents where status = 'bestaetigt'").fetch_one(pool).await.map_err(internal)?;
+    let confirmed_all: i64 = sqlx::query_scalar("select coalesce(sum(coalesce(confirmed_cents, amount_cents)),0)::bigint from incidents where status = 'bestaetigt'").fetch_one(pool).await.map_err(internal)?;
 
     // Next thing.
     let mut candidates = Vec::new();
@@ -2406,6 +2804,44 @@ mod upload_tests {
 #[cfg(test)]
 mod inbound_tests {
     use super::*;
+
+    #[test]
+    fn a_sender_counts_as_verified_only_with_the_providers_single_dkim_verdict() {
+        let h = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())).collect::<Vec<_>>();
+        let from = "Servicecenter <antwort@bahn.test>";
+        assert_eq!(sender_auth(&h(&[("X-Spam-Tests", "DKIM_SIGNED,DKIM_VALID,DKIM_VALID_AU,SPF_PASS")]), true, from, &[])["aligned"], true);
+        // Signed, but not by the author's domain.
+        assert_eq!(sender_auth(&h(&[("X-Spam-Tests", "DKIM_SIGNED,DKIM_VALID,SPF_PASS")]), true, from, &[])["aligned"], false);
+        // A second copy: one of them is the sender's, and nobody can tell which.
+        assert_eq!(sender_auth(&h(&[("X-Spam-Tests", "SPF_FAIL"), ("X-Spam-Tests", "DKIM_VALID_AU")]), true, from, &[])["aligned"], false);
+        // Headers Postmark does not write prove nothing.
+        assert_eq!(sender_auth(&h(&[("Authentication-Results", "mx; dkim=pass header.d=bahn.test")]), true, from, &[])["aligned"], false);
+        assert_eq!(sender_auth(&[], true, from, &[])["aligned"], false);
+        // No secret on the webhook, or a raw post from an unknown upstream: nothing is a verdict.
+        assert_eq!(sender_auth(&h(&[("X-Spam-Tests", "DKIM_VALID_AU")]), false, from, &[])["aligned"], false);
+    }
+
+    #[test]
+    fn a_from_with_two_mailboxes_is_not_one_sender() {
+        let raw = parse_raw_mail(b"From: Desk <antwort@bahn.test>, x@evil.test\r\nTo: antrag-1@users.verspaetomat.de\r\nSubject: x\r\n\r\nbody").unwrap();
+        assert_eq!(raw.from_addresses.len(), 2);
+        let twice = parse_raw_mail(b"From: x@evil.test\r\nFrom: Desk <antwort@bahn.test>\r\nTo: antrag-1@users.verspaetomat.de\r\nSubject: x\r\n\r\nbody").unwrap();
+        assert!(twice.from_addresses.len() >= 2);
+        let named = parse_raw_mail(b"From: \"DB Vertrieb (Fahrgastrechte)\" <antwort@bahn.test>\r\nTo: a@b.test\r\nSubject: x\r\n\r\nbody").unwrap();
+        assert_eq!(named.from_addresses, vec!["antwort@bahn.test".to_string()]);
+    }
+
+    #[test]
+    fn postmark_json_keeps_its_verdict_even_with_the_raw_message() {
+        let v = json!({
+            "RawEmail": "From: Desk <antwort@bahn.test>\r\nTo: antrag-1@users.verspaetomat.de\r\nX-Spam-Tests: DKIM_VALID_AU\r\nSubject: x\r\n\r\nWir zahlen.",
+            "Headers": [{ "Name": "X-Spam-Tests", "Value": "DKIM_SIGNED,SPF_PASS" }],
+        });
+        let m = inbound_from_json(v).unwrap();
+        assert_eq!(m.headers, vec![("X-Spam-Tests".to_string(), "DKIM_SIGNED,SPF_PASS".to_string())]);
+        let raw = parse_raw_mail(b"X-Spam-Tests: SPF_FAIL\r\nFrom: a@b.test\r\nX-Spam-Tests: DKIM_VALID_AU\r\nSubject: x\r\n\r\nbody").unwrap();
+        assert_eq!(raw.headers, vec![("X-Spam-Tests".to_string(), "SPF_FAIL".to_string()), ("X-Spam-Tests".to_string(), "DKIM_VALID_AU".to_string())]);
+    }
 
     /// docs/25 §4: an automatic mute runs out on its own; a mute a passenger set by hand does
     /// not. That is the whole difference between the two, and the geofence set reads it.

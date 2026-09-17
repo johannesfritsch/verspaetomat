@@ -23,7 +23,7 @@ The relay model sits between the two and must stay on the messenger side. German
 
 ## Telecommunications secrecy (TDDDG)
 
-Giving each customer a mailbox on our domain and reading what arrives there may make us a provider of a telecommunications service, bound by the secrecy of communications (§3 TDDDG). Handling that: the mailbox exists for one declared purpose, the customer is told exactly what we read (status, amount, reference) and why, consent is explicit and separate, inbound mail is forwarded whole, nothing is used for anything else, and retention ends with the claim. The DPIA must cover this. One question in the legal opinion.
+Giving each customer a mailbox on our domain and reading what arrives there may make us a provider of a telecommunications service, bound by the secrecy of communications (§3 TDDDG). Handling that: the mailbox exists for one declared purpose, the customer is told exactly what we read (which rides are paid or refused, the amount, whether the desk asks something) and why, and that an OpenAI model reads the reply text for us with name, address, contact and bank data removed as far as they are recognised (a processor outside the EU: DPA, SCCs, transfer impact assessment), consent is explicit and separate, inbound mail is forwarded whole, nothing is used for anything else, and retention ends with the claim. The DPIA must cover this. One question in the legal opinion.
 
 ## GDPR
 

@@ -281,6 +281,7 @@ mod tests {
             journey_id: None,
             discarded_at: None,
             discard_reason: None,
+            confirmed_cents: None,
         };
         // docs/21 §2: an interrupted journey prints the true arrival plus the line saying only
         // the railway's share is claimed. The passenger's own pause is named, never hidden.

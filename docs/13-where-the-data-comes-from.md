@@ -34,4 +34,4 @@ Every number in the app should be tappable and answer "Woher weißt du das?". Th
 
 1. **Dein Standort bleibt am Bahnhof.** We look at where you are only to notice a station. During the ride we follow the train, not you.
 2. **Kein Geld läuft durch uns.** The railway pays the NGO. We fill in forms and carry the mail; you sign and send, and you get a copy of everything.
-3. **Kein Euro ist gespendet, bevor er es ist.** Totals show submitted and confirmed separately, and confirmed only means a railway reply or an NGO statement exists.
+3. **Kein Euro ist gespendet, bevor er es ist.** Totals show submitted and confirmed separately, and confirmed only means the railway wrote that it pays, at the figure it wrote.

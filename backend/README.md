@@ -21,6 +21,11 @@ Environment:
 | `SMTP_URL` | unset → dry-run | `smtps://user:pass@host:465` or `smtp://user:pass@host:587` (STARTTLS) |
 | `INBOUND_SECRET` | unset | when set, `/internal/inbound-mail` and `/internal/inbound-mail/raw` require `?secret=` |
 | `ADMIN_TOKEN` | `stellwerk` | the `x-admin-token` for `/admin/*` and the `stellwerk` CLI |
+| `OPENAI_API_KEY` | unset → rules only | a model reads desk replies too, checked by the gate in `src/reply.rs` (needs a DPA with OpenAI) |
+| `OPENAI_MODEL` | `gpt-5.4-mini-2026-03-17` | pinned snapshot; try `stellwerk read-mail` on real replies before changing it |
+| `OPENAI_CONFIRM_MODEL` | `gpt-5.5-2026-04-23` | second reader for anything that would accept or refuse; both must agree; empty turns it off |
+| `INBOUND_RAW_TRUSTS_SPAM_TESTS` | unset | `1` only when the raw-MIME upstream writes `X-Spam-Tests` itself; otherwise raw posts cannot verify a sender |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | only for a compatible proxy |
 | `RUST_LOG` | `info,tower_http=info,sqlx=warn` | tracing filter |
 
 ## Try it
@@ -39,14 +44,18 @@ curl -s -H "$A" localhost:8080/v1/incidents | jq .summary
 ## Layout
 
 ```
-migrations/        0001…0018, applied automatically at start (sqlx migrate)
+migrations/        0001…0031, applied automatically at start (sqlx migrate)
 src/main.rs        router, state, follower wiring
 src/auth.rs        device tokens, recovery codes, the Customer extractor
 src/db/            pool + seed (mod.rs), row types (rows.rs)
 src/rules.rs       amounts, readiness, deadlines, monthly cap, status refresh, audit
 src/handlers.rs    HTTP handlers
 src/scanner.rs     deadline scanner loop (warnings, expiry, reply nudges, retention)
-src/admin.rs       Stellwerk admin API (simulation, forget, NGO report import, scan)
+src/admin.rs       Stellwerk admin API (simulation, forget, routes, read-mail, replies, reread, scan)
+src/reply.rs       reading a desk's answer: the gate between readers and money, per ride
+src/classify.rs    the rules reader, money figures
+src/openai.rs      the model reader (optional), prompt and schema
+src/redact.rs      what the model may see
 src/pdf.rs         the EU claim form via Typst (templates/eu_form.typ)
 src/train/         Transitous client (transitous.rs), trip follower (follower.rs), shared types (mod.rs)
 src/mail.rs        SMTP via lettre, dry-run without SMTP_URL
@@ -84,7 +93,7 @@ Env: `STELLWERK_URL` (default `http://127.0.0.1:8080`), `ADMIN_TOKEN` (default `
 
 - Trip follower: every 45 s, every ride in `riding` is polled; snapshots go to `ride_snapshots`; at the exit stop the ride is finalised and an incident is created when the rules say so.
 - Deadline scanner (`src/scanner.rs`): hourly on the simulated clock, first pass 30 s after start, `POST /admin/scan` or `stellwerk scan` for one pass now. It warns 21 days before an incident's legal deadline (`incidents.warned_at`, SSE `incident {incident_id, warning: true, legal_deadline}`), marks open incidents `verfallen` at the deadline for every customer, nudges once when a sent claim passed `expected_reply_by` without an inbound mail (`claims.nudged_at`, SSE `claim {claim_id, nudge: true}`), and sweeps retention.
-- Retention: when a claim becomes accepted or rejected (inbound mail, Stellwerk reply, NGO report) the bytes of its uploads and of the inbound mails' attachments are deleted unless the customer set `keep_correspondence`. Ledger, claim, mail and audit rows stay; an upload still attached to another open claim is kept.
+- Retention: when a claim becomes accepted or rejected (inbound mail, Stellwerk reply, reread) the bytes of its uploads and of the inbound mails' attachments are deleted unless the customer set `keep_correspondence`. Ledger, claim, mail and audit rows stay; an upload still attached to another open claim is kept.
 - Monthly cap: on every status refresh (incident creation, ledger read, scanner) Deutschlandticket incidents are summed per calendar month in ride order; from the one that pushes the month over 25 % of the ticket price they are `gedeckelt`, and released again when an earlier one is rejected or expires. The ledger summary reports `capped_cents`.
 - Boards (`GET /v1/boards?scope=`): seven-day sums of `points` over location-verified rides finalised in the last seven days, per customer with `show_on_boards`. `line` = rides on my most frequent line of the last 30 days, `city` = rides starting at a station whose first word matches my home station's, `germany` = all; a scope with nothing to narrow on falls back to all. Filled from `board_seed` (entries carry `seed: true`) up to ten entries; the requesting customer always appears with `is_me`.
 - Inbound mail: `POST /internal/inbound-mail` (JSON) and `POST /internal/inbound-mail/raw` (the RFC 822 message, parsed with mail-parser; attachments stored as uploads of kind `inbound`).
@@ -133,5 +142,6 @@ Everything else works; these need an account and go into `deploy/.env`:
 | Push, iOS | APNs auth key `.p8`, its key id, the team id, the bundle id | `APNS_KEY_P8` (or `APNS_KEY_P8_BASE64`), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC`, `APNS_SANDBOX` |
 | Push, Android | Firebase service account JSON with the Cloud Messaging role | `FCM_SERVICE_ACCOUNT_JSON` |
 | Stellwerk on the server | a long random token | `ADMIN_TOKEN` |
+| Reading replies with a model | OpenAI project key; OpenAI's DPA accepted | `OPENAI_API_KEY` |
 | Träwelling | OAuth client registration | not wired yet |
 | App Attest / Play Integrity | Apple and Google console setup | not wired yet; per-device rate limits only |

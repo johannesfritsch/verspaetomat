@@ -54,7 +54,7 @@ Backend only, no mock equivalent yet: a journey holds customer, origin and desti
 
 Since docs/18 §4 every claim has its own address `antrag-<8 hex>@RELAY_DOMAIN` (`claims.reply_address`, assigned at send time); inbound mail is routed by it first, by the customer's old `relay_address` second. `mails.seen_at` marks read state; `POST /v1/claims/{id}/seen` sets it; `standing.unread_mails` counts the rest.
 
-`Mock.mails` / `state.mails`: id, incident ids, direction, from, to, subject, body, date, attachments, amount, outcome. Backend: mail id, claim id, direction, message id, in-reply-to, from, to, bcc, subject, body text, attachments (object keys), received/sent at, classification (`accepted`, `question`, `rejected`, `bounce`, `other`) with confidence, extracted amount and reference, forwarded-to-customer at. `GET /v1/mails`, `GET /v1/mails/{id}`, `POST /v1/mails/{id}/reply`, internal `POST /internal/inbound-mail`.
+`Mock.mails` / `state.mails`: id, incident ids, direction, from, to, subject, body, date, attachments, amount, outcome. Backend: mail id, claim id, direction, message id, in-reply-to, from, to, bcc, subject, body text, attachments (object keys), received/sent at, outcome (`accepted`, `question`, `rejected`, `bounce`, `other`) and the confirmed amount, `read_by` (`rules` or `model:<snapshot>`) and `reading` (the verdict per ride, the evidence, for a model the redacted text it was shown; operator data, never sent to the app), forwarded-to-customer at. A confirmed ride carries what the desk wrote it pays in `incidents.confirmed_cents`; every confirmed total reads that before `amount_cents` (docs/20). `GET /v1/mails`, `GET /v1/mails/{id}`, `POST /v1/mails/{id}/reply`, internal `POST /internal/inbound-mail`.
 
 ### NGO
 
@@ -101,9 +101,9 @@ Since docs/18 §4 every claim has its own address `antrag-<8 hex>@RELAY_DOMAIN` 
 | Claim form | EU standard form structure reproduced in a Typst template | signature embedded |
 | Outbound mail | transactional provider over SMTP | relay domain with SPF/DKIM/DMARC; BCC to the customer |
 | Inbound mail | provider inbound webhook | per-customer relay address routing |
-| NGO statements | monthly CSV or PDF from each NGO | matched by amount, date, claimant |
 | Träwelling check-ins | Träwelling REST API with the customer's token | read-only; IBNR to station mapping |
-| Push | APNs, FCM | arrival, reply, deadline, NGO confirmation |
+| Reading replies | OpenAI Responses API, pinned snapshot, optional | redacted reply text and the claim's rides; the gate in `reply.rs` decides |
+| Push | APNs, FCM | arrival, reply, deadline, reply nudge |
 
 ## 4. Things the mock has that the backend does not need
 

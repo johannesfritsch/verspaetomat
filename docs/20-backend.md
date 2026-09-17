@@ -40,22 +40,71 @@ One binary, several loops:
 
 - **API** — the routes in `backend/openapi.yaml`.
 - **Trip follower** — for each ride in `riding`, poll the trip every 30 to 60 s, store the latest stop-by-stop forecast, detect arrival at the exit stop (forecast turned actual, or the trip's next stop is beyond the exit stop), finalise the delay, create an incident when the rules in 21 say so, send the arrival push.
-- **Relay** — outbound queue (send claim mails with BCC, retry, record message ids), inbound processing (match by relay address and claim reference, classify accepted / question / rejected / bounce, extract amount, forward the original to the customer's private inbox, update the claim).
+- **Relay** — outbound queue (send claim mails with BCC, retry, record message ids), inbound processing (match by relay address and claim reference, read the answer per ride — see below —, forward the original to the customer's private inbox, update the claim).
 - **Deadline scanner** (`backend/src/scanner.rs`, shipped 10 September 2026) — hourly on the simulated clock: warn 21 days before an incident's legal deadline (once, `warned_at`), mark `verfallen` at the deadline across all customers, nudge once when a sent claim passed its expected reply date without an answer (`nudged_at`), sweep retention. Events go out over SSE.
-- **Push sender** (`backend/src/push.rs`, shipped 10 September 2026) — taps the event bus and turns five events into notifications: arrival, post from the railway, deadline warning, reply nudge, NGO confirmation. Copy is composed server-side in the app's voice; the payload carries `kind` and the id so the app opens the right screen. APNs (token auth) and FCM v1; dead tokens are removed; `notifications=false` mutes; no credentials means one log line per push. `stellwerk push` for a test.
-- **Confirmation comes from the railway's answer, and from nothing else** (`classify.rs`). The desk
-  writes that it pays or has paid; that is read, and the claim becomes `accepted`, its cases
-  `bestätigt`, the amount the desk named is recorded, the badge is awarded and the passenger's and
-  the Verein's totals move. There is no second path and no manual confirmation.
-  - Every rule fails towards "a human should read this". A wrong `accepted` tells somebody their
-    delay became money that never arrived and adds it to a Verein's public total; a wrong `other`
-    costs one look at an inbox. So a negated phrase, a mail that reads as both paid and refused, and
-    a payment that names no amount all land on `other`.
+- **Push sender** (`backend/src/push.rs`, shipped 10 September 2026) — taps the event bus and turns events into notifications: arrival, post from the railway, a confirmed payment, deadline warning, reply nudge. Copy is composed server-side in the app's voice; the payload carries `kind` and the id so the app opens the right screen. APNs (token auth) and FCM v1; dead tokens are removed; `notifications=false` mutes; no credentials means one log line per push. `stellwerk push` for a test.
+- **Confirmation comes from the railway's answer, and from nothing else** (`reply.rs`). The desk
+  writes that it pays or has paid; that is read, and the claim becomes `accepted`, each paid ride
+  `bestätigt` at the figure the desk wrote for it (`incidents.confirmed_cents`), each refused ride
+  `abgelehnt`, the badge is awarded and the passenger's and the Verein's totals move. There is no
+  second path and no manual confirmation.
+  - Two readers. The rules (`classify.rs`) read every mail. With `OPENAI_API_KEY` set, a model
+    (`openai.rs`, pinned snapshot `gpt-5.4-mini-2026-03-17`, `OPENAI_MODEL` overrides) reads it too
+    and decides, per ride. Without a key the rules decide alone. When the call fails or runs out of
+    its 25 s budget, the rules may refuse, ask or pass a mail on but never confirm money; the mail
+    waits for `stellwerk reread <mail>` (`stellwerk replies` lists the latest answers and why).
+  - Our own words out first (`redact::without_ours`): every line of an answer that is text from a
+    mail we sent — the claim, a reply written in the app — is removed before anything reads it, so
+    a desk system that echoes our claim, or relays back what the passenger wrote, cannot pass it off
+    as the desk's decision.
+  - Two readers must agree before a claim is accepted or refused: when the first model's reading
+    survives the gate as a payment or refusal, a second, larger model (`OPENAI_CONFIRM_MODEL`,
+    pinned `gpt-5.5-2026-04-23`) reads the same text, and only the same outcome with the same rides
+    and figures counts. In testing most misreadings were a model's mood (two runs in three).
+  - The model proposes, the gate decides (`reply::gate_model`). Money moves only if the sentence the
+    model quotes is in the mail, every amount it names is written in the mail as money, the ride
+    amounts add up to the total, no ride gets more than was claimed for it (the fare is not the
+    payment), and the rules do not read the opposite. Anything else is `other`.
+  - What the model sees (`redact.rs`): subject and the desk's own part of the mail, without the quoted
+    history, without the passenger's name, address, e-mail, ticket number, relay addresses, and
+    without anything shaped like an e-mail address, IBAN, phone number or a name in a salutation;
+    plus date, train, stations and minutes of each claimed ride. `store: false`. The text shown and
+    the raw answer are kept on the mail (`mails.read_by`, `mails.reading`).
+  - Every rule and every check fails towards "a human should read this". A wrong `accepted` tells
+    somebody their delay became money that never arrived and adds it to a Verein's public total; a
+    wrong `other` costs one look at an inbox.
   - Order is the design: a bounce is judged on the envelope first, because a delivery failure quotes
     the mail it could not deliver; automatic and interim replies next; refusal before payment,
     because a refusal often explains what would have been paid.
-  - The amount is the one the desk named, never the one we claimed — falling back to the claimed sum
-    turned every partial award into a full one.
+  - The amount is the one the desk named, never the one we claimed, and it is recorded per ride.
+    A rules reading of several rides confirms them only when the named figure is exactly the claim;
+    a partial award needs the model's per-ride reading.
+  - Only the desk moves a claim: a mail that would accept, refuse or ask has to come from the
+    route's `reply_from` domains (default: the domain the claim was sent to; changing the route's
+    address resets it) **and** carry the receiving provider's verification of that domain:
+    SpamAssassin's `DKIM_VALID_AU` in Postmark's `X-Spam-Tests`, present exactly once, on a webhook
+    guarded by `INBOUND_SECRET`, with exactly one mailbox in From (`handlers::sender_auth`, all
+    copies stored in `mails.sender_auth`). `Received-SPF` and
+    `Authentication-Results` are ignored — nothing says the provider writes them, so a copy may be
+    the sender's. A mail that fails is recorded and moves nothing: the passenger holds the reply
+    address too, and a From header is only text. Check the first real answers in `stellwerk
+    replies` ("Absender geprüft"); a desk that does not DKIM-sign its mail, or a Postmark stream
+    without spam headers, shows "nein" for every answer and needs a decision, not a workaround.
+  - A claim already accepted or refused is not re-decided by a later mail (the claim row is locked
+    while the answer is written), a delivery with a known message id is not read twice (a unique
+    index), and the forward to the passenger goes out before anything that could fail after commit.
+  - Where the vetoes look: everything the desk wrote except the quoted claim — below a signature, a
+    line of dashes or a ticket system's echo too — but only in sentences that talk about money or
+    the claim, so a footer's "nicht an Dritte weitergegeben" blocks nothing. Stops (a voucher, a
+    payment made before or to someone other than the Verein, a claim passed to another desk) and
+    conditions ("sofern", "sobald", "unter Vorbehalt", "nach Eingang Ihrer Kopie") keep money from
+    moving; a payment phrase negated anywhere later in its sentence is no payment. The model reads
+    the same text minus the echo of the passenger's own message.
+  - `stellwerk reread <mail>` reads a stored answer again (for mail that arrived while the model was
+    unavailable); a mail whose claim is closed or gone is read but not changed. Replies planted by
+    `stellwerk reply` are read by the rules only, so end-to-end tests need no network.
+  - Trying a real answer without touching a claim: `stellwerk read-mail mail.txt --date 2026-09-03
+    --claimed 150` (or `--claim <id>` to read it against a claim's rides and passenger).
   - Removed: the NGO bank-statement import (`POST /admin/ngos/{id}/report`, `stellwerk ngo-report`,
     the `ngo_reports` table). It required a monthly CSV from each Verein, which they will not send.
 - **Backdated test data** (`POST /admin/customers/{key}/backdate`, `stellwerk backdate`, shipped 13 September 2026) — a ride that already happened, with the delay it had: an arrived journey, its one leg and the case the rules allow, so bundles, the monthly cap, deadlines and the claim form can be tested without waiting for a real train. No feed is consulted; the evidence names the Stellwerk and the case counts as self-entered, so no claim ever dresses invented data up as live data.
