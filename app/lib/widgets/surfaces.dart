@@ -223,7 +223,7 @@ class VBoard extends StatelessWidget {
     if (onTap == null) return box;
     return Stack(
       children: [
-        box,
+        _BoardExplains(child: box),
         Positioned.fill(
           child: Material(
             color: Colors.transparent,
@@ -240,7 +240,24 @@ class VBoard extends StatelessWidget {
   }
 }
 
+/// Marks the space inside a [VBoard] that answers „Woher weißt du das?" when it is tapped, so the
+/// label over the figure can say so with its own small mark.
+class _BoardExplains extends InheritedWidget {
+  const _BoardExplains({required super.child});
+
+  static bool of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<_BoardExplains>() != null;
+
+  @override
+  bool updateShouldNotify(_BoardExplains oldWidget) => false;
+}
+
 /// The label over a board's figure. Small caps, quiet, with an optional glyph in front of it.
+///
+/// Inside a board that opens its source sheet, the label ends in a small ⓘ. Every figure in the
+/// app is meant to answer where it comes from (docs/13) and the big ones do — but the boards
+/// carried nothing that said so, so the answer sat behind a tap nobody had a reason to try. The
+/// mark is the label's, not the board's corner: it stays beside the words it belongs to at any
+/// text size, and it cannot land on the handwritten note that shares the board's right-hand side.
 class VBoardLabel extends StatelessWidget {
   const VBoardLabel(this.text, {super.key, this.icon, this.look = VBoardLook.dark});
   final String text;
@@ -250,14 +267,23 @@ class VBoardLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = VText.eyebrow.copyWith(color: VColors.inkOnDark2);
-    if (icon == null) return Text(text.toUpperCase(), style: style);
+    final explains = _BoardExplains.of(context);
+    if (icon == null && !explains) return Text(text.toUpperCase(), style: style);
     return Row(
       children: [
-        Icon(icon, size: 17, color: VColors.inkOnDark2),
-        const SizedBox(width: VSpace.s),
+        if (icon != null) ...[
+          Icon(icon, size: 17, color: VColors.inkOnDark2),
+          const SizedBox(width: VSpace.s),
+        ],
         Flexible(
           child: Text(text.toUpperCase(), style: style, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
+        // Quieter than the label: the figure and its name come first, the offer to explain them
+        // second. Outside the Flexible, so a long label loses its own end rather than the mark.
+        if (explains) ...[
+          const SizedBox(width: VSpace.xs),
+          const Icon(Icons.info_outline, size: 14, color: VColors.inkOnDark3),
+        ],
       ],
     );
   }

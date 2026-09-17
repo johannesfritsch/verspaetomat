@@ -43,8 +43,9 @@ import '../theme/tokens.dart';
 /// rotation to the parent as a surprise. It measures the text with a [TextPainter], computes the
 /// rotated bounds (`w·|cos| + h·|sin|` by `w·|sin| + h·|cos|`) and reports *those* as its size,
 /// with the note centred inside. It therefore occupies exactly what it paints, and a [Column]
-/// above or below it keeps its gap. If the rotated width would not fit the incoming constraints
-/// the text is re-wrapped narrower rather than clipped — a hand note wraps, it never ellipsises.
+/// above or below it keeps its gap. If the rotated block would not fit the incoming constraints
+/// the whole note is scaled down to fit: it keeps the lines it was written with, because a hand
+/// note is never re-wrapped, never ellipsised and never cut.
 ///
 /// **What the mockups measure.** Two different tilts live in those files and only one of them is
 /// rotation. Every line of every note rises to the right — baseline fits give −8.1° ("Gutes." on
@@ -113,48 +114,64 @@ class VHandNote extends StatelessWidget {
           textScaler: scaler,
         );
 
-        // Measured unwrapped: the width the note asks for is the width of its longest
-        // authored line, and the caller gives it that or the note overhangs — which on a board is
-        // fine, because the board is wider than the column the note sits in.
-        final ceiling = double.infinity;
-        painter.layout(maxWidth: ceiling);
-        var width = painter.width;
-        var height = painter.height + _inkSlack(span, direction, scaler, ceiling);
+        // Measured unwrapped: the width the note asks for is the width of its longest authored
+        // line. A line is never re-wrapped to fit — „Verspätung" broken into „Verspätun" and „g"
+        // is not handwriting, it is a fault — so if the space is too small the whole block is
+        // scaled down below instead.
+        painter.layout();
+        final width = painter.width;
+        final height = painter.height + _inkSlack(span, direction, scaler, double.infinity);
 
         final sin = math.sin(angle).abs();
         final cos = math.cos(angle).abs();
 
-        // Re-wrap if the rotated block would not fit. The height is what the rotation borrows
-        // from the width, so subtract it and lay the text out again.
-        if (sin > 0 && ceiling.isFinite && width * cos + height * sin > ceiling) {
-          painter.layout(maxWidth: math.max(0, ceiling - height * sin));
-          width = painter.width;
-          height = painter.height + _inkSlack(span, direction, scaler, ceiling);
-        }
-
         final rotated = Size(width * cos + height * sin, width * sin + height * cos);
         painter.dispose();
 
-        return Semantics(
-          label: text.replaceAll('\n', ' '),
-          child: ExcludeSemantics(
-            child: SizedBox(
-              width: rotated.width,
-              height: rotated.height,
-              child: Center(
-                child: Transform.rotate(
-                  angle: angle,
-                  // The child is given the painter's own width so it breaks exactly where the
-                  // measurement said it would; the rotation then pivots about that box's centre,
-                  // which is the centre of the SizedBox, so the painted bounds fill it exactly.
-                  child: SizedBox(
-                    width: width,
-                    child: Text(text, style: style, textAlign: align, softWrap: false),
-                  ),
+        Widget note = SizedBox(
+          width: rotated.width,
+          height: rotated.height,
+          child: Center(
+            child: Transform.rotate(
+              angle: angle,
+              // The child is given the painter's own width so it breaks exactly where the
+              // measurement said it would; the rotation then pivots about that box's centre,
+              // which is the centre of the SizedBox, so the painted bounds fill it exactly.
+              child: SizedBox(
+                width: width,
+                child: Text(
+                  text,
+                  style: style,
+                  textAlign: align,
+                  softWrap: false,
+                  // Caveat is a script: its letters lean into each other and their ink runs past
+                  // the advance widths the layout is measured in, on the last letter of a line by
+                  // a point or two. Text clips to its box by default, so the note came out shaved
+                  // down the right edge — „Gutes." lost its full stop, „Verspätung" the tail of
+                  // its g. The ink is allowed out of the box instead; the box is a measurement,
+                  // not a frame.
+                  overflow: TextOverflow.visible,
                 ),
               ),
             ),
           ),
+        );
+
+        // Too little room — a narrow phone, or large system text. The note shrinks as a block and
+        // keeps the lines the designer drew, which is what handwriting on a small page does. It
+        // never breaks a word and never gets cut.
+        if (constraints.hasBoundedWidth && rotated.width > constraints.maxWidth) {
+          final scale = constraints.maxWidth / rotated.width;
+          note = SizedBox(
+            width: constraints.maxWidth,
+            height: rotated.height * scale,
+            child: FittedBox(fit: BoxFit.contain, child: note),
+          );
+        }
+
+        return Semantics(
+          label: text.replaceAll('\n', ' '),
+          child: ExcludeSemantics(child: note),
         );
       },
     );
