@@ -1146,6 +1146,11 @@ pub async fn route_answers(State(s): State<AppState>, _a: Admin, Json(b): Json<A
     };
     let add = normalise(&b.add)?;
     let remove = normalise(&b.remove)?;
+    // Only looking: nothing written, nothing in the audit trail.
+    if add.is_empty() && remove.is_empty() && !b.clear {
+        let extra: Vec<String> = current.as_deref().unwrap_or("").split(',').filter_map(|d| crate::reply::normalise_domain(d).ok()).collect();
+        return Ok(Json(json!({ "desk": b.desk.trim(), "to_address": to_address, "answer_domains": crate::reply::answer_domains(&to_address, current.as_deref()), "extra": extra })));
+    }
     if let Some(free) = add.iter().find(|d| crate::reply::is_free_mail(d)) {
         if !b.force {
             return Err(err(StatusCode::BAD_REQUEST, &format!("{free} is a free-mail provider: anybody with an account there could confirm money. Add it with force only for a test inbox")));
