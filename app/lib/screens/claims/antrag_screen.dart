@@ -83,6 +83,21 @@ class _AntragScreenState extends State<AntragScreen> {
   final _pAddress = TextEditingController();
   final _pEmail = TextEditingController();
   final _pTicket = TextEditingController();
+
+  /// Where each required row is and how to put the cursor in it, so „Weiter" can take the
+  /// passenger to what is missing. It used to name the missing field in a snackbar while the form
+  /// sat below the fold — and after the e-mail row was relabelled „Postfach", people put their
+  /// postcode there and were told an e-mail field was missing that they could not find (#19).
+  final _fName = FocusNode();
+  final _fAddress = FocusNode();
+  final _fEmail = FocusNode();
+  final _kName = GlobalKey();
+  final _kAddress = GlobalKey();
+  final _kEmail = GlobalKey();
+  final _kUnknownDesk = GlobalKey();
+
+  /// The rows the last „Weiter" found missing or wrong. Each mark goes as soon as its row is fine.
+  Set<PersonalField> _marked = {};
   /// The signature as drawn, so the step can show it back. The server has no route that serves an
   /// upload, and in Demo there is no upload at all.
   Uint8List? _signaturePng;
@@ -96,6 +111,13 @@ class _AntragScreenState extends State<AntragScreen> {
     super.initState();
     _draft = widget.draft;
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    // Leaving the e-mail row with something that is not an address says so right there, not only
+    // when „Weiter" is pressed.
+    _fEmail.addListener(() {
+      if (!_fEmail.hasFocus && _pEmail.text.trim().isNotEmpty && !looksLikeEmail(_pEmail.text)) {
+        setState(() => _marked = {..._marked, PersonalField.email});
+      }
+    });
   }
 
   @override
@@ -103,6 +125,9 @@ class _AntragScreenState extends State<AntragScreen> {
     _unknownAddress.dispose();
     for (final c in [_pName, _pAddress, _pEmail, _pTicket]) {
       c.dispose();
+    }
+    for (final f in [_fName, _fAddress, _fEmail]) {
+      f.dispose();
     }
     super.dispose();
   }
@@ -461,9 +486,16 @@ class _AntragScreenState extends State<AntragScreen> {
           desk: widget.desk,
           unknown: _unknownDesk,
           addressCtl: _unknownAddress,
+          unknownKey: _kUnknownDesk,
           showPersonal: _showPersonal,
-          onChanged: () => setState(() {}),
+          onChanged: () => setState(() {
+            // A mark stays only while its row is still missing.
+            if (_marked.isNotEmpty) _marked = _marked.intersection(_missingPersonal().toSet());
+          }),
           personal: (name: _pName, address: _pAddress, email: _pEmail, ticket: _pTicket),
+          focus: (name: _fName, address: _fAddress, email: _fEmail),
+          keys: (name: _kName, address: _kAddress, email: _kEmail),
+          marked: _marked,
         ),
       1 => _Ticket(
           months: _months,
@@ -538,18 +570,37 @@ class _AntragScreenState extends State<AntragScreen> {
     );
   }
 
+  /// The personal rows still missing, in the order they stand on the screen.
+  List<PersonalField> _missingPersonal() => [
+        if (_showPersonal && _pName.text.trim().isEmpty) PersonalField.name,
+        if (_showPersonal && _pAddress.text.trim().isEmpty) PersonalField.address,
+        if (_showPersonal && !looksLikeEmail(_pEmail.text)) PersonalField.email,
+      ];
+
   /// Weiter on „Prüfen": check what the form needs, save it, show the twelve words, move on.
+  ///
+  /// Something missing: mark every missing row, scroll to the first and put the cursor in it. A
+  /// message about a field the passenger cannot see is a riddle, not a hint.
   Future<void> _advanceFromPruefen() async {
-    final missing = <String>[
-      if (_showPersonal && _pName.text.trim().isEmpty) 'dein Name',
-      if (_showPersonal && _pAddress.text.trim().isEmpty) 'deine Anschrift',
-      if (_showPersonal && !_pEmail.text.contains('@')) 'deine E-Mail-Adresse',
-      if (_unknownDesk && _unknownAddress.text.trim().isEmpty) 'die Anschrift der Stelle',
-    ];
-    if (missing.isNotEmpty) {
-      final list = missing.length == 1 ? missing.first : '${missing.sublist(0, missing.length - 1).join(', ')} und ${missing.last}';
-      final verb = missing.length == 1 ? 'fehlt' : 'fehlen';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Für das Formular $verb noch $list.')));
+    final missing = _missingPersonal();
+    final deskMissing = _unknownDesk && _unknownAddress.text.trim().isEmpty;
+    if (missing.isNotEmpty || deskMissing) {
+      setState(() => _marked = missing.toSet());
+      final (key, focus) = switch (missing.firstOrNull) {
+        PersonalField.name => (_kName, _fName),
+        PersonalField.address => (_kAddress, _fAddress),
+        PersonalField.email => (_kEmail, _fEmail),
+        null => (_kUnknownDesk, null),
+      };
+      final target = key.currentContext;
+      if (target != null) {
+        await Scrollable.ensureVisible(target, duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic, alignment: 0.3);
+      }
+      if (!mounted) return;
+      focus?.requestFocus();
+      if (missing.isEmpty && deskMissing) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Für das Formular fehlt noch die Anschrift der Stelle.')));
+      }
       return;
     }
     if (_showPersonal) {
@@ -734,9 +785,13 @@ class _Pruefen extends StatelessWidget {
     required this.desk,
     required this.unknown,
     required this.addressCtl,
+    required this.unknownKey,
     required this.showPersonal,
     required this.onChanged,
     required this.personal,
+    required this.focus,
+    required this.keys,
+    required this.marked,
   });
   final ApiClaimDraft draft;
   final List<ApiIncident> incidents;
@@ -751,9 +806,13 @@ class _Pruefen extends StatelessWidget {
   final String desk;
   final bool unknown;
   final TextEditingController addressCtl;
+  final GlobalKey unknownKey;
   final bool showPersonal;
   final VoidCallback onChanged;
   final ({TextEditingController name, TextEditingController address, TextEditingController email, TextEditingController ticket}) personal;
+  final ({FocusNode name, FocusNode address, FocusNode email}) focus;
+  final ({GlobalKey name, GlobalKey address, GlobalKey email}) keys;
+  final Set<PersonalField> marked;
 
   @override
   Widget build(BuildContext context) {
@@ -761,6 +820,64 @@ class _Pruefen extends StatelessWidget {
     final cases = available.isNotEmpty ? available : incidents;
     final pd = me?.personalData;
     final relay = me?.relayAddress ?? draft.relayAddress;
+    final form = showPersonal || pd == null;
+    final goesTo = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const VGap.xl(),
+        const VSectionHeader('Geht an', onCard: false),
+        const VGap.m(),
+        if (unknown || (draft.deskAddress == null && draft.deskEmail == null))
+          _UnknownDesk(key: unknownKey, ctl: addressCtl, onChanged: onChanged)
+        else ...[
+          Text(desk, style: VText.bodyStrong),
+          const VGap.xs(),
+          Text([draft.deskAddress, draft.deskEmail].whereType<String>().join('\n'), style: VText.bodyS.copyWith(color: VColors.ink2)),
+          const VGap.xs(),
+          Text(
+            desk == 'Servicecenter Fahrgastrechte'
+                ? 'Die gemeinsame Stelle von DB und rund 40 weiteren Bahnen.'
+                : (draft.deskEmail == null ? 'Eigene Stelle ohne E-Mail. Der Antrag geht per Post.' : 'Eigene Fahrgastrechte-Stelle dieses Betreibers.'),
+            style: VText.caption,
+          ),
+        ],
+      ],
+    );
+    final yours = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const VGap.xl(),
+        const VSectionHeader('Deine Angaben', onCard: false),
+        if (form)
+          _PersonalForm(fields: personal, focus: focus, keys: keys, marked: marked, onChanged: onChanged)
+        else ...[
+          VKeyValue('Name', pd.name, strong: true),
+          const VRule(),
+          VKeyValue('Anschrift', pd.address.replaceAll('\n', ', ')),
+          const VRule(),
+          VKeyValue('E-Mail', pd.email),
+          const VRule(),
+          VKeyValue('Ticket-Nr.', pd.ticketNumber ?? '–', valueStyle: VText.mono),
+        ],
+        if (relay != null) ...[
+          const VGap.m(),
+          Container(
+            padding: const EdgeInsets.all(VSpace.m),
+            decoration: BoxDecoration(border: Border.all(color: VColors.rule), borderRadius: BorderRadius.circular(4)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('DEINE VERSPÄTOMAT-ADRESSE', style: VText.eyebrow),
+                const SizedBox(height: 6),
+                Text(relay, style: VText.mono),
+                const SizedBox(height: 6),
+                Text('Deine Anträge gehen von hier raus. Antworten der Bahn landen dort und sofort auch in deinem E-Mail-Postfach.', style: VText.caption),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -806,53 +923,9 @@ class _Pruefen extends StatelessWidget {
           text: 'Abhaken nimmt einen Fall nur aus diesem Antrag; er bleibt liegen und kommt in den nächsten. '
               'Tipp die Zeile an, wenn du den Nachweis sehen oder den Fall ganz verwerfen willst.',
         ),
-        const VGap.xl(),
-        const VSectionHeader('Geht an', onCard: false),
-        const VGap.m(),
-        if (unknown || (draft.deskAddress == null && draft.deskEmail == null))
-          _UnknownDesk(ctl: addressCtl, onChanged: onChanged)
-        else ...[
-          Text(desk, style: VText.bodyStrong),
-          const VGap.xs(),
-          Text([draft.deskAddress, draft.deskEmail].whereType<String>().join('\n'), style: VText.bodyS.copyWith(color: VColors.ink2)),
-          const VGap.xs(),
-          Text(
-            desk == 'Servicecenter Fahrgastrechte'
-                ? 'Die gemeinsame Stelle von DB und rund 40 weiteren Bahnen.'
-                : (draft.deskEmail == null ? 'Eigene Stelle ohne E-Mail. Der Antrag geht per Post.' : 'Eigene Fahrgastrechte-Stelle dieses Betreibers.'),
-            style: VText.caption,
-          ),
-        ],
-        const VGap.xl(),
-        const VSectionHeader('Deine Angaben', onCard: false),
-        if (showPersonal || pd == null)
-          _PersonalForm(fields: personal, onChanged: onChanged)
-        else ...[
-          VKeyValue('Name', pd.name, strong: true),
-          const VRule(),
-          VKeyValue('Anschrift', pd.address.replaceAll('\n', ', ')),
-          const VRule(),
-          VKeyValue('Privates Postfach', pd.email),
-          const VRule(),
-          VKeyValue('Ticket-Nr.', pd.ticketNumber ?? '–', valueStyle: VText.mono),
-        ],
-        if (relay != null) ...[
-          const VGap.m(),
-          Container(
-            padding: const EdgeInsets.all(VSpace.m),
-            decoration: BoxDecoration(border: Border.all(color: VColors.rule), borderRadius: BorderRadius.circular(4)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('DEINE VERSPÄTOMAT-ADRESSE', style: VText.eyebrow),
-                const SizedBox(height: 6),
-                Text(relay, style: VText.mono),
-                const SizedBox(height: 6),
-                Text('Deine Anträge gehen von hier raus. Antworten der Bahn landen dort und sofort auch in deinem Postfach.', style: VText.caption),
-              ],
-            ),
-          ),
-        ],
+        // While „Deine Angaben" still has to be filled in it comes first: it is the one part of this
+        // step that asks for something, and below „Geht an" it started well under the fold.
+        if (form) ...[yours, goesTo] else ...[goesTo, yours],
         const VGap.s(),
         Text('Diese Daten stehen nur auf dem Formular.', style: VText.caption),
       ],
@@ -861,7 +934,7 @@ class _Pruefen extends StatelessWidget {
 }
 
 class _UnknownDesk extends StatelessWidget {
-  const _UnknownDesk({required this.ctl, required this.onChanged});
+  const _UnknownDesk({super.key, required this.ctl, required this.onChanged});
   final TextEditingController ctl;
   final VoidCallback onChanged;
 
@@ -889,13 +962,23 @@ class _UnknownDesk extends StatelessWidget {
   }
 }
 
+/// The rows of „Deine Angaben" that „Weiter" can find missing.
+enum PersonalField { name, address, email }
+
+/// Something shaped like an e-mail address. Not a full RFC check — the point is to catch a
+/// postcode or a name in the e-mail row, before the claim goes out with no copy for the passenger.
+bool looksLikeEmail(String s) => RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$').hasMatch(s.trim());
+
 /// First claim only: name, address, private inbox, ticket number.
 /// „Deine Angaben": the fields and nothing else. Checking and saving belong to „Weiter", so this
 /// has no button of its own — a form with its own save next to a flow's own onward button asks the
 /// passenger to work out which one matters, and the answer used to be "both, in order".
 class _PersonalForm extends StatelessWidget {
-  const _PersonalForm({required this.fields, required this.onChanged});
+  const _PersonalForm({required this.fields, required this.focus, required this.keys, required this.marked, required this.onChanged});
   final ({TextEditingController name, TextEditingController address, TextEditingController email, TextEditingController ticket}) fields;
+  final ({FocusNode name, FocusNode address, FocusNode email}) focus;
+  final ({GlobalKey name, GlobalKey address, GlobalKey email}) keys;
+  final Set<PersonalField> marked;
   final VoidCallback onChanged;
 
   @override
@@ -920,8 +1003,11 @@ class _PersonalForm extends StatelessWidget {
             child: Column(
               children: [
                 _Field(
+                  key: keys.name,
                   label: 'Name',
                   hint: 'Vor- und Nachname',
+                  focusNode: focus.name,
+                  error: marked.contains(PersonalField.name) ? 'Fehlt noch.' : null,
                   controller: fields.name,
                   onChanged: onChanged,
                   autofill: const [AutofillHints.name],
@@ -929,8 +1015,11 @@ class _PersonalForm extends StatelessWidget {
                 ),
                 const VDivider(),
                 _Field(
+                  key: keys.address,
                   label: 'Anschrift',
                   hint: 'Straße, Hausnummer, PLZ und Ort',
+                  focusNode: focus.address,
+                  error: marked.contains(PersonalField.address) ? 'Fehlt noch.' : null,
                   controller: fields.address,
                   onChanged: onChanged,
                   autofill: const [AutofillHints.fullStreetAddress, AutofillHints.postalAddress],
@@ -938,9 +1027,14 @@ class _PersonalForm extends StatelessWidget {
                   lines: 2,
                 ),
                 const VDivider(),
+                // „E-Mail", not „Postfach": next to „Anschrift" that read as a P.O. box, and a postcode
+                // went in (#19). The word has to stay on screen once the field is filled.
                 _Field(
-                  label: 'Postfach',
-                  hint: 'Deine private E-Mail',
+                  key: keys.email,
+                  label: 'E-Mail',
+                  hint: 'Für die Kopie jedes Antrags',
+                  focusNode: focus.email,
+                  error: marked.contains(PersonalField.email) ? (fields.email.text.trim().isEmpty ? 'Fehlt noch.' : 'Das ist keine E-Mail-Adresse.') : null,
                   controller: fields.email,
                   onChanged: onChanged,
                   autofill: const [AutofillHints.email],
@@ -976,10 +1070,13 @@ class _PersonalForm extends StatelessWidget {
 /// thing it becomes is easier to check than one that looks like a different screen.
 class _Field extends StatelessWidget {
   const _Field({
+    super.key,
     required this.label,
     required this.hint,
     required this.controller,
     required this.onChanged,
+    this.focusNode,
+    this.error,
     this.autofill,
     this.keyboard,
     this.capitalization = TextCapitalization.none,
@@ -991,6 +1088,10 @@ class _Field extends StatelessWidget {
   final String hint;
   final TextEditingController controller;
   final VoidCallback onChanged;
+  final FocusNode? focusNode;
+
+  /// What is wrong with the row, shown under it with the label in red. Null: nothing.
+  final String? error;
   final List<String>? autofill;
   final TextInputType? keyboard;
   final TextCapitalization capitalization;
@@ -999,40 +1100,55 @@ class _Field extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final wrong = error != null;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: VSpace.s),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 96,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(label, style: VText.bodyS.copyWith(color: VColors.ink2)),
+      // One node for the reader: „E-Mail, text field", not a label and a field it has to pair.
+      child: MergeSemantics(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 96,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(label, style: VText.bodyS.copyWith(color: wrong ? VColors.red : VColors.ink2)),
+                  ),
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    onChanged: (_) => onChanged(),
+                    autofillHints: autofill,
+                    keyboardType: keyboard,
+                    textCapitalization: capitalization,
+                    maxLines: lines,
+                    style: mono ? VText.mono : VText.bodySStrong,
+                    decoration: InputDecoration(
+                      hintText: hint,
+                      hintStyle: VText.bodyS.copyWith(color: VColors.ink3),
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      filled: false,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onChanged: (_) => onChanged(),
-              autofillHints: autofill,
-              keyboardType: keyboard,
-              textCapitalization: capitalization,
-              maxLines: lines,
-              style: mono ? VText.mono : VText.bodySStrong,
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: VText.bodyS.copyWith(color: VColors.ink3),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                filled: false,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            if (wrong)
+              Padding(
+                padding: const EdgeInsets.only(left: 96, bottom: VSpace.xs),
+                child: Text(error!, style: VText.caption.copyWith(color: VColors.red)),
               ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
