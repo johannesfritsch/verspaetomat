@@ -366,12 +366,16 @@ enum Cmd {
         #[arg(long)]
         subject: Option<String>,
         /// Read it as the answer to this claim id (its rides, its passenger taken out)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "to")]
         claim: Option<String>,
-        /// Without --claim: cents claimed for the single made-up ride it is read against (default 150)
+        /// Or the address the answer was sent to (antrag-…@users.verspaetomat.de): the claim is found
+        /// the way the webhook finds it
+        #[arg(long)]
+        to: Option<String>,
+        /// Without --claim or --to: cents claimed for the single made-up ride it is read against (default 150)
         #[arg(long)]
         claimed: Option<i64>,
-        /// Without --claim: that ride's date, YYYY-MM-DD (default today)
+        /// Without --claim or --to: that ride's date, YYYY-MM-DD (default today)
         #[arg(long)]
         date: Option<String>,
     },
@@ -692,7 +696,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("Antrag:  {}", v["claim_moved_to"].as_str().unwrap_or("unverändert"));
             }
         }
-        Cmd::ReadMail { file, from, subject, claim, claimed, date } => {
+        Cmd::ReadMail { file, from, subject, claim, to, claimed, date } => {
             let body = if file == "-" {
                 let mut b = String::new();
                 std::io::Read::read_to_string(&mut std::io::stdin(), &mut b)?;
@@ -700,8 +704,15 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 std::fs::read_to_string(&file)?
             };
-            let v = api.post("/admin/read-mail", json!({ "from": from, "subject": subject, "body": body, "claim_id": claim, "claimed_cents": claimed, "ride_date": date })).await?;
+            let v = api.post("/admin/read-mail", json!({ "from": from, "subject": subject, "body": body, "claim_id": claim, "to": to, "claimed_cents": claimed, "ride_date": date })).await?;
             let verdict = &v["verdict"];
+            let matched = &v["matched"];
+            if !matched.is_null() {
+                match matched["claim_id"].as_str() {
+                    Some(id) => println!("Zugeordnet: Antrag {id} ({}), Fahrgast {} — über {}", s(matched, "claim_status"), s(matched, "customer"), s(matched, "how")),
+                    None => println!("Zugeordnet: Fahrgast {}, aber kein offener Antrag — über {}. Es kann sich nichts bewegen.", s(matched, "customer"), s(matched, "how")),
+                }
+            }
             println!("Gelesen von: {}   (Modell eingerichtet: {})", s(&v, "read_by"), v["model_configured"].as_str().unwrap_or("nein"));
             println!("Ergebnis:    {}   Betrag {} ct", s(verdict, "outcome"), s(verdict, "amount_cents"));
             println!("Weil:        {}", s(verdict, "because"));

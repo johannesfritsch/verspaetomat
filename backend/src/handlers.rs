@@ -1887,6 +1887,42 @@ pub async fn unread_mails(pool: &PgPool, customer_id: Uuid) -> anyhow::Result<i6
     Ok(sqlx::query_scalar("select count(*) from mails where customer_id = $1 and direction = 'inbound' and seen_at is null").bind(customer_id).fetch_one(pool).await?)
 }
 
+/// Whom an inbound mail belongs to, found by the address it was sent to.
+pub struct Routed {
+    pub customer: CustomerRow,
+    pub claim: Option<ClaimRow>,
+    /// How it was found, for the dry run to say.
+    pub how: &'static str,
+}
+
+/// Routing order (docs/18 §4): the claim's own address (`antrag-<hex>@RELAY_DOMAIN`) names customer
+/// and claim in one step; the customer's older per-customer address (`fahrgast-<hex>@…`) names only
+/// the customer, and the claim is the one named, the one whose mail this answers, or the newest open
+/// one. None: the address belongs to nobody. Shared by the webhook and `stellwerk read-mail --to`, so
+/// the dry run finds what the webhook would.
+pub async fn route_inbound(pool: &PgPool, to: &str, claim_id: Option<Uuid>, in_reply_to: Option<&str>) -> Result<Option<Routed>, sqlx::Error> {
+    let address = inbound_address(to);
+    let by_claim: Option<ClaimRow> = sqlx::query_as("select * from claims where lower(reply_address) = $1").bind(&address).fetch_optional(pool).await?;
+    if let Some(claim) = by_claim {
+        let customer: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(claim.customer_id).fetch_one(pool).await?;
+        return Ok(Some(Routed { customer, claim: Some(claim), how: "the claim's own address" }));
+    }
+    let customer: Option<CustomerRow> = sqlx::query_as("select * from customers where lower(relay_address) = $1").bind(&address).fetch_optional(pool).await?;
+    let Some(customer) = customer else { return Ok(None) };
+    let (claim, how): (Option<ClaimRow>, &'static str) = match (claim_id, in_reply_to) {
+        (Some(id), _) => (sqlx::query_as("select * from claims where id = $1 and customer_id = $2").bind(id).bind(customer.id).fetch_optional(pool).await?, "the passenger's address, claim named"),
+        (None, Some(mid)) => (
+            sqlx::query_as("select c.* from claims c join mails ml on ml.claim_id = c.id where ml.message_id = $1 and c.customer_id = $2").bind(mid).bind(customer.id).fetch_optional(pool).await?,
+            "the passenger's address, answering our mail",
+        ),
+        (None, None) => (
+            sqlx::query_as("select * from claims where customer_id = $1 and status in ('sent','question') order by sent_at desc limit 1").bind(customer.id).fetch_optional(pool).await?,
+            "the passenger's address, newest open claim",
+        ),
+    };
+    Ok(Some(Routed { customer, claim, how }))
+}
+
 /// A claim's rides in the order a reader numbers them (F1, F2, …). One query for the webhook and the
 /// dry run, so `stellwerk read-mail --claim` shows what the webhook will do.
 pub async fn claim_rides(pool: &PgPool, claim_id: Uuid) -> Result<Vec<IncidentRow>, sqlx::Error> {
@@ -2188,27 +2224,10 @@ pub async fn process_inbound(s: &AppState, mut m: InboundMail) -> Result<Value, 
         }
     }
     let relay = inbound_address(&m.to);
-    // Routing order (docs/18 §4): the claim's own address names customer and claim in one step;
-    // the customer's old per-customer address falls back to threading and "newest open claim".
-    let by_claim: Option<ClaimRow> = sqlx::query_as("select * from claims where lower(reply_address) = $1").bind(&relay).fetch_optional(&s.pool).await.map_err(internal)?;
-    let (cust, claim): (CustomerRow, Option<ClaimRow>) = match by_claim {
-        Some(cl) => {
-            let cust: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(cl.customer_id).fetch_one(&s.pool).await.map_err(internal)?;
-            (cust, Some(cl))
-        }
-        None => {
-            let cust: Option<CustomerRow> = sqlx::query_as("select * from customers where lower(relay_address) = $1").bind(&relay).fetch_optional(&s.pool).await.map_err(internal)?;
-            let Some(cust) = cust else { return Err(err(StatusCode::NOT_FOUND, "no claim or customer for this address")) };
-            let claim: Option<ClaimRow> = match m.claim_id {
-                Some(id) => sqlx::query_as("select * from claims where id = $1 and customer_id = $2").bind(id).bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
-                None => match &m.in_reply_to {
-                    Some(mid) => sqlx::query_as("select c.* from claims c join mails ml on ml.claim_id = c.id where ml.message_id = $1 and c.customer_id = $2").bind(mid).bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
-                    None => sqlx::query_as("select * from claims where customer_id = $1 and status in ('sent','question') order by sent_at desc limit 1").bind(cust.id).fetch_optional(&s.pool).await.map_err(internal)?,
-                },
-            };
-            (cust, claim)
-        }
+    let Some(routed) = route_inbound(&s.pool, &relay, m.claim_id, m.in_reply_to.as_deref()).await.map_err(internal)? else {
+        return Err(err(StatusCode::NOT_FOUND, "no claim or customer for this address"));
     };
+    let (cust, claim) = (routed.customer, routed.claim);
     // The desk's own words are the only confirmation this system has. `reply.rs` reads them — the
     // rules always, a model when one is configured — and checks every answer against the mail
     // before anything moves; each check that fails ends as "a human should read this", because a

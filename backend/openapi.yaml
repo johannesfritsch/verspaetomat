@@ -326,10 +326,10 @@ paths:
       responses: { "200": { description: "{desk, to_address, answer_domains: [the destination's domain, then the added ones], extra}" }, "400": { description: not a domain, or a free-mail provider without force }, "404": { description: no route for this desk } }
   /admin/read-mail:
     post:
-      summary: "How a desk's mail would be read, without it touching anything: the same reader as inbound mail (rules, model when OPENAI_API_KEY is set, and the gate between them), no writes. With claim_id it reads against that claim's rides and takes that passenger out of the text; without, against one made-up ride (claimed_cents, ride_date)."
+      summary: "How a desk's mail would be read, without it touching anything: the same reader as inbound mail (rules, model when OPENAI_API_KEY is set, and the gate between them), no writes. With claim_id, or with to (the address the answer was sent to, routed exactly like the webhook), it reads against that claim's rides and takes that passenger out of the text; without, against one made-up ride (claimed_cents, ride_date)."
       security: [{ adminToken: [] }]
-      requestBody: { content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string }, from: { type: string }, subject: { type: string }, claim_id: { type: string, format: uuid }, claimed_cents: { type: integer }, ride_date: { type: string, format: date } } } } } }
-      responses: { "200": { description: "{model_configured, read_by: rules | model:<snapshot>, verdict: {outcome, rides: [{incident_id, decision: paid | refused, cents}], amount_cents, because}, trace}" }, "404": { description: no such claim } }
+      requestBody: { content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string }, from: { type: string }, subject: { type: string }, claim_id: { type: string, format: uuid }, to: { type: string }, claimed_cents: { type: integer }, ride_date: { type: string, format: date } } } } } }
+      responses: { "200": { description: "{model_configured, matched: {how, claim_id, customer, claim_status} | null, read_by: rules | model:<snapshot>, verdict: {outcome, rides: [{incident_id, decision: paid | refused, cents}], amount_cents, because}, trace}" }, "404": { description: no such claim } }
 
 components:
   schemas:

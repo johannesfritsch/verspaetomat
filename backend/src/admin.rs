@@ -235,6 +235,10 @@ pub struct ReadMailBody {
     /// Read it as the answer to this claim: its rides, and its passenger taken out of the text.
     #[serde(default)]
     pub claim_id: Option<Uuid>,
+    /// Or find the claim the way the webhook does, by the address the answer was sent to
+    /// (`antrag-…@users.verspaetomat.de`).
+    #[serde(default)]
+    pub to: Option<String>,
     /// Without a claim: what was claimed for the single ride it is read against, in cents (150).
     #[serde(default)]
     pub claimed_cents: Option<i64>,
@@ -252,16 +256,40 @@ pub struct ReadMailBody {
 pub async fn read_mail(State(s): State<AppState>, _a: Admin, Json(b): Json<ReadMailBody>) -> ApiResult {
     let from = b.from.unwrap_or_else(|| "Servicecenter Fahrgastrechte <fahrgastrechte@servicecenter.invalid>".into());
     let subject = b.subject.unwrap_or_else(|| "Ihr Antrag auf Entschädigung".into());
-    let (claim, claimed, rides, known) = match b.claim_id {
-        Some(id) => {
+    if b.claim_id.is_some() && b.to.is_some() {
+        return Err(err(StatusCode::BAD_REQUEST, "either a claim id or an address, not both"));
+    }
+    // Who the answer belongs to: the claim named, or whatever the address finds.
+    let (target, matched): (Option<(CustomerRow, Option<ClaimRow>)>, Value) = match (b.claim_id, b.to.as_deref()) {
+        (Some(id), _) => {
             let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1").bind(id).fetch_optional(&s.pool).await.map_err(internal)?;
             let Some(claim) = claim else { return Err(err(StatusCode::NOT_FOUND, "no such claim")) };
             let cust: CustomerRow = sqlx::query_as("select * from customers where id = $1").bind(claim.customer_id).fetch_one(&s.pool).await.map_err(internal)?;
+            let matched = json!({ "how": "the claim named", "claim_id": claim.id, "customer": cust.nickname, "claim_status": claim.status });
+            (Some((cust, Some(claim))), matched)
+        }
+        (None, Some(to)) => {
+            let Some(routed) = handlers::route_inbound(&s.pool, to, None, None).await.map_err(internal)? else {
+                return Err(err(StatusCode::NOT_FOUND, "no claim or customer for this address: the webhook would refuse this mail"));
+            };
+            let matched = json!({ "how": routed.how, "claim_id": routed.claim.as_ref().map(|c| c.id), "customer": routed.customer.nickname, "claim_status": routed.claim.as_ref().map(|c| c.status) });
+            (Some((routed.customer, routed.claim)), matched)
+        }
+        (None, None) => (None, Value::Null),
+    };
+    let (claim, claimed, rides, known) = match target {
+        Some((cust, Some(claim))) => {
             let rows = handlers::claim_rides(&s.pool, claim.id).await.map_err(internal)?;
             let (claimed, rides) = crate::reply::rides_of(&rows);
             let mut known = crate::reply::known_of(&cust, Some(&claim), None);
             known.sent = handlers::sent_by_passenger(&s.pool, cust.id).await.map_err(internal)?;
             (Some(claim), claimed, rides, known)
+        }
+        // The passenger, but no claim to answer: read like the webhook, where nothing can move.
+        Some((cust, None)) => {
+            let mut known = crate::reply::known_of(&cust, None, None);
+            known.sent = handlers::sent_by_passenger(&s.pool, cust.id).await.map_err(internal)?;
+            (None, vec![], vec![], known)
         }
         None => {
             let date = b.ride_date.unwrap_or_else(|| clock::now().date_naive());
@@ -281,6 +309,7 @@ pub async fn read_mail(State(s): State<AppState>, _a: Admin, Json(b): Json<ReadM
     }
     Ok(Json(json!({
         "model_configured": crate::openai::Config::from_env().map(|c| c.model),
+        "matched": matched,
         "read_by": decision.read_by,
         "verdict": decision.verdict,
         "trace": decision.trace,

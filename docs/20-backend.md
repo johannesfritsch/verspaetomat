@@ -105,7 +105,9 @@ One binary, several loops:
     unavailable); a mail whose claim is closed or gone is read but not changed. Replies planted by
     `stellwerk reply` are read by the rules only, so end-to-end tests need no network.
   - Trying a real answer without touching a claim: `stellwerk read-mail mail.txt --date 2026-09-03
-    --claimed 150` (or `--claim <id>` to read it against a claim's rides and passenger).
+    --claimed 150`, or against a real claim: `--to antrag-…@users.verspaetomat.de` finds it the way
+    the webhook does (claim address first, then the passenger's older address and their newest open
+    claim), `--claim <id>` names it directly.
   - Removed: the NGO bank-statement import (`POST /admin/ngos/{id}/report`, `stellwerk ngo-report`,
     the `ngo_reports` table). It required a monthly CSV from each Verein, which they will not send.
 - **Backdated test data** (`POST /admin/customers/{key}/backdate`, `stellwerk backdate`, shipped 13 September 2026) — a ride that already happened, with the delay it had: an arrived journey, its one leg and the case the rules allow, so bundles, the monthly cap, deadlines and the claim form can be tested without waiting for a real train. No feed is consulted; the evidence names the Stellwerk and the case counts as self-entered, so no claim ever dresses invented data up as live data.
