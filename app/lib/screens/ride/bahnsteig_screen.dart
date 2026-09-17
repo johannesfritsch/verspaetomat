@@ -12,6 +12,7 @@ import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'checkin_flow.dart';
+import 'location_nudge.dart';
 import 'ride_widgets.dart';
 
 /// Home, second version (docs/16). Six blocks, everything above the fold: the action
@@ -38,6 +39,9 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   String? _lastMeStamp;
   late final Session _session;
 
+  /// The card asking for „Immer" (#18): shown while the phone has not granted it, until closed.
+  late final LocationNudge _nudge;
+
   @override
   void initState() {
     super.initState();
@@ -49,6 +53,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
       if (e.touchesLocation || e.touchesRide || e.touchesLedger) _load();
     });
     session.addListener(_onSession);
+    _nudge = LocationNudge(session)..addListener(_onNudge);
     // There was a timer here that added a random number to the community's minutes every two
     // seconds, so the figure climbed whether or not a single train was late. A product that argues
     // it does not invent numbers cannot print an invented one on its front page. The figure now
@@ -82,7 +87,14 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     _ticker?.cancel();
     _near?.removeListener(_onNearby);
     _session.removeListener(_onSession);
+    _nudge
+      ..removeListener(_onNudge)
+      ..dispose();
     super.dispose();
+  }
+
+  void _onNudge() {
+    if (mounted) setState(() {});
   }
 
   /// The account changed (points after an arrival, a new NGO, a nickname): the numbers follow.
@@ -211,6 +223,13 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
           )
         else
           _CheckinCard(onTap: () => runCheckinFlow(context)),
+
+        // Right under the action it is about: the reminder that starts that action by itself.
+        if (_nudge.visible)
+          LocationNudgeCard(
+            onOpen: () => showLocationNudgeSheet(context, _nudge),
+            onDismiss: _nudge.dismiss,
+          ),
 
         // Under the card: yesterday's forgotten check-in, only for people who ride most days.
         if (st.next?.kind == 'nachtrag')
