@@ -212,13 +212,27 @@ enum RouteCmd {
         live: bool,
         #[arg(long)]
         note: Option<String>,
-        /// Domains the desk answers from, comma-separated ("bahn.de,info.bahn.de"). Only verified mail
-        /// from these can accept, refuse or ask. Without it: unchanged; "default" = the domain of TO
-        #[arg(long = "reply-from")]
-        reply_from: Option<String>,
     },
     /// Remove a route. Nothing can be sent to that desk afterwards.
     Remove { desk: String },
+    /// The domains a desk's answers may come from, besides the domain its mail goes to. Only
+    /// verified mail from these can accept, refuse or ask. Without options: show them
+    Answers {
+        /// The desk, exactly as in `route list`
+        desk: String,
+        /// Add a domain (repeatable, or comma-separated); subdomains count too
+        #[arg(long)]
+        add: Vec<String>,
+        /// Remove a domain (repeatable, or comma-separated)
+        #[arg(long)]
+        remove: Vec<String>,
+        /// Remove every added domain; the destination's own domain stays
+        #[arg(long)]
+        clear: bool,
+        /// Allow a free-mail provider (gmail.com, web.de, …) — only for a test inbox
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -478,6 +492,11 @@ impl Api {
         }
         Ok(v)
     }
+}
+
+/// A JSON array of strings, as strings.
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
 }
 
 fn s(v: &Value, key: &str) -> String {
@@ -754,16 +773,20 @@ async fn main() -> anyhow::Result<()> {
                     println!("No routes. Nothing can be sent until one exists:");
                     println!("  stellwerk route set \"Servicecenter Fahrgastrechte\" du@example.org --label \"Probelauf\"");
                 } else {
-                    println!("{:<34} {:<34} {:<22} {:<18} echt?", "Schalter", "geht wirklich an", "Bezeichnung", "antwortet von");
+                    println!("{:<34} {:<34} {:<22} echt?", "Schalter", "geht wirklich an", "Bezeichnung");
                     for r in rows {
                         println!(
-                            "{:<34} {:<34} {:<22} {:<18} {}",
+                            "{:<34} {:<34} {:<22} {}",
                             r["desk"].as_str().unwrap_or("–"),
                             r["to_address"].as_str().unwrap_or("–"),
                             r["label"].as_str().unwrap_or("–"),
-                            r["answers_from"].as_str().unwrap_or("–"),
                             if r["live"].as_bool().unwrap_or(false) { "JA — echte Stelle" } else { "nein, Probelauf" }
                         );
+                        println!("  Antworten zählen von: {}", strings(&r["answer_domains"]).join(", "));
+                        let free = strings(&r["free_mail_answer_domains"]);
+                        if !free.is_empty() {
+                            println!("  ⚠  {} ist ein Freemail-Anbieter: jede Adresse dort kann Geld bestätigen.", free.join(", "));
+                        }
                         if !r["matches_a_desk"].as_bool().unwrap_or(true) {
                             println!(
                                 "  ⚠  Kein Antrag trägt diesen Schalter. Die Route greift nie. Bekannte Schalter: {}",
@@ -775,7 +798,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            RouteCmd::Set { desk, to, label, postal, live, note, reply_from } => {
+            RouteCmd::Set { desk, to, label, postal, live, note } => {
                 let mut body = serde_json::Map::new();
                 body.insert("to_address".into(), json!(to));
                 body.insert("label".into(), json!(label.unwrap_or_else(|| if live { "Echte Stelle".into() } else { "Probelauf".into() })));
@@ -786,16 +809,20 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(n) = note {
                     body.insert("note".into(), json!(n));
                 }
-                if let Some(r) = reply_from {
-                    body.insert("reply_from".into(), json!(r));
-                }
                 body.insert("desk".into(), json!(desk));
                 let v = api.put("/admin/routes", Value::Object(body)).await?;
                 println!("{} → {}  ({})", desk, v["to_address"].as_str().unwrap_or("–"), if v["live"].as_bool().unwrap_or(false) { "echte Stelle" } else { "Probelauf" });
+                println!("  Antworten zählen von: {}", strings(&v["answer_domains"]).join(", "));
             }
             RouteCmd::Remove { desk } => {
                 api.post("/admin/routes/remove", json!({ "desk": desk })).await?;
                 println!("{desk}: Route entfernt. An diesen Schalter geht jetzt nichts mehr raus.");
+            }
+            RouteCmd::Answers { desk, add, remove, clear, force } => {
+                let v = api.post("/admin/routes/answers", json!({ "desk": desk, "add": add, "remove": remove, "clear": clear, "force": force })).await?;
+                println!("{desk} → {}", s(&v, "to_address"));
+                println!("  Antworten zählen von: {}", strings(&v["answer_domains"]).join(", "));
+                println!("  (Subdomains zählen mit; die Domain der Zieladresse immer.)");
             }
         },
         Cmd::Ngo { cmd } => match cmd {

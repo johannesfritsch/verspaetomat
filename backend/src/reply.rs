@@ -160,6 +160,48 @@ pub fn gate_rules(r: &classify::Reading, claimed: &[Claimed]) -> Verdict {
     }
 }
 
+/// The domains a desk's answers may come from: the domain its mail goes to, and the route's extra
+/// answer domains (`mail_routes.reply_from`, comma-separated). A desk rarely answers from the address
+/// it is written to — mail to the Servicecenter at deutschebahn.com comes back from deutschebahn.de —
+/// so the list adds to the destination and never replaces it. Subdomains count (see
+/// [`sender_matches`]).
+pub fn answer_domains(to_address: &str, extra: Option<&str>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let own = to_address.rsplit_once('@').map(|(_, d)| d);
+    for d in own.into_iter().chain(extra.unwrap_or("").split(',')) {
+        if let Ok(d) = normalise_domain(d) {
+            if !out.contains(&d) {
+                out.push(d);
+            }
+        }
+    }
+    out
+}
+
+/// A domain as an operator types it — "@DeutscheBahn.de", "*.bahn.de", "bahn.de." — in the one form
+/// the sender check compares, or why it is not a domain.
+pub fn normalise_domain(raw: &str) -> Result<String, String> {
+    let d = raw.trim().trim_start_matches('@').trim_start_matches("*.").trim_end_matches('.').to_lowercase();
+    let labels_ok = d.split('.').all(|l| !l.is_empty() && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    if d.contains('.') && labels_ok && d.len() <= 253 {
+        Ok(d)
+    } else {
+        Err(format!("\"{}\" is not a domain", raw.trim()))
+    }
+}
+
+/// Mail providers anybody can open an account with. An answer domain like this lets every one of
+/// their users — the passenger included — send a DKIM-verified "wir überweisen" that confirms money.
+pub fn is_free_mail(domain: &str) -> bool {
+    const FREE: &[&str] = &[
+        "gmail.com", "googlemail.com", "outlook.com", "outlook.de", "hotmail.com", "hotmail.de", "live.com", "live.de", "msn.com", "yahoo.com", "yahoo.de", "ymail.com",
+        "icloud.com", "me.com", "mac.com", "aol.com", "aol.de", "gmx.de", "gmx.net", "gmx.at", "gmx.ch", "gmx.com", "web.de", "t-online.de", "freenet.de", "mail.de",
+        "posteo.de", "posteo.net", "mailbox.org", "proton.me", "protonmail.com", "protonmail.ch", "tutanota.com", "tutanota.de", "tuta.io", "arcor.de", "vodafone.de",
+        "1und1.de", "online.de", "email.de", "zoho.com", "yandex.com", "mail.ru", "gmx.eu",
+    ];
+    FREE.iter().any(|f| domain == *f || domain.ends_with(&format!(".{f}")))
+}
+
 /// True if `sender` (a bare, lower-cased address) writes from one of `domains` or a subdomain of one.
 pub fn sender_matches(sender: &str, domains: &[String]) -> bool {
     // One plain address or nothing: "x@gmail.com <antwort@desk" without its closing bracket would
@@ -788,6 +830,17 @@ mod tests {
         let answer = model(Outcome::Paid, Some("3,00 EUR"), vec![ride(1, RideCall::Paid, None), ride(2, RideCall::Paid, None)], first);
         let d = settle(&mail("Desk <desk@bahn.invalid>", body), &known, &claim(&[150, 150]), Asked::Answered { model: "m".into(), shown: shown(first), answer, confirm: None });
         assert_eq!(d.verdict.because, "every ride paid, but a refusal stands in a part of the mail the model did not read");
+    }
+
+    #[test]
+    fn answer_domains_add_to_the_destination() {
+        assert_eq!(answer_domains("servicecenter@deutschebahn.com", None), vec!["deutschebahn.com"]);
+        assert_eq!(answer_domains("servicecenter@deutschebahn.com", Some("@DeutscheBahn.de, *.bahn.de,, bahn.de.")), vec!["deutschebahn.com", "deutschebahn.de", "bahn.de"]);
+        assert!(sender_matches("noreply@service.deutschebahn.de", &answer_domains("x@deutschebahn.com", Some("deutschebahn.de"))));
+        assert!(normalise_domain("bahn").is_err());
+        assert!(normalise_domain("bahn de").is_err());
+        assert!(normalise_domain("x@bahn.de").is_err());
+        assert!(is_free_mail("gmail.com") && is_free_mail("mail.gmx.de") && !is_free_mail("deutschebahn.de"));
     }
 
     #[test]

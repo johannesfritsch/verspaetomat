@@ -183,6 +183,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/desks", get(admin::desks))
         .route("/admin/routes", get(admin::routes).put(admin::route_set))
         .route("/admin/routes/remove", post(admin::route_remove))
+        .route("/admin/routes/answers", post(admin::route_answers))
         .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
         .route("/admin/overrides", get(admin::overrides).delete(admin::clear_overrides))
         .layer(CorsLayer::permissive())

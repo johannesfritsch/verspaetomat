@@ -318,6 +318,12 @@ paths:
       security: [{ adminToken: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: '{deleted, deactivated}' }, '404': { description: No such NGO }, '409': { description: Last active NGO } }
+  /admin/routes/answers:
+    post:
+      summary: "The domains a desk's answers may come from, besides the domain its mail goes to (mail_routes.reply_from). Only verified mail from these can accept, refuse or ask. Subdomains count. Free-mail providers are refused unless force is set."
+      security: [{ adminToken: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [desk], properties: { desk: { type: string }, add: { type: array, items: { type: string } }, remove: { type: array, items: { type: string } }, clear: { type: boolean }, force: { type: boolean } } } } } }
+      responses: { "200": { description: "{desk, to_address, answer_domains: [the destination's domain, then the added ones], extra}" }, "400": { description: not a domain, or a free-mail provider without force }, "404": { description: no route for this desk } }
   /admin/read-mail:
     post:
       summary: "How a desk's mail would be read, without it touching anything: the same reader as inbound mail (rules, model when OPENAI_API_KEY is set, and the gate between them), no writes. With claim_id it reads against that claim's rides and takes that passenger out of the text; without, against one made-up ride (claimed_cents, ride_date)."

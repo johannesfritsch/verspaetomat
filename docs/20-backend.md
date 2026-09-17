@@ -79,9 +79,10 @@ One binary, several loops:
   - The amount is the one the desk named, never the one we claimed, and it is recorded per ride.
     A rules reading of several rides confirms them only when the named figure is exactly the claim;
     a partial award needs the model's per-ride reading.
-  - Only the desk moves a claim: a mail that would accept, refuse or ask has to come from the
-    route's `reply_from` domains (default: the domain the claim was sent to; changing the route's
-    address resets it) **and** carry the receiving provider's verification of that domain:
+  - Only the desk moves a claim: a mail that would accept, refuse or ask has to come from one of the
+    route's answer domains — the domain the claim was sent to, plus the domains added with
+    `stellwerk route answers "<Schalter>" --add deutschebahn.de` (subdomains count; free-mail
+    providers are refused) — **and** carry the receiving provider's verification of that domain:
     SpamAssassin's `DKIM_VALID_AU` in Postmark's `X-Spam-Tests`, present exactly once, on a webhook
     guarded by `INBOUND_SECRET`, with exactly one mailbox in From (`handlers::sender_auth`, all
     copies stored in `mails.sender_auth`). `Received-SPF` and

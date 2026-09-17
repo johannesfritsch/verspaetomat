@@ -1922,9 +1922,9 @@ pub fn sender_auth(headers: &[(String, String)], trusted: bool, from: &str, from
 
 /// Only the desk can move a claim. Everybody who holds the claim's reply address — including the
 /// passenger, who gets a copy of every claim — could otherwise write "wir überweisen 1,50 EUR" and
-/// confirm money. Two things have to hold for a mail to accept, refuse or ask: it is from the
-/// domains the route names (`reply_from`, by default the domain it is sent to), and the receiving
-/// side verified that domain ([`sender_auth`]). A mail that fails keeps its reading on record and
+/// confirm money. Two things have to hold for a mail to accept, refuse or ask: it is from one of
+/// the route's answer domains (the domain it is sent to, plus `stellwerk route answers`; see
+/// `reply::answer_domains`), and the receiving side verified that domain ([`sender_auth`]). A mail that fails keeps its reading on record and
 /// moves nothing. Bounces are exempt: they come from mail servers, not from the desk.
 pub async fn guard_sender(pool: &PgPool, claim: Option<&ClaimRow>, from: &str, trusted: bool, auth: &Value, decision: &mut crate::reply::Decision) -> Result<(), (StatusCode, Json<Value>)> {
     if trusted || !matches!(decision.verdict.outcome, MailOutcome::Accepted | MailOutcome::Rejected | MailOutcome::Question) {
@@ -1935,8 +1935,7 @@ pub async fn guard_sender(pool: &PgPool, claim: Option<&ClaimRow>, from: &str, t
         None => None,
     };
     let allowed: Vec<String> = match row {
-        Some((_, Some(list))) => list.split(',').map(|d| d.trim().trim_start_matches('@').to_lowercase()).filter(|d| !d.is_empty()).collect(),
-        Some((to, None)) => to.rsplit_once('@').map(|(_, d)| vec![d.to_lowercase()]).unwrap_or_default(),
+        Some((to, extra)) => crate::reply::answer_domains(&to, extra.as_deref()),
         None => vec![],
     };
     let sender = inbound_address(from);

@@ -1060,10 +1060,12 @@ pub async fn routes(State(s): State<AppState>, _a: Admin) -> ApiResult {
     Ok(Json(json!(rows
         .into_iter()
         .map(|(desk, to_address, label, live, note, postal_address, known, reply_from)| {
-            let answers_from = reply_from.clone().unwrap_or_else(|| to_address.rsplit_once('@').map(|(_, d)| d.to_string()).unwrap_or_default());
+            let answer_domains = crate::reply::answer_domains(&to_address, reply_from.as_deref());
+            let free_mail: Vec<&String> = answer_domains.iter().filter(|d| crate::reply::is_free_mail(d)).collect();
             json!({
                 "desk": desk, "to_address": to_address, "label": label, "live": live, "note": note,
-                "postal_address": postal_address, "matches_a_desk": known, "reply_from": reply_from, "answers_from": answers_from
+                "postal_address": postal_address, "matches_a_desk": known,
+                "answer_domains": answer_domains, "free_mail_answer_domains": free_mail,
             })
         })
         .collect::<Vec<_>>())))
@@ -1078,9 +1080,6 @@ pub struct RouteBody {
     #[serde(default)]
     pub live: bool,
     pub note: Option<String>,
-    /// Comma-separated domains the desk answers from; unset keeps the current value, "default" goes
-    /// back to the domain of `to_address`.
-    pub reply_from: Option<String>,
 }
 
 /// Create or change one route. This is the only way a destination comes to exist.
@@ -1094,16 +1093,10 @@ pub async fn route_set(State(s): State<AppState>, _a: Admin, Json(b): Json<Route
     };
     let label = b.label.unwrap_or_else(|| if b.live { "Echte Stelle".into() } else { "Probelauf".into() });
     let row: (String, String, String, bool, Option<String>) = sqlx::query_as(
-        "insert into mail_routes (desk, to_address, label, live, note, postal_address, reply_from) values ($1,$2,$3,$4,$5,$6,$7)
+        "insert into mail_routes (desk, to_address, label, live, note, postal_address) values ($1,$2,$3,$4,$5,$6)
          on conflict (desk) do update set to_address = excluded.to_address, label = excluded.label,
            live = excluded.live, note = excluded.note,
-           postal_address = coalesce(excluded.postal_address, mail_routes.postal_address),
-           -- A new destination forgets who answered for the old one: a test inbox's domain must not
-           -- stay authorised for the real desk.
-           reply_from = case when $8 then null
-                             when excluded.reply_from is not null then excluded.reply_from
-                             when lower(excluded.to_address) <> lower(mail_routes.to_address) then null
-                             else mail_routes.reply_from end, updated_at = now()
+           postal_address = coalesce(excluded.postal_address, mail_routes.postal_address), updated_at = now()
          returning desk, to_address, label, live, reply_from",
     )
     .bind(&desk)
@@ -1112,18 +1105,65 @@ pub async fn route_set(State(s): State<AppState>, _a: Admin, Json(b): Json<Route
     .bind(b.live)
     .bind(&b.note)
     .bind(&b.postal_address)
-    // An empty list is no list: stored as '' it would block every answer for the desk.
-    .bind(b.reply_from.as_deref().map(|r| r.split(',').map(|d| d.trim().trim_start_matches('@').to_lowercase()).filter(|d| !d.is_empty() && d != "default").collect::<Vec<_>>().join(",")).filter(|r| !r.is_empty()))
-    .bind(b.reply_from.as_deref().is_some_and(|r| r.trim().eq_ignore_ascii_case("default")))
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
     // An address that decides where a stranger's legal claim lands belongs in the audit trail.
     // Who may answer for the desk decides who can confirm money, so it is in the line too.
-    crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-set", &format!("{} → {} ({}, live={}, reply_from={})", row.0, row.1, row.2, row.3, row.4.as_deref().unwrap_or("default")))
+    crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-set", &format!("{} → {} ({}, live={})", row.0, row.1, row.2, row.3))
         .await
         .map_err(internal)?;
-    Ok(Json(json!({ "desk": row.0, "to_address": row.1, "label": row.2, "live": row.3 })))
+    Ok(Json(json!({ "desk": row.0, "to_address": row.1, "label": row.2, "live": row.3, "answer_domains": crate::reply::answer_domains(&row.1, row.4.as_deref()) })))
+}
+
+#[derive(Deserialize)]
+pub struct AnswerDomainsBody {
+    pub desk: String,
+    #[serde(default)]
+    pub add: Vec<String>,
+    #[serde(default)]
+    pub remove: Vec<String>,
+    /// Drop every extra domain; the route's own destination domain stays.
+    #[serde(default)]
+    pub clear: bool,
+    /// Allow a free-mail domain anyway.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// `POST /admin/routes/answers`: the domains a desk's answers may come from, besides the domain its
+/// mail goes to.
+///
+/// A desk is written to at one address and answers from another — the Servicecenter's inbox at
+/// deutschebahn.com, its replies from deutschebahn.de — and an answer from a domain not on this list
+/// is recorded but cannot accept, refuse or ask (`handlers::guard_sender`). Free-mail providers are
+/// refused without `force`: every user of gmail.com can DKIM-sign a "wir überweisen".
+pub async fn route_answers(State(s): State<AppState>, _a: Admin, Json(b): Json<AnswerDomainsBody>) -> ApiResult {
+    let row: Option<(String, Option<String>)> = sqlx::query_as("select to_address, reply_from from mail_routes where desk = $1").bind(b.desk.trim()).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some((to_address, current)) = row else { return Err(err(StatusCode::NOT_FOUND, "no route for this desk: set one first with `stellwerk route set`")) };
+    let normalise = |list: &[String]| -> Result<Vec<String>, (StatusCode, Json<Value>)> {
+        list.iter().flat_map(|x| x.split(',')).filter(|x| !x.trim().is_empty()).map(|x| crate::reply::normalise_domain(x).map_err(|e| err(StatusCode::BAD_REQUEST, &e))).collect()
+    };
+    let add = normalise(&b.add)?;
+    let remove = normalise(&b.remove)?;
+    if let Some(free) = add.iter().find(|d| crate::reply::is_free_mail(d)) {
+        if !b.force {
+            return Err(err(StatusCode::BAD_REQUEST, &format!("{free} is a free-mail provider: anybody with an account there could confirm money. Add it with force only for a test inbox")));
+        }
+    }
+    let mut extra: Vec<String> = if b.clear { vec![] } else { current.as_deref().unwrap_or("").split(',').filter_map(|d| crate::reply::normalise_domain(d).ok()).collect() };
+    extra.retain(|d| !remove.contains(d));
+    for d in add {
+        if !extra.contains(&d) {
+            extra.push(d);
+        }
+    }
+    let stored = if extra.is_empty() { None } else { Some(extra.join(",")) };
+    sqlx::query("update mail_routes set reply_from = $2, updated_at = now() where desk = $1").bind(b.desk.trim()).bind(&stored).execute(&s.pool).await.map_err(internal)?;
+    let effective = crate::reply::answer_domains(&to_address, stored.as_deref());
+    // Who may answer for a desk decides who can confirm money: that belongs in the audit trail.
+    crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-answers", &format!("{}: answers from {}", b.desk.trim(), effective.join(", "))).await.map_err(internal)?;
+    Ok(Json(json!({ "desk": b.desk.trim(), "to_address": to_address, "answer_domains": effective, "extra": extra })))
 }
 
 #[derive(Deserialize)]
