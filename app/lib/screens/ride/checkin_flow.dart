@@ -54,9 +54,11 @@ Future<void> runCheckinFlow(BuildContext context, {ApiStation? from, ApiStation?
 
 Future<void> _runCheckinFlow(BuildContext context, {ApiStation? from, ApiStation? to}) async {
   final near = NearbyScope.read(context);
-  // A fix may still be in flight when the square is tapped right after a cold start.
-  if (from == null && near != null && near.station == null) await near.refresh();
-  if (!context.mounted) return;
+  // A fix may still be in flight when the square is tapped right after a cold start. It used to be
+  // awaited here — up to five seconds for the fix plus the station request — so the tap did nothing
+  // visible and the sheet appeared late (#16). Now the sheet opens at once, shows its placeholder
+  // rows while this runs, and fills in when the monitor notifies.
+  if (from == null && near != null && near.station == null) unawaited(near.refresh());
 
   var source = from;
   var destination = to;
@@ -190,6 +192,9 @@ class _VonSheetState extends State<_VonSheet> {
   List<ApiGeofenceStation> _frequent = const [];
   String _homeStation = '';
 
+  /// Until the frequent stations are in, their section is a placeholder rather than missing.
+  bool _frequentLoaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -204,6 +209,7 @@ class _VonSheetState extends State<_VonSheet> {
     setState(() {
       _frequent = [...g.stations]..sort((a, b) => b.checkins.compareTo(a.checkins));
       _homeStation = session.me?.homeStation ?? '';
+      _frequentLoaded = true;
     });
   }
 
@@ -245,6 +251,8 @@ class _VonSheetState extends State<_VonSheet> {
         others.any((s) => s.id == f.id || sameStation(s.name, f.name));
     final frequent = _frequent.where((f) => !listed(f)).take(3).toList();
     final nothingKnown = detected == null && others.isEmpty;
+    // Still finding out where the passenger is: the row the answer will fill, not a sentence.
+    final looking = nothingKnown && near != null && (near.resolving || near.checking);
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.l),
       child: Column(
@@ -302,16 +310,21 @@ class _VonSheetState extends State<_VonSheet> {
                   ),
                 ],
 
-                if (nothingKnown)
+                if (looking) ...[
+                  const VGap.md(),
+                  const VSkeletonList(rows: 2, trailing: false),
+                ] else if (nothingKnown)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: VSpace.s),
-                    child: Text(
-                      near?.checking == true
-                          ? 'Wir schauen noch, wo du bist.'
-                          : 'Wir wissen gerade nicht, wo du bist.',
-                      style: VText.bodyS,
-                    ),
+                    child: Text('Wir wissen gerade nicht, wo du bist.', style: VText.bodyS),
                   ),
+
+                if (!_frequentLoaded) ...[
+                  const VGap.m(),
+                  const VSectionHeader('Deine Bahnhöfe', wide: true, onCard: false),
+                  const VGap.s(),
+                  const VSkeletonList(rows: 2, trailing: false),
+                ],
 
                 if (frequent.isNotEmpty) ...[
                   const VGap.m(),
@@ -506,7 +519,7 @@ class _WohinSheetState extends State<_WohinSheet> {
 
                 if (_loading) ...[
                   const VGap.m(),
-                  const LoadingLine(label: 'Deine Ziele werden geladen …'),
+                  const VSkeletonList(rows: 3, trailing: false),
                 ],
                 if (_error != null) ...[
                   const VGap.m(),

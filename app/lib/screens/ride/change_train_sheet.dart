@@ -141,7 +141,7 @@ class _ChangeTrainListState extends State<_ChangeTrainList> {
         const SizedBox(height: 2),
         Text('Deine Geduldspunkte bleiben. Die Verspätung zählt weiter am Ziel.', style: VText.caption),
         const VGap.m(),
-        if (_loading) const LoadingLine(label: 'Verbindungen werden geladen …'),
+        if (_loading) ...const [VSkeletonCard(trailing: true), SizedBox(height: VSpace.s), VSkeletonCard(trailing: true)],
         if (_error != null) ...[const OfflineBanner(), ErrorLine(message: _error!, onRetry: _load)],
         if (!_loading && _error == null && _itineraries.isEmpty)
           Padding(

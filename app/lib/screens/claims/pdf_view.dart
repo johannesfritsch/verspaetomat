@@ -198,7 +198,7 @@ class _ClaimPdfPageState extends State<ClaimPdfPage> {
         backgroundDecoration: const BoxDecoration(color: VColors.paper),
         builders: PdfViewPinchBuilders<DefaultBuilderOptions>(
           options: const DefaultBuilderOptions(),
-          documentLoaderBuilder: (_) => Center(child: Text('Lädt …', style: VText.caption)),
+          documentLoaderBuilder: (_) => const Padding(padding: EdgeInsets.all(VSpace.l), child: Center(child: VSkeletonPaper())),
           pageLoaderBuilder: (_) => const SizedBox.shrink(),
           errorBuilder: (_, e) => Center(child: Text('PDF konnte nicht angezeigt werden.', style: VText.caption)),
         ),

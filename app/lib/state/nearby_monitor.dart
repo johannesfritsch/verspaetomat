@@ -259,6 +259,10 @@ class NearbyMonitor extends ChangeNotifier with WidgetsBindingObserver {
   /// fix is actually in flight — a list that came back without one is the away box, not a wait.
   bool get checking => nearby.checking || (locating && !trustworthy);
 
+  /// A resolve is running: the fix, or the station list for it. The check-in's first sheet shows
+  /// its placeholder rows for as long as this is true, instead of the tap waiting for it (#16).
+  bool get resolving => _resolving;
+
   /// The station on offer: the one picked from the `Von` row, else the best one within 300 m.
   /// Null while no fix is worth trusting.
   ApiStation? get station {

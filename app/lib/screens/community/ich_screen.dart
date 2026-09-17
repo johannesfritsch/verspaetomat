@@ -29,6 +29,15 @@ class IchScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Loader<_IchData>(
+      placeholder: (context) => VTabScaffold(
+        header: VTabHeader(
+          title: RepoScope.read(context).me?.nickname ?? 'Ich',
+          subtitle: 'Gemeinsam für pünktlichere Züge',
+          narrow: true,
+          onSettings: () => context.push(Routes.einstellungen),
+        ),
+        children: const [VSkeletonBoard(look: VBoardLook.red), VSkeletonCard(), VSkeletonList()],
+      ),
       load: (repo) async {
         final me = await repo.getMe();
         final badges = await repo.badges();

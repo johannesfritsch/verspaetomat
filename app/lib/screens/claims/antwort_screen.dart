@@ -81,6 +81,7 @@ class _AntwortScreenState extends State<AntwortScreen> {
     final session = RepoScope.of(context);
     return Loader<List<ApiMail>>(
       controller: _loader,
+      placeholder: (_) => const VScreen(eyebrow: 'Post von der Bahn', title: 'Antwort', child: VSkeletonCard(lines: 3)),
       load: _load,
       builder: (context, mails, refresh) {
         ApiMail? mail = mails.where((m) => m.id == _mailId).firstOrNull;

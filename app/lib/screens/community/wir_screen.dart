@@ -77,6 +77,11 @@ class _WirScreenState extends State<WirScreen> {
     final session = RepoScope.of(context);
     return Loader<_WirData>(
       controller: _loader,
+      placeholder: (context) => VTabScaffold(
+        sceneHeart: true,
+        header: VTabHeader(title: 'Wir', tagline: 'Gemeinsam mehr bewegen.', narrow: true, onSettings: () => context.push(Routes.einstellungen)),
+        children: const [VSkeletonBoard(look: VBoardLook.red), VSkeletonList()],
+      ),
       load: (repo) async {
         final c = await repo.community();
         final st = await repo.standing().catchError((_) => ApiStanding.empty);

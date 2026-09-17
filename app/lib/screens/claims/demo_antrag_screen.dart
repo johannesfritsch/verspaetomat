@@ -56,23 +56,14 @@ class _DemoAntragScreenState extends State<DemoAntragScreen> {
   Widget build(BuildContext context) {
     final s = _session;
     if (s == null) {
-      return const VScreen(title: 'Vorführung', child: LoadingLineStandIn());
+      return const VScreen(
+        title: 'Vorführung',
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [VSkeletonCard(), SizedBox(height: VSpace.md), VSkeletonList()]),
+      );
     }
     return RepoScope(
       session: s,
       child: const AntragScreen(desk: 'Servicecenter Fahrgastrechte', demo: true),
     );
   }
-}
-
-/// The one line shown while the demo session is built. Local to this file because the claims
-/// screens' own LoadingLine lives behind a repository import this route does not need.
-class LoadingLineStandIn extends StatelessWidget {
-  const LoadingLineStandIn({super.key});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: VSpace.l),
-        child: Text('Lädt …', style: VText.body.copyWith(color: VColors.ink2)),
-      );
 }

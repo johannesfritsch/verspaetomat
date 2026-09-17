@@ -148,7 +148,7 @@ class _WelcherZugListState extends State<WelcherZugList> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const VGap.s(),
-        if (_loading) const LoadingLine(label: 'Verbindungen werden geladen …'),
+        if (_loading) ...const [VSkeletonCard(trailing: true), SizedBox(height: VSpace.s), VSkeletonCard(trailing: true)],
         if (_error != null) ...[const OfflineBanner(), ErrorLine(message: 'Keine Verbindung geplant. $_error', onRetry: _load)],
         if (!_loading && _error == null && _itineraries.isEmpty)
           Padding(

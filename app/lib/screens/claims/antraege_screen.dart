@@ -148,6 +148,10 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
     final session = RepoScope.of(context);
     return Loader<_AntraegeData>(
       controller: _loader,
+      placeholder: (context) => VTabScaffold(
+        header: VTabHeader(title: 'Anträge', narrow: true, onSettings: () => context.push(Routes.einstellungen)),
+        children: const [VSkeletonCard(trailing: true), VSkeletonList()],
+      ),
       load: (repo) async {
         final ledger = await repo.incidents();
         List<ApiClaim> claims = const [];

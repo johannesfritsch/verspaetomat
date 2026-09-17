@@ -44,7 +44,10 @@ class RideSheetBody extends StatelessWidget {
       );
     }
     if (live == null && journey == null) {
-      return const Padding(padding: EdgeInsets.all(VSpace.page), child: LoadingLine(label: 'Fahrt wird geladen …'));
+      return const Padding(
+        padding: EdgeInsets.all(VSpace.page),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [VSkeletonBoard(), SizedBox(height: VSpace.md), VSkeletonStops(stops: 5)]),
+      );
     }
 
     final demoControls = session.isLocal
@@ -239,7 +242,7 @@ class _NextLegStopsState extends State<_NextLegStops> {
   Widget build(BuildContext context) {
     final l = widget.leg;
     if (_stops.isEmpty) {
-      if (_loading) return const LoadingLine(label: 'Halte werden geladen …');
+      if (_loading) return const VSkeletonStops();
       return Text('Halte folgen, sobald der Zug im Feed ist.', style: VText.caption);
     }
     final from = fromIndex(_stops, l.fromStationId, l.fromStationName);

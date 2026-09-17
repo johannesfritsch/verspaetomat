@@ -7,7 +7,7 @@ import '../../platform/geofence.dart';
 import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
-import '../ride/ride_widgets.dart' show ErrorLine, LoadingLine, fmtLocal, shortError;
+import '../ride/ride_widgets.dart' show ErrorLine, fmtLocal, shortError;
 
 /// `Entwicklung` (docs/25 §5): what the geofence layer is actually doing, read from the phone.
 ///
@@ -103,7 +103,7 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const VGap.s(),
-          if (_loading && s == null) const LoadingLine(label: 'Status wird gelesen …'),
+          if (_loading && s == null) const VSkeletonList(rows: 4, trailing: false),
           if (_error != null) ErrorLine(message: _error!, onRetry: _load),
           if (s != null) ...[
             const VSection('Status'),

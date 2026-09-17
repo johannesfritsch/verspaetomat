@@ -164,7 +164,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
           Text(_station?.name ?? '–', style: VText.bodyStrong),
           const VGap.l(),
           const VSection('Zug'),
-          if (_loading) const LoadingLine(label: 'Züge werden geladen …'),
+          if (_loading) const VSkeletonList(rows: 4),
           if (_error != null) ErrorLine(message: _error!, onRetry: _loadStation),
           for (final d in _departures.take(8))
             InkWell(
@@ -199,7 +199,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
           const VGap.l(),
           const VSection('Ausstieg'),
           const VGap.s(),
-          if (_departure != null && t == null) const LoadingLine(label: 'Halte werden geladen …'),
+          if (_departure != null && t == null) const VSkeletonStops(),
           if (t != null)
             StopLine(
               stops: t.stops,

@@ -19,6 +19,7 @@ export 'profile.dart';
 export 'rows.dart';
 export 'scaffold.dart';
 export 'sheet_scene.dart';
+export 'skeleton.dart';
 export 'steps.dart';
 export 'surfaces.dart';
 export 'timeline.dart';

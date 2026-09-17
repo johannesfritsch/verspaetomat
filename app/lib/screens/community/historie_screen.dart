@@ -23,6 +23,7 @@ class _HistorieScreenState extends State<HistorieScreen> {
   @override
   Widget build(BuildContext context) {
     return Loader<List<ApiJourney>>(
+      placeholder: (_) => const VScreen(title: 'Alle Fahrten', eyebrow: 'Historie', child: VSkeletonList(rows: 5)),
       load: (repo) => repo.journeys(),
       builder: (context, all, refresh) {
         final lines = all.expand((j) => j.legs.map((l) => l.line)).where((l) => l.isNotEmpty).toSet().toList()..sort();

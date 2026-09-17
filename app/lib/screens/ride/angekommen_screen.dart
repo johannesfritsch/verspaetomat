@@ -135,7 +135,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       final empty = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_loading) const LoadingLine(label: 'Ankunft wird geladen …'),
+          if (_loading) ...const [VGap.s(), VSkeletonBoard(), VGap.md(), VSkeletonCard()],
           if (_error != null) ErrorLine(message: _error!, onRetry: _load),
           if (!_loading && _error == null) ...[
             const VGap.xl(),

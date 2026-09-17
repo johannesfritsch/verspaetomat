@@ -442,7 +442,7 @@ class _AntragScreenState extends State<AntragScreen> {
         incidents: _incidents,
       );
     }
-    if (_loading) return const VScreen(title: 'Antrag', child: LoadingLine());
+    if (_loading) return const PagePlaceholder(title: 'Antrag');
     if (_error != null || _draft == null) {
       return VScreen(
         title: 'Antrag',

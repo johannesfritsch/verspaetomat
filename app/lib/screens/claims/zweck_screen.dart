@@ -16,6 +16,7 @@ class ZweckScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final session = RepoScope.of(context);
     return Loader<List<ApiNgo>>(
+      placeholder: (_) => const VScreen(eyebrow: 'Zweck', title: 'Verein', child: VSkeletonCard(lines: 3)),
       load: (repo) => repo.ngos(),
       builder: (context, ngos, refresh) {
         final ngo = ngos.where((n) => n.id == ngoId).firstOrNull ?? ngos.firstOrNull;

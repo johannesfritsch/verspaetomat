@@ -42,13 +42,20 @@ String fmtStamp(DateTime d) => '${Mock.shortDate(d.toLocal())} ${fmtClock(d)}';
 // Loading
 // ---------------------------------------------------------------------------
 
-/// Runs one repository call and renders the result, with plain loading and
-/// error lines. Call [refresh] via the returned controller to reload.
+/// Runs one repository call and renders the result. Call [refresh] via the returned controller to
+/// reload.
+///
+/// While the call runs it shows [placeholder]: the screen's own header over skeleton cards, so the
+/// page has its shape from the first frame and fills in rather than jumping from a caption in the
+/// corner to a full layout (#17).
 class Loader<T> extends StatefulWidget {
-  const Loader({super.key, required this.load, required this.builder, this.controller});
+  const Loader({super.key, required this.load, required this.builder, this.controller, this.placeholder});
   final Future<T> Function(AppRepository repo) load;
   final Widget Function(BuildContext context, T data, VoidCallback refresh) builder;
   final LoaderController? controller;
+
+  /// The page before its data. Without one: two skeleton cards in the page gutter.
+  final WidgetBuilder? placeholder;
 
   @override
   State<Loader<T>> createState() => _LoaderState<T>();
@@ -103,21 +110,33 @@ class _LoaderState<T> extends State<Loader<T>> {
       future: _future,
       builder: (context, snap) {
         if (snap.hasError) return LoadError(error: snap.error, onRetry: _reload);
-        if (!snap.hasData) return const LoadingLine();
+        if (!snap.hasData) return widget.placeholder?.call(context) ?? const PagePlaceholder();
         return widget.builder(context, snap.data as T, _reload);
       },
     );
   }
 }
 
-class LoadingLine extends StatelessWidget {
-  const LoadingLine({super.key, this.text = 'Lädt …'});
-  final String text;
+/// A page before its data, for screens that have not drawn their own skeleton: a card and a list,
+/// in the page gutter, below the status bar.
+class PagePlaceholder extends StatelessWidget {
+  const PagePlaceholder({super.key, this.title});
+
+  /// The title the screen will have, when it is known before the data.
+  final String? title;
+
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: VSpace.l),
-        child: Text(text, style: VText.body.copyWith(color: VColors.ink2)),
-      );
+  Widget build(BuildContext context) {
+    const body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [VSkeletonCard(), SizedBox(height: VSpace.md), VSkeletonList()],
+    );
+    if (title != null) return VScreen(title: title!, child: body);
+    return const Scaffold(
+      backgroundColor: VColors.paper,
+      body: SafeArea(child: Padding(padding: EdgeInsets.all(VSpace.page), child: body)),
+    );
+  }
 }
 
 class LoadError extends StatelessWidget {

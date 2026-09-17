@@ -730,7 +730,7 @@ class _StationSearchSheetState extends State<_StationSearchSheet> {
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
             children: [
-              if (_loading) const LoadingLine(label: 'Suche …'),
+              if (_loading) const VSkeletonList(rows: 4, trailing: false),
               if (_error != null) ErrorLine(message: _error!, onRetry: () => _search(_ctl.text)),
               for (final s in _results)
                 VListRow(

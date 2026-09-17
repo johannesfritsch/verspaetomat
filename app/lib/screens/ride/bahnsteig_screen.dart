@@ -200,7 +200,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         // 1 · Action, sized by the moment. Under way, the ride card (docs/20 §2) opens the sheet;
         // the check-in card waits until the journey is over.
         if (_loading && ride.loading)
-          const LoadingLine(label: 'Bahnsteig wird geladen …')
+          const VSkeletonCard(button: true)
         else if (underWay)
           _RideCard(monitor: ride)
         else if (arrived)
