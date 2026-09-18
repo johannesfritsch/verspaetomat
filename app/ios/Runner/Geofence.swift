@@ -686,6 +686,11 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   private func registerStations(_ c: GeofenceConfig) -> Int {
     let set = GeofenceRules.regionSet(frequent: c.stations, nearest: nearest, here: discCentre)
     noteRegionsDrawn(around: discCentre)
+    // The line that says why the set is what it is (issue #31). Reading it out of the pieces took
+    // two rounds: „1 registriert" and a station thirty kilometres away is only explicable once you
+    // know there were no frequent stations, no nearest ones, and which budget was in force.
+    lastEvent = "regionSet: \(c.stations.count) frequent + \(nearest.count) nearest, "
+      + "nearHome=\(GeofenceRules.nearHome(frequent: c.stations, here: discCentre)) → \(set.count) stations"
     for s in set {
       let r = CLCircularRegion(center: s.location.coordinate, radius: c.stationRadiusM, identifier: Self.stationPrefix + s.id)
       r.notifyOnEntry = true

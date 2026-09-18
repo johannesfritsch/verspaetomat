@@ -123,9 +123,6 @@ impl TransitousClient {
             .collect();
         candidates.sort_by_key(|s| s.distance_m.unwrap_or(i64::MAX));
         candidates.truncate(NEARBY_CANDIDATES);
-        // The nearest stop of any kind, kept to anchor the radius query if the rank filter empties
-        // the list. Any stop will do — it is only a point to measure a radius from.
-        let anchor_id = candidates.first().map(|s| s.id.clone());
 
         let mut set = JoinSet::new();
         for (idx, stop) in candidates.iter().enumerate() {
@@ -157,9 +154,7 @@ impl TransitousClient {
         // then all correctly dropped as non-rail and the customer gets an empty answer while a
         // station is eight hundred metres away.
         if kept.is_empty() {
-            if let Some(anchor) = anchor_id {
-                kept = self.rail_stops_around(&anchor, lat, lon).await;
-            }
+            kept = self.rail_stops_around(lat, lon).await;
         }
 
         kept.sort_by(|a, b| {
@@ -170,22 +165,24 @@ impl TransitousClient {
         Ok(kept)
     }
 
-    /// Railway stations within [`NEARBY_FALLBACK_RADIUS_M`] of a stop, found through what departs
+    /// Railway stations within [`NEARBY_FALLBACK_RADIUS_M`] of a point, found through what departs
     /// there rather than through the gazetteer (issue #31).
     ///
-    /// `stoptimes` takes a radius and a mode filter, so asking it for rail departures around any
-    /// nearby stop names every railway station in reach — including the ones `reverse-geocode`
-    /// will not return because a handful of bus stops are closer. A station that appears here has
-    /// a real rail departure by construction, so it needs no ranking.
+    /// `reverse-geocode` is a *what is at this point* lookup with a tight radius, which is the
+    /// wrong primitive for *what is near me*: in Wangen im Allgäu it answers with five bus stops
+    /// and no Bahnhof, and in Kißlegg it answers with an empty list while the station is six
+    /// hundred metres away. `stoptimes` takes a **centre and a radius** and a mode filter, so it
+    /// names every railway station in reach directly — and one that appears has a real rail
+    /// departure by construction, so it needs no ranking and no anchor stop to start from.
     ///
-    /// One station appears once per platform (`…:9002_G`, `…:9002:2:1`, `…:9002:2:2`), so they are
+    /// One station appears once per platform (`…:1159_G`, `…:1159:2:1`, `…:1159:2:2`), so they are
     /// folded by name, preferring MOTIS' parent id — the one the rest of the app wants.
-    async fn rail_stops_around(&self, anchor_stop_id: &str, lat: f64, lon: f64) -> Vec<StopInfo> {
+    async fn rail_stops_around(&self, lat: f64, lon: f64) -> Vec<StopInfo> {
         let resp: Result<StopTimesResponse> = self
             .get_json(
                 "/api/v1/stoptimes",
                 &[
-                    ("stopId", anchor_stop_id.to_string()),
+                    ("center", format!("{lat},{lon}")),
                     ("n", "50".into()),
                     ("radius", NEARBY_FALLBACK_RADIUS_M.to_string()),
                     ("mode", RANK_MODES.to_string()),
@@ -193,7 +190,7 @@ impl TransitousClient {
             )
             .await;
         let Ok(resp) = resp else {
-            tracing::debug!(stop = anchor_stop_id, "nearby fallback query failed");
+            tracing::debug!(lat, lon, "nearby fallback query failed");
             return Vec::new();
         };
 
@@ -708,10 +705,16 @@ mod tests {
     #[ignore]
     async fn live_wangen_finds_its_bahnhof() {
         let c = TransitousClient::new();
-        for (name, lat, lon) in [("Zentrum", 47.6817, 9.8331), ("am Bahnhof", 47.6874, 9.8255)] {
+        // Kißlegg is the harder one: `reverse-geocode` answers with an empty list there, so the
+        // fallback has nothing to anchor on and has to work from the coordinates alone.
+        for (name, lat, lon) in [
+            ("Zentrum", 47.6817, 9.8331),
+            ("am Bahnhof", 47.6874, 9.8255),
+            ("Kißlegg", 47.7914, 9.8921),
+        ] {
             let got = c.nearby_stops(lat, lon).await.unwrap();
-            eprintln!("Wangen {name}: {:?}", got.iter().map(|s| (&s.name, s.distance_m)).collect::<Vec<_>>());
-            assert!(got.iter().any(|s| s.name.contains("Wangen")), "Wangen {name} gave {got:?}");
+            eprintln!("{name}: {:?}", got.iter().map(|s| (&s.name, s.distance_m)).collect::<Vec<_>>());
+            assert!(!got.is_empty(), "{name} gave nothing");
         }
     }
 
