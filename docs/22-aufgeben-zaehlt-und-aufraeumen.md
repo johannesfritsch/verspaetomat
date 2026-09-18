@@ -28,7 +28,7 @@ Load all three scopes **once**, together with the rest of Wir, and keep them in 
 In a **release** build (`kDebugMode == false`) these disappear completely:
 
 - the `Backend` section with the mode choice and the health/`Prüfen` row,
-- the `Vorführung` section (the "Offline simulieren" switch and the Showcase link),
+- the `Vorführung` section (the "Offline simulieren" switch; the Showcase link moved out of it in issue #28 and now lives under Einstellungen › Entwicklung, in every build),
 - the footer `Verspätomat 0.1 · Vorführung · Alle Daten erfunden`.
 
 In a debug build they all stay exactly as they are, because the tour and the local loop need them. The release footer is a single quiet line with the version and build number, nothing else.

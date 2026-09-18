@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
 import '../../platform/diagnose_log.dart';
 import '../../platform/geofence.dart';
 import '../../platform/geofence_replay.dart';
 import '../../repo/repo_scope.dart';
+import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/geofence_map.dart';
 import '../../widgets/kit.dart';
@@ -20,10 +22,15 @@ import '../ride/ride_widgets.dart' show ErrorLine, fmtDay, fmtLocal, shortError;
 /// **It is in every build, including a release one** (issue #29). It used to be hidden unless
 /// `--dart-define=DEBUG_PAGE=1` was passed, which `tools/release.sh` has never done — so the page
 /// shipped inside every TestFlight build with no way to reach it, which is the whole of "I cannot
-/// find it in the current build". Showing it is safe: there is no write control on it in any
-/// form, and the app has no admin surface to expose. The workshop tools that change what the app
-/// *is* — switching backend, the demo toys, the Showcase — stay behind `kDebugMode` in their own
-/// block in `einstellungen_screen.dart`.
+/// find it in the current build". Showing it is safe: nothing *on this page* writes anything, and
+/// the app has no admin surface to expose. The workshop tools that change what the app *is* —
+/// switching backend, the demo toys, the "alles erfunden" footer — stay behind `kDebugMode` in
+/// their own block in `einstellungen_screen.dart`.
+///
+/// The one thing that leads away from here is the **Showcase** (issue #28), which is an index of
+/// every screen and so is not read-only the way this page is. It carries its own guard: in local
+/// mode it leaves out the entries that would write to the real account or show real data under an
+/// invented label, and says on the page that it has done so.
 class EntwicklungScreen extends StatefulWidget {
   const EntwicklungScreen({super.key});
 
@@ -428,6 +435,19 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
             'kopieren“ legt sie mit Datum in die Zwischenablage. Überleg dir also, an wen du das '
             'schickst, und „Log leeren“ ist daneben.',
             style: VText.caption,
+          ),
+          const VGap.xl(),
+
+          // issue #28: the index of every screen, in every build. Pushed rather than gone to, so
+          // there is a way back — the Showcase draws its back arrow only when it can pop.
+          const VSection('Alle Schirme'),
+          const VGap.xs(),
+          VListRow(
+            key: const Key('showcase'),
+            title: 'Showcase',
+            subtitle: 'Jeden Schirm der App einmal ansehen',
+            chevron: true,
+            onTap: () => context.push(Routes.showcase),
           ),
           const VGap.xl(),
         ],

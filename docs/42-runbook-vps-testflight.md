@@ -150,7 +150,7 @@ Then `stellwerk --prod customers`, `stellwerk --prod locate Johannes "Köln Hbf"
 
 Facts already in the project: bundle id `de.verspaetomat.verspaetomat`, team `PNC6S4SMVN`, automatic signing, version `1.0.0+1` in `app/pubspec.yaml`, display name "Verspätomat", app icon (Bahnhofsuhr) in all sizes, privacy manifest, `ITSAppUsesNonExemptEncryption = false` (no export-compliance question per build), Always-location and background-location strings, `UIBackgroundModes = location`.
 
-A release build starts at Willkommen on a fresh install and at the Bahnsteig once onboarding is done, and talks to the real backend by default. The Showcase stays reachable from Einstellungen.
+A release build starts at Willkommen on a fresh install and at the Bahnsteig once onboarding is done, and talks to the real backend by default. The Showcase is reachable from Einstellungen › Entwicklung (issue #28), with the entries that would write to the real account left out.
 
 ### B1. Apple accounts **[you]** (once)
 

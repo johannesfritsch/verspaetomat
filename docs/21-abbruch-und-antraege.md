@@ -89,15 +89,21 @@ In the app:
 
 There is not always a claim, and there is not always an incident. Anträge with no incidents, no claims and nothing discarded shows one card instead of "Wird gesammelt · Noch nichts":
 
-> **Hier wird es später voll.** (title)
-> `So läuft es:` and four numbered lines:
-> 1. `Einchecken, wenn du in den Zug steigst.`
-> 2. `Ab 60 Minuten Verspätung am Ziel entstehen 1,50 €.`
-> 3. `Ab 4 € geht ein Antrag an das Eisenbahnunternehmen — mit deiner Unterschrift, von dir.`
-> 4. `Antwortet die Bahn, zahlt sie direkt an <Verein>.`
+Redrawn for issue #30: the four lines become a `VStepList` — numbered discs, a dashed rail, an icon and a card each — and the `Einchecken` button is gone, leaving the walkthrough the only thing to press.
+
+> **Noch keine Anträge offen** (h2)
+> `Hier sammeln sich deine Fälle, sobald du im Zug eingecheckt warst und der Zug zu spät ankam.`
+> 1. **Im Zug einchecken** · `Ein Tippen, sobald du sitzt.`
+> 2. **Ab \<n\> Minuten Verspätung** · `am Ziel entstehen <Betrag>.` — or, with no flat rate, `entsteht ein Anspruch. Wie hoch, hängt von deinem Ticket und dem Zug ab.`
+> 3. **Ab \<Mindestbetrag\>** · `bereiten wir den Antrag vor. Unterschrieben wird er von dir.`
+> 4. **Die Bahn zahlt** · `direkt an <Verein> — nicht an uns.`
 >
-> Caption: `Anträge müssen innerhalb eines Jahres gestellt werden. Wir erinnern dich rechtzeitig.`
-> Primary button `Einchecken` (calls `startCheckin`).
+> Caption: `Ein Fall verfällt drei Monate nach der Fahrt.` plus `Wir melden uns rechtzeitig vorher.` — or, with notifications off, `Erinnern können wir dich nur mit Mitteilungen.`
+> Outline button `Vorführung ansehen`.
+
+**Every number on it comes from the server**, because the backend owns every money rule and a copy of the rate table in the app is the one thing certain to drift: `min_payout_cents` and, new in #30, `flat_claim_cents` and `delay_minutes_threshold` in the incidents summary. `flat_claim_cents` is null wherever there is no single answer — a Zeitkarte pays 1,50 € regionally and 5,00 € long-distance, a single ticket a share of its own fare — and the screen then states the rule without a number instead of printing the commonest one and being wrong for everyone else.
+
+Two corrections the redraw carried: the old caption said claims must be made **within a year**, which is the railway's goodwill window and not the one this app enforces — `rules.rs` sets the legal deadline three months after the ride and expires the case itself, so the old line invited someone to miss their own deadline. And the reminder is only promised where it can arrive: the 21-day warning travels as a push, which the backend gates on the notifications flag.
 
 The cycle strip stays above it. When incidents exist but no claim was ever sent, the collecting card is the empty state and needs nothing extra.
 

@@ -930,6 +930,11 @@ pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
             "oldest_open": oldest.map(|i| json!({ "id": i.id, "line": i.line, "date": i.ride_date, "deadline": i.legal_deadline, "days_left": rules::days_until(i.legal_deadline, today), "warn_from": rules::warn_from(i.legal_deadline) })),
             "min_payout_cents": rules::MIN_PAYOUT_CENTS,
             "dticket_monthly_cap_cents": rules::dticket_monthly_cap_cents(),
+            // What one qualifying journey earns with this customer's ticket, when that is a fixed
+            // number at all (issue #30). Null for a Zeitkarte or a single ticket, where it depends
+            // on the train or the fare; the app then says it without a number.
+            "flat_claim_cents": rules::flat_claim_cents(c.0.ticket, c.0.first_class),
+            "delay_minutes_threshold": rules::MIN_DELAY_MINUTES,
         }
     })))
 }

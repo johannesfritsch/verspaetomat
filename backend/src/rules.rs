@@ -10,6 +10,9 @@ use crate::db::rows::{ClaimStatus, IncidentRow, IncidentStatus, TicketType, Trai
 pub type Cents = i64;
 
 pub const MIN_PAYOUT_CENTS: Cents = 400;
+
+/// Below this a delay is worth nothing at all — the one threshold the whole product turns on.
+pub const MIN_DELAY_MINUTES: i64 = 60;
 pub const DTICKET_MONTHLY_PRICE_CENTS: Cents = 6300;
 pub const LEGAL_DEADLINE_MONTHS: u32 = 3;
 pub const WARN_DAYS_BEFORE_DEADLINE: i64 = 21;
@@ -18,7 +21,7 @@ pub const DEFAULT_FARE_CENTS: Cents = 3990;
 
 /// Compensation for one delayed journey. None when nothing is owed.
 pub fn claim_amount_cents(ticket: TicketType, category: TrainCategory, delay_minutes: i64, first_class: bool, fare_cents: Option<Cents>) -> Option<Cents> {
-    if delay_minutes < 60 {
+    if delay_minutes < MIN_DELAY_MINUTES {
         return None;
     }
     let amount = match ticket {
@@ -45,6 +48,27 @@ pub fn claim_amount_cents(ticket: TicketType, category: TrainCategory, delay_min
         }
     };
     Some(amount)
+}
+
+/// What one qualifying journey is worth with this ticket, when that is a fixed number (issue #30).
+///
+/// The app's empty state wants to tell a newcomer what a delayed journey earns, and the amount is
+/// not one number: a Deutschlandticket pays 1,50 € (2,25 € in first class), a Zeitkarte pays that
+/// for a regional train but 5,00 € on a long-distance one, and a single ticket pays a quarter or a
+/// half of its own fare. So this answers only where the answer does not depend on which train was
+/// late or what the ticket cost, and returns `None` otherwise — which the app renders as a
+/// sentence without a number rather than as a guess.
+///
+/// It lives here, not in the app, because this is the money rule: the app must never carry a copy
+/// of the table that could drift away from it.
+pub fn flat_claim_cents(ticket: TicketType, first_class: bool) -> Option<Cents> {
+    match ticket {
+        TicketType::Deutschlandticket => Some(if first_class { 225 } else { 150 }),
+        // Regional and long-distance differ, and which one it will be is not known in advance.
+        TicketType::Zeitkarte => None,
+        // A share of a fare nobody has entered yet.
+        TicketType::Einzelfahrkarte => None,
+    }
 }
 
 /// Points for a ride: one per minute late from minute 1; a cancellation is 60; a Nachtrag is 1.
@@ -227,6 +251,33 @@ mod tests {
         assert_eq!(claim_amount_cents(TicketType::Deutschlandticket, TrainCategory::Re, 68, false, None), Some(150));
         assert_eq!(claim_amount_cents(TicketType::Deutschlandticket, TrainCategory::Re, 59, false, None), None);
         assert_eq!(claim_amount_cents(TicketType::Deutschlandticket, TrainCategory::Re, 60, true, None), Some(225));
+    }
+
+    /// issue #30: the app prints this number in its empty state, so it must be the same number the
+    /// ledger would actually book — and absent rather than wrong where it cannot be known.
+    #[test]
+    fn a_flat_rate_only_where_there_is_one() {
+        // The D-Ticket is flat whatever the train, which is the case the copy is written for.
+        assert_eq!(flat_claim_cents(TicketType::Deutschlandticket, false), Some(150));
+        assert_eq!(flat_claim_cents(TicketType::Deutschlandticket, true), Some(225));
+        for category in [TrainCategory::Re, TrainCategory::Fern] {
+            assert_eq!(
+                flat_claim_cents(TicketType::Deutschlandticket, false),
+                claim_amount_cents(TicketType::Deutschlandticket, category, MIN_DELAY_MINUTES, false, None),
+                "the advertised rate has to be what a journey on a {category:?} actually books",
+            );
+        }
+
+        // A Zeitkarte pays 1,50 € regionally and 5,00 € long-distance, and which train it will be
+        // is not known when the sentence is written; a single ticket is a share of a fare nobody
+        // has entered. Both must be None rather than one of the two numbers.
+        assert_eq!(flat_claim_cents(TicketType::Zeitkarte, false), None);
+        assert_eq!(flat_claim_cents(TicketType::Einzelfahrkarte, false), None);
+        assert_ne!(
+            claim_amount_cents(TicketType::Zeitkarte, TrainCategory::Re, 70, false, None),
+            claim_amount_cents(TicketType::Zeitkarte, TrainCategory::Fern, 70, false, None),
+            "if these ever became equal, a Zeitkarte could carry a flat rate too",
+        );
         assert_eq!(claim_amount_cents(TicketType::Zeitkarte, TrainCategory::Fern, 70, false, None), Some(500));
         assert_eq!(claim_amount_cents(TicketType::Einzelfahrkarte, TrainCategory::Fern, 124, false, Some(3990)), Some(1995));
         assert_eq!(claim_amount_cents(TicketType::Einzelfahrkarte, TrainCategory::Fern, 70, false, Some(3990)), Some(997));

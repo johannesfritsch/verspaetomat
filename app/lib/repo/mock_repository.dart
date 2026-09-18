@@ -773,6 +773,14 @@ class MockRepository implements AppRepository {
         confirmedCents: _cents(state.confirmedTotal),
         submittedCents: _cents(state.submittedTotal),
         oldestOpen: oldest == null ? null : ApiOldestOpen(id: oldest.id, line: oldest.line, date: oldest.date, deadline: oldest.legalDeadline, daysLeft: state.daysUntilOldestExpires ?? 0),
+        // The same rule the server applies (`rules::flat_claim_cents`): flat for a
+        // Deutschlandticket, and not a single number for the other two, where it depends on the
+        // train or on the fare (issue #30).
+        flatClaimCents: switch (state.ticket) {
+          TicketType.deutschlandticket => 150,
+          TicketType.zeitkarte => null,
+          TicketType.einzelfahrkarte => null,
+        },
       ),
     );
   }

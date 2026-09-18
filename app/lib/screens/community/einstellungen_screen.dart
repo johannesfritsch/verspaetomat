@@ -207,7 +207,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           const VGap.xl(),
           const VSection('Vorführung'),
           SwitchRow(title: 'Offline simulieren', subtitle: 'Screens zeigen den letzten Stand', value: state.offline, onChanged: (_) => state.toggleOffline()),
-          VListRow(title: 'Showcase', subtitle: 'Alle Screens auf einen Blick', chevron: true, onTap: () => context.go(Routes.showcase)),
+          // The Showcase moved to Entwicklung, where it is in every build (issue #28).
           const VGap.l(),
           Text('Verspätomat 0.1 · Vorführung · Alle Daten erfunden', style: VText.caption),
           ] else ...[

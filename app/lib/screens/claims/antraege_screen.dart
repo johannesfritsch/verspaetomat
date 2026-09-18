@@ -10,7 +10,6 @@ import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../community/community_widgets.dart' show pickNgo;
-import '../ride/checkin_launcher.dart' show startCheckin;
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
 
@@ -187,7 +186,13 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
         final cards = <Widget>[
           // The bundle(s) being collected first (docs/18); nothing at all gets the explainer (docs/21 §5).
           if (nothingAtAll)
-            _EmptyAntraege(ngoName: ngoName(session.me?.settings.ngoId ?? ''))
+            EmptyAntraege(
+              ngoName: ngoName(session.me?.settings.ngoId ?? ''),
+              minPayoutCents: summary.minPayoutCents,
+              flatClaimCents: summary.flatClaimCents,
+              delayMinutes: summary.delayMinutesThreshold,
+              notifications: session.me?.settings.notifications ?? true,
+            )
           else if (desks.isEmpty)
             _EmptyCollecting()
           else
@@ -512,53 +517,116 @@ class _CollectingCard extends StatelessWidget {
 
 /// The whole tab is empty: no case, no Antrag, nothing taken out. Say what will
 /// happen here and when, rather than showing an empty box (docs/21 §5).
-class _EmptyAntraege extends StatelessWidget {
-  const _EmptyAntraege({required this.ngoName});
+class EmptyAntraege extends StatelessWidget {
+  const EmptyAntraege({
+    super.key,
+    required this.ngoName,
+    required this.minPayoutCents,
+    required this.flatClaimCents,
+    required this.delayMinutes,
+    required this.notifications,
+  });
+
   final String? ngoName;
+
+  /// All four numbers on this screen come from the server, because the backend owns every money
+  /// rule and a second copy of the table in the app is the one thing certain to drift (issue #30).
+  final int minPayoutCents;
+
+  /// What one qualifying journey earns with this customer's ticket — null when that is not a
+  /// single number, which is the honest answer for a Zeitkarte or a single ticket.
+  final int? flatClaimCents;
+  final int delayMinutes;
+
+  /// Whether the deadline reminder can actually reach this phone. The warning is delivered as a
+  /// push and the backend gates it on this flag, so promising it unconditionally would be a
+  /// promise to the wrong half of the users.
+  final bool notifications;
 
   @override
   Widget build(BuildContext context) {
-    final steps = [
-      'Einchecken, wenn du in den Zug steigst.',
-      'Ab 60 Minuten Verspätung am Ziel entstehen 1,50 €.',
-      'Ab 4 € geht ein Antrag an das Eisenbahnunternehmen — mit deiner Unterschrift, von dir.',
-      'Antwortet die Bahn, zahlt sie direkt an ${ngoName ?? 'deinen Verein'}.',
-    ];
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.m),
-      // docs/22 §4: no box. Nothing is collected yet, so nothing should look like a container.
+      // docs/22 §4: no box. Nothing is collected yet, so nothing should look like a container —
+      // which is also why the #30 mockup's floating card is not here, only its contents.
       child: Container(
         key: const Key('antraege-empty'),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Hier wird es später voll.', style: VText.title),
-            const SizedBox(height: 4),
-            Text('So läuft es:', style: VText.bodySStrong.copyWith(color: VColors.ink2)),
-            const VGap.s(),
-            for (var n = 0; n < steps.length; n++)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(width: 22, child: Text('${n + 1}.', style: VText.bodySStrong.copyWith(color: VColors.red))),
-                    Expanded(child: Text(steps[n], style: VText.bodyS)),
-                  ],
-                ),
-              ),
+            Text('Noch keine Anträge offen', style: VText.h2),
             const VGap.xs(),
-            Text('Anträge müssen innerhalb eines Jahres gestellt werden. Wir erinnern dich rechtzeitig.', style: VText.caption),
-            const VGap.m(),
-            VPrimaryButton(label: 'Einchecken', icon: Icons.train_outlined, onTap: () => startCheckin(context)),
+            Text(
+              'Hier sammeln sich deine Fälle, sobald du im Zug eingecheckt warst und der Zug zu '
+              'spät ankam.',
+              style: VText.body,
+            ),
+            const VGap.l(),
+            VStepList(
+              active: -1,
+              steps: [
+                const VStep(
+                  title: 'Im Zug einchecken',
+                  text: 'Ein Tippen, sobald du sitzt.',
+                  icon: Icons.train_outlined,
+                ),
+                VStep(
+                  title: 'Ab $delayMinutes Minuten Verspätung',
+                  // The amount is a fact about *this* ticket. Where it is not one number — a
+                  // Zeitkarte pays differently on a regional and a long-distance train, a single
+                  // ticket pays a share of its own fare — the sentence says so instead of
+                  // printing the commonest number and being wrong for everyone else.
+                  text: flatClaimCents == null
+                      ? 'entsteht ein Anspruch. Wie hoch, hängt von deinem Ticket und dem Zug ab.'
+                      : 'am Ziel entstehen ${fmtCents(flatClaimCents!)}.',
+                  icon: Icons.schedule,
+                ),
+                VStep(
+                  title: 'Ab ${fmtCents(minPayoutCents)}',
+                  text: 'bereiten wir den Antrag vor. Unterschrieben wird er von dir.',
+                  icon: Icons.description_outlined,
+                ),
+                VStep(
+                  title: 'Die Bahn zahlt',
+                  text: 'direkt an ${ngoName ?? 'deinen Verein'} — nicht an uns.',
+                  icon: Icons.favorite_outline,
+                ),
+              ],
+            ),
+            const VGap.l(),
+            const VDivider(),
             const VGap.s(),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  notifications ? Icons.notifications_none : Icons.notifications_off_outlined,
+                  size: 18,
+                  color: VColors.ink3,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    // Three months, not a year: `rules.rs` sets the legal deadline three months
+                    // after the ride and expires the case itself, so the app must not suggest
+                    // there is longer. The reminder is real — the scanner warns 21 days out —
+                    // but it travels as a push, so it is only a promise if those are on.
+                    notifications
+                        ? 'Ein Fall verfällt drei Monate nach der Fahrt. Wir melden uns rechtzeitig vorher.'
+                        : 'Ein Fall verfällt drei Monate nach der Fahrt. Erinnern können wir dich nur mit Mitteilungen.',
+                    style: VText.caption,
+                  ),
+                ),
+              ],
+            ),
+            const VGap.l(),
             // Until a train is an hour late this tab has nothing to show, which can be weeks. The
             // walkthrough is the only way to find out what it will look like — and the only way an
-            // App Store reviewer sees the flow at all.
-            VGhostButton(
+            // App Store reviewer sees the flow at all. Issue #30 drops the „Einchecken" button
+            // that stood above it, which leaves this the only thing to press.
+            VOutlineButton(
               label: 'Vorführung ansehen',
               icon: Icons.play_circle_outline,
-              color: VColors.ink2,
               onTap: () => context.push(Routes.vorfuehrung),
             ),
           ],
@@ -568,7 +636,6 @@ class _EmptyAntraege extends StatelessWidget {
   }
 }
 
-/// "1 Fall nicht eingereicht · anzeigen": the way back for a case taken out (docs/21 §4).
 class _DiscardedLine extends StatefulWidget {
   const _DiscardedLine({required this.incidents, required this.onRestore, required this.onDelete});
   final List<ApiIncident> incidents;

@@ -828,13 +828,34 @@ class ApiOldestOpen {
 }
 
 class ApiIncidentSummary {
-  const ApiIncidentSummary({this.desks = const [], this.readyDesk, this.confirmedCents = 0, this.submittedCents = 0, this.oldestOpen, this.minPayoutCents = 400});
+  const ApiIncidentSummary({
+    this.desks = const [],
+    this.readyDesk,
+    this.confirmedCents = 0,
+    this.submittedCents = 0,
+    this.oldestOpen,
+    this.minPayoutCents = 400,
+    this.flatClaimCents,
+    this.delayMinutesThreshold = 60,
+  });
   final List<ApiDeskSummary> desks;
   final String? readyDesk;
   final int confirmedCents;
   final int submittedCents;
   final ApiOldestOpen? oldestOpen;
   final int minPayoutCents;
+
+  /// What one qualifying journey earns with *this* customer's ticket, when that is a fixed
+  /// number at all (issue #30). Null for a Zeitkarte or a single ticket, where it depends on the
+  /// train or on the fare — the screen then says it without a number rather than guessing.
+  ///
+  /// It comes from the server because the backend owns every money rule; a copy of the rate
+  /// table in the app is the one thing that is certain to drift.
+  final int? flatClaimCents;
+
+  /// Below this a delay is worth nothing. Also the server's number, for the same reason.
+  final int delayMinutesThreshold;
+
   factory ApiIncidentSummary.fromJson(Map<String, dynamic> j) => ApiIncidentSummary(
         desks: _ml(j['desks']).map(ApiDeskSummary.fromJson).toList(),
         readyDesk: _sn(j['ready_desk']),
@@ -842,6 +863,10 @@ class ApiIncidentSummary {
         submittedCents: _i(j['submitted_cents']),
         oldestOpen: _m(j['oldest_open']) == null ? null : ApiOldestOpen.fromJson(_m(j['oldest_open'])!),
         minPayoutCents: _i(j['min_payout_cents'], 400),
+        // Absent on a server older than issue #30, and absent *by design* for a ticket with no
+        // flat rate. Both mean the same thing to the screen: say it without a number.
+        flatClaimCents: j['flat_claim_cents'] == null ? null : _i(j['flat_claim_cents']),
+        delayMinutesThreshold: _i(j['delay_minutes_threshold'], 60),
       );
 }
 

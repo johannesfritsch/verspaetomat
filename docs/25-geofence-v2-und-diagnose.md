@@ -62,7 +62,9 @@ Nobody should be nudged forever by an app they stopped using.
 
 A sub-page under Einstellungen, `Entwicklung`, **in every build including a release one** (issue #29). It exists so a question like "why no nudge at Memmingen?" can be answered from the phone instead of guessed at from a laptop.
 
-It used to need `--dart-define=DEBUG_PAGE=1`, which `tools/release.sh` never passed, so the page shipped inside every TestFlight build with no way in. It is safe in a passenger's hands: there is no write control on it in any form, and the app has no admin surface. The workshop tools that change what the app *is* — switching backend, the demo toys, the Showcase — stay behind `kDebugMode` in their own block in `einstellungen_screen.dart`.
+It used to need `--dart-define=DEBUG_PAGE=1`, which `tools/release.sh` never passed, so the page shipped inside every TestFlight build with no way in. It is safe in a passenger's hands: nothing on the page itself writes anything, and the app has no admin surface. The workshop tools that change what the app *is* — switching backend, the demo toys, the "alles erfunden" footer — stay behind `kDebugMode` in their own block in `einstellungen_screen.dart`.
+
+Since issue #28 the page also carries **Alle Schirme → Showcase**, the index of every screen, in every build. That one is not read-only the way this page is, so it guards itself: in local mode it leaves out the entries that would write to the real account — the three onboarding screens, which set the ticket, the NGO and the onboarding flag and raise the iOS prompts, and the two `Antrag` rows, which POST a draft that can delete one already holding a ticket photo and a signature — and the entries that would show real data under an invented label, which is every `Angekommen` variant, since the variant only applies outside local mode. A note on the page says it has done so. It is pushed rather than gone to, and draws a back arrow when it can pop; without that it would be a room with no door in a release build.
 
 **Status**
 
