@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -179,7 +181,8 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
         '# Berechtigung: ${s.permission.name} · Mitteilungen: ${s.notifications ? 'an' : 'aus'} · Schicht: ${s.mode ?? '?'}',
         '# Regionen: ${s.registered} registriert, gezogen ${when(s.regionsAt)}'
             '${s.regionsCentre == null ? '' : ' um ${s.regionsCentre!.lat.toStringAsFixed(4)},${s.regionsCentre!.lon.toStringAsFixed(4)}'}',
-        '# Nearest: ${when(s.nearestAt)} · ${s.nearestCount} zurück',
+        '# Nearest: ${when(s.nearestAt)} · ${s.nearestCount} zurück'
+          '${s.nearestCentre == null ? ' · Ort unbekannt' : ' · geholt um ${s.nearestCentre!.lat.toStringAsFixed(4)},${s.nearestCentre!.lon.toStringAsFixed(4)}'}',
         if (s.disc != null)
           '# Scheibe: ${s.disc!.lat.toStringAsFixed(4)},${s.disc!.lon.toStringAsFixed(4)} '
               'r=${(s.disc!.radiusM / 1000).round()} km (${s.disc!.band}) gesetzt ${when(s.disc!.at)}',
@@ -251,19 +254,40 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
   String _setCaption(GeofenceStatus s) {
     if (s.regionsAt == null) return 'Noch nie gezogen.';
     if (s.nearestAt == null) {
-      return 'Die Liste der nahen Bahnhöfe wurde noch nie geholt — der Satz besteht aus deinen '
+      return 'Die Liste der nahen Bahnhöfe wurde noch nie geholt — der Satz besteht nur aus deinen '
           'Stammbahnhöfen.';
     }
+
+    // The question this page exists for, in the order it actually gets asked: is the list from
+    // *here*, and if not, is anything going to fetch a new one?
+    final away = _nearestAwayKm(s);
+    if (away != null && away > 3) {
+      return 'Die Liste der nahen Bahnhöfe wurde ${away.toStringAsFixed(0)} km von hier geholt. Sie '
+          'beschreibt einen anderen Ort, und der Satz ist daraus gezogen — beim nächsten Start '
+          'wird neu gesucht.';
+    }
+
     final gap = s.regionsAt!.difference(s.nearestAt!);
     final parts = <String>[
       if (gap.inMinutes > 30)
         'Der Satz wurde ${_howLong(gap)} nach der letzten Suche neu gezogen — also aus derselben '
             'Liste wie vorher, nicht aus einer neuen.',
       if (s.disc != null)
-        'Neu gesucht wird erst außerhalb der Scheibe, und die ist gerade '
-            '${(s.disc!.radiusM / 1000).round()} km weit.',
+        'Von selbst neu gesucht wird erst außerhalb der Scheibe, und die ist gerade '
+            '${(s.disc!.radiusM / 1000).round()} km weit — im Stehen passiert das nie.',
     ];
     return parts.isEmpty ? 'Satz und Suche liegen dicht beieinander.' : parts.join(' ');
+  }
+
+  /// How far the stored nearby list was fetched from where the disc now sits, in km.
+  static double? _nearestAwayKm(GeofenceStatus s) {
+    final n = s.nearestCentre, d = s.disc;
+    if (n == null || d == null) return null;
+    // Equirectangular is exact enough for a distance that only has to be read as a number.
+    const mPerDegLat = 111320.0;
+    final mPerDegLon = mPerDegLat * math.cos(d.lat * math.pi / 180);
+    final dy = (n.lat - d.lat) * mPerDegLat, dx = (n.lon - d.lon) * mPerDegLon;
+    return math.sqrt(dy * dy + dx * dx) / 1000;
   }
 
   /// „3 Stunden", „12 Minuten" — a gap in the words the caption needs.
@@ -495,6 +519,12 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
                   : '${s.regionsCentre!.lat.toStringAsFixed(4)}, ${s.regionsCentre!.lon.toStringAsFixed(4)}',
             ),
             _Row('Nearest geholt', _stamp(s.nearestAt)),
+            _Row(
+              '… und zwar um',
+              s.nearestCentre == null
+                  ? '–'
+                  : '${s.nearestCentre!.lat.toStringAsFixed(4)}, ${s.nearestCentre!.lon.toStringAsFixed(4)}',
+            ),
             _Row('… Bahnhöfe zurück', s.nearestAt == null ? '–' : '${s.nearestCount}'),
             _Row('Schicht macht', s.mode ?? '–'),
             const VGap.xs(),

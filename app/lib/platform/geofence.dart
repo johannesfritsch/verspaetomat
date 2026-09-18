@@ -112,6 +112,9 @@ class Geofence {
             : null,
         nearestAt: _at(m['nearestAt']),
         nearestCount: (m['nearestCount'] as num?)?.toInt() ?? 0,
+        nearestCentre: m['nearestLat'] is num && m['nearestLon'] is num
+            ? (lat: (m['nearestLat'] as num).toDouble(), lon: (m['nearestLon'] as num).toDouble())
+            : null,
         mode: m['mode']?.toString(),
         regions: [
           for (final r in (m['regions'] as List? ?? const []).whereType<Map>())
@@ -295,6 +298,7 @@ class GeofenceStatus {
     this.regionsCentre,
     this.nearestAt,
     this.nearestCount = 0,
+    this.nearestCentre,
     this.mode,
   });
   const GeofenceStatus.unavailable()
@@ -312,6 +316,7 @@ class GeofenceStatus {
         regionsCentre = null,
         nearestAt = null,
         nearestCount = 0,
+        nearestCentre = null,
         mode = null;
   final GeofencePermission permission;
   final bool notifications;
@@ -345,6 +350,10 @@ class GeofenceStatus {
   /// This is the one that goes stale without anything on screen changing.
   final DateTime? nearestAt;
   final int nearestCount;
+
+  /// Where that list was fetched. A list from the right time in the wrong town looks exactly like
+  /// a good one without it — which is how Langenargen stayed registered in Kißlegg (issue #31).
+  final ({double lat, double lon})? nearestCentre;
 
   /// What the layer is waiting for: `idle`, `configureFix`, `umbrellaFix`, `dwell:<station>`.
   final String? mode;

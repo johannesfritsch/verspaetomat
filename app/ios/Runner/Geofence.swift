@@ -33,6 +33,11 @@ enum GeofenceRules {
   /// to what is actually around the passenger.
   static let awayFromHomeM: CLLocationDistance = 50_000
 
+  /// How far the phone may be from where the nearby list was fetched before that list is treated
+  /// as describing somewhere else (issue #31). Wider than a station circle so a walk across town
+  /// does not re-ask, far narrower than the coverage disc so a different town always does.
+  static let nearestStaleM: CLLocationDistance = 3_000
+
   /// The nudge fires only if the phone is still in the region three minutes later (docs/25 §3):
   /// a train passing through is long gone by then, a passenger on a platform is not. Exit
   /// cancels it, which is the honest signal — the old 25 s speed watch guessed at the same
@@ -443,6 +448,26 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   private var nearestAt: Date? { defaults.object(forKey: "geofence.nearest.at") as? Date }
   private var nearestCount: Int { defaults.integer(forKey: "geofence.nearest.n") }
 
+  /// Where the nearby list was fetched. Without it a list is only dated, and a list from the
+  /// right time in the wrong town looks exactly like a good one (issue #31).
+  private var nearestCentre: CLLocation? {
+    guard let lat = defaults.object(forKey: "geofence.nearest.lat") as? Double,
+          let lon = defaults.object(forKey: "geofence.nearest.lon") as? Double else { return nil }
+    return CLLocation(latitude: lat, longitude: lon)
+  }
+
+  /// Whether the stored nearby list still describes where the phone is.
+  ///
+  /// **This is the hole that kept Langenargen registered in Kißlegg.** `nearest` is persisted, and
+  /// the only thing that ever writes it is `refreshNearest` — which runs on an umbrella exit, a
+  /// disc exit, or the button. Standing still, none of those can fire: the umbrella and the disc
+  /// are both centred on the phone. So a list fetched in one town survived every relaunch in
+  /// another, and `configure` re-registered it each time without ever asking again.
+  private func nearestFits(_ fix: CLLocation) -> Bool {
+    guard let centre = nearestCentre, nearestAt != nil else { return false }
+    return fix.distance(from: centre) <= GeofenceRules.nearestStaleM
+  }
+
   /// The last significant-location fix, so the next one can be turned into a speed.
   private var lastSignificant: CLLocation?
 
@@ -581,7 +606,10 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     }
     startCoarseLayer()
     let n = registerStations(c)
-    lastEvent = "configure: \(n) stations, enabled=\(c.enabled), riding=\(c.riding), auth=\(Self.permissionString(authStatus))"
+    // `n` is what got registered, not what Dart sent — those differ whenever the nearby list is
+    // carrying the set, and reading it as "Dart sent one station" sent me down the wrong path.
+    lastEvent = "configure: sent \(c.stations.count) frequent, registered \(n) regions, "
+      + "enabled=\(c.enabled), riding=\(c.riding), auth=\(Self.permissionString(authStatus))"
     configureReply = reply
     registerNudgeCategory()
     beginMode(.configureFix, timeout: 10) { [weak self] in self?.configureReply?(["registered": n]); self?.configureReply = nil }
@@ -634,6 +662,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         "regionsLon": regionsCentre?.coordinate.longitude as Any,
         "nearestAt": nearestAt?.timeIntervalSince1970 as Any,
         "nearestCount": nearestCount,
+        "nearestLat": nearestCentre?.coordinate.latitude as Any,
+        "nearestLon": nearestCentre?.coordinate.longitude as Any,
         "mode": modeLabel,
         // Every registered region, with whether the phone is inside it right now (docs/25 §5).
         "regions": manager.monitoredRegions.compactMap { r -> [String: Any]? in
@@ -689,8 +719,11 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     // The line that says why the set is what it is (issue #31). Reading it out of the pieces took
     // two rounds: „1 registriert" and a station thirty kilometres away is only explicable once you
     // know there were no frequent stations, no nearest ones, and which budget was in force.
+    // Naming them is the point: „→ 1 stations" was true in Kißlegg for three builds running, and
+    // the one station was Langenargen, thirty kilometres away. The count never said which.
+    let named = set.isEmpty ? "none" : set.map { $0.name }.joined(separator: ", ")
     lastEvent = "regionSet: \(c.stations.count) frequent + \(nearest.count) nearest, "
-      + "nearHome=\(GeofenceRules.nearHome(frequent: c.stations, here: discCentre)) → \(set.count) stations"
+      + "nearHome=\(GeofenceRules.nearHome(frequent: c.stations, here: discCentre)) → \(set.count): \(named)"
     for s in set {
       let r = CLCircularRegion(center: s.location.coordinate, radius: c.stationRadiusM, identifier: Self.stationPrefix + s.id)
       r.notifyOnEntry = true
@@ -882,6 +915,15 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       discRadius = GeofenceRules.coverageRadius(speedMps: 0)
       registerStations(c)
       finishConfigure()
+      // …and asks again if the list it just drew from belongs to somewhere else. Every other
+      // path to `refreshNearest` needs the phone to *move*; standing still, the umbrella and the
+      // disc are both centred on it and neither can fire. Without this a list fetched in one town
+      // outlives every relaunch in the next one, which is exactly what happened in Kißlegg.
+      if !nearestFits(l) {
+        let how = nearestCentre.map { "\(Int($0.distance(from: l) / 1000)) km away" } ?? "never fetched"
+        lastEvent = "nearest belongs elsewhere (\(how)), asking again"
+        refreshNearest(around: l, c)
+      }
     case .umbrellaFix:
       endMode()
       refreshNearest(around: l, c)
@@ -973,6 +1015,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         if let found = found {
           self.defaults.set(Date(), forKey: "geofence.nearest.at")
           self.defaults.set(found.count, forKey: "geofence.nearest.n")
+          self.defaults.set(l.coordinate.latitude, forKey: "geofence.nearest.lat")
+          self.defaults.set(l.coordinate.longitude, forKey: "geofence.nearest.lon")
           self.nearest = found
           self.stopAllRegions()
           self.registerStations(c)
