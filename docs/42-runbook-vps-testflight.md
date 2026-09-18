@@ -273,3 +273,13 @@ The phone shows the notification within seconds. If the log says `BadDeviceToken
 | Android | debug APK builds; Play needs the console account | `docs/41-launch-checklist.md` A5 |
 
 The order for the following week, from `docs/41-launch-checklist.md`: Postmark account and mail DNS first, because domain reputation takes days; the NGO agreement in parallel, because a real claim needs a real payee.
+
+## Alte TestFlight-Builds ablaufen lassen
+
+Builds bis 1.0.0 (48) sagen nach jedem Absenden „Testlauf: keine echte Mail hat das Haus
+verlassen", auch wenn die Mail wirklich rausging: die Prüfung dahinter (`_looksDryRun`) gab
+`true` für alles zurück. Vom Server aus ist das nicht zu heilen — der Satz hängt an keinem Feld.
+
+Der einzige Weg, den Satz aus der Welt zu bekommen, ist in App Store Connect: **Builds 38 bis 48
+ablaufen lassen (expire)**, damit nur noch (50) und neuer installierbar ist. Danach darf auch
+`desk_route_label` aus `draft_json` raus; nur diese Builds lesen es noch.

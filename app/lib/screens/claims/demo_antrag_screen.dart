@@ -43,6 +43,31 @@ class _DemoAntragScreenState extends State<DemoAntragScreen> {
     final s = Session(demo: _demo, prefs: prefs, apiUrl: apiUrl);
     if (!mounted) return;
     setState(() => _session = s);
+    await _askWhereAClaimGoes();
+  }
+
+  /// The one fact the walkthrough cannot make up: the address a claim from this app really goes to.
+  ///
+  /// It comes from the operator directory, which answers it out of the same routing table the
+  /// Senden step and the sender read — so when the desk is re-pointed with `stellwerk route set`,
+  /// the walkthrough follows without anyone touching the app. This is the app's *real* session,
+  /// the one the Anträge tab is running on; the throwaway demo session above cannot reach a server
+  /// and is never asked to. A failure here is not worth a word on screen: the walkthrough simply
+  /// says it does not know the address, which is what it said before this existed.
+  Future<void> _askWhereAClaimGoes() async {
+    if (!mounted) return;
+    // Looked up without asserting: the walkthrough is also pumped on its own in a widget test,
+    // where there is no app above it and no server to ask.
+    final real = context.getInheritedWidgetOfExactType<RepoScope>()?.notifier;
+    if (real == null || !real.isLocal) return;
+    try {
+      final ops = await real.repo.operators();
+      final desk = ops.where((o) => o.desk == 'Servicecenter Fahrgastrechte').firstOrNull;
+      if (!mounted || desk?.email == null) return;
+      setState(() => _demo.deskEmail = desk!.email);
+    } catch (_) {
+      // Nothing. The walkthrough is not the place to report that a directory could not be read.
+    }
   }
 
   @override

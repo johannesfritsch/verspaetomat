@@ -837,7 +837,8 @@ class MockRepository implements AppRepository {
     return ApiClaimDraft(
       claim: _draftClaim(),
       deskAddress: addr?.split('\n').first,
-      deskEmail: null,
+      // Whatever the real routing table said, if anybody asked it. Never invented here.
+      deskEmail: state.deskEmail,
       personalDataRequired: !state.personalDataEntered,
       relayAddress: Mock.relayAddress,
       claimReplyAddress: Mock.claimReplyAddress,

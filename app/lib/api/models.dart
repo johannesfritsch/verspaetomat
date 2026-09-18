@@ -922,6 +922,7 @@ class ApiClaimDraft {
     this.personalDataRequired = false,
     this.relayAddress,
     this.claimReplyAddress,
+    this.routeLabel,
     this.routeViaDefault = false,
   });
   final ApiClaim claim;
@@ -936,6 +937,11 @@ class ApiClaimDraft {
   final String? claimReplyAddress;
 
 
+  /// What the address is called in the routing table — „Auffanglinie", „Testpostfach (noch nicht
+  /// die Bahn)". It is the only thing that can tell a passenger that the address above is not the
+  /// railway's own desk, and the app must not guess that from the address itself.
+  final String? routeLabel;
+
   /// True when this desk has no address of its own and the server's catch-all answered. Worth
   /// saying on screen: it means nobody has looked this operator up yet (#25).
   final bool routeViaDefault;
@@ -947,6 +953,7 @@ class ApiClaimDraft {
         personalDataRequired: _b(j['personal_data_required']),
         relayAddress: _sn(j['relay_address']),
         claimReplyAddress: _sn(j['claim_reply_address']),
+        routeLabel: _sn(j['desk_route_label']),
         routeViaDefault: j['desk_route_via_default'] == true,
       );
 }

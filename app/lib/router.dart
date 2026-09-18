@@ -12,6 +12,7 @@ import 'screens/claims/demo_antrag_screen.dart';
 import 'screens/claims/demo_weiter_screen.dart';
 import 'screens/onboarding/wiederherstellen_screen.dart';
 import 'screens/showcase_screen.dart';
+import 'widgets/server_down.dart';
 import 'state/demo_state.dart';
 import 'state/nearby_monitor.dart';
 import 'state/ride_monitor.dart';
@@ -59,6 +60,10 @@ class Routes {
   static const wiederherstellen = '/wiederherstellen';
 
   static const showcase = '/showcase';
+
+  /// The „nicht erreichbar" page on its own (#28). A real outage cannot be arranged on demand, so
+  /// the Showcase and the screenshot tour reach it by route instead of by breaking the server.
+  static const stoerung = '/showcase/stoerung';
 }
 
 /// Where the app opens. `INITIAL_ROUTE` wins (tests, showcase runs). Otherwise a release
@@ -83,6 +88,7 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
     initialLocation: initialLocation,
     routes: [
       GoRoute(path: '/', redirect: (_, __) => Routes.showcase),
+      GoRoute(path: Routes.stoerung, builder: (context, __) => ServerDownScreen(onRetry: () => context.pop())),
       GoRoute(path: Routes.showcase, builder: (_, __) => const ShowcaseScreen()),
       GoRoute(path: Routes.vorfuehrung, builder: (_, __) => const DemoAntragScreen()),
       GoRoute(path: Routes.vorfuehrungWeiter, builder: (_, __) => const DemoWeiterScreen()),

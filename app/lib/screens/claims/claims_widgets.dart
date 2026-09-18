@@ -12,6 +12,7 @@ import '../../repo/app_repository.dart';
 import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../../widgets/server_down.dart';
 import '../../widgets/ticket.dart' show NgoLogo;
 import '../ride/ride_widgets.dart';
 
@@ -109,7 +110,15 @@ class _LoaderState<T> extends State<Loader<T>> {
     return FutureBuilder<T>(
       future: _future,
       builder: (context, snap) {
-        if (snap.hasError) return LoadError(error: snap.error, onRetry: _reload);
+        // A screen that could not load because the Verspätomat is unreachable gets the whole page
+        // (#28), not a line of red text with an exception in it: nothing about that failure is
+        // this passenger's doing and there is nothing on the page to keep. Everything else — a
+        // 404, a conflict, a refused precondition — is one request being wrong and stays the
+        // ordinary inline error, where the rest of the screen is still worth seeing.
+        if (snap.hasError) {
+          if (isBackendUnreachable(snap.error)) return ServerDownScreen(onRetry: _reload);
+          return LoadError(error: snap.error, onRetry: _reload);
+        }
         if (!snap.hasData) return widget.placeholder?.call(context) ?? const PagePlaceholder();
         return widget.builder(context, snap.data as T, _reload);
       },

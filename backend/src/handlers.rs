@@ -111,8 +111,23 @@ pub async fn trip(State(s): State<AppState>, _c: Customer, Query(q): Query<TripQ
     Ok(Json(json!(t)))
 }
 
+/// The public operator directory, each desk carrying the address a claim filed under it really
+/// goes to.
+///
+/// `operators.email` is a column nobody has written since migration 0028 nulled it, and it was
+/// serialized here as a permanent null. It answers a question now, and the answer is the routing
+/// table's — resolved exactly the way the Senden step and the sender resolve it, catch-all
+/// included, so there is still one place that knows a destination. Null where no route exists at
+/// all, because then nothing can be sent and there is nothing to name.
 pub async fn operators(State(s): State<AppState>) -> ApiResult {
-    let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators order by name").fetch_all(&s.pool).await.map_err(internal)?;
+    let mut ops: Vec<OperatorRow> = sqlx::query_as("select * from operators order by name").fetch_all(&s.pool).await.map_err(internal)?;
+    // One read of a table that holds a row per desk plus the catch-all, rather than a resolve per
+    // row of a six-row directory.
+    let routes: Vec<(String, String)> = sqlx::query_as("select desk, to_address from mail_routes").fetch_all(&s.pool).await.map_err(internal)?;
+    let fallback = routes.iter().find(|(d, _)| d == DEFAULT_DESK).map(|(_, a)| a.clone());
+    for o in &mut ops {
+        o.email = routes.iter().find(|(d, _)| *d == o.desk).map(|(_, a)| a.clone()).or_else(|| fallback.clone());
+    }
     Ok(Json(json!(ops)))
 }
 
@@ -1162,13 +1177,16 @@ async fn draft_json(s: &AppState, c: &CustomerRow, claim: &ClaimRow, desk: &str)
     let route = mail_route(&s.pool, desk).await?;
     v["desk_email"] = json!(route.as_ref().map(|r| r.to_address.clone()));
     v["desk_route_label"] = json!(route.as_ref().map(|r| r.label.clone()));
-    // Kept only for the iOS builds still installable from TestFlight (1.0.0 (38) to (48)). Routing
-    // has no rehearsal any more (#25), but those builds read `desk_route_live` and take a missing
-    // key as false — their „Probelauf" state — so they would tell the passenger that nothing was
-    // sent while the mail really went out. That is a lie about a legal claim, so the key stays and
-    // says the truth for this server: everything it sends on is a real route. Nothing branches on
-    // it here. Drop it once no build below (50) is on anyone's phone.
-    v["desk_route_live"] = json!(true);
+    // `desk_route_live` is deliberately NOT sent, although builds up to (48) read it.
+    //
+    // I put it back for one deploy on the theory that a missing key reads as false there and makes
+    // those builds claim nothing was sent. It does not. In (48) the post-send line comes from
+    // `_looksDryRun`, which returns `… || true`, so it says „Testlauf" after every send whatever
+    // this server does. What the key really gates there are two warnings *before* sending — „diese
+    // Adresse ist eine von uns, nicht die des Eisenbahnunternehmens" — and with the route pointing
+    // at our own inbox those are true. Sending `true` deleted two true warnings and, per
+    // migration 0028, asserted that the address is the railway's real desk, which it is not.
+    // The way to stop (48) lying is to expire it in App Store Connect, not to feed it a constant.
     // True when this desk has no address of its own and the catch-all answered. The app says so on
     // the step that shows the destination, so "nobody set one for this desk yet" is visible rather
     // than silently absorbed (#25). Additive: an older build ignores it.

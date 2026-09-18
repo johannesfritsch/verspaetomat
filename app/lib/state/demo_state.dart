@@ -82,6 +82,15 @@ class DemoState extends ChangeNotifier {
     _refreshReady();
   }
 
+  /// Where a claim from this app really goes, read from the server's routing table by whoever
+  /// built this state — the walkthrough asks the real session for it before it starts.
+  ///
+  /// The walkthrough has no server of its own and must not invent a destination: an invented one
+  /// is what read as „ihr denkt euch Adressen aus" (#22), and a blank is not the truth either
+  /// (#25). So the one number it cannot know is handed to it, and where nobody hands it one the
+  /// screens say they do not know rather than filling the gap.
+  String? deskEmail;
+
   // -- Onboarding -----------------------------------------------------------
   bool onboardingDone = false;
   bool notificationsGranted = true;

@@ -46,6 +46,7 @@ const tour = <(String, String)>[
   ('historie', Routes.historie),
   ('einstellungen', Routes.einstellungen),
   ('daten', Routes.datenherkunft),
+  ('stoerung', Routes.stoerung),
   ('impressum', '/rechtliches/impressum'),
   ('datenschutz', '/rechtliches/datenschutz'),
   ('bote', '/rechtliches/bote'),

@@ -404,6 +404,7 @@ class _AntragScreenState extends State<AntragScreen> {
         personalDataRequired: _draft?.personalDataRequired ?? false,
         relayAddress: _draft?.relayAddress,
         claimReplyAddress: _draft?.claimReplyAddress,
+        routeLabel: _draft?.routeLabel,
         routeViaDefault: _draft?.routeViaDefault ?? false,
       );
 
@@ -946,17 +947,27 @@ class _Pruefen extends StatelessWidget {
                 : (draft.deskEmail == null ? 'Eigene Stelle ohne E-Mail. Der Antrag geht per Post.' : 'Eigene Fahrgastrechte-Stelle dieses Betreibers.'),
             style: VText.caption,
           ),
-          // Where the mail really goes, said on the step that first names the desk rather than
-          // four steps later on the preview (#25). The address above is the one the server will
-          // send to; these two lines say what it is when it is not the railway's own.
+          // What the address above is called in the routing table. Without it the screen read
+          // „Servicecenter Fahrgastrechte / info@zoom7.de / die gemeinsame Stelle von DB" — three
+          // true lines that together say something false, because that address is ours and not
+          // DB's. The app cannot tell one from the other by looking; the person who typed the
+          // route can, and did, so the label is what says it (#25).
+          if (draft.routeLabel != null) ...[
+            const VGap.xs(),
+            Text('Diese Adresse ist hinterlegt als: ${draft.routeLabel}.', style: VText.caption),
+          ],
+          if (draft.routeViaDefault) ...[
+            const VGap.xs(),
+            Text('Für diese Stelle ist keine eigene Adresse hinterlegt. Der Antrag geht an unsere Auffanglinie.', style: VText.caption),
+          ],
           if (demo) ...[
             const VGap.s(),
-            Text('Vorführung: hier steht später die Adresse der Stelle. In der Vorführung geht nichts raus.', style: VText.caption),
-          ] else ...[
-            if (draft.routeViaDefault) ...[
-              const VGap.s(),
-              Text('Für diese Stelle ist noch keine eigene Adresse hinterlegt. Der Antrag geht an unsere Auffanglinie.', style: VText.caption),
-            ],
+            Text(
+              draft.deskEmail == null
+                  ? 'Vorführung: Welche Adresse hier steht, weiß nur der Server. Verschickt wird hier ohnehin nichts.'
+                  : 'Vorführung: Dorthin ginge ein echter Antrag. Verschickt wird hier nichts.',
+              style: VText.caption,
+            ),
           ],
         ],
       ],
@@ -1671,10 +1682,12 @@ class _Senden extends StatelessWidget {
           // table the server sends from. When that is not the railway's own desk, the screen says
           // so — a rehearsal must never be able to pass for a filed claim.
           if (demo) ...[
-            const VNoteBanner(
+            VNoteBanner(
               icon: Icons.science_outlined,
-              text: 'Vorführung. Hier steht später die Adresse, an die dein Antrag wirklich geht — die kennt nur '
-                  'der Server. In der Vorführung wird nichts verschickt.',
+              text: draft.deskEmail == null
+                  ? 'Vorführung. Welche Adresse hier stünde, weiß nur der Server. Verschickt wird hier nichts.'
+                  : 'Vorführung. „An" ist die Adresse, an die ein echter Antrag aus dieser App wirklich ginge. '
+                      'Verschickt wird hier nichts.',
             ),
             const VGap.s(),
           ] else if (draft.routeViaDefault) ...[
