@@ -129,6 +129,13 @@ One binary, several loops:
   which is the correct state for a system nobody has told where to send. Manage it with
   `stellwerk route list | set <desk> <address> [--label …] [--live] | remove <desk>`, and read the
   answer to "where does this actually go" straight out of `route list`.
+  - **One catch-all** (#25): the row keyed `*`, set with `stellwerk route default <address>`, is
+    where a desk with no route of its own sends. It is an ordinary row in the same table, printed
+    first by `route list` as „Auffanglinie", so the fallback is not a second mechanism to remember.
+    A desk with its own route always wins over it. The draft says `desk_route_via_default` when the
+    catch-all answered, and the app prints that on the step that names the desk — so "nobody has
+    looked this operator up yet" is visible rather than silently absorbed. Answers are matched
+    through the same resolver, or a claim sent on the catch-all could never be confirmed.
   - This replaced `CLAIM_MAIL_REDIRECT`, an optional environment variable that had to be remembered
     to be safe and failed open when it was not: unset, empty, whitespace, missing `@`, or the name
     typed wrong all sent to the railway silently. Two paths never consulted it at all — answering an

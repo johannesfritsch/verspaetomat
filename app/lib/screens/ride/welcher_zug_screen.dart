@@ -174,7 +174,7 @@ class _WelcherZugListState extends State<WelcherZugList> {
         ],
         const VGap.m(),
         for (final it in _itineraries) ...[
-          Builder(builder: (context) {
+          ItineraryTile(itinerary: it, child: Builder(builder: (context) {
             final leg = it.legs.isEmpty ? null : it.legs.first;
             final arrival = it.liveArrival ?? it.plannedArrival;
             final late = it.liveArrival != null &&
@@ -210,7 +210,7 @@ class _WelcherZugListState extends State<WelcherZugList> {
                 if (_hasLeft(it)) const VConnectionTag('schon weg', icon: Icons.history),
               ],
             );
-          }),
+          })),
           // A later train than the earliest one: the extra wait is the passenger's, not the railway's.
           if (_later(it))
             Padding(
@@ -247,6 +247,23 @@ class _WelcherZugListState extends State<WelcherZugList> {
       ],
     );
   }
+}
+
+/// The itinerary a connection card stands for, hung on the card without drawing anything.
+///
+/// [VConnectionCard] is a design widget: it takes times, names and tags, and knows nothing about a
+/// journey. The walk-through test has to pick a particular connection — direct or with exactly one
+/// transfer, an operator the claims directory knows, one that has not left yet — and until this
+/// tile existed it read that off `ItineraryRow`, which this list stopped using in the redesign
+/// (#26). One stale finder took three E2E scenarios down with it, so the handle is worth its four
+/// lines.
+class ItineraryTile extends StatelessWidget {
+  const ItineraryTile({super.key, required this.itinerary, required this.child});
+  final ApiItinerary itinerary;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
 }
 
 /// One itinerary in board style: the first leg as a departure row, the transfers as a chip line.

@@ -76,6 +76,11 @@ class _AntragScreenState extends State<AntragScreen> {
   ApiSendResult? _sent;
   final _unknownAddress = TextEditingController();
 
+  /// One scroll view carries all five steps, so a step change has to send it back to the top. The
+  /// scaffold is the same element across `_step` — Flutter keeps a Scrollable's offset when its
+  /// element is only updated — so the next step opened wherever the last one was left (#27).
+  final _scroll = ScrollController();
+
   /// „Deine Angaben", held here rather than inside the form so „Weiter" can check and save them.
   /// There used to be a separate „Speichern" in the form and „Weiter" stayed grey until it was
   /// pressed, with nothing on the screen saying why. Now there is one button and it does the work.
@@ -104,20 +109,32 @@ class _AntragScreenState extends State<AntragScreen> {
 
   bool get _unknownDesk => widget.desk == 'Unbekannt';
   ApiClaim? get _claim => _draft?.claim;
-  bool get _paperOnly => _draft != null && (_draft!.deskEmail == null || _draft!.deskEmail!.isEmpty);
+  /// This desk takes no e-mail, so the claim goes on paper.
+  ///
+  /// Never in the walkthrough: the demo has no server and therefore no route, and that is not the
+  /// same as a desk that refuses mail. Without this it would show an App Store reviewer the postal
+  /// branch of a flow whose point is the mail (#22).
+  bool get _paperOnly => !widget.demo && _draft != null && (_draft!.deskEmail == null || _draft!.deskEmail!.isEmpty);
 
   @override
   void initState() {
     super.initState();
     _draft = widget.draft;
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-    // Leaving the e-mail row with something that is not an address says so right there, not only
-    // when „Weiter" is pressed.
-    _fEmail.addListener(() {
-      if (!_fEmail.hasFocus && _pEmail.text.trim().isNotEmpty && !looksLikeEmail(_pEmail.text)) {
-        setState(() => _marked = {..._marked, PersonalField.email});
-      }
-    });
+    // A row says what is wrong with it when it is left, not when a button is pressed. „Weiter" is
+    // disabled until the step is done now (#21), so it can no longer be pressed for an answer —
+    // and leaving a row is the same moment, one row earlier. The line above the button names what
+    // is missing; this puts the mark on the row itself.
+    for (final (node, field) in [
+      (_fName, PersonalField.name),
+      (_fAddress, PersonalField.address),
+      (_fEmail, PersonalField.email),
+    ]) {
+      node.addListener(() {
+        if (node.hasFocus || !mounted) return;
+        if (_missingPersonal().contains(field)) setState(() => _marked = {..._marked, field});
+      });
+    }
   }
 
   @override
@@ -129,6 +146,7 @@ class _AntragScreenState extends State<AntragScreen> {
     for (final f in [_fName, _fAddress, _fEmail]) {
       f.dispose();
     }
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -249,6 +267,20 @@ class _AntragScreenState extends State<AntragScreen> {
         _ => true,
       };
 
+  /// Move to another step, and start it at its top.
+  ///
+  /// A jump, not an animation: the title, the drawing, the step indicator and the whole body are
+  /// replaced in the same frame, so nothing is ever seen travelling. An animation would scroll the
+  /// *next* step's content up from its middle and would race that step's own height — Ticket is a
+  /// third of Prüfen, so the extent shrinks under the animation and it ends in a spring.
+  void _goToStep(int step) {
+    // A row left focused pulls the page back down a frame later, when the keyboard inset changes
+    // and the field brings its caret into view again. The step is over, so the keyboard is too.
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _step = step);
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+  }
+
   List<String> get _months {
     final m = _claim?.ticketMonths ?? const [];
     if (m.isNotEmpty) return m;
@@ -359,12 +391,24 @@ class _AntragScreenState extends State<AntragScreen> {
     return RepoScope.read(context).isLocal == false || true;
   }
 
+  /// The draft with a fresh claim in it, and everything else the server said about it kept.
+  ///
+  /// Every field the draft carries has to be listed here, because this runs after each patch — a
+  /// ticket, a Verein, a signature — and whatever is left out is silently lost for the rest of the
+  /// flow. Three were: the claim's own answering address, so the Senden step fell back to the
+  /// passenger's `fahrgast-…` and printed a sender the mail does not use; and the route's label and
+  /// its live flag, so every claim called itself a Probelauf from the first attachment onwards, a
+  /// real route included (#22).
   ApiClaimDraft _withClaim(ApiClaim c) => ApiClaimDraft(
         claim: c,
         deskAddress: _draft?.deskAddress,
         deskEmail: _draft?.deskEmail,
         personalDataRequired: _draft?.personalDataRequired ?? false,
         relayAddress: _draft?.relayAddress,
+        claimReplyAddress: _draft?.claimReplyAddress,
+        routeLabel: _draft?.routeLabel,
+        routeLive: _draft?.routeLive ?? false,
+        routeViaDefault: _draft?.routeViaDefault ?? false,
       );
 
   void _leave() => context.canPop() ? context.pop() : context.go(Routes.antraege);
@@ -475,6 +519,7 @@ class _AntragScreenState extends State<AntragScreen> {
     final me = session.me;
     final content = switch (_step) {
       0 => _Pruefen(
+          demo: widget.demo,
           draft: _draft!,
           incidents: _incidents,
           available: _available,
@@ -516,7 +561,7 @@ class _AntragScreenState extends State<AntragScreen> {
           signaturePng: _signaturePng,
           onSign: _openSignatureBoard,
         ),
-      _ => _Senden(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, paperOnly: _paperOnly),
+      _ => _Senden(draft: _draft!, incidents: _incidents, me: me, ngo: _ngo, paperOnly: _paperOnly, demo: widget.demo),
     };
 
     final last = _step == _steps.length - 1;
@@ -524,6 +569,7 @@ class _AntragScreenState extends State<AntragScreen> {
       eyebrow: 'Antrag · ${deskDisplay(widget.desk)}',
       title: _steps[_step],
       scroll: true,
+      controller: _scroll,
       art: _art[_step],
       onClose: _close,
       bottom: Column(
@@ -551,31 +597,23 @@ class _AntragScreenState extends State<AntragScreen> {
               Text(line, style: VText.caption, textAlign: TextAlign.center),
               const VGap.xs(),
             ],
-            if (_missingHere.isEmpty)
-              VPrimaryButton(
-                label: 'Weiter',
-                trailingIcon: Icons.arrow_forward,
-                onTap: _canContinue && !_busy ? () => _step == 0 ? _advanceFromPruefen() : setState(() => _step += 1) : null,
-              )
-            else
-              // Neutral, not the red tint: the red tier carries the same glow the primary does, and
-              // a glowing „Weiter" over an empty form is the very thing that was wrong (#21). Grey
-              // with ink says *not yet* and leaves the one red light on the screen to the step that
-              // is actually finished.
-              //
-              // Still pressable on „Prüfen": the press is what marks the empty rows and scrolls to
-              // the first one (#19). Where there is nothing to point at — a missing ticket photo is
-              // its own button on the screen — it simply waits.
-              VTintButton(
-                label: 'Weiter',
-                tone: VTintTone.neutral,
-                onTap: _step == 0 && !_busy ? _advanceFromPruefen : null,
-              ),
+            // One button in both states, and the state is the app's own disabled look: grey fill,
+            // grey ink, no glow, no ripple. The tier below the primary was the wrong answer — a
+            // filled tint block reads like the „Zurück" ghost underneath it rather than like a
+            // button that is off (#21). Same widget either way, so nothing is rebuilt and nothing
+            // moves when the step completes: the grey turns red and the glow lights.
+            VPrimaryButton(
+              label: 'Weiter',
+              trailingIcon: Icons.arrow_forward,
+              onTap: _missingHere.isEmpty && _canContinue && !_busy
+                  ? () => _step == 0 ? _advanceFromPruefen() : _goToStep(_step + 1)
+                  : null,
+            ),
           ],
           // One step back, everywhere — on the first step that is the overview. Leaving the whole
           // Antrag is the X at the top, never this.
           const VGap.xs(),
-          VGhostButton(label: 'Zurück', onTap: () => setState(() => _step == 0 ? _intro = true : _step -= 1)),
+          VGhostButton(label: 'Zurück', onTap: () => _step == 0 ? setState(() => _intro = true) : _goToStep(_step - 1)),
         ],
       ),
       child: Column(
@@ -685,7 +723,7 @@ class _AntragScreenState extends State<AntragScreen> {
       await _maybeShowRecoveryCode();
       if (!mounted) return;
     }
-    setState(() => _step = 1);
+    _goToStep(1);
   }
 
   Future<void> _maybeShowRecoveryCode() async {
@@ -860,8 +898,13 @@ class _Pruefen extends StatelessWidget {
     required this.focus,
     required this.keys,
     required this.marked,
+    required this.demo,
   });
   final ApiClaimDraft draft;
+
+  /// Reached from „Vorführung ansehen": the mock repository underneath knows no route, so the step
+  /// says that rather than printing an address nobody set.
+  final bool demo;
   final List<ApiIncident> incidents;
 
   /// Every open case at this desk: the ticked ones go in, the others wait for the next Antrag.
@@ -907,6 +950,26 @@ class _Pruefen extends StatelessWidget {
                 : (draft.deskEmail == null ? 'Eigene Stelle ohne E-Mail. Der Antrag geht per Post.' : 'Eigene Fahrgastrechte-Stelle dieses Betreibers.'),
             style: VText.caption,
           ),
+          // Where the mail really goes, said on the step that first names the desk rather than
+          // four steps later on the preview (#25). The address above is the one the server will
+          // send to; these two lines say what it is when it is not the railway's own.
+          if (demo) ...[
+            const VGap.s(),
+            Text('Vorführung: hier steht später die Adresse der Stelle. In der Vorführung geht nichts raus.', style: VText.caption),
+          ] else ...[
+            if (draft.routeViaDefault) ...[
+              const VGap.s(),
+              Text('Für diese Stelle ist noch keine eigene Adresse hinterlegt. Der Antrag geht an unsere Auffanglinie.', style: VText.caption),
+            ],
+            if ((draft.deskEmail?.isNotEmpty ?? false) && !draft.routeLive) ...[
+              const VGap.s(),
+              Text(
+                'Probelauf: diese Adresse ist eine von uns, nicht die des Eisenbahnunternehmens. '
+                'Der Antrag geht dorthin und sonst nirgendwohin.',
+                style: VText.caption,
+              ),
+            ],
+          ],
         ],
       ],
     );
@@ -1569,12 +1632,16 @@ class _Unterschrift extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _Senden extends StatelessWidget {
-  const _Senden({required this.draft, required this.incidents, required this.me, required this.ngo, required this.paperOnly});
+  const _Senden({required this.draft, required this.incidents, required this.me, required this.ngo, required this.paperOnly, required this.demo});
   final ApiClaimDraft draft;
   final List<ApiIncident> incidents;
   final ApiCustomer? me;
   final ApiNgo? ngo;
   final bool paperOnly;
+
+  /// „Vorführung ansehen": the preview shows the real shape of the mail, but the walkthrough knows
+  /// no destination and sends nothing, and it says both.
+  final bool demo;
 
   @override
   Widget build(BuildContext context) {
@@ -1589,7 +1656,9 @@ class _Senden extends StatelessWidget {
       incidentIds: draft.claim.incidentIds,
       direction: ApiMailDirection.out,
       from: '$name <$relay>',
-      to: draft.deskEmail ?? '–',
+      // The desk by name where there is no address to show: the walkthrough has no route, and an
+      // invented one was exactly what read as a made-up destination (#22).
+      to: draft.deskEmail ?? (demo ? 'Fahrgastrechte-Stelle' : '–'),
       bcc: pd?.email != null ? '${pd!.email} (dein Postfach)' : null,
       subject: 'Fahrgastrechte: EU-Antragsformular',
       body: draftMailBody(accountHolder: draft.claim.accountHolder, claimantName: name, incidents: incidents),
@@ -1613,11 +1682,19 @@ class _Senden extends StatelessWidget {
           // The address in the preview is the address the mail really goes to, read from the same
           // table the server sends from. When that is not the railway's own desk, the screen says
           // so — a rehearsal must never be able to pass for a filed claim.
-          if (!draft.routeLive) ...[
+          if (demo) ...[
+            const VNoteBanner(
+              icon: Icons.science_outlined,
+              text: 'Vorführung. Hier steht später die Adresse, an die dein Antrag wirklich geht — die kennt nur '
+                  'der Server. In der Vorführung wird nichts verschickt.',
+            ),
+            const VGap.s(),
+          ] else if (!draft.routeLive) ...[
             VNoteBanner(
               icon: Icons.science_outlined,
               text: 'Probelauf${draft.routeLabel == null ? '' : ' („${draft.routeLabel}")'}: '
-                  'diese E-Mail geht an ${draft.deskEmail ?? 'die eingetragene Adresse'} und nicht an das Eisenbahnunternehmen.',
+                  'diese E-Mail geht an ${draft.deskEmail ?? 'die eingetragene Adresse'} und nicht an das Eisenbahnunternehmen.'
+                  '${draft.routeViaDefault ? ' Für diese Stelle ist noch keine eigene Adresse hinterlegt.' : ''}',
             ),
             const VGap.s(),
           ],

@@ -485,9 +485,13 @@ class Mock {
 
   static String deskFor(String operator) => desks[operator] ?? 'Unbekannt';
 
+  /// The postal addresses only. There is deliberately no e-mail address here any more: where a
+  /// claim really goes lives in the server's `mail_routes` and nowhere else, so an address invented
+  /// for the demo is a second answer to a question that has one (#22, #25). The walkthrough says it
+  /// does not know instead.
   static const deskAddresses = <String, String>{
-    'Servicecenter Fahrgastrechte': 'DB Fernverkehr AG · Servicecenter Fahrgastrechte · 60647 Frankfurt am Main\nfahrgastrechte@servicecenter.invalid',
-    'NordWestBahn': 'NordWestBahn GmbH · Kundenservice · Wilhelm-Bock-Weg 3 · 49080 Osnabrück\nfahrgastrechte@nordwestbahn.invalid (Beispiel)',
+    'Servicecenter Fahrgastrechte': 'DB Fernverkehr AG · Servicecenter Fahrgastrechte · 60647 Frankfurt am Main',
+    'NordWestBahn': 'NordWestBahn GmbH · Kundenservice · Wilhelm-Bock-Weg 3 · 49080 Osnabrück',
   };
 
   static final incidents = <Incident>[
@@ -805,7 +809,7 @@ class Mock {
       incidentIds: ['i-0814'],
       direction: MailDirection.out,
       from: '$userName <$relayAddress>',
-      to: 'fahrgastrechte@servicecenter.invalid',
+      to: 'Servicecenter Fahrgastrechte',
       subject: 'Fahrgastrechte: EU-Antragsformular',
       body:
           'Sehr geehrte Damen und Herren,\n\nanbei mein Antrag auf Entschädigung nach VO (EU) 2021/782 für die Fahrt mit ICE 612 am 14.08.2026 (Köln Hbf – Frankfurt (Main) Hbf), Ankunft 124 Minuten verspätet.\n\nDie Entschädigung bitte ich auf das im Formular angegebene Konto zu überweisen (Kontoinhaber: Bahnhofsmission Köln e.V.).\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist $userName.\n\nMit freundlichen Grüßen\n$userName',
@@ -817,7 +821,7 @@ class Mock {
       incidentIds: ['i-0722', 'i-0715', 'i-0703'],
       direction: MailDirection.out,
       from: '$userName <$relayAddress>',
-      to: 'fahrgastrechte@servicecenter.invalid',
+      to: 'Servicecenter Fahrgastrechte',
       subject: 'Fahrgastrechte: EU-Antragsformular',
       body:
           'Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte Deutschlandticket) für drei Fahrten im Juli 2026. Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: Bahnhofsmission Köln e.V.\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist $userName.\n\nMit freundlichen Grüßen\n$userName',
@@ -829,7 +833,7 @@ class Mock {
       incidentIds: ['i-0612', 'i-0605', 'i-0528'],
       direction: MailDirection.out,
       from: '$userName <$relayAddress>',
-      to: 'fahrgastrechte@servicecenter.invalid',
+      to: 'Servicecenter Fahrgastrechte',
       subject: 'Fahrgastrechte: EU-Antragsformular',
       body: 'Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag (wiederholte Verspätungen, Deutschlandticket) für drei Fahrten im Mai und Juni 2026.\n\nKontoinhaber: Bahnhofsmission Köln e.V.\n\nMit freundlichen Grüßen\n$userName',
       date: DateTime(2026, 6, 20, 12, 5),
@@ -839,7 +843,7 @@ class Mock {
       id: 'm-0718-in',
       incidentIds: ['i-0612', 'i-0605', 'i-0528'],
       direction: MailDirection.inbound,
-      from: 'Servicecenter Fahrgastrechte <fahrgastrechte@servicecenter.invalid>',
+      from: 'Servicecenter Fahrgastrechte',
       to: relayAddress,
       subject: 'Ihr Antrag auf Entschädigung – Vorgang 2026-06-4471182',
       body:

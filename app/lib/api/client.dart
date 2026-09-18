@@ -344,7 +344,7 @@ class ApiClient {
   Future<ApiInboundResult> simulateInbound({required String body, String? claimId, String? relayAddress}) async =>
       ApiInboundResult.fromJson(_map(await _post('/internal/inbound-mail', {
         'to': relayAddress ?? '',
-        'from': 'Servicecenter Fahrgastrechte <fahrgastrechte@servicecenter.invalid>',
+        'from': 'Servicecenter Fahrgastrechte',
         'subject': 'Ihr Antrag auf Entschädigung',
         'body': body,
         if (claimId != null) 'claim_id': claimId,

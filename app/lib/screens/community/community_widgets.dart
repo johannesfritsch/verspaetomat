@@ -139,9 +139,10 @@ class FilterChips extends StatelessWidget {
 ///
 /// Three things carry it now. **The rank is a column, not an indent**: 28 pt wide and centred, so
 /// 1 and 10 sit under each other and every name starts at the same x. **The first three get a
-/// disc** — the winner's in the dark ink with the numeral reversed out of it, second and third in
-/// the grey fill — which is as far as a podium goes here: gold, silver and bronze are not in this
-/// palette, and colour in this app is identity, never decoration (`STYLE.md`).
+/// disc** in gold, silver and bronze — a fourth identity family in the palette, muted into the
+/// same tint band as the operator hues, on the disc only and never on type (`STYLE.md`). They were
+/// kept out until #24 asked for them, and they earn their place the way teal does: a place on a
+/// board is who you are on that list.
 /// **Your own row is the tinted one**, edge to edge. That is the app's own mark for *this one is
 /// yours*, and it does the job the red dot was doing without moving the text a single point. The
 /// words stay in ink: the tint already says whose row it is, and `VColors.red` is spoken for —
@@ -199,11 +200,15 @@ class _Rank extends StatelessWidget {
     final podium = rank <= 3;
     final Color ink;
     final Color? disc;
-    if (rank == 1) {
-      disc = VColors.surfaceDark;
-      ink = VColors.paperElevated;
-    } else if (podium) {
-      disc = VColors.greyFill;
+    if (podium) {
+      // Gold, silver and bronze, muted into the palette's tint band (#24). The metal is the disc
+      // and nothing else: the numeral on all three is the full ink, which is what keeps them
+      // readable and keeps colour off the type.
+      disc = switch (rank) {
+        1 => VColors.podiumGold,
+        2 => VColors.podiumSilver,
+        _ => VColors.podiumBronze,
+      };
       ink = VColors.ink;
     } else {
       disc = null;

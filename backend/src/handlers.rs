@@ -1163,6 +1163,10 @@ async fn draft_json(s: &AppState, c: &CustomerRow, claim: &ClaimRow, desk: &str)
     v["desk_email"] = json!(route.as_ref().map(|r| r.to_address.clone()));
     v["desk_route_label"] = json!(route.as_ref().map(|r| r.label.clone()));
     v["desk_route_live"] = json!(route.as_ref().map(|r| r.live).unwrap_or(false));
+    // True when this desk has no address of its own and the catch-all answered. The app says so on
+    // the step that shows the destination, so "nobody set one for this desk yet" is visible rather
+    // than silently absorbed (#25). Additive: an older build ignores it.
+    v["desk_route_via_default"] = json!(route.as_ref().map(|r| r.via_default).unwrap_or(false));
     // A rehearsal's paper goes where the rehearsal says, not to the railway's published address.
     if let Some(p) = route.as_ref().and_then(|r| r.postal_address.clone()) {
         v["desk_address"] = json!(p);
@@ -1523,20 +1527,44 @@ pub struct MailRoute {
     pub label: String,
     pub live: bool,
     pub postal_address: Option<String>,
+
+    /// True when this desk has no route of its own and the catch-all answered instead.
+    pub via_default: bool,
 }
 
-/// The destination for a desk, or None if nobody has set one.
+/// The desk key of the catch-all route: the one every desk without its own falls back to.
 ///
-/// Every outbound path that could reach a railway goes through here. There is deliberately no
-/// fallback, no environment variable and no default: an address exists because a person typed it
-/// into this database, or it does not exist and nothing is sent.
+/// Safe as a reserved value because `mail_routes.desk` is matched against the desk string frozen
+/// onto a claim, which comes from `operators.desk`, and no operator can be filed under `*`.
+pub const DEFAULT_DESK: &str = "*";
+
+/// The destination for a desk: its own route first, the catch-all second, None if neither exists.
+///
+/// Every outbound path that could reach a railway goes through here. There is still no environment
+/// variable and no address in this repository: a route exists because a person typed it into this
+/// database with `stellwerk route set`. What changed is that a desk nobody has thought about yet
+/// lands on the catch-all instead of on nothing (#25) — which is one row, in the same table, in the
+/// same listing, so the answer to "where does this go" is still one command away.
 pub async fn mail_route(pool: &PgPool, desk: &str) -> Result<Option<MailRoute>, (StatusCode, Json<Value>)> {
-    let row: Option<(String, String, bool, Option<String>)> = sqlx::query_as("select to_address, label, live, postal_address from mail_routes where desk = $1")
-        .bind(desk)
-        .fetch_optional(pool)
-        .await
-        .map_err(internal)?;
-    Ok(row.map(|(to_address, label, live, postal_address)| MailRoute { to_address, label, live, postal_address }))
+    // `order by (desk = $2)`: false sorts before true, so the desk's own row wins over the
+    // catch-all whenever both exist.
+    let row: Option<(String, String, bool, Option<String>, bool)> = sqlx::query_as(
+        "select to_address, label, live, postal_address, desk = $2 as via_default
+           from mail_routes where desk = $1 or desk = $2
+          order by (desk = $2) limit 1",
+    )
+    .bind(desk)
+    .bind(DEFAULT_DESK)
+    .fetch_optional(pool)
+    .await
+    .map_err(internal)?;
+    Ok(row.map(|(to_address, label, live, postal_address, via_default)| MailRoute {
+        to_address,
+        label,
+        live,
+        postal_address,
+        via_default,
+    }))
 }
 
 pub const MAX_UPLOAD: usize = 8 * 1024 * 1024;
@@ -1975,8 +2003,19 @@ pub async fn guard_sender(pool: &PgPool, claim: Option<&ClaimRow>, from: &str, t
     if trusted || !matches!(decision.verdict.outcome, MailOutcome::Accepted | MailOutcome::Rejected | MailOutcome::Question) {
         return Ok(());
     }
+    // Through the same resolver the send used, catch-all included: a claim that went out on the
+    // fallback route has to be allowed to be answered on it too. Looked up by desk alone, a claim
+    // on the catch-all had no answer domains at all, so every reply was downgraded to "other" and
+    // no money could ever move (#25).
     let row: Option<(String, Option<String>)> = match claim {
-        Some(c) => sqlx::query_as("select to_address, reply_from from mail_routes where desk = $1").bind(&c.desk).fetch_optional(pool).await.map_err(internal)?,
+        Some(c) => sqlx::query_as(
+            "select to_address, reply_from from mail_routes where desk = $1 or desk = $2 order by (desk = $2) limit 1",
+        )
+        .bind(&c.desk)
+        .bind(DEFAULT_DESK)
+        .fetch_optional(pool)
+        .await
+        .map_err(internal)?,
         None => None,
     };
     let allowed: Vec<String> = match row {

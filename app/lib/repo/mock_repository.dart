@@ -679,7 +679,7 @@ class MockRepository implements AppRepository {
             name: e.key,
             desk: e.value,
             postalAddress: (Mock.deskAddresses[e.value] ?? '').split('\n').first,
-            email: e.value == 'Servicecenter Fahrgastrechte' ? 'fahrgastrechte@servicecenter.invalid' : null,
+            email: null, // the demo knows no destination; the server's routes do
             acceptsEmail: e.value == 'Servicecenter Fahrgastrechte',
           ))
       .toList();
@@ -830,13 +830,14 @@ class MockRepository implements AppRepository {
       }
     }
     final addr = Mock.deskAddresses[desk];
-    // Demo shows a route the same way the server does, and labels it a rehearsal — because it is
-    // one. There is no real railway address in this build at all: the demo address ends in
-    // `.invalid`, which RFC 2606 reserves precisely so it can never be delivered to.
+    // No e-mail address. Where a claim really goes lives in the server's `mail_routes`, which the
+    // demo cannot reach, and an address invented here was read as the app's answer to „wohin geht
+    // mein Antrag?" — a `.invalid` one at that (#22, #25). The postal address stays: it is public
+    // and true. The screens say the walkthrough does not know the rest, and nothing is sent.
     return ApiClaimDraft(
       claim: _draftClaim(),
       deskAddress: addr?.split('\n').first,
-      deskEmail: addr != null && addr.contains('\n') ? addr.split('\n').last : null,
+      deskEmail: null,
       personalDataRequired: !state.personalDataEntered,
       relayAddress: Mock.relayAddress,
       claimReplyAddress: Mock.claimReplyAddress,
@@ -921,7 +922,7 @@ class MockRepository implements AppRepository {
       incidentIds: original?.incidentIds ?? const [],
       direction: MailDirection.out,
       from: '${Mock.userName} <${Mock.relayAddress}>',
-      to: original?.from ?? 'fahrgastrechte@servicecenter.invalid',
+      to: original?.from ?? 'Servicecenter Fahrgastrechte',
       subject: 'Re: ${original?.subject ?? 'Ihr Antrag'}',
       body: body,
       date: DateTime.now(),

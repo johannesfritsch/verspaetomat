@@ -265,9 +265,11 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
   }
   // Welcher Zug?: the itineraries.
   await pumpUntilFound(tester, find.text('Welcher Zug?'), timeout: const Duration(seconds: 20));
-  await pumpUntilFound(tester, find.byType(ItineraryRow), timeout: const Duration(seconds: 60));
+  // The list draws VConnectionCards now, and a card carries no journey; ItineraryTile is the
+  // handle that does (#26).
+  await pumpUntilFound(tester, find.byType(ItineraryTile), timeout: const Duration(seconds: 60));
   await settle(tester, 800);
-  final rows = find.byType(ItineraryRow);
+  final rows = find.byType(ItineraryTile);
   Finder? pick;
   // Prefer trains whose operator the claims directory knows: an unknown operator becomes its
   // own desk ("Unbekannt") whose claim flow has no ticket step, which the test relies on.
@@ -290,7 +292,7 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
     (false, false, false),
   ]) {
     for (var i = 0; i < rows.evaluate().length && pick == null; i++) {
-      final it = tester.widget<ItineraryRow>(rows.at(i)).itinerary;
+      final it = tester.widget<ItineraryTile>(rows.at(i)).itinerary;
       final ok = connecting ? (oneTransfer ? it.transfers == 1 : it.transfers >= 1) : it.direct;
       final known = it.legs.every((l) => Mock.desks.containsKey(l.operator) || l.operator.startsWith('DB '));
       if (ok && !it.first.cancelled && (known || !knownOnly) && (stillToCome(it) || !futureOnly)) pick = rows.at(i);
@@ -301,12 +303,14 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
     if (connecting) return null;
     pick = rows.first;
   }
-  final picked = tester.widget<ItineraryRow>(pick).itinerary;
+  final picked = tester.widget<ItineraryTile>(pick).itinerary;
   // ignore: avoid_print
   print('journey → $match: ${picked.legs.map((l) => l.line).join(' + ')} (${picked.transfers} transfers)');
   await tester.ensureVisible(pick);
   await tester.tap(pick, warnIfMissed: false);
   await settle(tester);
+  // Tapping a card only chooses it now; the sheet's own „Weiter" is what checks in.
+  await tapText(tester, 'Weiter');
   return picked;
 }
 

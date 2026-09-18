@@ -9,6 +9,11 @@ A screen is a cool grey page with white cards lifted off it. Where the app wants
 - Use only the tokens and widgets in `lib/theme/tokens.dart` and `lib/widgets/kit.dart` (which re-exports `surfaces.dart` and the rest). Do not invent colours, radii, shadows or sizes. The tokens for all four now exist — `VColors`, `VRadius`, `VShadow`, `VControl` — so there is no longer an excuse for a literal.
 - **The palette is cool.** Every neutral has more blue than red. Nothing is black: the darkest ink and the hero board are both blue-blacks, and every neutral shadow is made of a slate navy, because a black shadow on a cool page reads as dirt.
 - **There are two reds.** `VColors.red` is the deep one and means *do this* or *this is money*: the primary button, the check-in circle, an amount, a link. `VColors.redBright` is the lit one and means *this one*: today's bar in the week chart, the unread badge, the app mark. They are forty levels of green apart and one token cannot carry both.
+- **The podium is the fourth identity family.** Gold, silver and bronze (`podiumGold`,
+  `podiumSilver`, `podiumBronze`) mark the first three places on a board. A place is who you are on
+  that list, so this is identity like the hues below it — and it is held to the same rule: the metal
+  is the disc under the numeral and never the type. They are muted into the tint band, so three
+  quiet discs, not three medals.
 - **The other hues belong to other people.** Teal, the two blues and the bright green identify an operator or a partner NGO. They never carry an app state. Colour is for identity; red and green are for meaning.
 - **Green means good.** On time, and ready to file. It was narrower before and it is not any more — say what you mean with the label, not with the hue alone.
 - Type: Archivo through the interface via `VText`, and Caveat in exactly one place — the four handwritten margin notes. A second face earns its place by doing a different job: those are asides, not interface. Figures use the tabular styles so a total does not jitter as it ticks up.

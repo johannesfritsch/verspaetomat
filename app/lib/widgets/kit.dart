@@ -40,6 +40,7 @@ class VScreen extends StatelessWidget {
     this.trailing,
     this.showBack = true,
     this.scroll = true,
+    this.controller,
     this.bottom,
     this.art,
     this.onClose,
@@ -60,6 +61,11 @@ class VScreen extends StatelessWidget {
   final String? eyebrow;
   final Widget? trailing;
   final bool showBack;
+
+  /// The scroll view's controller, for a screen whose content changes while the scaffold stays
+  /// put. The Antrag's five steps share one scroll view, so without a handle on it a step opens
+  /// wherever the last one was left standing (#27). Ignored when [scroll] is false.
+  final ScrollController? controller;
   final bool scroll;
   final Widget? bottom;
 
@@ -125,7 +131,7 @@ class VScreen extends StatelessWidget {
       child: Column(
         children: [
           if (header != null) header,
-          Expanded(child: scroll ? SingleChildScrollView(child: body) : body),
+          Expanded(child: scroll ? SingleChildScrollView(controller: controller, child: body) : body),
           if (bottom != null)
             SafeArea(
               top: false,

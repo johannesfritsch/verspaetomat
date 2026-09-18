@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/screens/claims/antrag_screen.dart';
 import 'package:verspaetomat/screens/claims/demo_antrag_screen.dart';
-import 'package:verspaetomat/widgets/kit.dart' show VPrimaryButton, VTintButton;
+import 'package:verspaetomat/widgets/kit.dart' show VPrimaryButton;
 
 /// #19: „Für das Formular fehlt noch deine E-Mail-Adresse", and no e-mail field to be found.
 ///
@@ -17,13 +17,6 @@ void main() {
         of: find.ancestor(of: find.text(label), matching: find.byType(Row)).first,
         matching: find.byType(TextField),
       );
-
-  /// True if [finder]'s widget is inside the visible screen.
-  bool onScreen(WidgetTester tester, Finder finder) {
-    final rect = tester.getRect(finder);
-    final screen = Offset.zero & tester.view.physicalSize / tester.view.devicePixelRatio;
-    return screen.contains(rect.center);
-  }
 
   Future<void> openPruefen(WidgetTester tester) async {
     // Widget tests draw every glyph as a square of the font size, so labels that fit in Archivo
@@ -46,12 +39,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
   }
 
-  Future<void> tapWeiter(WidgetTester tester) async {
-    await tester.tap(find.text('Weiter'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 600));
-  }
-
   testWidgets('the e-mail row says E-Mail, also once it is filled in', (tester) async {
     await openPruefen(tester);
     expect(find.text('Postfach'), findsNothing);
@@ -60,37 +47,40 @@ void main() {
     expect(find.text('E-Mail'), findsOneWidget);
   });
 
-  testWidgets('Weiter with a postcode in the e-mail row brings that row into view and says why', (tester) async {
+  testWidgets('a postcode left in the e-mail row says why, on the row itself', (tester) async {
     await openPruefen(tester);
-    await tester.enterText(fieldLabelled('Name'), 'Anita Müller');
-    await tester.enterText(fieldLabelled('Anschrift'), 'Franz-Müller-Straße 23');
     await tester.enterText(fieldLabelled('E-Mail'), '99111');
-    // Back to the top, where the passenger is when they reach for „Weiter".
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, 3000));
+    // Leave the row. „Weiter" is disabled until the step is done (#21), so the row has to answer
+    // for itself the moment it is left — there is no press left to ask.
+    await tester.showKeyboard(fieldLabelled('Name'));
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tapWeiter(tester);
-
-    expect(onScreen(tester, fieldLabelled('E-Mail')), isTrue, reason: 'the row that is wrong has to be on screen');
     expect(find.text('Das ist keine E-Mail-Adresse.'), findsOneWidget);
-    final field = tester.widget<TextField>(fieldLabelled('E-Mail'));
-    expect(field.focusNode?.hasFocus, isTrue, reason: 'the cursor goes where the fix is');
+    // The line under the form says the same thing in the same words: a wrong row is not a missing
+    // one, which is the riddle #19 removed.
+    expect(find.textContaining('eine gültige E-Mail-Adresse'), findsOneWidget);
   });
 
-  testWidgets('Weiter with nothing filled in starts at the name and marks every missing row', (tester) async {
+  testWidgets('a row left empty marks itself, and the line names all of them', (tester) async {
     await openPruefen(tester);
-    await tapWeiter(tester);
-    expect(onScreen(tester, fieldLabelled('Name')), isTrue);
+    // Through the three rows without typing: each one marks itself as it is left.
+    for (final row in ['Name', 'Anschrift', 'E-Mail', 'Name']) {
+      await tester.showKeyboard(fieldLabelled(row));
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+
     expect(find.text('Fehlt noch.'), findsNWidgets(3));
+    expect(find.text('Es fehlen noch: dein Name, deine Anschrift und deine E-Mail-Adresse.'), findsOneWidget);
   });
 
   // #21: „Warum ist Weiter rot, obwohl das Formular nicht ausgefüllt ist?" The red light means
   // *do this* in this app, so it may only come on when the step is really done; until then the
   // button is the quiet tier and the line above it names what is missing.
-  testWidgets('an unfinished step draws the quiet Weiter and says what is missing', (tester) async {
+  testWidgets('an unfinished step draws Weiter disabled and says what is missing', (tester) async {
     await openPruefen(tester);
-    expect(find.widgetWithText(VPrimaryButton, 'Weiter'), findsNothing, reason: 'nothing is filled in');
-    expect(find.widgetWithText(VTintButton, 'Weiter'), findsOneWidget);
+    final weiter = find.widgetWithText(VPrimaryButton, 'Weiter');
+    expect(weiter, findsOneWidget, reason: 'one button in both states, not two widgets');
+    expect(tester.widget<VPrimaryButton>(weiter).onTap, isNull, reason: 'grey and off, not a ghost');
     expect(find.text('Es fehlen noch: dein Name, deine Anschrift und deine E-Mail-Adresse.'), findsOneWidget);
   });
 
@@ -103,14 +93,14 @@ void main() {
     expect(find.text('Es fehlt noch: eine gültige E-Mail-Adresse.'), findsOneWidget);
   });
 
-  testWidgets('a finished step draws the red Weiter and says nothing more', (tester) async {
+  testWidgets('a finished step lights Weiter and says nothing more', (tester) async {
     await openPruefen(tester);
     await tester.enterText(fieldLabelled('Name'), 'Anita Müller');
     await tester.enterText(fieldLabelled('Anschrift'), 'Franz-Müller-Straße 23');
     await tester.enterText(fieldLabelled('E-Mail'), 'anita@example.org');
     await tester.pump();
-    expect(find.widgetWithText(VPrimaryButton, 'Weiter'), findsOneWidget);
-    expect(find.widgetWithText(VTintButton, 'Weiter'), findsNothing);
+    final weiter = find.widgetWithText(VPrimaryButton, 'Weiter');
+    expect(tester.widget<VPrimaryButton>(weiter).onTap, isNotNull, reason: 'the light comes on when the step is done');
     expect(find.textContaining('Es fehl'), findsNothing);
   });
 

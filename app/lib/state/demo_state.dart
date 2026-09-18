@@ -678,8 +678,10 @@ class DemoState extends ChangeNotifier {
         id: 'm-$id-out',
         incidentIds: List.of(draftIncidentIds),
         direction: MailDirection.out,
-        from: '${Mock.userName} <${Mock.relayAddress}>',
-        to: draftDesk == 'NordWestBahn' ? 'fahrgastrechte@nordwestbahn.invalid' : 'fahrgastrechte@servicecenter.invalid',
+        // The claim's own address, which is what a real claim leaves from; and the desk by name,
+        // because the demo knows no route and will not invent one (#22).
+        from: '${Mock.userName} <${Mock.claimReplyAddress}>',
+        to: draftDesk ?? 'Fahrgastrechte-Stelle',
         subject: 'Fahrgastrechte: EU-Antragsformular',
         body:
             'Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte Deutschlandticket). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: ${ngo.accountHolder}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist ${Mock.userName}.\n\nMit freundlichen Grüßen\n${Mock.userName}',
@@ -722,7 +724,7 @@ class DemoState extends ChangeNotifier {
       id: 'm-${DateTime.now().millisecondsSinceEpoch}-in',
       incidentIds: group.map((i) => i.id).toList(),
       direction: MailDirection.inbound,
-      from: 'Servicecenter Fahrgastrechte <fahrgastrechte@servicecenter.invalid>',
+      from: 'Servicecenter Fahrgastrechte',
       to: Mock.relayAddress,
       subject: 'Ihr Antrag auf Entschädigung – Vorgang 2026-09-${DateTime.now().millisecondsSinceEpoch % 10000000}',
       body: body,

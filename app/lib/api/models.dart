@@ -924,6 +924,7 @@ class ApiClaimDraft {
     this.claimReplyAddress,
     this.routeLabel,
     this.routeLive = false,
+    this.routeViaDefault = false,
   });
   final ApiClaim claim;
   final String? deskAddress;
@@ -942,6 +943,10 @@ class ApiClaimDraft {
   final String? routeLabel;
   final bool routeLive;
 
+  /// True when this desk has no address of its own and the server's catch-all answered. Worth
+  /// saying on screen: it means nobody has looked this operator up yet (#25).
+  final bool routeViaDefault;
+
   factory ApiClaimDraft.fromJson(Map<String, dynamic> j) => ApiClaimDraft(
         claim: ApiClaim.fromJson(_m(j['claim']) ?? j),
         deskAddress: _sn(j['desk_address']),
@@ -951,6 +956,7 @@ class ApiClaimDraft {
         claimReplyAddress: _sn(j['claim_reply_address']),
         routeLabel: _sn(j['desk_route_label']),
         routeLive: j['desk_route_live'] == true,
+        routeViaDefault: j['desk_route_via_default'] == true,
       );
 }
 

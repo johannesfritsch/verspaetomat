@@ -92,6 +92,20 @@ class VColors {
   static const greenBright = Color(0xFF07A126);
   static const greenBrightTint = Color(0xFFDEF8E2);
 
+  // --- The podium -------------------------------------------------------------------------
+
+  /// Gold, silver and bronze: the fourth identity family (#24). A place on a board is who you are
+  /// on that list, the way [teal] is who an operator is — identity, not decoration, which is the
+  /// line `STYLE.md` draws. They were kept out of the palette until Johannes asked for them.
+  ///
+  /// Fills only, and deliberately no matching ink: the metal goes on the disc under the numeral
+  /// and never on type. The numeral on all three is [ink] — 13.5:1 at worst. They sit in the same
+  /// lightness band as [tealTint] and [blueDeepTint], so a podium here is three quiet discs and
+  /// not three medals.
+  static const podiumGold = Color(0xFFF3E4B5);
+  static const podiumSilver = Color(0xFFE2E6EE);
+  static const podiumBronze = Color(0xFFEFDAC3);
+
   // --- Neutral fills ----------------------------------------------------------------------
 
   /// A neutral filled control: a quiet button, a round icon button, a speech bubble.

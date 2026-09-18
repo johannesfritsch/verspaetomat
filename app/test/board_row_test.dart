@@ -60,9 +60,9 @@ void main() {
       return tester.widget<Container>(box).decoration as BoxDecoration?;
     }
 
-    expect(discOf('1')?.shape, BoxShape.circle);
-    expect(discOf('2')?.shape, BoxShape.circle);
-    expect(discOf('4'), isNull);
+    expect(discOf('1')?.color, VColors.podiumGold);
+    expect(discOf('2')?.color, VColors.podiumSilver);
+    expect(discOf('4'), isNull, reason: 'the disc is what says podium');
     expect(discOf('10'), isNull);
   });
 }

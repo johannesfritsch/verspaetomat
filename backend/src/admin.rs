@@ -1080,7 +1080,7 @@ pub async fn routes(State(s): State<AppState>, _a: Admin) -> ApiResult {
     // "no mail route" while a route sits right there looking correct.
     let rows: Vec<(String, String, String, bool, Option<String>, Option<String>, bool, Option<String>)> = sqlx::query_as(
         "select r.desk, r.to_address, r.label, r.live, r.note, r.postal_address,
-                exists(select 1 from operators o where o.desk = r.desk) as known, r.reply_from
+                exists(select 1 from operators o where o.desk = r.desk) or r.desk = '*' as known, r.reply_from
          from mail_routes r order by r.desk",
     )
     .fetch_all(&s.pool)
