@@ -839,6 +839,7 @@ class MockRepository implements AppRepository {
       deskEmail: addr != null && addr.contains('\n') ? addr.split('\n').last : null,
       personalDataRequired: !state.personalDataEntered,
       relayAddress: Mock.relayAddress,
+      claimReplyAddress: Mock.claimReplyAddress,
       routeLabel: 'Vorführung',
       routeLive: false,
     );
@@ -1001,7 +1002,7 @@ class MockRepository implements AppRepository {
           : ApiStandingBoard(scope: 'line', key: 'RE 7', rank: me.rank, size: Mock.boardLine.length, points: me.points, gapToNext: above == null ? null : above.points - me.points + 1),
       community: ApiStandingCommunity(
         minutesTotal: Mock.communityMinutes,
-        myMinutes: pointsTotal,
+        myMinutes: Mock.myMinutes + state.bonusPoints,
         confirmedCents: _cents(Mock.communityConfirmed + state.confirmedTotal - Mock.incidents.where((i) => i.status == IncidentStatus.bestaetigt).fold(0.0, (s, i) => s + i.amount)),
         myConfirmedCents: _cents(state.confirmedTotal),
       ),

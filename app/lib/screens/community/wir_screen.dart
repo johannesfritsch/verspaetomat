@@ -114,12 +114,8 @@ class _WirScreenState extends State<WirScreen> {
             // two looks of one object rather than as two different claims (docs/43).
             VBoard(
               look: VBoardLook.red,
-              onTap: () => showSourceSheet(
-                context,
-                title: 'Minuten zusammen gewartet',
-                origin: 'Die Summe aller endgültigen Verspätungen aller Fahrgäste, Minute für Minute.',
-                freshness: 'Live',
-              ),
+              onTap: () => showMinutesSource(context),
+              onExplain: () => showMinutesSource(context),
               aside: const Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -334,7 +330,12 @@ class _Board extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (entries.isEmpty) Text('Noch niemand auf dieser Liste.', style: VText.caption),
-        for (final e in top) BoardRow(entry: e),
+        // The hairline belongs between two rows, never after the last one (STYLE.md), so the list
+        // draws it rather than the row. The break to the pinned own row is the „· · ·" itself.
+        for (var i = 0; i < top.length; i++) ...[
+          if (i > 0) const VRule.soft(),
+          BoardRow(entry: top[i]),
+        ],
         if (me.isNotEmpty) ...[
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),

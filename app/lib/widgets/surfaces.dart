@@ -164,6 +164,7 @@ class VBoard extends StatelessWidget {
     this.look = VBoardLook.dark,
     this.onTap,
     this.aside,
+    this.onExplain,
     this.padding = const EdgeInsets.all(VSpace.card),
     this.glow = true,
   });
@@ -171,6 +172,11 @@ class VBoard extends StatelessWidget {
   final Widget child;
   final VBoardLook look;
   final VoidCallback? onTap;
+
+  /// „Woher weißt du das?" — the source sheet for the figure on the board. Given one, the board
+  /// carries a small ⓘ in its top right corner and that corner opens the sheet. Home's board taps
+  /// through to Wir, so the mark is its own target rather than the board's (#20).
+  final VoidCallback? onExplain;
 
   /// Something set into the board's right edge: on Wir, the handwritten note and its heart.
   final Widget? aside;
@@ -189,10 +195,20 @@ class VBoard extends StatelessWidget {
   static const _figureFlex = 58;
   static const _asideFlex = 42;
 
+  /// The ⓘ in the corner, and the room the label or the margin note leaves it.
+  static const _markSize = 18.0;
+  static const markRoom = _markSize + VSpace.xs;
+
   @override
   Widget build(BuildContext context) {
     final shape = BorderRadius.circular(VRadius.lg);
-    Widget content = Padding(padding: padding, child: child);
+    final explains = onExplain != null;
+    // Without a margin note the figure's own column reaches the corner, so its label is the thing
+    // that has to stop short of the mark.
+    Widget content = Padding(
+      padding: padding,
+      child: explains ? _BoardMark(child: child) : child,
+    );
     if (aside != null) {
       content = Padding(
         padding: padding,
@@ -204,7 +220,17 @@ class VBoard extends StatelessWidget {
             // A loose share: the aside may take up to its portion of the board and no more, but
             // it is not made to fill it. Expanded stretched a heart across a third of the card;
             // a bare maximum let the row hand the note sixty points and break a word in half.
-            Flexible(flex: _asideFlex, fit: FlexFit.loose, child: aside!),
+            Flexible(
+              flex: _asideFlex,
+              fit: FlexFit.loose,
+              // The corner belongs to the mark, so the note's share stops short of it. At the
+              // sizes the app is drawn at the note is far narrower than its share and nothing
+              // moves; where large system text grows it into the corner it is set narrower rather
+              // than run under the glyph. Pushing it *down* instead cost the board 22 pt, because
+              // on Wir the margin note — note, gap and heart — is the taller of the two columns,
+              // not the figure.
+              child: explains ? Padding(padding: const EdgeInsets.only(right: markRoom), child: aside!) : aside!,
+            ),
           ],
         ),
       );
@@ -220,44 +246,77 @@ class VBoard extends StatelessWidget {
       child: content,
     );
 
-    if (onTap == null) return box;
+    if (onTap == null && onExplain == null) return box;
     return Stack(
       children: [
-        _BoardExplains(child: box),
-        Positioned.fill(
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
-              borderRadius: shape,
-              splashColor: const Color(0x14FFFFFF),
-              highlightColor: const Color(0x0AFFFFFF),
+        box,
+        if (onTap != null)
+          Positioned.fill(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: shape,
+                splashColor: const Color(0x14FFFFFF),
+                highlightColor: const Color(0x0AFFFFFF),
+              ),
             ),
           ),
-        ),
+        // The ⓘ, last so it wins the tap over the whole board underneath it. „Woher weißt du
+        // das?" was already there and nothing said so — the answer sat behind a tap nobody had a
+        // reason to try (docs/13). It hangs in the corner of the box rather than after the label:
+        // beside the words it competed with them for the width of a small phone's eyebrow.
+        if (onExplain != null)
+          Positioned(
+            top: 0,
+            right: 0,
+            // The glyph is small and quiet; the target around it is a proper one.
+            child: SizedBox(
+              width: VSpace.card + _markSize / 2 + VControl.touch / 2,
+              height: VSpace.card + _markSize / 2 + VControl.touch / 2,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onExplain,
+                  customBorder: const CircleBorder(),
+                  splashColor: const Color(0x14FFFFFF),
+                  highlightColor: const Color(0x0AFFFFFF),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: VSpace.card, right: VSpace.card),
+                    child: Align(
+                      alignment: Alignment.topRight,
+                      child: Semantics(
+                        button: true,
+                        label: 'Woher weißt du das?',
+                        child: const Icon(Icons.info_outline, size: _markSize, color: VColors.inkOnDark3),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
 }
 
-/// Marks the space inside a [VBoard] that answers „Woher weißt du das?" when it is tapped, so the
-/// label over the figure can say so with its own small mark.
-class _BoardExplains extends InheritedWidget {
-  const _BoardExplains({required super.child});
+/// Tells the label above the figure that the board's corner is taken by the ⓘ, so a long eyebrow
+/// stops before it instead of running underneath it.
+class _BoardMark extends InheritedWidget {
+  const _BoardMark({required super.child});
 
-  static bool of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<_BoardExplains>() != null;
+  static bool above(BuildContext context) => context.dependOnInheritedWidgetOfExactType<_BoardMark>() != null;
 
   @override
-  bool updateShouldNotify(_BoardExplains oldWidget) => false;
+  bool updateShouldNotify(_BoardMark oldWidget) => false;
 }
 
 /// The label over a board's figure. Small caps, quiet, with an optional glyph in front of it.
 ///
-/// Inside a board that opens its source sheet, the label ends in a small ⓘ. Every figure in the
-/// app is meant to answer where it comes from (docs/13) and the big ones do — but the boards
-/// carried nothing that said so, so the answer sat behind a tap nobody had a reason to try. The
-/// mark is the label's, not the board's corner: it stays beside the words it belongs to at any
-/// text size, and it cannot land on the handwritten note that shares the board's right-hand side.
+/// The ⓘ that says the figure explains itself is [VBoard]'s, drawn in the corner of the box:
+/// beside the label it ate the width a long eyebrow needs on a small phone, and „ZUSAMMEN
+/// GEWARTET" came out as „ZUSAMME…". The label only keeps the corner clear.
 class VBoardLabel extends StatelessWidget {
   const VBoardLabel(this.text, {super.key, this.icon, this.look = VBoardLook.dark});
   final String text;
@@ -267,24 +326,20 @@ class VBoardLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = VText.eyebrow.copyWith(color: VColors.inkOnDark2);
-    final explains = _BoardExplains.of(context);
-    if (icon == null && !explains) return Text(text.toUpperCase(), style: style);
-    return Row(
-      children: [
-        if (icon != null) ...[
+    final label = Text(text.toUpperCase(), style: style, maxLines: 1, overflow: TextOverflow.ellipsis);
+    // The board's own mark hangs in the top right corner; on a board without a margin note the
+    // label would otherwise run straight under it.
+    final room = _BoardMark.above(context) ? VBoard.markRoom : 0.0;
+    if (icon == null) return Padding(padding: EdgeInsets.only(right: room), child: label);
+    return Padding(
+      padding: EdgeInsets.only(right: room),
+      child: Row(
+        children: [
           Icon(icon, size: 17, color: VColors.inkOnDark2),
           const SizedBox(width: VSpace.s),
+          Flexible(child: label),
         ],
-        Flexible(
-          child: Text(text.toUpperCase(), style: style, maxLines: 1, overflow: TextOverflow.ellipsis),
-        ),
-        // Quieter than the label: the figure and its name come first, the offer to explain them
-        // second. Outside the Flexible, so a long label loses its own end rather than the mark.
-        if (explains) ...[
-          const SizedBox(width: VSpace.xs),
-          const Icon(Icons.info_outline, size: 14, color: VColors.inkOnDark3),
-        ],
-      ],
+      ),
     );
   }
 }

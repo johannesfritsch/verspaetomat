@@ -92,6 +92,13 @@ void main() {
       await tester.tapAt(const Offset(200, 60));
       await wait(tester, 700);
     }
+    // The boards on Wir are below the fold, so the route's own shot never showed them and the
+    // ranks went unphotographed through their redesign (#24). Scroll to them.
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+    await wait(tester, 1500);
+    await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -900));
+    await shot('wir-ranglisten');
+
     // docs/39: behind the pre-step, the first step lists every open case of the desk with its
     // own tick. The route above stops at „So läuft das", so the tour walks one step further.
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go('${Routes.antrag}?desk=Servicecenter%20Fahrgastrechte');
@@ -105,8 +112,11 @@ void main() {
     // line and the button was centred off the screen (test/ghost_button_row_test.dart).
     // Two gates stand in the way, and both are the point of their step: „Prüfen" holds until the
     // passenger's own details are on file, and „Ticket" until a ticket hangs on the claim.
+    // By the word, not by the widget: „Weiter" is the red primary once the step is finished and
+    // the quiet tier while something is still missing (#21), and the tour presses it in both
+    // states — the first press, on the empty form, is what puts the marks on the rows.
     Future<void> weiter() async {
-      await tester.tap(find.widgetWithText(VPrimaryButton, 'Weiter').first);
+      await tester.tap(find.text('Weiter').first);
       await wait(tester, 1200);
     }
     Future<void> tapIt(Finder f) async {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../repo/app_repository.dart';
+import '../community/community_widgets.dart' show showMinutesSource;
 import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
@@ -597,6 +598,8 @@ class _WirBlock extends StatelessWidget {
     final total = c.minutesTotal <= 0 ? 1 : c.minutesTotal;
     return VBoard(
       onTap: onTap,
+      // The board itself goes to Wir, so the figure's own answer needs a target of its own (#20).
+      onExplain: () => showMinutesSource(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -130,7 +130,22 @@ class FilterChips extends StatelessWidget {
   }
 }
 
-/// One line of a board: rank, name, points. The customer's row is bold with a red mark.
+/// One line of a board: rank, name, points (#24).
+///
+/// The list used to be ten rows of the same weight: a mono rank hanging at the left of a 44 pt
+/// column, a red dot that pushed the passenger's own name out of line with every other name, and
+/// nothing at all to say who is at the top. It read as a table of numbers rather than as a
+/// standing.
+///
+/// Three things carry it now. **The rank is a column, not an indent**: 28 pt wide and centred, so
+/// 1 and 10 sit under each other and every name starts at the same x. **The first three get a
+/// disc** — the winner's in the dark ink with the numeral reversed out of it, second and third in
+/// the grey fill — which is as far as a podium goes here: gold, silver and bronze are not in this
+/// palette, and colour in this app is identity, never decoration (`STYLE.md`).
+/// **Your own row is the tinted one**, edge to edge. That is the app's own mark for *this one is
+/// yours*, and it does the job the red dot was doing without moving the text a single point. The
+/// words stay in ink: the tint already says whose row it is, and `VColors.red` is spoken for —
+/// *do this* or *this is money* — so the one red left on the row is its rank.
 class BoardRow extends StatelessWidget {
   const BoardRow({super.key, required this.entry});
   final ApiBoardEntry entry;
@@ -138,31 +153,80 @@ class BoardRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final me = entry.isMe;
-    final style = me ? VText.bodyStrong : VText.body;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 11),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 44,
-                child: Text('${entry.rank}', style: VText.mono.copyWith(color: me ? VColors.ink : VColors.ink2)),
-              ),
-              if (me)
-                Container(
-                  width: 8,
-                  height: 8,
-                  margin: const EdgeInsets.only(right: 10),
-                  decoration: const BoxDecoration(color: VColors.red, shape: BoxShape.circle),
-                ),
-              Expanded(child: Text(me ? 'Du' : entry.name, style: style, overflow: TextOverflow.ellipsis)),
-              Text(fmtInt(entry.points), style: VText.mono.copyWith(fontWeight: FontWeight.w700)),
-            ],
+    // No horizontal inset: the rows share the card's gutter with the tabs above them, the
+    // hairlines between them and the footnote below them, and 8 pt of their own put the names on
+    // a different left edge from everything else in the card.
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        children: [
+          _Rank(rank: entry.rank, me: me),
+          const SizedBox(width: VSpace.md),
+          Expanded(
+            child: Text(
+              me ? 'Du' : entry.name,
+              style: (me ? VText.bodyStrong : VText.body).copyWith(color: VColors.ink),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
+          Text(fmtInt(entry.points), style: VText.mono.copyWith(fontWeight: FontWeight.w700, color: VColors.ink)),
+        ],
+      ),
+    );
+    if (!me) return content;
+    // The band runs the full width of the card's content, so the row keeps the same left edge as
+    // every other row and the tint reads as something behind the line rather than a box round it.
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: VColors.redTintFaint, borderRadius: BorderRadius.circular(VRadius.md)),
+        child: content,
+      ),
+    );
+  }
+}
+
+/// The place: a disc for the first three, bare figures below that.
+class _Rank extends StatelessWidget {
+  const _Rank({required this.rank, required this.me});
+  final int rank;
+  final bool me;
+
+  static const _size = 28.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final podium = rank <= 3;
+    final Color ink;
+    final Color? disc;
+    if (rank == 1) {
+      disc = VColors.surfaceDark;
+      ink = VColors.paperElevated;
+    } else if (podium) {
+      disc = VColors.greyFill;
+      ink = VColors.ink;
+    } else {
+      disc = null;
+      // The place is what the row is ranked by, so it is content and takes the body grey, not the
+      // caption grey. Your own place is the one red on the list.
+      ink = me ? VColors.red : VColors.ink2;
+    }
+    return Container(
+      width: _size,
+      height: _size,
+      alignment: Alignment.center,
+      decoration: disc == null ? null : BoxDecoration(color: disc, shape: BoxShape.circle),
+      // Below the top ten the list pins the passenger's own place, and that can be four figures
+      // wide. Scaled down rather than wrapped: a rank that breaks across two lines is clipped by
+      // the disc and reads as a different number.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          '$rank',
+          maxLines: 1,
+          style: VText.mono.copyWith(fontWeight: podium ? FontWeight.w700 : FontWeight.w500, color: ink),
         ),
-        const VRule.soft(),
-      ],
+      ),
     );
   }
 }
@@ -198,7 +262,11 @@ class BigFigure extends StatelessWidget {
 }
 
 /// A source sheet: "Woher weißt du das?"
-void showSourceSheet(BuildContext context, {required String title, required String origin, String? freshness, String? fallback}) {
+///
+/// Two paragraphs at most, both written as answers. It used to end in a register row — the word
+/// „Aktualität" over the word „Live" — which reads as a database column, not as an answer to the
+/// question in the header (#23). A sheet that explains a number is prose or it is nothing.
+void showSourceSheet(BuildContext context, {required String title, required String origin, String? update}) {
   showVSheet(
     context,
     builder: (ctx) => Padding(
@@ -209,13 +277,16 @@ void showSourceSheet(BuildContext context, {required String title, required Stri
         children: [
           VSheetHeader(title: 'Woher weißt du das?', subtitle: title),
           Padding(
-            padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
+            // The sheet's gutter, not the page's: the answer has to start under its own question.
+            padding: const EdgeInsets.fromLTRB(VSpace.sheet, VSpace.s, VSpace.sheet, 0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(origin, style: VText.body),
-                if (freshness != null) ...[const VGap.m(), VKeyValue('Aktualität', freshness)],
-                if (fallback != null) ...[const VRule(), VKeyValue('Wenn es fehlt', fallback)],
+                if (update != null) ...[
+                  const VGap.m(),
+                  Text(update, style: VText.bodyS.copyWith(color: VColors.ink2)),
+                ],
               ],
             ),
           ),
@@ -224,6 +295,24 @@ void showSourceSheet(BuildContext context, {required String title, required Stri
     ),
   );
 }
+
+/// „Woher weißt du das?" for the minutes the whole community has waited — the one figure that
+/// stands on two screens, so both take the same answer: the board on Home and the board on Wir.
+void showMinutesSource(BuildContext context) => showSourceSheet(
+      context,
+      title: 'Minuten zusammen gewartet',
+      // Word for word what „Woher kommen die Daten?" says about this figure and about the number
+      // it is made of, including the case where there were no live data: a ride whose arrival the
+      // passenger typed in counts too, and a sheet that leaves that out promises more than the
+      // number can keep.
+      origin: 'Die Summe aller endgültigen Verspätungen aller Fahrgäste, Minute für Minute. '
+          'Gezählt wird die Verspätung an dem Halt, an dem jemand ausgestiegen ist: geplante '
+          'Ankunft aus dem Fahrplan, tatsächliche aus den Live-Daten. Wo es keine Live-Daten gab, '
+          'zählt die Zeit, die der Fahrgast selbst eingetragen hat, und ein ausgefallener Zug '
+          'zählt mit mindestens 60 Minuten.',
+      update: 'Die Zahl wächst laufend: jede Fahrt kommt dazu, sobald sie vorbei und ihre '
+          'Verspätung endgültig ist.',
+    );
 
 /// A badge: a circle in the station-clock spirit, name below.
 /// The achievement artwork from `assets/achievements/<stem>-aktiv|inaktiv.png` (Johannes'

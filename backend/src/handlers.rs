@@ -1043,7 +1043,12 @@ async fn render_claim_pdf(pool: &PgPool, claim: &ClaimRow, customer: &CustomerRo
 /// `GET /v1/claims/{id}/pdf` — the filled EU form as it stands right now (draft or sent).
 pub async fn claim_pdf(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> Result<Response, (StatusCode, Json<Value>)> {
     let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1 and customer_id = $2").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
-    let Some(claim) = claim else { return Err(err(StatusCode::NOT_FOUND, "claim not found")) };
+    let Some(mut claim) = claim else { return Err(err(StatusCode::NOT_FOUND, "claim not found")) };
+    // The form names the claim's own address as the one to answer to, so the address has to exist
+    // before it is printed. On the paper route this is the only place it ever gets assigned: that
+    // claim never goes through `claim_send`, and an address on a printed form that no table knows
+    // would drop the railway's answer on the floor.
+    claim.reply_address = Some(ensure_claim_address(&s.pool, &claim).await.map_err(internal)?);
     let pdf = render_claim_pdf(&s.pool, &claim, &c.0).await.map_err(internal)?;
     Ok((
         [(header::CONTENT_TYPE, "application/pdf".to_string()), (header::CONTENT_DISPOSITION, format!("inline; filename=\"EU-Antrag-{}.pdf\"", claim.id))],
@@ -1165,6 +1170,10 @@ async fn draft_json(s: &AppState, c: &CustomerRow, claim: &ClaimRow, desk: &str)
     v["desk_accepts_email"] = json!(op.as_ref().map(|o| o.accepts_email).unwrap_or(false) && route.is_some());
     v["personal_data_required"] = json!(c.full_name.is_none());
     v["relay_address"] = json!(c.relay_address);
+    // The address this one claim answers on — what the mail really leaves from, and what stands in
+    // field 5.3.1 of the form. Additive: an older build ignores it and keeps showing the
+    // passenger's own relay address, which is the address it has always shown.
+    v["claim_reply_address"] = json!(claim.reply_address.clone().unwrap_or_else(|| claim_address_for(claim.id)));
     v["needs_recovery_code"] = json!(sqlx::query_scalar::<_, bool>("select recovery_hash is null from devices where id = $1").bind(c.id).fetch_one(&s.pool).await.map_err(internal)?);
     Ok(v)
 }
@@ -2600,9 +2609,13 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
         }
     }
 
-    // Community with my share.
-    let (minutes, my_confirmed): (i64, i64) = sqlx::query_as(
+    // Community with my share. `my_minutes` is minutes, out of the same column and the same set of
+    // rides as the total it is a share of — it used to be the Geduldspunkte total, so Home's dark
+    // board said „N davon deine" under a label that says minutes and the two numbers were counted
+    // by different rules (a ride given up carries points but no final delay).
+    let (minutes, my_minutes, my_confirmed): (i64, i64, i64) = sqlx::query_as(
         "select (select coalesce(sum(final_delay_min),0)::bigint from rides where status = 'arrived'),
+                (select coalesce(sum(final_delay_min),0)::bigint from rides where customer_id = $1 and status = 'arrived'),
                 (select coalesce(sum(coalesce(confirmed_cents, amount_cents)),0)::bigint from incidents where customer_id = $1 and status = 'bestaetigt')",
     )
     .bind(c.0.id)
@@ -2677,7 +2690,7 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
         "level": { "name": level_name, "next_name": next_name, "points_to_next": points_to_next, "progress": progress },
         "money": { "open_cents": open_cents, "missing_cents": missing_cents, "ready": ready, "ready_desk": ready_desk, "ngo_name": ngo_name },
         "board": board,
-        "community": { "minutes_total": minutes, "my_minutes": points_total, "confirmed_cents": confirmed_all, "my_confirmed_cents": my_confirmed },
+        "community": { "minutes_total": minutes, "my_minutes": my_minutes, "confirmed_cents": confirmed_all, "my_confirmed_cents": my_confirmed },
         "next": next,
     })))
 }

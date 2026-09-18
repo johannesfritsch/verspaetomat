@@ -95,7 +95,7 @@ const datenschutz = LegalDoc(
     ]),
     LegalSection('Was wir speichern', [
       'Beim Fahren: den Bahnhof, an dem du eingecheckt hast, den Zug, den Ausstieg, die Zeiten laut Fahrplan und Live-Daten, die daraus berechneten Geduldspunkte und Abzeichen. Optional einen Anzeigenamen, den du selbst wählst.',
-      'Beim ersten Antrag, nicht früher: Name, Anschrift, deine private E-Mail-Adresse und bei Zeitkarten die Ticketnummer. Sie stehen auf dem Antragsformular, weil das Eisenbahnunternehmen sie verlangt.',
+      'Beim ersten Antrag, nicht früher: Name, Anschrift, deine private E-Mail-Adresse und bei Zeitkarten die Ticketnummer. Name, Anschrift und Ticketnummer stehen auf dem Antragsformular, weil das Eisenbahnunternehmen sie verlangt. Deine private E-Mail-Adresse steht nicht darauf: Im Formular steht die Verspätomat-Adresse dieses Antrags, damit die Antwort dorthin geht. Deine eigene Adresse benutzen wir nur, um dir jede Mail in Kopie zu schicken.',
       'Pro Antrag: das Bild deines Tickets für die betroffenen Monate und deine Unterschrift (getippt oder gezeichnet). Beides landet nur im PDF und in der Mail an das Unternehmen.',
       'Der Schriftverkehr über deine Verspätomat-Adresse: die Anträge, die du abschickst, und die Antworten des Unternehmens. Dazu unten mehr.',
       'Einstellungen wie Ticketart, gewählter Verein, Standortmodus, stumme Bahnhöfe.',

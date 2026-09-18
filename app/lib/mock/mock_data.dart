@@ -237,6 +237,10 @@ class Mock {
   static const userAddress = 'Venloer Straße 123\n50823 Köln';
   static const userEmail = 'johannes@example.de';
   static const relayAddress = 'fahrgast-4711@users.verspaetomat.de';
+
+  /// The address one claim answers on. A claim is sent from its own address, not from the
+  /// passenger's, and this is the one the Senden step prints.
+  static const claimReplyAddress = 'antrag-9c31af02@users.verspaetomat.de';
   static const ticketNumber = 'D-2026-0904-771-2201';
 
   static final today = DateTime(2026, 9, 9, 10, 46);
@@ -739,6 +743,11 @@ class Mock {
   ];
 
   static const pointsTotal = 1372;
+
+  /// Minutes this passenger waited — the share under Home's „Minuten haben wir gewartet".
+  /// Not the same number as [pointsTotal] and never larger: a ride given up earns its
+  /// points but has no final delay to add (docs/22).
+  static const myMinutes = 1298;
   static const pointsThisWeek = 96;
   static const levelName = 'Gleis 7';
   static const nextLevelName = 'Bahnhofsmission';

@@ -546,12 +546,32 @@ class _AntragScreenState extends State<AntragScreen> {
                 onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF gespeichert. Per Post an: ${_draft!.deskAddress ?? '–'}'))),
               ),
             ],
-          ] else
-            VPrimaryButton(
-              label: 'Weiter',
-              trailingIcon: Icons.arrow_forward,
-              onTap: _canContinue && !_busy ? () => _step == 0 ? _advanceFromPruefen() : setState(() => _step += 1) : null,
-            ),
+          ] else ...[
+            if (_missingLine case final line?) ...[
+              Text(line, style: VText.caption, textAlign: TextAlign.center),
+              const VGap.xs(),
+            ],
+            if (_missingHere.isEmpty)
+              VPrimaryButton(
+                label: 'Weiter',
+                trailingIcon: Icons.arrow_forward,
+                onTap: _canContinue && !_busy ? () => _step == 0 ? _advanceFromPruefen() : setState(() => _step += 1) : null,
+              )
+            else
+              // Neutral, not the red tint: the red tier carries the same glow the primary does, and
+              // a glowing „Weiter" over an empty form is the very thing that was wrong (#21). Grey
+              // with ink says *not yet* and leaves the one red light on the screen to the step that
+              // is actually finished.
+              //
+              // Still pressable on „Prüfen": the press is what marks the empty rows and scrolls to
+              // the first one (#19). Where there is nothing to point at — a missing ticket photo is
+              // its own button on the screen — it simply waits.
+              VTintButton(
+                label: 'Weiter',
+                tone: VTintTone.neutral,
+                onTap: _step == 0 && !_busy ? _advanceFromPruefen : null,
+              ),
+          ],
           // One step back, everywhere — on the first step that is the overview. Leaving the whole
           // Antrag is the X at the top, never this.
           const VGap.xs(),
@@ -568,6 +588,47 @@ class _AntragScreenState extends State<AntragScreen> {
         ],
       ),
     );
+  }
+
+  /// What this step still wants, in the words the passenger reads on the screen.
+  ///
+  /// „Weiter" used to be the red primary on every step, whether or not the step was finished: red
+  /// in this app means *do this*, so a red button over an empty form promised something it could
+  /// not keep (#21). Now the light comes on when the step is actually done. Until then the button
+  /// is the quiet tier and this list is printed above it, so what is missing is readable before
+  /// anything is pressed — not only after a press that scrolls to it.
+  List<String> get _missingHere => switch (_step) {
+        0 => [
+            for (final f in _missingPersonal())
+              switch (f) {
+                PersonalField.name => 'dein Name',
+                PersonalField.address => 'deine Anschrift',
+                // A postcode in the e-mail row is not a missing address, it is a wrong one, and
+                // saying „es fehlt deine E-Mail-Adresse" over a row that visibly has something in
+                // it is the riddle #19 set out to remove. The row itself says the same thing.
+                PersonalField.email => _pEmail.text.trim().isEmpty ? 'deine E-Mail-Adresse' : 'eine gültige E-Mail-Adresse',
+              },
+            if (_unknownDesk && _unknownAddress.text.trim().isEmpty) 'die Adresse der Fahrgastrechte-Stelle',
+          ],
+        1 => [
+            // `_months` holds "2026-08"; the screen says „August 2026", as every other label of a
+            // ticket month in the app does.
+            for (final m in _months)
+              if (!_uploads.containsKey(m)) m == 'Ticket' ? 'ein Bild deines Tickets' : 'das Ticket für ${monthLabel(m)}',
+          ],
+        3 => _signed ? const [] : ['deine Unterschrift'],
+        _ => const [],
+      };
+
+  /// „Es fehlt noch: deine E-Mail-Adresse." — one line, in the order the rows stand.
+  String? get _missingLine {
+    final missing = _missingHere;
+    if (missing.isEmpty) return null;
+    final verb = missing.length == 1 ? 'Es fehlt noch' : 'Es fehlen noch';
+    final list = missing.length == 1
+        ? missing.first
+        : '${missing.take(missing.length - 1).join(', ')} und ${missing.last}';
+    return '$verb: $list.';
   }
 
   /// The personal rows still missing, in the order they stand on the screen.
@@ -620,7 +681,7 @@ class _AntragScreenState extends State<AntragScreen> {
       }
       setState(() => _showPersonal = false);
       // The first time somebody gives us their name is the moment the account starts to matter,
-      // so this is where the twelve words are shown — once, and only on the way forward.
+      // so this is where the twelve words are shown, on the way forward.
       await _maybeShowRecoveryCode();
       if (!mounted) return;
     }
@@ -633,8 +694,9 @@ class _AntragScreenState extends State<AntragScreen> {
     if (code == null || !mounted) return;
     await showVSheet(
       context,
-      // Not swipeable. These words are shown once and cannot be shown again — the server keeps only
-      // a hash — so the sheet waits for an answer instead of vanishing under a stray drag.
+      // Not swipeable: *these* words cannot be shown again — the server keeps only a hash — so the
+      // sheet waits for an answer instead of vanishing under a stray drag. It does not follow that
+      // this is somebody's only chance at a code, and it used to say so (#21).
       dismissible: false,
       builder: (ctx) => Column(
         mainAxisSize: MainAxisSize.min,
@@ -649,8 +711,14 @@ class _AntragScreenState extends State<AntragScreen> {
               children: [
                 Text(
                   'Verspätomat hat kein Konto und kein Passwort. Mit diesen Wörtern holst du dein Konto, deine '
-                  'Fahrten und deine Anträge auf ein neues Telefon. Wir zeigen sie dir nur dieses eine Mal.',
+                  'Fahrten und deine Anträge auf ein neues Telefon.',
                   style: VText.body,
+                ),
+                const VGap.s(),
+                Text(
+                  'Genau diese Wörter können wir dir später nicht noch einmal zeigen — wir bewahren nur einen '
+                  'Abdruck davon auf. Verlegt? Unter Einstellungen → Konto bekommst du jederzeit neue.',
+                  style: VText.bodyS.copyWith(color: VColors.ink2),
                 ),
                 const VGap.m(),
                 VCard(child: SelectableText(code, style: VText.mono.copyWith(fontSize: 18, height: 1.5))),
@@ -819,7 +887,6 @@ class _Pruefen extends StatelessWidget {
     final amount = draft.claim.amountClaimedCents;
     final cases = available.isNotEmpty ? available : incidents;
     final pd = me?.personalData;
-    final relay = me?.relayAddress ?? draft.relayAddress;
     final form = showPersonal || pd == null;
     final goesTo = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -859,21 +926,30 @@ class _Pruefen extends StatelessWidget {
           const VRule(),
           VKeyValue('Ticket-Nr.', pd.ticketNumber ?? '–', valueStyle: VText.mono),
         ],
-        if (relay != null) ...[
+        // The relay address used to stand here in full, in mono, in a box of its own — and it
+        // confused people: a second e-mail address, on the step where they have just typed their
+        // own, with no job to do (#22). What matters at this point is the promise, not the string.
+        // The address itself is on the last step, on the mail that actually goes out.
+        //
+        // The promise is about a mail, so it holds wherever there is one to send — not wherever
+        // the passenger already owns an address. Gating it on the address hid it from exactly the
+        // first-time passenger it is for: the relay is minted when „Weiter" saves the form, one
+        // step after this screen. A desk that takes no e-mail gets no promise about mail either.
+        if (draft.deskEmail?.isNotEmpty ?? false) ...[
           const VGap.m(),
-          Container(
-            padding: const EdgeInsets.all(VSpace.m),
-            decoration: BoxDecoration(border: Border.all(color: VColors.rule), borderRadius: BorderRadius.circular(4)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('DEINE VERSPÄTOMAT-ADRESSE', style: VText.eyebrow),
-                const SizedBox(height: 6),
-                Text(relay, style: VText.mono),
-                const SizedBox(height: 6),
-                Text('Deine Anträge gehen von hier raus. Antworten der Bahn landen dort und sofort auch in deinem E-Mail-Postfach.', style: VText.caption),
-              ],
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.shield_outlined, size: 18, color: VColors.ink3),
+              const SizedBox(width: VSpace.s),
+              Expanded(
+                child: Text(
+                  'Deine E-Mail-Adresse sieht die Bahn nie. Der Antrag geht über eine Adresse von uns raus; '
+                  'was zurückkommt, leiten wir sofort in dein Postfach weiter.',
+                  style: VText.caption,
+                ),
+              ),
+            ],
           ),
         ],
       ],
@@ -1053,11 +1129,16 @@ class _PersonalForm extends StatelessWidget {
           ),
         ),
         const VGap.s(),
+        // Which of the four rows actually travels, row by row: the form carries name, address and
+        // ticket number, and the e-mail row does not go on it at all — it is the address your own
+        // copy goes to, and the form names ours so the answer comes back through us (#22). The
+        // banner used to say „diese Angaben" and mean all four.
         VNoteBanner(
           tone: VNoteTone.neutral,
           icon: Icons.lock_outline,
-          text: 'Diese Angaben stehen nur auf dem Formular an das Eisenbahnunternehmen. '
-              'Sie bleiben auf ${RepoScope.read(context).isLocal ? 'deinem Gerät und unserem Server' : 'diesem Gerät'}.',
+          text: 'Name, Anschrift und Ticketnummer stehen auf dem Formular an das Eisenbahnunternehmen — '
+              'deine E-Mail-Adresse nicht. Alles bleibt auf '
+              '${RepoScope.read(context).isLocal ? 'deinem Gerät und unserem Server' : 'diesem Gerät'}.',
         ),
 
       ],
@@ -1499,7 +1580,10 @@ class _Senden extends StatelessWidget {
   Widget build(BuildContext context) {
     final pd = me?.personalData;
     final name = pd?.name ?? me?.nickname ?? 'Fahrgast';
-    final relay = me?.relayAddress ?? draft.relayAddress ?? '–';
+    // The claim's own address, not the passenger's: the mail goes out from `antrag-<claim>@…` and
+    // the railway's answer comes back to it. The passenger's `fahrgast-…` address is the fallback
+    // for a server that does not name the claim's one yet.
+    final relay = draft.claimReplyAddress ?? me?.relayAddress ?? draft.relayAddress ?? '–';
     final mail = ApiMail(
       id: 'draft',
       incidentIds: draft.claim.incidentIds,

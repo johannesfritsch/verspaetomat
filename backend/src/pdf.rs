@@ -156,7 +156,13 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
         "incidents": doc.incidents.iter().map(incident_json).collect::<Vec<_>>(),
         "person": {
             "name": c.full_name.clone().unwrap_or_default(),
-            "email": c.email.clone().unwrap_or_default(),
+            // 5.3.1 is where the desk writes back, and that is the claim's own address, not the
+            // passenger's. Their private address used to stand here, which broke two things at
+            // once: the app promises a railway never sees it, and an answer sent to it lands in
+            // a private inbox instead of the relay that reads, classifies and forwards it. The
+            // fallback is the address `ensure_claim_address` would assign, so the form carries a
+            // working address even before the first send.
+            "email": claim.reply_address.clone().unwrap_or_else(|| crate::handlers::claim_address_for(claim.id)),
             "address": c.postal_address.clone().unwrap_or_default().replace('\n', ", "),
         },
         "payee": { "iban": claim.iban, "holder": claim.account_holder },
@@ -351,6 +357,46 @@ mod tests {
         assert_eq!(compile(&doc).expect("compile journey").pages().len(), 1, "a journey claim fits on one page");
         let pdf = render(&doc).expect("render journey");
         std::fs::write(std::env::temp_dir().join("verspaetomat-journey.pdf"), &pdf).ok();
+    }
+
+    /// The one thing the app promises about the form: the railway never reads the passenger's own
+    /// address off it. 5.3.1 carries the claim's address instead, which is also where the answer
+    /// has to go for the relay to see it.
+    #[test]
+    fn the_form_names_our_address_and_never_the_passengers() {
+        let customer = test_customer();
+        let mut claim = ClaimRow {
+            id: Uuid::new_v4(),
+            customer_id: customer.id,
+            desk: "Servicecenter Fahrgastrechte".into(),
+            ngo_id: "seenotrettung".into(),
+            account_holder: "Sea-Watch e.V.".into(),
+            iban: "DE12 3456 7890 1234 5678 90".into(),
+            ticket_months: vec!["2026-09".into()],
+            status: ClaimStatus::Draft,
+            signed_by: None,
+            signed_at: None,
+            sent_at: None,
+            expected_reply_by: None,
+            amount_claimed_cents: 450,
+            amount_confirmed_cents: None,
+            closed_at: None,
+            created_at: Utc::now(),
+            reply_address: Some("antrag-3d09a883@users.verspaetomat.de".into()),
+        };
+        let inputs = |claim: &ClaimRow| {
+            claim_inputs(&ClaimDocument { claim, incidents: &[], customer: &customer, signature_png: None })["person"]["email"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(inputs(&claim), "antrag-3d09a883@users.verspaetomat.de");
+
+        // Not yet sent, so no address is stored: the form still carries the one it will be given,
+        // never `erika@example.org`.
+        claim.reply_address = None;
+        assert_eq!(inputs(&claim), crate::handlers::claim_address_for(claim.id));
+        assert_ne!(inputs(&claim), customer.email.clone().unwrap());
     }
 
     fn signature_png() -> Vec<u8> {

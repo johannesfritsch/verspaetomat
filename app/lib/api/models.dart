@@ -921,6 +921,7 @@ class ApiClaimDraft {
     this.deskEmail,
     this.personalDataRequired = false,
     this.relayAddress,
+    this.claimReplyAddress,
     this.routeLabel,
     this.routeLive = false,
   });
@@ -929,6 +930,11 @@ class ApiClaimDraft {
   final String? deskEmail;
   final bool personalDataRequired;
   final String? relayAddress;
+
+  /// The address this one claim answers on — `antrag-…@…`, the address the mail really leaves
+  /// from and the one printed on the form. [relayAddress] is the passenger's own `fahrgast-…@…`
+  /// and is not what a claim is sent from. Null against a server that does not send it yet.
+  final String? claimReplyAddress;
 
   /// What the route this mail takes is called, and whether the operator has asserted that its
   /// address is the railway's real desk. A draft with no route has neither, and no [deskEmail] —
@@ -942,6 +948,7 @@ class ApiClaimDraft {
         deskEmail: _sn(j['desk_email']),
         personalDataRequired: _b(j['personal_data_required']),
         relayAddress: _sn(j['relay_address']),
+        claimReplyAddress: _sn(j['claim_reply_address']),
         routeLabel: _sn(j['desk_route_label']),
         routeLive: j['desk_route_live'] == true,
       );

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/screens/claims/antrag_screen.dart';
 import 'package:verspaetomat/screens/claims/demo_antrag_screen.dart';
+import 'package:verspaetomat/widgets/kit.dart' show VPrimaryButton, VTintButton;
 
 /// #19: „Für das Formular fehlt noch deine E-Mail-Adresse", and no e-mail field to be found.
 ///
@@ -81,6 +82,36 @@ void main() {
     await tapWeiter(tester);
     expect(onScreen(tester, fieldLabelled('Name')), isTrue);
     expect(find.text('Fehlt noch.'), findsNWidgets(3));
+  });
+
+  // #21: „Warum ist Weiter rot, obwohl das Formular nicht ausgefüllt ist?" The red light means
+  // *do this* in this app, so it may only come on when the step is really done; until then the
+  // button is the quiet tier and the line above it names what is missing.
+  testWidgets('an unfinished step draws the quiet Weiter and says what is missing', (tester) async {
+    await openPruefen(tester);
+    expect(find.widgetWithText(VPrimaryButton, 'Weiter'), findsNothing, reason: 'nothing is filled in');
+    expect(find.widgetWithText(VTintButton, 'Weiter'), findsOneWidget);
+    expect(find.text('Es fehlen noch: dein Name, deine Anschrift und deine E-Mail-Adresse.'), findsOneWidget);
+  });
+
+  testWidgets('a postcode in the e-mail row asks for a valid address, not for a missing one', (tester) async {
+    await openPruefen(tester);
+    await tester.enterText(fieldLabelled('Name'), 'Anita Müller');
+    await tester.enterText(fieldLabelled('Anschrift'), 'Franz-Müller-Straße 23');
+    await tester.enterText(fieldLabelled('E-Mail'), '99111');
+    await tester.pump();
+    expect(find.text('Es fehlt noch: eine gültige E-Mail-Adresse.'), findsOneWidget);
+  });
+
+  testWidgets('a finished step draws the red Weiter and says nothing more', (tester) async {
+    await openPruefen(tester);
+    await tester.enterText(fieldLabelled('Name'), 'Anita Müller');
+    await tester.enterText(fieldLabelled('Anschrift'), 'Franz-Müller-Straße 23');
+    await tester.enterText(fieldLabelled('E-Mail'), 'anita@example.org');
+    await tester.pump();
+    expect(find.widgetWithText(VPrimaryButton, 'Weiter'), findsOneWidget);
+    expect(find.widgetWithText(VTintButton, 'Weiter'), findsNothing);
+    expect(find.textContaining('Es fehl'), findsNothing);
   });
 
   test('an e-mail address is recognised, a postcode or a name is not', () {

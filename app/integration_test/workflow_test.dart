@@ -243,7 +243,16 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
     final searchField = find.byWidgetPredicate(
       (w) => w is TextField && (w.decoration?.hintText ?? '').startsWith('Köln Hbf'),
     );
-    await tapText(tester, 'Bahnhof suchen');
+    // The field's own hint, „Bahnhof suchen …", ellipsis and all. Matched by its words rather
+    // than letter for letter: the exact string stopped matching when the hint gained its ellipsis,
+    // and because a half-run check-in leaves `runCheckinFlow`'s guard standing, that one stale
+    // string took the three following scenarios down with it.
+    final searchRow = find.byWidgetPredicate((w) => w is Text && (w.data ?? '').startsWith('Bahnhof suchen'));
+    await pumpUntilFound(tester, searchRow, timeout: const Duration(seconds: 30));
+    await tester.ensureVisible(searchRow.first);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(searchRow.first, warnIfMissed: false);
+    await settle(tester);
     await pumpUntilFound(tester, searchField, timeout: const Duration(seconds: 30));
     await tester.ensureVisible(searchField.last);
     await tester.enterText(searchField.last, search);
