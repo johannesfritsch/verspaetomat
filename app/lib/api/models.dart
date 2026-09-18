@@ -1133,9 +1133,22 @@ class ApiStanding {
     this.community,
     this.next,
     this.unreadMails = 0,
+    this.pointsByDay = const [],
+    this.todayIndex = -1,
   });
   final int pointsThisWeek;
   final int pointsLastWeek;
+
+  /// Geduldspunkte per weekday of the running week, Monday first, always seven entries — or empty
+  /// on a server that predates issue #33, which the chart reads as "no daily breakdown" rather
+  /// than as a week of zeroes.
+  final List<int> pointsByDay;
+
+  /// Which of those seven days is today, in Europe/Berlin — the clock the buckets were cut with.
+  /// Never the device's weekday: a phone in another timezone, or one showing a standing fetched
+  /// before midnight, would light a bar whose value belongs to another day. −1 means unknown,
+  /// which lights nothing.
+  final int todayIndex;
   final int ridesThisWeek;
   final ApiStandingLevel? level;
   final ApiStandingMoney? money;
@@ -1153,6 +1166,12 @@ class ApiStanding {
         pointsThisWeek: _i(j['points_this_week']),
         pointsLastWeek: _i(j['points_last_week']),
         ridesThisWeek: _i(j['rides_this_week']),
+        // Anything but seven numbers is not a week, and half a week drawn as a week would be
+        // worse than the two-column chart it replaced.
+        pointsByDay: (j['points_by_day'] as List?)?.length == 7
+            ? [for (final v in (j['points_by_day'] as List)) _i(v)]
+            : const [],
+        todayIndex: _i(j['today_index'], -1),
         level: _m(j['level']) == null ? null : ApiStandingLevel.fromJson(_m(j['level'])!),
         money: _m(j['money']) == null ? null : ApiStandingMoney.fromJson(_m(j['money'])!),
         board: _m(j['board']) == null ? null : ApiStandingBoard.fromJson(_m(j['board'])!),

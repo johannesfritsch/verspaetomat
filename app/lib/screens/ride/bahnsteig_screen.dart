@@ -535,8 +535,10 @@ class _Momentum extends StatelessWidget {
           // goes to Ich, which is a place that exists.
           const VSectionHeader('Deine Woche'),
           const VGap.md(),
+          // Neutral, not faint red (issue #33): the drawing makes this a quiet block that the
+          // number and the bars sit in, and the red tint was doing the work the big figure does.
           VPanel(
-            tone: VPanelTone.redFaint,
+            tone: VPanelTone.neutral,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -563,11 +565,27 @@ class _Momentum extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: VSpace.s),
-                VWeekBars(
-                  values: [st.pointsLastWeek, st.pointsThisWeek],
-                  todayIndex: 1,
-                  labels: const ['Letzte', 'Diese'],
-                ),
+                // Seven days, Monday first (issue #33). The server sends them; on one that
+                // predates it the list is empty and the chart falls back to the two columns it
+                // has always drawn, so an old app against a new server and a new app against an
+                // old one both show a real chart rather than a gap.
+                if (st.pointsByDay.length == 7)
+                  VWeekBars(
+                    values: st.pointsByDay,
+                    // The server's weekday, not the device's: same clock the buckets were cut with.
+                    todayIndex: st.todayIndex,
+                    labels: const ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
+                    // Seven real numbers arrived, so an all-zero week is a quiet week and draws
+                    // tracks. The two-column fallback below is also what a failed load produces,
+                    // and that must keep reading as "nothing yet" rather than as a quiet week.
+                    emptyIsTrack: true,
+                  )
+                else
+                  VWeekBars(
+                    values: [st.pointsLastWeek, st.pointsThisWeek],
+                    todayIndex: 1,
+                    labels: const ['Letzte', 'Diese'],
+                  ),
               ],
             ),
           ),

@@ -47,12 +47,21 @@ class ServerDownScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const VGap.s(),
+          // Johannes' drawing for this page (#28). It carries its own alpha, because its white is
+          // a hair brighter than the paper and an opaque rectangle would show its own edge.
+          Center(
+            child: Image.asset(
+              'assets/header/stoerung.webp',
+              height: 220,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.medium,
+              // An asset that failed to decode must not take the page down with it: the whole
+              // point of this screen is to be the thing that still works when nothing else does.
+              errorBuilder: (_, __, ___) => const VStationClock(size: 96, animated: true),
+            ),
+          ),
           const VGap.l(),
-          // The Bahnhofsuhr, not a broken-server drawing. Every other illustration in this app is
-          // a shipped asset and there is none for this page yet; the clock is drawn in code, it is
-          // the app's own signature, and a station clock is what you look at while you wait.
-          const Center(child: VStationClock(size: 96, animated: true)),
-          const VGap.xl(),
           Text(
             'Wir erreichen den Verspätomat im Moment nicht. Das kann an unserem Server liegen oder an deiner '
             'Verbindung — von hier aus sieht beides gleich aus.',

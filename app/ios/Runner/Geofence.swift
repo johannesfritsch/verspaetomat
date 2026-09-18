@@ -365,6 +365,17 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   private enum Mode { case idle, configureFix, umbrellaFix, dwell(GeofenceStation) }
   private var mode = Mode.idle
+
+  /// What the layer is waiting for, in one word for the debug page (issue #31). „dwell" is the
+  /// one that matters: the phone is at a station with the GPS on, deciding whether to nudge.
+  private var modeLabel: String {
+    switch mode {
+    case .idle: return "idle"
+    case .configureFix: return "configureFix"
+    case .umbrellaFix: return "umbrellaFix"
+    case .dwell(let s): return "dwell:\(s.name)"
+    }
+  }
   private var fixes: [CLLocation] = []
 
   // -- The coverage disc (docs/25 §1) ---------------------------------------
@@ -398,6 +409,39 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   }
 
   private var discAt: Date? { defaults.object(forKey: "geofence.disc.at") as? Date }
+
+  // -- What the debug page could not answer (issue #31) -----------------------
+  //
+  // The disc's timestamp was the only date describing this layer, and it is the wrong one:
+  // `configure` moves the disc to wherever its fix lands while re-registering the station set it
+  // already had, because the nearest list is only ever written by `refreshNearest`. So the page
+  // could say „Gesetzt: gerade eben" above a set of stations drawn thirteen kilometres away, and
+  // there was no way to see the difference. These record the set and the lookup in their own
+  // right, so the two can visibly disagree.
+
+  /// When the station set was last handed to iOS, and around which centre.
+  private var regionsAt: Date? { defaults.object(forKey: "geofence.regions.at") as? Date }
+  private var regionsCentre: CLLocation? {
+    guard let lat = defaults.object(forKey: "geofence.regions.lat") as? Double,
+          let lon = defaults.object(forKey: "geofence.regions.lon") as? Double else { return nil }
+    return CLLocation(latitude: lat, longitude: lon)
+  }
+
+  private func noteRegionsDrawn(around centre: CLLocation?) {
+    defaults.set(Date(), forKey: "geofence.regions.at")
+    if let c = centre {
+      defaults.set(c.coordinate.latitude, forKey: "geofence.regions.lat")
+      defaults.set(c.coordinate.longitude, forKey: "geofence.regions.lon")
+    } else {
+      defaults.removeObject(forKey: "geofence.regions.lat")
+      defaults.removeObject(forKey: "geofence.regions.lon")
+    }
+  }
+
+  /// When the nearby list behind that set was last fetched, and how many stations came back.
+  /// This is the one that goes stale without anything on screen changing.
+  private var nearestAt: Date? { defaults.object(forKey: "geofence.nearest.at") as? Date }
+  private var nearestCount: Int { defaults.integer(forKey: "geofence.nearest.n") }
 
   /// The last significant-location fix, so the next one can be turned into a speed.
   private var lastSignificant: CLLocation?
@@ -582,6 +626,15 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         "discRadiusM": discRadius,
         "discAt": discAt?.timeIntervalSince1970 as Any,
         "counters": counters(),
+        // issue #31: the set and the lookup, dated in their own right, and what the layer is
+        // doing right now. Without these the page could only show the disc's timestamp, which
+        // describes something else entirely.
+        "regionsAt": regionsAt?.timeIntervalSince1970 as Any,
+        "regionsLat": regionsCentre?.coordinate.latitude as Any,
+        "regionsLon": regionsCentre?.coordinate.longitude as Any,
+        "nearestAt": nearestAt?.timeIntervalSince1970 as Any,
+        "nearestCount": nearestCount,
+        "mode": modeLabel,
         // Every registered region, with whether the phone is inside it right now (docs/25 §5).
         "regions": manager.monitoredRegions.compactMap { r -> [String: Any]? in
           guard let c = r as? CLCircularRegion else { return nil }
@@ -632,6 +685,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   @discardableResult
   private func registerStations(_ c: GeofenceConfig) -> Int {
     let set = GeofenceRules.regionSet(frequent: c.stations, nearest: nearest, here: discCentre)
+    noteRegionsDrawn(around: discCentre)
     for s in set {
       let r = CLCircularRegion(center: s.location.coordinate, radius: c.stationRadiusM, identifier: Self.stationPrefix + s.id)
       r.notifyOnEntry = true
@@ -879,6 +933,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         guard let self = self else { return }
         if let found = found, !found.isEmpty {
           self.nearest = found
+          self.defaults.set(Date(), forKey: "geofence.nearest.at")
+          self.defaults.set(found.count, forKey: "geofence.nearest.n")
           self.stopAllRegions()
           self.registerStations(c)
         }

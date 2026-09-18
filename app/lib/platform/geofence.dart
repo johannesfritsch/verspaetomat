@@ -106,6 +106,13 @@ class Geofence {
           for (final e in (m['counters'] as Map?)?.cast<String, dynamic>().entries ?? const <MapEntry<String, dynamic>>[])
             e.key: (e.value as num?)?.toInt() ?? 0,
         },
+        regionsAt: _at(m['regionsAt']),
+        regionsCentre: m['regionsLat'] is num && m['regionsLon'] is num
+            ? (lat: (m['regionsLat'] as num).toDouble(), lon: (m['regionsLon'] as num).toDouble())
+            : null,
+        nearestAt: _at(m['nearestAt']),
+        nearestCount: (m['nearestCount'] as num?)?.toInt() ?? 0,
+        mode: m['mode']?.toString(),
         regions: [
           for (final r in (m['regions'] as List? ?? const []).whereType<Map>())
             GeofenceRegion(
@@ -268,6 +275,10 @@ enum GeofencePermission {
       };
 }
 
+/// Seconds-since-epoch from the channel, or null. Native sends `NSNull` for an absent date.
+DateTime? _at(dynamic v) =>
+    v is num ? DateTime.fromMillisecondsSinceEpoch((v.toDouble() * 1000).round()) : null;
+
 class GeofenceStatus {
   const GeofenceStatus({
     required this.permission,
@@ -280,6 +291,11 @@ class GeofenceStatus {
     this.disc,
     this.counters = const {},
     this.regions = const [],
+    this.regionsAt,
+    this.regionsCentre,
+    this.nearestAt,
+    this.nearestCount = 0,
+    this.mode,
   });
   const GeofenceStatus.unavailable()
       : permission = GeofencePermission.notDetermined,
@@ -291,7 +307,12 @@ class GeofenceStatus {
         ignored = const {},
         disc = null,
         counters = const {},
-        regions = const [];
+        regions = const [],
+        regionsAt = null,
+        regionsCentre = null,
+        nearestAt = null,
+        nearestCount = 0,
+        mode = null;
   final GeofencePermission permission;
   final bool notifications;
   final int registered;
@@ -311,6 +332,22 @@ class GeofenceStatus {
 
   /// Every monitored region, with whether the phone is inside it right now.
   final List<GeofenceRegion> regions;
+
+  /// When the station set was last handed to iOS, and the centre it was chosen around (issue
+  /// #31). Deliberately separate from the disc: `configure` moves the disc to wherever its fix
+  /// lands while re-registering the set it already had, so the two can be hours and kilometres
+  /// apart — and until these existed, the page could only show the disc's date and call it the
+  /// age of the set.
+  final DateTime? regionsAt;
+  final ({double lat, double lon})? regionsCentre;
+
+  /// When the nearby list behind that set was last fetched, and how many stations came back.
+  /// This is the one that goes stale without anything on screen changing.
+  final DateTime? nearestAt;
+  final int nearestCount;
+
+  /// What the layer is waiting for: `idle`, `configureFix`, `umbrellaFix`, `dwell:<station>`.
+  final String? mode;
 }
 
 /// One registered region as the debug page lists it (docs/25 §5).

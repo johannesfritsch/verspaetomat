@@ -8,6 +8,7 @@ import '../../platform/geofence.dart';
 import '../../platform/geofence_replay.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
+import 'community_widgets.dart' show SegmentTabs;
 import '../../theme/tokens.dart';
 import '../../widgets/geofence_map.dart';
 import '../../widgets/kit.dart';
@@ -52,6 +53,11 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
 
   /// Which replayed event the map is showing, as an index into [_replay]. Null is "now".
   int? _replayAt;
+
+  /// Which segment is open (issue #32). The page was one eager column about 2 700 pt tall, so the
+  /// Showcase and the two actions sat below a 120-line log and nobody scrolled that far.
+  int _tab = 0;
+  static const _tabs = ['Zustand', 'Zahlen', 'Log'];
 
   /// Built once per load, not per frame: the join is every log line against every region, and it
   /// would otherwise run several times for each pixel the replay slider moves.
@@ -145,12 +151,66 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
     return _replay.events[i];
   }
 
+  /// Why the set is empty, in the words the status already knows — never a guess.
+  static String _whyNothingRegistered(GeofenceStatus s) {
+    if (s.permission != GeofencePermission.always) {
+      return 'Ohne Hintergrund-Berechtigung registriert iOS keine (${s.permission.name}).';
+    }
+    if (s.regionsAt == null) return 'Der Satz wurde noch nie gezogen.';
+    return 'Warum, steht nicht fest — sieh ins Log.';
+  }
+
+  /// Nearest first, the umbrella last, and anything without a distance after the rest.
+  static List<GeofenceRegion> _sortedRegions(List<GeofenceRegion> regions) {
+    final out = [...regions];
+    out.sort((a, b) {
+      if (a.isUmbrella != b.isUmbrella) return a.isUmbrella ? 1 : -1;
+      final da = a.distanceM, db = b.distanceM;
+      if (da == null && db == null) return a.name.compareTo(b.name);
+      if (da == null) return 1;
+      if (db == null) return -1;
+      return da.compareTo(db);
+    });
+    return out;
+  }
+
   /// The station the map is filled with, if it is still in the set after a reload.
   GeofenceRegion? _focused(GeofenceStatus s) {
     for (final r in s.regions) {
       if (r.id == _focusId && r.hasPosition) return r;
     }
     return null;
+  }
+
+  /// The one sentence the page exists for: is this set current, and if not, why not (issue #31).
+  ///
+  /// It only ever states what the two timestamps and the disc actually say. „Nearest" is the list
+  /// the set is chosen from and it is fetched in exactly one place — after the phone leaves the
+  /// umbrella — so a set redrawn long after the last lookup is a set redrawn from a stale list,
+  /// which is the failure that looks like nothing happening.
+  String _setCaption(GeofenceStatus s) {
+    if (s.regionsAt == null) return 'Noch nie gezogen.';
+    if (s.nearestAt == null) {
+      return 'Die Liste der nahen Bahnhöfe wurde noch nie geholt — der Satz besteht aus deinen '
+          'Stammbahnhöfen.';
+    }
+    final gap = s.regionsAt!.difference(s.nearestAt!);
+    final parts = <String>[
+      if (gap.inMinutes > 30)
+        'Der Satz wurde ${_howLong(gap)} nach der letzten Suche neu gezogen — also aus derselben '
+            'Liste wie vorher, nicht aus einer neuen.',
+      if (s.disc != null)
+        'Neu gesucht wird erst außerhalb der Scheibe, und die ist gerade '
+            '${(s.disc!.radiusM / 1000).round()} km weit.',
+    ];
+    return parts.isEmpty ? 'Satz und Suche liegen dicht beieinander.' : parts.join(' ');
+  }
+
+  /// „3 Stunden", „12 Minuten" — a gap in the words the caption needs.
+  static String _howLong(Duration d) {
+    if (d.inMinutes < 90) return '${d.inMinutes} Minuten';
+    if (d.inHours < 48) return '${d.inHours} Stunden';
+    return '${d.inDays} Tage';
   }
 
   /// What the picture is and, more importantly, what it is not.
@@ -237,9 +297,64 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const VGap.s(),
+
+          // Everything that is not a reading lives above the segments (issue #32): the page used
+          // to be one eager column about two and a half screens tall, with the Showcase and the
+          // two actions below a 120-line log, so nothing down there was ever reached.
+          Row(
+            children: [
+              Expanded(child: VOutlineButton(label: 'Neu laden', icon: Icons.refresh, onTap: _load)),
+              const SizedBox(width: 8),
+              Expanded(child: VOutlineButton(label: 'Neu suchen', icon: Icons.my_location, onTap: _refreshNow)),
+            ],
+          ),
+          const VGap.s(),
+          Row(
+            children: [
+              Expanded(child: VOutlineButton(label: 'Hinweis', icon: Icons.notifications_active_outlined, onTap: _testNudge)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: VOutlineButton(
+                  key: const Key('showcase'),
+                  label: 'Showcase',
+                  icon: Icons.grid_view_outlined,
+                  onTap: () => context.push(Routes.showcase),
+                ),
+              ),
+            ],
+          ),
+          const VGap.xs(),
+          Text(
+            '„Neu suchen“ holt einen frischen Standort und zieht den Satz neu — dasselbe, was sonst '
+            'beim Verlassen des Schirms passiert, und es unterbricht nichts, was gerade läuft. '
+            '„Hinweis“ schickt in zehn Sekunden eine Mitteilung an dieses Telefon, die nichts '
+            'enthält und beim Antippen nichts tut: sie beantwortet nur, ob Hinweise hier überhaupt '
+            'ankommen. Sperr den Bildschirm und warte.',
+            style: VText.caption,
+          ),
+          const VGap.l(),
+
+          SegmentTabs(labels: _tabs, index: _tab, onChanged: (i) => setState(() => _tab = i)),
+          const VGap.l(),
+
           if (_loading && s == null) const VSkeletonList(rows: 4, trailing: false),
           if (_error != null) ErrorLine(message: _error!, onRetry: _load),
-          if (s != null) ...[
+
+          // One segment is built at a time. An IndexedStack would keep all three laid out — which
+          // is the weight this change exists to remove — and would let the tour photograph the
+          // wrong one under the right name without failing.
+          if (_tab == 0 && s != null) ..._zustand(context, s, session),
+          if (_tab == 1 && s != null) ..._zahlen(s),
+          if (_tab == 2) ..._logTab(),
+          const VGap.xl(),
+        ],
+      ),
+    );
+  }
+
+  /// Everything about where the fence is and what it is doing (issues #31, #32).
+  List<Widget> _zustand(BuildContext context, GeofenceStatus s, Session session) {
+    return [
             const VSection('Status'),
             _Row('Berechtigung', s.permission.name),
             _Row('Mitteilungen', s.notifications ? 'erlaubt' : 'aus'),
@@ -307,6 +422,28 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
             const VGap.m(),
 
             // The coverage disc (docs/25 §1): the thing that decides how often we ask the backend.
+            // issue #31: the set and the lookup behind it, dated in their own right. Until these
+            // existed the page had one date — the disc's — and `configure` moves the disc to
+            // wherever its fix lands while re-registering the set it already had, so „Gesetzt:
+            // gerade eben" could sit above stations chosen thirteen kilometres away.
+            const VSection('Der Satz'),
+            _Row('Gezogen', _stamp(s.regionsAt)),
+            _Row(
+              'Gezogen um',
+              s.regionsCentre == null
+                  ? '–'
+                  : '${s.regionsCentre!.lat.toStringAsFixed(4)}, ${s.regionsCentre!.lon.toStringAsFixed(4)}',
+            ),
+            _Row('Nearest geholt', _stamp(s.nearestAt)),
+            _Row('… Bahnhöfe zurück', s.nearestAt == null ? '–' : '${s.nearestCount}'),
+            _Row('Schicht macht', s.mode ?? '–'),
+            const VGap.xs(),
+            Text(
+              _setCaption(s),
+              style: VText.caption,
+            ),
+            const VGap.m(),
+
             const VSection('Abdeckung'),
             if (s.disc == null)
               _Row('Scheibe', 'noch keine')
@@ -316,7 +453,44 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
               _Row('Gesetzt', _stamp(s.disc!.at)),
             ],
             const VGap.m(),
+            // An empty set drew nothing at all — no header, no count, no explanation — so the
+            // page went straight from the counters to the log and looked like it had lost the
+            // section. Keyed on `registered`, not on the list, because Android sends a count and
+            // no list and would otherwise claim a phone with live fences has none.
+            if (s.regions.isEmpty) ...[
+              const VSection('Regionen'),
+              const VGap.xs(),
+              Text(
+                s.registered > 0
+                    ? '${s.registered} registriert, aber diese Plattform sagt nicht welche.'
+                    : 'Keine Region registriert. ${_whyNothingRegistered(s)}',
+                style: VText.caption,
+              ),
+              const VGap.m(),
+            ],
+            if (s.regions.isNotEmpty) ...[
+              VSection('Regionen', trailing: Text('${s.regions.length}', style: VText.caption)),
+              // Sorted by distance, umbrella last. Native hands back a Set in whatever order it
+              // feels like, and with eighteen rows „is Lindau Reutin in here?" was a linear scan
+              // with no anchor — which is most of „I cannot see the registered regions".
+              for (final r in _sortedRegions(s.regions))
+                _RegionRow(
+                  region: r,
+                  selected: r.id == _focusId,
+                  // The umbrella has no inside to look at, and a region without coordinates
+                  // cannot be shown on the map at all.
+                  onTap: r.isUmbrella || !r.hasPosition
+                      ? null
+                      : () => setState(() => _focusId = r.id == _focusId ? null : r.id),
+                ),
+              const VGap.m(),
+            ],
+    ];
+  }
 
+  /// The counters, today and before.
+  List<Widget> _zahlen(GeofenceStatus s) {
+    return [
             // Counters since midnight, so the traffic table in docs/25 is falsifiable on a trip.
             const VSection('Heute'),
             _Row('Backend-Anfragen', '${s.counters['requests'] ?? 0}'),
@@ -344,23 +518,12 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
               ),
               const VGap.m(),
             ],
+    ];
+  }
 
-            if (s.regions.isNotEmpty) ...[
-              VSection('Regionen', trailing: Text('${s.regions.length}', style: VText.caption)),
-              for (final r in s.regions)
-                _RegionRow(
-                  region: r,
-                  selected: r.id == _focusId,
-                  // The umbrella has no inside to look at, and a region without coordinates
-                  // cannot be shown on the map at all.
-                  onTap: r.isUmbrella || !r.hasPosition
-                      ? null
-                      : () => setState(() => _focusId = r.id == _focusId ? null : r.id),
-                ),
-              const VGap.m(),
-            ],
-          ],
-
+  /// The log, its filters and the things you do with it.
+  List<Widget> _logTab() {
+    return [
           // The log itself.
           VSection('Log', trailing: Text('${_visible.length}', style: VText.caption)),
           const VGap.xs(),
@@ -406,53 +569,17 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
             ],
           ),
           const VGap.xl(),
-
-          // The two actions docs/25 §5 promised and nobody built (issue #29). They exist so the
-          // fence can be tested where it runs — on a platform, from a shipped build.
-          const VSection('Ausprobieren'),
-          const VGap.xs(),
-          Row(
-            children: [
-              Expanded(child: VOutlineButton(label: 'Jetzt neu suchen', icon: Icons.my_location, onTap: _refreshNow)),
-              const SizedBox(width: 8),
-              Expanded(child: VOutlineButton(label: 'Testhinweis', icon: Icons.notifications_active_outlined, onTap: _testNudge)),
-            ],
-          ),
-          const VGap.xs(),
-          Text(
-            '„Jetzt neu suchen“ holt einen frischen Standort und zieht den Satz neu — dasselbe, was '
-            'sonst beim Verlassen des Schirms passiert. „Testhinweis“ schickt in zehn Sekunden eine '
-            'Mitteilung an dieses Telefon, die nichts enthält und beim Antippen nichts tut: sie '
-            'beantwortet nur, ob Hinweise hier überhaupt ankommen. Sperr den Bildschirm und warte.',
-            style: VText.caption,
-          ),
-          const VGap.m(),
-          Text(
-            'Alles hier bleibt auf dem Telefon und geht von selbst nirgendwohin. Im Log stehen '
-            'Pfade, keine Inhalte, und nichts aus einem Antrag. Es stehen aber Bahnhofsnamen mit '
-            'Uhrzeit darin — „enter Köln Hbf“ —, weil genau das die Frage beantwortet, für die '
-            'die Seite da ist. Die letzten 500 Zeilen sind leicht eine Reisewoche, und „Alles '
-            'kopieren“ legt sie mit Datum in die Zwischenablage. Überleg dir also, an wen du das '
-            'schickst, und „Log leeren“ ist daneben.',
-            style: VText.caption,
-          ),
-          const VGap.xl(),
-
-          // issue #28: the index of every screen, in every build. Pushed rather than gone to, so
-          // there is a way back — the Showcase draws its back arrow only when it can pop.
-          const VSection('Alle Schirme'),
-          const VGap.xs(),
-          VListRow(
-            key: const Key('showcase'),
-            title: 'Showcase',
-            subtitle: 'Jeden Schirm der App einmal ansehen',
-            chevron: true,
-            onTap: () => context.push(Routes.showcase),
-          ),
-          const VGap.xl(),
-        ],
+      const VGap.m(),
+      Text(
+        'Alles hier bleibt auf dem Telefon und geht von selbst nirgendwohin. Im Log stehen '
+        'Pfade, keine Inhalte, und nichts aus einem Antrag. Es stehen aber Bahnhofsnamen mit '
+        'Uhrzeit darin — „enter Köln Hbf“ —, weil genau das die Frage beantwortet, für die '
+        'die Seite da ist. Die letzten 500 Zeilen sind leicht eine Reisewoche, und „Alles '
+        'kopieren“ legt sie mit Datum in die Zwischenablage. Überleg dir also, an wen du das '
+        'schickst, und „Log leeren“ ist daneben.',
+        style: VText.caption,
       ),
-    );
+    ];
   }
 
   /// Why background scanning is or is not happening, in one line — the question the page exists

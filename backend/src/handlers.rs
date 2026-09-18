@@ -2563,6 +2563,20 @@ pub fn week_bounds(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
     (start.with_timezone(&Utc), next.with_timezone(&Utc))
 }
 
+/// Postgres' `isodow - 1` buckets laid out Monday-first, with the days nobody rode as zero.
+///
+/// Separate from the query because this is the off-by-one that would never show up as an error —
+/// a week shifted by one day still draws seven plausible bars (issue #33).
+pub fn week_buckets(rows: &[(i32, i64)]) -> [i64; 7] {
+    let mut out = [0i64; 7];
+    for &(day, points) in rows {
+        if (0..7).contains(&day) {
+            out[day as usize] = points;
+        }
+    }
+    out
+}
+
 /// Level name, next level, points still missing, and progress 0..1 within the current band.
 pub fn level_progress(points: i64) -> (&'static str, &'static str, i64, f64) {
     const LEVELS: [(&str, i64); 6] = [
@@ -2642,6 +2656,31 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     .await
     .map_err(internal)?;
     let (level_name, next_name, points_to_next, progress) = level_progress(points_total);
+
+    // One value per weekday of the running week, Monday first (issue #33). The home screen used to
+    // draw two columns — this week against last — and the redesign wants Mo–So, which nothing has
+    // ever computed. Days with no ride are a real zero here, not a gap: the week is bounded and
+    // every one of its days has already happened or is still to come, so a zero means "nothing was
+    // late", which is exactly what the bar should say.
+    let day_rows: Vec<(i32, i64)> = sqlx::query_as(
+        "select (extract(isodow from finalised_at at time zone 'Europe/Berlin')::int - 1) as day,
+                coalesce(sum(points),0)::bigint
+         from rides
+         where customer_id = $1 and status in ('arrived','abandoned')
+           and finalised_at >= $2 and finalised_at < $3
+         group by day",
+    )
+    .bind(c.0.id)
+    .bind(week_start)
+    .bind(next_week)
+    .fetch_all(pool)
+    .await
+    .map_err(internal)?;
+    let points_by_day = week_buckets(&day_rows);
+    let today_index = {
+        use chrono::Datelike;
+        now.with_timezone(&chrono_tz::Europe::Berlin).weekday().num_days_from_monday() as i64
+    };
 
     // Money: the desk that is ready, else the one closest to the minimum payout.
     let rows = rules::refresh_statuses(pool, c.0.id, today).await.map_err(internal)?;
@@ -2751,6 +2790,13 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     Ok(Json(json!({
         "points_this_week": points_this_week,
         "points_last_week": points_last_week,
+        // Monday first, seven entries, always present (issue #33).
+        "points_by_day": points_by_day.to_vec(),
+        // Which of those seven is today, in Europe/Berlin — the same clock the buckets were cut
+        // with. The app must not work this out from the device: a phone in another timezone, or
+        // one still showing a standing fetched before midnight, would light a bar whose value
+        // belongs to another day.
+        "today_index": today_index,
         "unread_mails": unread_mails(pool, c.0.id).await.map_err(internal)?,
         "rides_this_week": rides_this_week,
         "level": { "name": level_name, "next_name": next_name, "points_to_next": points_to_next, "progress": progress },
@@ -3120,5 +3166,26 @@ mod claim_address_tests {
         assert_eq!(route("Antrag <antrag-3d09a883@users.verspaetomat.de>", &claims, &customers), "claim");
         assert_eq!(route("fahrgast-264c454b@users.verspaetomat.de", &claims, &customers), "customer");
         assert_eq!(route("someone@else.de", &claims, &customers), "unknown");
+    }
+
+    /// issue #33: seven bars, Monday first. Postgres' isodow is 1..7 with Monday at 1, so the
+    /// query subtracts one — and if that ever drifted, the home screen would still draw seven
+    /// plausible bars against the wrong days and nobody would notice.
+    #[test]
+    fn a_week_of_buckets_starts_on_monday() {
+        // Monday 3, Wednesday 40, Sunday 7 — nothing on the other four days.
+        let rows = vec![(0i32, 3i64), (2, 40), (6, 7)];
+        assert_eq!(week_buckets(&rows), [3, 0, 40, 0, 0, 0, 7]);
+
+        // A quiet week is seven real zeroes, not an empty array the screen has to guess at.
+        assert_eq!(week_buckets(&[]), [0; 7]);
+
+        // Out-of-range days are dropped rather than panicking on an index.
+        assert_eq!(week_buckets(&[(7, 99), (-1, 99), (3, 5)]), [0, 0, 0, 5, 0, 0, 0]);
+
+        // The bars have to add up to the week total the same query computes separately, or the
+        // chart and the number beside it would disagree on the same screen.
+        let rows = vec![(0i32, 12i64), (1, 30), (4, 8)];
+        assert_eq!(week_buckets(&rows).iter().sum::<i64>(), 50);
     }
 }

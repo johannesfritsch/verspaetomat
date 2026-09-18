@@ -629,7 +629,11 @@ class EmptyAntraege extends StatelessWidget {
             // walkthrough is the only way to find out what it will look like — and the only way an
             // App Store reviewer sees the flow at all. Issue #30 drops the „Einchecken" button
             // that stood above it, which leaves this the only thing to press.
-            VOutlineButton(
+            //
+            // A ghost button, because that is the secondary of the Antrag flow — every other
+            // non-primary control in `antrag_screen.dart` is one. I had promoted it to an outline
+            // button when the primary above it went away; that is the style the redesign retired.
+            VGhostButton(
               label: 'Vorführung ansehen',
               icon: Icons.play_circle_outline,
               onTap: () => context.push(Routes.vorfuehrung),

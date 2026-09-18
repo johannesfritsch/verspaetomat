@@ -69,8 +69,9 @@ class VColors {
   /// The lightest tinted panel.
   static const redTintFaint = Color(0xFFFDF3F3);
 
-  /// The unfilled bars of the week chart: a greyer pink, picked so it does not glow on
-  /// [redTintFaint] the way a straight opacity step would.
+  /// Was the unfilled bars of the week chart, until issue #33 made those [track]: a quiet week
+  /// in a red tint read as a faint achievement. Kept because it is the right pink for anything
+  /// that has to sit on [redTintFaint] without glowing the way a straight opacity step would.
   static const redTintMuted = Color(0xFFF6E4E4);
 
   /// Kept so the old name still resolves while the screens migrate. Prefer [redTint].

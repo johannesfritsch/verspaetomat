@@ -99,7 +99,7 @@ Redrawn for issue #30: the four lines become a `VStepList` — numbered discs, a
 > 4. **Die Bahn zahlt** · `direkt an <Verein> — nicht an uns.`
 >
 > Caption: `Ein Fall verfällt drei Monate nach der Fahrt.` plus `Wir melden uns rechtzeitig vorher.` — or, with notifications off, `Erinnern können wir dich nur mit Mitteilungen.`
-> Outline button `Vorführung ansehen`.
+> Ghost button `Vorführung ansehen` — the secondary of the Antrag flow, which is what every other non-primary control in it is.
 
 **Every number on it comes from the server**, because the backend owns every money rule and a copy of the rate table in the app is the one thing certain to drift: `min_payout_cents` and, new in #30, `flat_claim_cents` and `delay_minutes_threshold` in the incidents summary. `flat_claim_cents` is null wherever there is no single answer — a Zeitkarte pays 1,50 € regionally and 5,00 € long-distance, a single ticket a share of its own fare — and the screen then states the rule without a number instead of printing the commonest one and being wrong for everyone else.
 

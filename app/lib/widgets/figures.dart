@@ -177,20 +177,23 @@ class VProgressBar extends StatelessWidget {
 /// Geduldspunkte over time, with one column picked out.
 ///
 /// Seven bars is the shape the design asks for — a week, Monday first, today solid. But the app
-/// does not always have seven days to show: a new passenger has two, and the standing endpoint
-/// carries this week and last week rather than a daily series. Rather than leave the slot empty
-/// until the API grows, the chart takes however many columns it is given and widens the bars to
-/// fill the same block. Two fat bars labelled „Diese" and „Letzte" are a week history at low
-/// resolution; an empty rectangle is nothing at all.
+/// does not always have seven days to show. Since issue #33 the standing endpoint carries a daily
+/// series and the Bahnsteig draws Mo–So, but a server without it still answers with this week and
+/// last week, so the chart takes however many columns it is given and widens the bars to fill the
+/// same block. Two fat bars labelled „Diese" and „Letzte" are a week history at low resolution;
+/// an empty rectangle is nothing at all.
 ///
 /// The bars stand on one baseline and are read against each other, not against an axis: there is
 /// no scale, no grid and no value anywhere on the chart, so the tallest bar is simply the best
 /// column and everything else is a fraction of it. The picked column is solid [VColors.redBright]
-/// while the rest stay [VColors.redTintMuted] — but its *label* stays grey like the others, because
-/// the colour already says which one it is and a second marker would only shout.
+/// while the rest are [VColors.track] — but its *label* stays grey like the others, because the
+/// colour already says which one it is and a second marker would only shout.
 ///
-/// A column worth nothing still draws a stub. An empty day and a missing day would otherwise look
-/// the same, and the chart has to be able to say "nothing happened on Tuesday".
+/// A column worth nothing still draws a stub, as long as *something* in the week did: an empty day
+/// and a missing day would otherwise look the same, and the chart has to be able to say "nothing
+/// happened on Tuesday". A week where nothing happened at all is the other way round — seven
+/// full-height tracks, because seven stubs read as a hole in the page rather than as a week that
+/// has not started (issue #33).
 class VWeekBars extends StatelessWidget {
   const VWeekBars({
     super.key,
@@ -199,6 +202,7 @@ class VWeekBars extends StatelessWidget {
     required this.labels,
     this.maxHeight = VControl.weekBarMax,
     this.barWidth,
+    this.emptyIsTrack = false,
   });
 
   /// The columns, oldest first. Any length from two upwards; one column is not a chart and the
@@ -218,6 +222,14 @@ class VWeekBars extends StatelessWidget {
   /// Overrides the width a column works out for itself.
   final double? barWidth;
 
+  /// Whether a week with nothing in it draws full-height tracks instead of stubs (issue #33).
+  ///
+  /// Only the caller knows whether all-zero means *this week was quiet* or *no numbers arrived*.
+  /// A standing that failed to load is `ApiStanding.empty`, which is all zeroes too, and seven
+  /// full-height bars for a page that is still loading would be the chart claiming a week it has
+  /// not been told about. So the flag is off by default and the seven-day caller turns it on.
+  final bool emptyIsTrack;
+
   /// The block the chart fills, whatever it is showing: seven narrow bars and two wide ones take
   /// up the same room, so the panel around them does not change shape with the data.
   static const _block = 7 * VControl.weekBar + 6 * VControl.weekBarGap;
@@ -226,8 +238,8 @@ class VWeekBars extends StatelessWidget {
   /// sharing the seven-bar block would be 50 pt wide each, which is a swatch, not a chart.
   static const _maxBarWidth = 16.0;
 
-  /// The height of a column worth zero. There is no token for a stub; VSpace.xs is the nearest
-  /// value that still reads as a bar rather than as a line.
+  /// The height of a column worth zero *in a week that has something in it*. There is no token
+  /// for a stub; VSpace.xs is the nearest value that still reads as a bar rather than as a line.
   static const _stub = VSpace.xs;
 
   @override
@@ -265,13 +277,18 @@ class VWeekBars extends StatelessWidget {
               children: [
                 Container(
                   width: width,
-                  height: peak == 0 ? _stub : _barHeight(week[i], peak),
+                  // A week with nothing in it draws full-height tracks rather than seven stubs
+                  // (issue #33): the stubs read as a hole in the page, and a track reads as a
+                  // place where something will go. The big 0 beside them is what says there is
+                  // no data — the bars are uniform and unlit, so they cannot be read as values.
+                  height: peak == 0 ? (emptyIsTrack ? maxHeight : _stub) : _barHeight(week[i], peak),
                   decoration: BoxDecoration(
-                    // Nothing is picked out of a week where nothing happened: every column
-                    // is a stub, and one of them lit red would read as a little something.
-                    color: peak > 0 && i == todayIndex
-                        ? VColors.redBright
-                        : VColors.redTintMuted,
+                    // Nothing is picked out of a week where nothing happened: one column lit red
+                    // would read as a little something. `redBright` is the *this one* red and
+                    // earns it only where there is a value to point at.
+                    // Today is lit only when today itself is worth something. Lighting a zero
+                    // today draws a small red mark that reads as "you earned a little today".
+                    color: i == todayIndex && week[i] > 0 ? VColors.redBright : VColors.track,
                     borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(VRadius.bar),
                     ),

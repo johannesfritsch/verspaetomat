@@ -315,6 +315,11 @@ void main() {
     await shot('einstellungen-entwicklung');
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.entwicklung);
     await shot('debug-status');
+    // issue #32: the page is three segments now and only the open one is built, so the log has to
+    // be selected rather than scrolled to. Tapping by label keeps this honest — an IndexedStack
+    // would have kept the key findable and photographed the wrong segment under the right name.
+    await tester.tap(find.text('Log'));
+    await wait(tester, 400);
     await tester.dragUntilVisible(
       find.byKey(const Key('diagnose-log')),
       find.byType(SingleChildScrollView).first,

@@ -994,10 +994,29 @@ class MockRepository implements AppRepository {
     } else if (state.newBadge != null) {
       next = ApiStandingNext(kind: 'badge', title: 'Neues Abzeichen', body: state.newBadge!.name, badgeId: state.newBadge!.id);
     }
+    final weekPoints = Mock.pointsThisWeek + state.bonusPoints;
     return ApiStanding(
-      pointsThisWeek: Mock.pointsThisWeek + state.bonusPoints,
+      pointsThisWeek: weekPoints,
       pointsLastWeek: 41,
       ridesThisWeek: 3,
+      // Three of the week's days carry the whole total, the way a real week does — nobody is late
+      // on a schedule (issue #33). The bars must add up to the figure printed beside them.
+      //
+      // Friday is "today" whatever day it really is: the tour photographs this panel for the
+      // website, and a lit bar that followed the real weekday would make the committed shot
+      // depend on which day the tour was run.
+      todayIndex: 4,
+      pointsByDay: weekPoints == 0
+          ? const [0, 0, 0, 0, 0, 0, 0]
+          : [
+              0,
+              (weekPoints * 0.45).round(),
+              0,
+              (weekPoints * 0.2).round(),
+              weekPoints - (weekPoints * 0.45).round() - (weekPoints * 0.2).round(),
+              0,
+              0,
+            ],
       level: ApiStandingLevel(
         name: Mock.levelName,
         nextName: Mock.nextLevelName,

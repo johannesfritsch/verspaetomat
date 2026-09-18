@@ -167,8 +167,12 @@ class _GeofencePainter extends CustomPainter {
   /// the thing it describes, and a reader would take a 300 m region for a 3 km one.
   static const minHonestRadiusPx = 3.0;
 
+  /// The frame being painted, so a label can tell whether it would run off the edge.
+  Size _frame = Size.zero;
+
   @override
   void paint(Canvas canvas, Size size) {
+    _frame = size;
     final proj = _fit(size);
     if (proj == null) return;
 
@@ -302,6 +306,39 @@ class _GeofencePainter extends CustomPainter {
       }
     }
     canvas.drawCircle(centre, highlighted ? 3.5 : 2.5, Paint()..color = ink);
+    _paintLabel(canvas, centre, r.name, ink);
+  }
+
+  /// The station's name beside its dot (issue #31).
+  ///
+  /// Unlabelled dots were the whole of "the debug graph is not very helpful": the picture could
+  /// show that a set was drawn around the wrong town without ever saying which town. Drawn to the
+  /// right of the dot, or to the left when that would run off the frame, and skipped entirely
+  /// when the label has no room — a name overlapping another name is worse than no name.
+  void _paintLabel(Canvas canvas, Offset at, String name, Color ink) {
+    if (name.isEmpty || name == 'umbrella') return;
+    final tp = TextPainter(
+      text: TextSpan(text: name, style: VText.micro.copyWith(color: ink)),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+      ellipsis: '…',
+    )..layout(maxWidth: 96);
+
+    var x = at.dx + 6;
+    if (x + tp.width > _frame.width - 2) x = at.dx - 6 - tp.width;
+    final y = at.dy - tp.height / 2;
+    if (x < 2 || y < 0 || y + tp.height > _frame.height) return;
+
+    // A paper chip behind it: labels land on circles and on each other's fills, and an unbacked
+    // one is unreadable exactly where the picture is busiest.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x - 2, y - 1, tp.width + 4, tp.height + 2),
+        const Radius.circular(2),
+      ),
+      Paint()..color = VColors.paper.withValues(alpha: 0.82),
+    );
+    tp.paint(canvas, Offset(x, y));
   }
 
   /// Where the set was last drawn from — the last place the phone noticed it had moved, which can

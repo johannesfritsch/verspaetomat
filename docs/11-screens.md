@@ -172,7 +172,7 @@ If the claim is ready, "Jetzt einreichen" opens the claim flow (screen 11).
 
 Replaces Konto in the nav (10 September 2026). One question: what is happening with my claims? Header "Anträge" with a caption like "3 Fälle gesammelt · 1 Antrag unterwegs", the gear top right. The tab icon carries a small red count of railway mails nobody has opened yet (`standing.unread_mails`); opening a card's thread marks them seen (`POST /v1/claims/{id}/seen`).
 
-**Nothing at all yet** (no case, no Antrag, nothing taken out) gets the explainer instead of an empty box (docs/21 §5): "Noch keine Anträge offen", then the four numbered steps as a `VStepList` — einchecken, ab 60 Minuten entsteht der Anspruch, ab dem Mindestbetrag geht der Antrag raus, die Bahn zahlt direkt an den Verein — a caption about the three-month deadline and the reminder, and the outline button "Vorführung ansehen". Every amount comes from the incidents summary, never from the app (issue #30).
+**Nothing at all yet** (no case, no Antrag, nothing taken out) gets the explainer instead of an empty box (docs/21 §5): "Noch keine Anträge offen", then the four numbered steps as a `VStepList` — einchecken, ab 60 Minuten entsteht der Anspruch, ab dem Mindestbetrag geht der Antrag raus, die Bahn zahlt direkt an den Verein — a caption about the three-month deadline and the reminder, and the ghost button "Vorführung ansehen". Every amount comes from the incidents summary, never from the app (issue #30).
 
 One card per Antrag, status in words, never dots (docs/18):
 
