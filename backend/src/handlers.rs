@@ -3038,7 +3038,6 @@ mod inbound_tests {
         assert!(!nudges_enabled(&c), "the switch still wins on its own");
     }
 
-    #[test]
     /// docs/30: two feeds, one platform. Before the merge this produced two regions on the phone
     /// and two „Ab Kißlegg Bahnhof" on Home, each with half the check-ins.
     #[test]
@@ -3070,6 +3069,8 @@ mod inbound_tests {
         assert_eq!(set[0].checkins, 4, "with the whole platform's count");
     }
 
+    /// The duplicated `#[test]` above used to swallow this one's attribute, so it never ran.
+    #[test]
     fn geofence_set_home_first_muted_out_capped() {
         let rows = vec![
             ("a".into(), "A".into(), 50.0, 7.0, 9),

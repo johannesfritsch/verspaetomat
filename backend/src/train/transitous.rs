@@ -18,6 +18,10 @@ const PLAN_CACHE_TTL: Duration = Duration::from_secs(60);
 const NEARBY_CANDIDATES: usize = 8;
 /// How many stations the Bahnsteig is offered: the best one and two alternatives (docs/23 §1).
 const NEARBY_RESULTS: usize = 3;
+/// How far the fallback looks for a railway station when the gazetteer returned only bus stops
+/// (issue #31). Far enough to reach a small town's Bahnhof from its market square, near enough
+/// that it is still somewhere you could be going.
+const NEARBY_FALLBACK_RADIUS_M: i64 = 5_000;
 /// Inside one band the better station wins; beyond it distance decides again (docs/23 §1).
 const RANK_BAND_M: i64 = 300;
 /// Departures read per candidate when ranking it: enough to see past a burst of one mode.
@@ -33,6 +37,16 @@ const RANK_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,L
 /// `itinerary_from` throws away every bus that is not standing in for a train, so an ordinary
 /// city bus never becomes a leg of a journey (docs/28).
 const PLAN_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,SUBURBAN,BUS,COACH";
+
+/// How much we want a stop id, lower being better (issue #31).
+///
+/// MOTIS names one station once per platform — `…:9002_G`, `…:9002:2:1`, `…:9002:2:2` — and the
+/// `_G` is the parent, which is what every other call in this app expects. Failing that the
+/// shortest id wins, so repeated calls fold to the same one rather than to whichever departure
+/// happened to come back first.
+fn stop_id_rank(id: &str) -> (u8, usize) {
+    (if id.ends_with("_G") { 0 } else { 1 }, id.len())
+}
 
 #[derive(Clone)]
 pub struct TransitousClient {
@@ -109,6 +123,9 @@ impl TransitousClient {
             .collect();
         candidates.sort_by_key(|s| s.distance_m.unwrap_or(i64::MAX));
         candidates.truncate(NEARBY_CANDIDATES);
+        // The nearest stop of any kind, kept to anchor the radius query if the rank filter empties
+        // the list. Any stop will do — it is only a point to measure a radius from.
+        let anchor_id = candidates.first().map(|s| s.id.clone());
 
         let mut set = JoinSet::new();
         for (idx, stop) in candidates.iter().enumerate() {
@@ -133,12 +150,80 @@ impl TransitousClient {
                 Some(s)
             })
             .collect();
+        // Nothing survived the rank filter, which in a town with a lot of bus stops is the
+        // normal case rather than an odd one (issue #31). `reverse-geocode` answers with at most
+        // five places whatever you ask it for, and in Wangen im Allgäu those five are all bus
+        // stops — even standing on the platform, the Bahnhof is not among them. The stops are
+        // then all correctly dropped as non-rail and the customer gets an empty answer while a
+        // station is eight hundred metres away.
+        if kept.is_empty() {
+            if let Some(anchor) = anchor_id {
+                kept = self.rail_stops_around(&anchor, lat, lon).await;
+            }
+        }
+
         kept.sort_by(|a, b| {
             nearby_order(a.distance_m.unwrap_or(i64::MAX), a.rail_rank.unwrap_or(0), &a.name)
                 .cmp(&nearby_order(b.distance_m.unwrap_or(i64::MAX), b.rail_rank.unwrap_or(0), &b.name))
         });
         kept.truncate(NEARBY_RESULTS);
         Ok(kept)
+    }
+
+    /// Railway stations within [`NEARBY_FALLBACK_RADIUS_M`] of a stop, found through what departs
+    /// there rather than through the gazetteer (issue #31).
+    ///
+    /// `stoptimes` takes a radius and a mode filter, so asking it for rail departures around any
+    /// nearby stop names every railway station in reach — including the ones `reverse-geocode`
+    /// will not return because a handful of bus stops are closer. A station that appears here has
+    /// a real rail departure by construction, so it needs no ranking.
+    ///
+    /// One station appears once per platform (`…:9002_G`, `…:9002:2:1`, `…:9002:2:2`), so they are
+    /// folded by name, preferring MOTIS' parent id — the one the rest of the app wants.
+    async fn rail_stops_around(&self, anchor_stop_id: &str, lat: f64, lon: f64) -> Vec<StopInfo> {
+        let resp: Result<StopTimesResponse> = self
+            .get_json(
+                "/api/v1/stoptimes",
+                &[
+                    ("stopId", anchor_stop_id.to_string()),
+                    ("n", "50".into()),
+                    ("radius", NEARBY_FALLBACK_RADIUS_M.to_string()),
+                    ("mode", RANK_MODES.to_string()),
+                ],
+            )
+            .await;
+        let Ok(resp) = resp else {
+            tracing::debug!(stop = anchor_stop_id, "nearby fallback query failed");
+            return Vec::new();
+        };
+
+        let mut by_name: HashMap<String, StopInfo> = HashMap::new();
+        for st in resp.stop_times {
+            let p = st.place;
+            let (Some(id), Some(name), Some(plat), Some(plon)) = (p.stop_id, p.name, p.lat, p.lon) else {
+                continue;
+            };
+            let name = crate::train::display_station_name(&name);
+            // A station already seen keeps the better id, so the answer is stable between calls.
+            if let Some(existing) = by_name.get(&name) {
+                if stop_id_rank(&existing.id) <= stop_id_rank(&id) {
+                    continue;
+                }
+            }
+            by_name.insert(
+                name.clone(),
+                StopInfo {
+                    distance_m: Some(haversine_m(lat, lon, plat, plon).round() as i64),
+                    id,
+                    name,
+                    lat: plat,
+                    lon: plon,
+                    // It has a rail departure; that is what the rank was ever asking.
+                    rail_rank: Some(rail_rank(&[("RAIL", "")], "")),
+                },
+            );
+        }
+        by_name.into_values().collect()
     }
 
     /// What kind of station this stop is (docs/23 §1), from what really departs there.
@@ -471,6 +556,10 @@ struct StopTime {
 struct TripPlace {
     name: Option<String>,
     stop_id: Option<String>,
+    /// Present on every place MOTIS returns; parsed because the nearby fallback builds a station
+    /// out of a departure (issue #31).
+    lat: Option<f64>,
+    lon: Option<f64>,
     scheduled_departure: Option<DateTime<Utc>>,
     departure: Option<DateTime<Utc>>,
     scheduled_arrival: Option<DateTime<Utc>>,
@@ -613,6 +702,19 @@ mod tests {
         assert!(nearby_order(120, 3, "Köln Hbf") < nearby_order(280, 3, "Köln Hbf"));
     }
 
+    /// Live API, issue #31: the town where the gazetteer only knows bus stops.
+    /// Run with `cargo test live_wangen -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_wangen_finds_its_bahnhof() {
+        let c = TransitousClient::new();
+        for (name, lat, lon) in [("Zentrum", 47.6817, 9.8331), ("am Bahnhof", 47.6874, 9.8255)] {
+            let got = c.nearby_stops(lat, lon).await.unwrap();
+            eprintln!("Wangen {name}: {:?}", got.iter().map(|s| (&s.name, s.distance_m)).collect::<Vec<_>>());
+            assert!(got.iter().any(|s| s.name.contains("Wangen")), "Wangen {name} gave {got:?}");
+        }
+    }
+
     /// Live API. Run with `cargo test -- --ignored`.
     #[tokio::test]
     #[ignore]
@@ -628,10 +730,42 @@ mod tests {
         // the tram stop 60 m away. Three at most, best first.
         let munich = c.nearby_stops(48.1402, 11.5600).await.unwrap();
         assert!(munich.len() <= 3, "{munich:?}");
+
+        // issue #31: Wangen im Allgäu. `reverse-geocode` answers with five places whatever you
+        // ask it, and here all five are bus stops — even standing on the platform. Every one is
+        // correctly dropped as non-rail, which used to leave the customer with nothing while the
+        // Bahnhof was eight hundred metres away, and left the geofence layer registering a
+        // station in the town it had come from. The fallback finds it through what departs.
+        let wangen = c.nearby_stops(47.6817, 9.8331).await.unwrap();
+        assert!(
+            wangen.iter().any(|s| s.name.contains("Wangen")),
+            "the Bahnhof has to come back from the town centre: {wangen:?}",
+        );
+        let platform = c.nearby_stops(47.6874, 9.8255).await.unwrap();
+        assert!(!platform.is_empty(), "standing at the station must not answer with nothing");
         assert!(munich[0].name.contains("Hauptbahnhof") || munich[0].name.contains("Hbf"), "{munich:?}");
         assert_eq!(munich[0].rail_rank, Some(3), "{munich:?}");
         assert!(!munich.iter().any(|s| s.name.contains("Seidlstraße")), "the tram stop is gone: {munich:?}");
         let found = c.search_stops("Münster Hbf").await.unwrap();
         assert!(!found.is_empty());
+    }
+
+    /// issue #31: one station comes back once per platform, and the app wants the parent id.
+    #[test]
+    fn the_parent_stop_id_wins_over_a_platform() {
+        // Wangen Bahnhof, exactly as MOTIS returned it: a parent and two platforms.
+        let parent = "de-DELFI_de:08436:9002_G";
+        let platform_a = "de-DELFI_de:08436:9002:2:1";
+        let platform_b = "de-DELFI_de:08436:9002:2:2";
+
+        assert!(stop_id_rank(parent) < stop_id_rank(platform_a));
+        assert!(stop_id_rank(parent) < stop_id_rank(platform_b));
+
+        // Between two platforms the shorter wins, so repeated calls fold to the same id rather
+        // than to whichever departure happened to come back first.
+        assert!(stop_id_rank("de:1:2") < stop_id_rank("de:1:2:0:1"));
+
+        // A parent beats a platform even when it is the longer string.
+        assert!(stop_id_rank("a-very-long-parent-id_G") < stop_id_rank("short"));
     }
 }

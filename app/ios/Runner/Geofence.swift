@@ -926,21 +926,35 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     reply?(["registered": manager.monitoredRegions.count])
   }
 
+  /// The lookup after leaving the umbrella, and what to do with each of its three answers.
+  ///
+  /// The distinction below is the whole of issue #31. The old code treated "the request failed"
+  /// and "the answer was empty" the same: keep the stations we have. But it moved the disc and
+  /// the umbrella to the new fix either way, which makes the state **self-sealing** — the
+  /// umbrella is now centred where you are standing, so nothing fires again until you travel
+  /// another eight kilometres, and each time it does the same thing happens. Johannes' log shows
+  /// an hour of `umbrella exit` → `recentred …, nearest 0` while the registered station stayed a
+  /// town away, and nothing on the phone said why.
+  ///
+  /// So: a *failed* request changes nothing but the disc — it is transient and the old set is
+  /// still the best guess. An *empty* one is an answer: there is no station near here, the old
+  /// nearest list describes somewhere else, and keeping it registered is worse than dropping it.
   private func refreshNearest(around l: CLLocation, _ c: GeofenceConfig) {
     let task = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
     let finish = { [weak self] (found: [GeofenceStation]?) in
       DispatchQueue.main.async {
         guard let self = self else { return }
-        if let found = found, !found.isEmpty {
-          self.nearest = found
+        if let found = found {
           self.defaults.set(Date(), forKey: "geofence.nearest.at")
           self.defaults.set(found.count, forKey: "geofence.nearest.n")
+          self.nearest = found
           self.stopAllRegions()
           self.registerStations(c)
         }
         self.registerUmbrella(at: l, c)
         self.discCentre = l
-        self.lastEvent = "recentred on \(Int(self.discRadius / 1000)) km disc, nearest \(found?.count ?? 0)"
+        let outcome = found == nil ? "lookup failed, set untouched" : "nearest \(found!.count)"
+        self.lastEvent = "recentred on \(Int(self.discRadius / 1000)) km disc, \(outcome)"
         self.onUmbrellaExit?()
         if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
       }
