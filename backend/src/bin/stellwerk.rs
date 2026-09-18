@@ -15,7 +15,7 @@
 //!   stellwerk watch Johannes
 //!   stellwerk locate Johannes "Köln Hbf"   |  locate Johannes 50.943,6.9586  |  locate Johannes --clear
 //!   stellwerk forget Johannes
-//!   stellwerk route list | set <desk> <address> [--label …] [--live] | remove <desk>
+//!   stellwerk route list | set <desk> <address> [--label …] | default <address> | remove <desk>
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
 //!   stellwerk scan
@@ -207,10 +207,6 @@ enum RouteCmd {
         /// Where this route's paper would go. Without it the operator directory's address is shown.
         #[arg(long = "postal")]
         postal: Option<String>,
-        /// Really send to this address. Without it the route is a Probelauf: the claim is built and
-        /// recorded, and nothing leaves the house.
-        #[arg(long)]
-        live: bool,
         #[arg(long)]
         note: Option<String>,
     },
@@ -224,9 +220,6 @@ enum RouteCmd {
         /// Where this route's paper would go
         #[arg(long = "postal")]
         postal: Option<String>,
-        /// Really send to this address. Without it the catch-all is a Probelauf and nothing leaves
-        #[arg(long)]
-        live: bool,
         #[arg(long)]
         note: Option<String>,
         /// Take the catch-all away. A desk without its own route can then send nothing
@@ -805,7 +798,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("  stellwerk route set \"Servicecenter Fahrgastrechte\" du@example.org --label \"Probelauf\"");
                     println!("  stellwerk route default du@example.org      # für jeden Schalter ohne eigene Route");
                 } else {
-                    println!("{:<34} {:<34} {:<22} echt?", "Schalter", "geht wirklich an", "Bezeichnung");
+                    println!("{:<34} {:<34} Bezeichnung", "Schalter", "geht wirklich an");
                     for r in rows {
                         // „*" is the catch-all, and a column of asterisks explains nothing. It
                         // sorts first, so it reads as the heading of the list it governs.
@@ -814,11 +807,10 @@ async fn main() -> anyhow::Result<()> {
                             d => d,
                         };
                         println!(
-                            "{:<34} {:<34} {:<22} {}",
+                            "{:<34} {:<34} {}",
                             desk,
                             r["to_address"].as_str().unwrap_or("–"),
-                            r["label"].as_str().unwrap_or("–"),
-                            if r["live"].as_bool().unwrap_or(false) { "JA — geht wirklich raus" } else { "nein, Probelauf (sendet nichts)" }
+                            r["label"].as_str().unwrap_or("–")
                         );
                         println!("  Antworten zählen von: {}", strings(&r["answer_domains"]).join(", "));
                         let free = strings(&r["free_mail_answer_domains"]);
@@ -836,11 +828,10 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            RouteCmd::Set { desk, to, label, postal, live, note } => {
+            RouteCmd::Set { desk, to, label, postal, note } => {
                 let mut body = serde_json::Map::new();
                 body.insert("to_address".into(), json!(to));
-                body.insert("label".into(), json!(label.unwrap_or_else(|| if live { "Echte Stelle".into() } else { "Probelauf".into() })));
-                body.insert("live".into(), json!(live));
+                body.insert("label".into(), json!(label.unwrap_or_else(|| "Fahrgastrechte-Stelle".into())));
                 if let Some(p) = postal {
                     body.insert("postal_address".into(), json!(p));
                 }
@@ -849,12 +840,12 @@ async fn main() -> anyhow::Result<()> {
                 }
                 body.insert("desk".into(), json!(desk));
                 let v = api.put("/admin/routes", Value::Object(body)).await?;
-                println!("{} → {}  ({})", desk, v["to_address"].as_str().unwrap_or("–"), if v["live"].as_bool().unwrap_or(false) { "echte Stelle" } else { "Probelauf" });
+                println!("{} → {}  ({})", desk, v["to_address"].as_str().unwrap_or("–"), v["label"].as_str().unwrap_or("–"));
                 println!("  Antworten zählen von: {}", strings(&v["answer_domains"]).join(", "));
             }
             // The catch-all is an ordinary route under the reserved key „*"; the subcommand exists
             // so nobody has to quote a shell glob and so `--help` says what it is for.
-            RouteCmd::Default { to, label, postal, live, note, remove } => {
+            RouteCmd::Default { to, label, postal, note, remove } => {
                 if remove {
                     api.post("/admin/routes/remove", json!({ "desk": "*" })).await?;
                     println!("Auffanglinie entfernt. Ein Schalter ohne eigene Route kann jetzt nichts mehr senden.");
@@ -862,8 +853,7 @@ async fn main() -> anyhow::Result<()> {
                     let mut body = serde_json::Map::new();
                     body.insert("desk".into(), json!("*"));
                     body.insert("to_address".into(), json!(to));
-                    body.insert("label".into(), json!(label.unwrap_or_else(|| if live { "Echte Stelle".into() } else { "Auffanglinie".into() })));
-                    body.insert("live".into(), json!(live));
+                    body.insert("label".into(), json!(label.unwrap_or_else(|| "Auffanglinie".into())));
                     if let Some(p) = postal {
                         body.insert("postal_address".into(), json!(p));
                     }
@@ -871,14 +861,14 @@ async fn main() -> anyhow::Result<()> {
                         body.insert("note".into(), json!(n));
                     }
                     let v = api.put("/admin/routes", Value::Object(body)).await?;
-                    println!("Auffanglinie → {}  ({})", v["to_address"].as_str().unwrap_or("–"), if v["live"].as_bool().unwrap_or(false) { "echte Stelle" } else { "Probelauf" });
+                    println!("Auffanglinie → {}  ({})", v["to_address"].as_str().unwrap_or("–"), v["label"].as_str().unwrap_or("–"));
                     println!("  Jeder Schalter ohne eigene Route sendet hierhin.");
                     println!("  Antworten zählen von: {}", strings(&v["answer_domains"]).join(", "));
                 } else {
                     let rows = api.get("/admin/routes").await?;
                     match rows.as_array().and_then(|a| a.iter().find(|r| r["desk"] == "*")) {
                         Some(r) => {
-                            println!("Auffanglinie → {}  ({})", s(r, "to_address"), if r["live"].as_bool().unwrap_or(false) { "echte Stelle" } else { "Probelauf" });
+                            println!("Auffanglinie → {}  ({})", s(r, "to_address"), s(r, "label"));
                             println!("  Antworten zählen von: {}", strings(&r["answer_domains"]).join(", "));
                         }
                         None => println!("Keine Auffanglinie. Ein Schalter ohne eigene Route sendet nichts."),

@@ -127,14 +127,14 @@ One binary, several loops:
   `mail_routes` table and from nowhere else — no fixture seeds it, no migration inserts into it, and
   no railway address exists anywhere in this repository. An empty table means nothing can be sent,
   which is the correct state for a system nobody has told where to send. Manage it with
-  `stellwerk route list | set <desk> <address> [--label …] [--live] | remove <desk>`, and read the
+  `stellwerk route list | set <desk> <address> [--label …] | default <address> | remove <desk>`, and read the
   answer to "where does this actually go" straight out of `route list`.
-  - **`live` decides delivery** (#25). A route marked `--live` is the railway's real desk and its
-    mail really goes out. A route without it is a Probelauf: the claim is built, the PDF rendered,
-    the mail recorded with `dry_run` — and **nothing leaves the house**. The app plays the whole
-    send through and then says what would have followed, so a rehearsal looks exactly like the real
-    thing and cannot be one. Before this, `live` only changed the subject line and the mail went out
-    regardless, which is why nobody could press „Absenden" in good conscience.
+  - **Routing knows nothing about a rehearsal** (#25). A desk has an address and mail goes to it —
+    one behaviour, no flag. `mail_routes.live` is gone: it first changed nothing but a subject line,
+    then briefly decided delivery, and both were the same mistake. A demo is something the app does,
+    not a property of a destination. The walkthrough („Vorführung ansehen") runs on the mock
+    repository, which has no HTTP client at all, so it cannot reach this server — and the Senden
+    step of a real claim shows the exact address the server will use.
   - **One catch-all** (#25): the row keyed `*`, set with `stellwerk route default <address>`, is
     where a desk with no route of its own sends. It is an ordinary row in the same table, printed
     first by `route list` as „Auffanglinie", so the fallback is not a second mechanism to remember.
@@ -148,10 +148,8 @@ One binary, several loops:
     inbound mail went to whatever `From` that mail carried, which for a `stellwerk reply` rehearsal
     was a real address, and `stellwerk mail-test` took any address given. All three now read the
     table; `mail-test` refuses an address no route points at.
-  - A route that is not marked `--live` says so on the subject line and in the first line of the
-    body, so a rehearsal landing in a real inbox cannot be mistaken for a real claim.
   - The passenger sees the route's address on the Senden step, because that is the address the mail
-    will really go to.
+    will really go to — sender, receiver and copy, all three, with nothing added and nothing hidden.
 
 ## What the backend does not do
 

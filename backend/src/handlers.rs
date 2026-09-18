@@ -1162,7 +1162,6 @@ async fn draft_json(s: &AppState, c: &CustomerRow, claim: &ClaimRow, desk: &str)
     let route = mail_route(&s.pool, desk).await?;
     v["desk_email"] = json!(route.as_ref().map(|r| r.to_address.clone()));
     v["desk_route_label"] = json!(route.as_ref().map(|r| r.label.clone()));
-    v["desk_route_live"] = json!(route.as_ref().map(|r| r.live).unwrap_or(false));
     // True when this desk has no address of its own and the catch-all answered. The app says so on
     // the step that shows the destination, so "nobody set one for this desk yet" is visible rather
     // than silently absorbed (#25). Additive: an older build ignores it.
@@ -1450,33 +1449,21 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     if total * 4 / 3 > 9 * 1024 * 1024 {
         return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "attachments too large for one mail"));
     }
-    // A Probelauf leaves nothing behind but a record. `live` is the one switch that decides
-    // delivery now: a route the operator has not asserted is the railway's real desk is a
-    // rehearsal, and a rehearsal that drops a real mail in a real inbox is the accident this
-    // table exists to prevent (#25). Everything up to here still happens — the PDF is rendered,
-    // the attachments are gathered and weighed, the claim is marked sent — so what the passenger
-    // walks through is the real thing, and the app says afterwards what would have followed.
-    let sent = if route.live {
-        crate::mail::send(crate::mail::OutgoingMail {
-            from: &format!("{name} <{relay}>"),
-            to: &to,
-            bcc: Some(&email),
-            subject: &subject,
-            body: &body,
-            message_id: &message_id,
-            in_reply_to: None,
-            attachments: uploads,
-        })
-        .await
-        .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?
-    } else {
-        let names: Vec<String> = uploads.iter().map(|(n, _, b)| format!("{n} ({} B)", b.len())).collect();
-        tracing::info!(
-            from = %format!("{name} <{relay}>"), to = %to, route = %route.label, attachments = %names.join(", "),
-            "claim mail (Probelauf): the route is not live, nothing sent"
-        );
-        crate::mail::SendResult::DryRun
-    };
+    // One behaviour: the claim goes to the address the route names, which is the address the app
+    // showed on the Senden step. Nothing here knows about a rehearsal — a walkthrough is something
+    // the app does, and it never reaches this handler (#25).
+    let sent = crate::mail::send(crate::mail::OutgoingMail {
+        from: &format!("{name} <{relay}>"),
+        to: &to,
+        bcc: Some(&email),
+        subject: &subject,
+        body: &body,
+        message_id: &message_id,
+        in_reply_to: None,
+        attachments: uploads,
+    })
+    .await
+    .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?;
     let dry_run = matches!(sent, crate::mail::SendResult::DryRun);
     let mail_id = Uuid::new_v4();
     let mail: MailRow = sqlx::query_as(
@@ -1537,7 +1524,6 @@ pub struct Reply {
 pub struct MailRoute {
     pub to_address: String,
     pub label: String,
-    pub live: bool,
     pub postal_address: Option<String>,
 
     /// True when this desk has no route of its own and the catch-all answered instead.
@@ -1560,8 +1546,8 @@ pub const DEFAULT_DESK: &str = "*";
 pub async fn mail_route(pool: &PgPool, desk: &str) -> Result<Option<MailRoute>, (StatusCode, Json<Value>)> {
     // `order by (desk = $2)`: false sorts before true, so the desk's own row wins over the
     // catch-all whenever both exist.
-    let row: Option<(String, String, bool, Option<String>, bool)> = sqlx::query_as(
-        "select to_address, label, live, postal_address, desk = $2 as via_default
+    let row: Option<(String, String, Option<String>, bool)> = sqlx::query_as(
+        "select to_address, label, postal_address, desk = $2 as via_default
            from mail_routes where desk = $1 or desk = $2
           order by (desk = $2) limit 1",
     )
@@ -1570,10 +1556,9 @@ pub async fn mail_route(pool: &PgPool, desk: &str) -> Result<Option<MailRoute>, 
     .fetch_optional(pool)
     .await
     .map_err(internal)?;
-    Ok(row.map(|(to_address, label, live, postal_address, via_default)| MailRoute {
+    Ok(row.map(|(to_address, label, postal_address, via_default)| MailRoute {
         to_address,
         label,
-        live,
         postal_address,
         via_default,
     }))
@@ -1608,7 +1593,7 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     // pressing "Antworten" in the app used to send a real mail to a real railway, with no redirect
     // consulted on this path at all. Reading the destination from mail_routes closes that by
     // construction — this path can only reach an address somebody put in the table.
-    let (relay, to, route_live, route_label) = match orig.claim_id {
+    let (relay, to) = match orig.claim_id {
         Some(cid) => {
             let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1").bind(cid).fetch_optional(&s.pool).await.map_err(internal)?;
             match claim {
@@ -1619,7 +1604,7 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
                             &format!("no mail route for desk '{}': set one with `stellwerk route set`", cl.desk),
                         ));
                     };
-                    (ensure_claim_address(&s.pool, &cl).await.map_err(internal)?, route.to_address, route.live, route.label)
+                    (ensure_claim_address(&s.pool, &cl).await.map_err(internal)?, route.to_address)
                 }
                 None => return Err(err(StatusCode::PRECONDITION_FAILED, "the claim behind this thread is gone; nothing to answer")),
             }
@@ -1669,25 +1654,18 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     }
     let attachments_json = json!(files.iter().map(|(name, ct, bytes, uid)| json!({ "name": name, "content_type": ct, "size": bytes.len(), "upload_id": uid })).collect::<Vec<_>>());
     let message_id = new_message_id();
-    // Same rule as the claim itself: on a route that is not live, the answer is written down and
-    // nothing leaves (#25).
-    let sent = if route_live {
-        crate::mail::send(crate::mail::OutgoingMail {
-            from: &format!("{name} <{relay}>"),
-            to: &to,
-            bcc: Some(&email),
-            subject: &format!("Re: {}", orig.subject),
-            body: &r.body,
-            message_id: &message_id,
-            in_reply_to: orig.message_id.as_deref(),
-            attachments: files.iter().map(|(name, ct, bytes, _)| (name.clone(), ct.clone(), bytes.clone())).collect(),
-        })
-        .await
-        .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?
-    } else {
-        tracing::info!(to = %to, route = %route_label, "reply (Probelauf): the route is not live, nothing sent");
-        crate::mail::SendResult::DryRun
-    };
+    let sent = crate::mail::send(crate::mail::OutgoingMail {
+        from: &format!("{name} <{relay}>"),
+        to: &to,
+        bcc: Some(&email),
+        subject: &format!("Re: {}", orig.subject),
+        body: &r.body,
+        message_id: &message_id,
+        in_reply_to: orig.message_id.as_deref(),
+        attachments: files.iter().map(|(name, ct, bytes, _)| (name.clone(), ct.clone(), bytes.clone())).collect(),
+    })
+    .await
+    .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?;
     let dry_run = matches!(sent, crate::mail::SendResult::DryRun);
     let mail: MailRow = sqlx::query_as(
         "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, bcc_addr, subject, body, attachments, dry_run)

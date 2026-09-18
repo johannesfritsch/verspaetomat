@@ -922,8 +922,6 @@ class ApiClaimDraft {
     this.personalDataRequired = false,
     this.relayAddress,
     this.claimReplyAddress,
-    this.routeLabel,
-    this.routeLive = false,
     this.routeViaDefault = false,
   });
   final ApiClaim claim;
@@ -937,11 +935,6 @@ class ApiClaimDraft {
   /// and is not what a claim is sent from. Null against a server that does not send it yet.
   final String? claimReplyAddress;
 
-  /// What the route this mail takes is called, and whether the operator has asserted that its
-  /// address is the railway's real desk. A draft with no route has neither, and no [deskEmail] —
-  /// which is the server saying nothing can be sent to this desk yet.
-  final String? routeLabel;
-  final bool routeLive;
 
   /// True when this desk has no address of its own and the server's catch-all answered. Worth
   /// saying on screen: it means nobody has looked this operator up yet (#25).
@@ -954,8 +947,6 @@ class ApiClaimDraft {
         personalDataRequired: _b(j['personal_data_required']),
         relayAddress: _sn(j['relay_address']),
         claimReplyAddress: _sn(j['claim_reply_address']),
-        routeLabel: _sn(j['desk_route_label']),
-        routeLive: j['desk_route_live'] == true,
         routeViaDefault: j['desk_route_via_default'] == true,
       );
 }

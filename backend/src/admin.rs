@@ -1078,8 +1078,8 @@ pub async fn routes(State(s): State<AppState>, _a: Admin) -> ApiResult {
     // on the desk string frozen onto a claim, which comes from the operator directory — so a desk
     // nobody is filed under is a route that silently never matches, and the claim is refused for
     // "no mail route" while a route sits right there looking correct.
-    let rows: Vec<(String, String, String, bool, Option<String>, Option<String>, bool, Option<String>)> = sqlx::query_as(
-        "select r.desk, r.to_address, r.label, r.live, r.note, r.postal_address,
+    let rows: Vec<(String, String, String, Option<String>, Option<String>, bool, Option<String>)> = sqlx::query_as(
+        "select r.desk, r.to_address, r.label, r.note, r.postal_address,
                 exists(select 1 from operators o where o.desk = r.desk) or r.desk = '*' as known, r.reply_from
          from mail_routes r order by r.desk",
     )
@@ -1088,11 +1088,11 @@ pub async fn routes(State(s): State<AppState>, _a: Admin) -> ApiResult {
     .map_err(internal)?;
     Ok(Json(json!(rows
         .into_iter()
-        .map(|(desk, to_address, label, live, note, postal_address, known, reply_from)| {
+        .map(|(desk, to_address, label, note, postal_address, known, reply_from)| {
             let answer_domains = crate::reply::answer_domains(&to_address, reply_from.as_deref());
             let free_mail: Vec<&String> = answer_domains.iter().filter(|d| crate::reply::is_free_mail(d)).collect();
             json!({
-                "desk": desk, "to_address": to_address, "label": label, "live": live, "note": note,
+                "desk": desk, "to_address": to_address, "label": label, "note": note,
                 "postal_address": postal_address, "matches_a_desk": known,
                 "answer_domains": answer_domains, "free_mail_answer_domains": free_mail,
             })
@@ -1106,8 +1106,6 @@ pub struct RouteBody {
     pub to_address: Option<String>,
     pub label: Option<String>,
     pub postal_address: Option<String>,
-    #[serde(default)]
-    pub live: bool,
     pub note: Option<String>,
 }
 
@@ -1120,18 +1118,17 @@ pub async fn route_set(State(s): State<AppState>, _a: Admin, Json(b): Json<Route
     let Some(to) = b.to_address.as_deref().map(str::trim).filter(|t| t.contains('@') && !t.starts_with('@') && !t.ends_with('@')) else {
         return Err(err(StatusCode::BAD_REQUEST, "to_address must be an e-mail address"));
     };
-    let label = b.label.unwrap_or_else(|| if b.live { "Echte Stelle".into() } else { "Probelauf".into() });
-    let row: (String, String, String, bool, Option<String>) = sqlx::query_as(
-        "insert into mail_routes (desk, to_address, label, live, note, postal_address) values ($1,$2,$3,$4,$5,$6)
+    let label = b.label.unwrap_or_else(|| "Fahrgastrechte-Stelle".into());
+    let row: (String, String, String, Option<String>) = sqlx::query_as(
+        "insert into mail_routes (desk, to_address, label, note, postal_address) values ($1,$2,$3,$4,$5)
          on conflict (desk) do update set to_address = excluded.to_address, label = excluded.label,
-           live = excluded.live, note = excluded.note,
+           note = excluded.note,
            postal_address = coalesce(excluded.postal_address, mail_routes.postal_address), updated_at = now()
-         returning desk, to_address, label, live, reply_from",
+         returning desk, to_address, label, reply_from",
     )
     .bind(&desk)
     .bind(to)
     .bind(&label)
-    .bind(b.live)
     .bind(&b.note)
     .bind(&b.postal_address)
     .fetch_one(&s.pool)
@@ -1139,10 +1136,10 @@ pub async fn route_set(State(s): State<AppState>, _a: Admin, Json(b): Json<Route
     .map_err(internal)?;
     // An address that decides where a stranger's legal claim lands belongs in the audit trail.
     // Who may answer for the desk decides who can confirm money, so it is in the line too.
-    crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-set", &format!("{} → {} ({}, live={})", row.0, row.1, row.2, row.3))
+    crate::rules::audit(&s.pool, "route", Uuid::nil(), None, "route-set", &format!("{} → {} ({})", row.0, row.1, row.2))
         .await
         .map_err(internal)?;
-    Ok(Json(json!({ "desk": row.0, "to_address": row.1, "label": row.2, "live": row.3, "answer_domains": crate::reply::answer_domains(&row.1, row.4.as_deref()) })))
+    Ok(Json(json!({ "desk": row.0, "to_address": row.1, "label": row.2, "answer_domains": crate::reply::answer_domains(&row.1, row.3.as_deref()) })))
 }
 
 #[derive(Deserialize)]

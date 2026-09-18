@@ -382,11 +382,11 @@ class _AntragScreenState extends State<AntragScreen> {
   Future<void> _send() => _run(() async {
         final r = await RepoScope.read(context).repo.sendClaim(_claim!.id);
         _sent = r;
-        // The server says whether anything left the house, and it is the only thing that knows:
-        // a route that is not live sends nothing, and neither does a backend without mail
-        // credentials. This used to be a stub that always said „rehearsal", so a real send was
-        // reported as a test too.
-        _sentDryRun = r.mail.dryRun || !(_draft?.routeLive ?? false);
+        // Whether anything actually left: in the walkthrough nothing is even asked of a server,
+        // and a backend without mail credentials records the mail without sending it. Both are
+        // facts, not a mode — and the server is the only one that knows the second. This used to
+        // be a stub that returned `true` for everything, so a real send was reported as a test.
+        _sentDryRun = widget.demo || r.mail.dryRun;
       }, failure: 'Senden fehlgeschlagen');
 
   /// The draft with a fresh claim in it, and everything else the server said about it kept.
@@ -404,8 +404,6 @@ class _AntragScreenState extends State<AntragScreen> {
         personalDataRequired: _draft?.personalDataRequired ?? false,
         relayAddress: _draft?.relayAddress,
         claimReplyAddress: _draft?.claimReplyAddress,
-        routeLabel: _draft?.routeLabel,
-        routeLive: _draft?.routeLive ?? false,
         routeViaDefault: _draft?.routeViaDefault ?? false,
       );
 
@@ -958,14 +956,6 @@ class _Pruefen extends StatelessWidget {
             if (draft.routeViaDefault) ...[
               const VGap.s(),
               Text('Für diese Stelle ist noch keine eigene Adresse hinterlegt. Der Antrag geht an unsere Auffanglinie.', style: VText.caption),
-            ],
-            if ((draft.deskEmail?.isNotEmpty ?? false) && !draft.routeLive) ...[
-              const VGap.s(),
-              Text(
-                'Probelauf: Es geht noch nichts raus. Der Antrag wird nur aufgezeichnet — die Adresse oben ist die, '
-                'an die er ginge.',
-                style: VText.caption,
-              ),
             ],
           ],
         ],
@@ -1687,13 +1677,10 @@ class _Senden extends StatelessWidget {
                   'der Server. In der Vorführung wird nichts verschickt.',
             ),
             const VGap.s(),
-          ] else if (!draft.routeLive) ...[
-            VNoteBanner(
-              icon: Icons.science_outlined,
-              text: 'Probelauf${draft.routeLabel == null ? '' : ' („${draft.routeLabel}")'}: So sähe die Mail aus, '
-                  'wenn sie rausginge. Im Probelauf verlässt nichts das Haus — abgeschickt wird erst, wenn diese '
-                  'Route als echte Stelle eingetragen ist.'
-                  '${draft.routeViaDefault ? ' Für diese Stelle ist noch keine eigene Adresse hinterlegt.' : ''}',
+          ] else if (draft.routeViaDefault) ...[
+            const VNoteBanner(
+              icon: Icons.alt_route,
+              text: 'Für diese Stelle ist noch keine eigene Adresse hinterlegt. Der Antrag geht an die Adresse oben.',
             ),
             const VGap.s(),
           ],
@@ -1847,24 +1834,31 @@ class _SentState extends State<_Sent> {
                   Text(Mock.longDate(DateTime.now()), style: VText.h2.copyWith(color: VColors.ink2, fontWeight: FontWeight.w400)),
                   const VGap.m(),
                   Text(
-                    widget.dryRun
-                        ? 'An ${widget.mail.to}, von deiner Adresse — im Probelauf.'
+                    widget.demo
+                        ? 'An ${widget.mail.to}, von deiner Adresse — in der Vorführung.'
                         : 'An ${widget.mail.to}, von deiner Adresse. Die Kopie ist in deinem Postfach.',
                     style: VText.body.copyWith(color: VColors.ink2),
                   ),
-                  // A Probelauf goes the whole way and stops at the letterbox: der Antrag steht
-                  // fertig da, mit Adresse und Anhängen, und nichts verlässt das Haus. Statt das
-                  // nur festzustellen, sagt der Schirm, was jetzt dran wäre — sonst ist „fertig"
-                  // ohne Fortsetzung, und niemand weiß, ob etwas fehlt oder ob es so gemeint ist.
-                  if (widget.dryRun) ...[
+                  // The walkthrough goes the whole way and stops at the letterbox: the claim stands
+                  // there finished, with its address and its attachments, and nothing was asked of
+                  // a server at all. Rather than only stating that, the screen says what would be
+                  // next — otherwise „fertig" has no sequel and nobody can tell whether something
+                  // is missing or whether it was meant that way.
+                  if (widget.demo) ...[
                     const VGap.m(),
-                    VNoteBanner(
+                    const VNoteBanner(
                       icon: Icons.science_outlined,
-                      text: 'Probelauf: es hat nichts das Haus verlassen. Echt liefe es jetzt so — die Stelle bekommt '
-                          'Formular, Ticketbild und Unterschrift, antwortet in der Regel innerhalb eines Monats an deine '
-                          'Verspätomat-Adresse, und was sie zahlt, geht direkt an deinen Verein. Du siehst die Antwort '
-                          'hier unter „Anträge".',
+                      text: 'Vorführung: es ist nichts rausgegangen. Mit einem echten Antrag liefe es jetzt so — die '
+                          'Stelle bekommt Formular, Ticketbild und Unterschrift, antwortet in der Regel innerhalb eines '
+                          'Monats an deine Verspätomat-Adresse, und was sie zahlt, geht direkt an deinen Verein. Die '
+                          'Antwort siehst du dann hier unter „Anträge".',
                     ),
+                  ] else if (widget.dryRun) ...[
+                    const VGap.s(),
+                    // The server took the claim but sent no mail — it has no mail credentials.
+                    // Saying so is the honest half of „Abgeschickt.".
+                    Text('Auf diesem Server ist kein Mailversand eingerichtet: der Antrag ist aufgezeichnet, '
+                        'verschickt wurde nichts.', style: VText.caption),
                   ],
                   const Spacer(),
                   if (canShare) ...[

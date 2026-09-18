@@ -841,8 +841,6 @@ class MockRepository implements AppRepository {
       personalDataRequired: !state.personalDataEntered,
       relayAddress: Mock.relayAddress,
       claimReplyAddress: Mock.claimReplyAddress,
-      routeLabel: 'Vorführung',
-      routeLive: false,
     );
   }
 
