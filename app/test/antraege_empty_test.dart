@@ -54,6 +54,14 @@ void main() {
       expect(find.textContaining('hängt von deinem Ticket'), findsOneWidget);
     });
 
+    testWidgets('the minimum is stated as per railway company, because that is what it is', (tester) async {
+      // `bundle_ready` is per desk: 3 € at der Bahn and 3 € elsewhere is six euros and no claim.
+      // The qualifier appears elsewhere on the tab only once a second desk exists, which the
+      // empty state by definition never has.
+      await pump(tester);
+      expect(find.textContaining('je Bahnunternehmen'), findsOneWidget);
+    });
+
     testWidgets('the payout threshold comes from the server too', (tester) async {
       await pump(tester, minPayoutCents: 400);
       expect(find.textContaining('4,00 €'), findsOneWidget);

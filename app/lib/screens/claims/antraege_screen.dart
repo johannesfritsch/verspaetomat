@@ -583,7 +583,12 @@ class EmptyAntraege extends StatelessWidget {
                 ),
                 VStep(
                   title: 'Ab ${fmtCents(minPayoutCents)}',
-                  text: 'bereiten wir den Antrag vor. Unterschrieben wird er von dir.',
+                  // Per railway company, not in total: `bundle_ready` is evaluated per desk, so
+                  // 3 € at der Bahn and 3 € somewhere else is six euros and no claim. The tab
+                  // says this elsewhere — but only once a second desk exists, which by
+                  // definition it never has here, so this is the one place a newcomer can read
+                  // the rule and it must carry the qualifier.
+                  text: 'je Bahnunternehmen bereiten wir den Antrag vor. Unterschrieben wird er von dir.',
                   icon: Icons.description_outlined,
                 ),
                 VStep(
