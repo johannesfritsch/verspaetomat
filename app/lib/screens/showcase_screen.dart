@@ -89,6 +89,7 @@ class ShowcaseScreen extends StatelessWidget {
             ('Einstellungen', 'und Datenschutz', Routes.einstellungen),
             ('Woher kommen die Daten?', 'die Tabelle', Routes.datenherkunft),
             ('Störung', 'wenn der Server nicht erreichbar ist', Routes.stoerung),
+            ('Zaunkarte', 'wie die Zäune stehen', Routes.zaunkarte),
           ]),
           const VGap.xl(),
           Text('Alle Daten sind erfunden. Bahnhöfe, Züge, Beträge und Vereine dienen nur der Vorführung.', style: VText.caption),

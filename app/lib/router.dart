@@ -12,6 +12,7 @@ import 'screens/claims/demo_antrag_screen.dart';
 import 'screens/claims/demo_weiter_screen.dart';
 import 'screens/onboarding/wiederherstellen_screen.dart';
 import 'screens/showcase_screen.dart';
+import 'widgets/geofence_map_showcase.dart';
 import 'widgets/server_down.dart';
 import 'state/demo_state.dart';
 import 'state/nearby_monitor.dart';
@@ -44,7 +45,7 @@ class Routes {
   static const einstellungen = '/einstellungen';
   static const datenherkunft = '/einstellungen/daten';
 
-  /// docs/25 §5: the debug page. Reachable only where `EntwicklungScreen.available`.
+  /// docs/25 §5: the debug page. In every build, release included (issue #29).
   static const entwicklung = '/einstellungen/entwicklung';
   static const rechtlichesBase = '/rechtliches'; // /rechtliches/:id  (impressum | datenschutz | bote)
   static String rechtliches(String id) => '$rechtlichesBase/$id';
@@ -64,6 +65,10 @@ class Routes {
   /// The „nicht erreichbar" page on its own (#28). A real outage cannot be arranged on demand, so
   /// the Showcase and the screenshot tour reach it by route instead of by breaking the server.
   static const stoerung = '/showcase/stoerung';
+
+  /// docs/25 §5: the fence drawing on its own, with an invented set, so it can be looked at
+  /// without standing at a station (issue #29). The page itself draws only what the phone says.
+  static const zaunkarte = '/showcase/zaunkarte';
 }
 
 /// Where the app opens. `INITIAL_ROUTE` wins (tests, showcase runs). Otherwise a release
@@ -89,6 +94,7 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
     routes: [
       GoRoute(path: '/', redirect: (_, __) => Routes.showcase),
       GoRoute(path: Routes.stoerung, builder: (context, __) => ServerDownScreen(onRetry: () => context.pop())),
+      GoRoute(path: Routes.zaunkarte, builder: (_, __) => const GeofenceMapShowcase()),
       GoRoute(path: Routes.showcase, builder: (_, __) => const ShowcaseScreen()),
       GoRoute(path: Routes.vorfuehrung, builder: (_, __) => const DemoAntragScreen()),
       GoRoute(path: Routes.vorfuehrungWeiter, builder: (_, __) => const DemoWeiterScreen()),

@@ -31,6 +31,12 @@ final class GeofenceChannel {
         manager.registerPush { result($0) }
       case "readLog":
         result(manager.readLog())
+      case "countersHistory":
+        result(manager.countersHistory(days: args["days"] as? Int ?? 7))
+      case "refreshNow":
+        result(manager.refreshNow())
+      case "testNudge":
+        manager.testNudge(delay: args["delay"] as? Double ?? 10) { result($0) }
       case "clearLog":
         manager.clearLog()
         result(nil)

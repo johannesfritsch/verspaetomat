@@ -111,6 +111,8 @@ class Geofence {
             GeofenceRegion(
               id: '${r['id'] ?? ''}',
               name: '${r['name'] ?? r['id'] ?? ''}',
+              lat: (r['lat'] as num?)?.toDouble(),
+              lon: (r['lon'] as num?)?.toDouble(),
               distanceM: (r['distanceM'] as num?)?.toDouble(),
               inside: r['inside'] == true,
               radiusM: (r['radiusM'] as num?)?.toDouble() ?? 0,
@@ -147,6 +149,62 @@ class Geofence {
     }
   }
 
+  /// The counters of the last [days] days, newest first (issue #29).
+  ///
+  /// Nothing new is recorded for this: native has written one key per day since the counters
+  /// existed and never deleted any, so this reads history that was already on the phone and
+  /// simply unreachable. Days with no traffic are absent rather than zero — the phone was off,
+  /// or the app was not installed, and a drawn zero would claim otherwise.
+  Future<List<GeofenceDay>> countersHistory({int days = 7}) async {
+    try {
+      final r = await _channel.invokeMethod<dynamic>('countersHistory', {'days': days});
+      return [
+        for (final e in (r as List? ?? const []).whereType<Map>())
+          GeofenceDay(
+            day: '${e['day'] ?? ''}',
+            counters: {
+              for (final c in (e['counters'] as Map?)?.cast<String, dynamic>().entries ?? const <MapEntry<String, dynamic>>[])
+                c.key: (c.value as num?)?.toInt() ?? 0,
+            },
+          ),
+      ];
+    } on MissingPluginException {
+      return const [];
+    } on PlatformException {
+      return const [];
+    }
+  }
+
+  /// docs/25 §5: redraw the region set around a fresh fix, now.
+  ///
+  /// It refuses rather than interrupts, so the answer is not a yes/no — the screen has to be able
+  /// to say *why* nothing happened, and "busy" in particular means the phone is in the middle of
+  /// the very thing the button would have tested.
+  Future<GeofenceRefresh> refreshNow() async {
+    try {
+      return GeofenceRefresh.parse('${await _channel.invokeMethod<dynamic>('refreshNow')}');
+    } on MissingPluginException {
+      return GeofenceRefresh.unavailable;
+    } on PlatformException {
+      return GeofenceRefresh.unavailable;
+    }
+  }
+
+  /// docs/25 §5: a notification to this phone in [delay], carrying nothing and doing nothing
+  /// when tapped. It answers whether hints arrive at all, which no status row can.
+  ///
+  /// False means the system refused it — which is the answer the button exists to give, so it
+  /// must never be reported as a success.
+  Future<bool> testNudge({Duration delay = const Duration(seconds: 10)}) async {
+    try {
+      return await _channel.invokeMethod<bool>('testNudge', {'delay': delay.inSeconds.toDouble()}) ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   /// docs/25 §4: the tally for this station has been turned into a mute, so it starts over.
   Future<void> clearIgnored(String stationId) async {
     try {
@@ -167,6 +225,33 @@ class Geofence {
       // nothing to stop
     }
   }
+}
+
+/// What `refreshNow` did, in the words the screen needs (issue #29).
+enum GeofenceRefresh {
+  /// A fresh fix was asked for; the set is redrawn when it lands.
+  started,
+
+  /// No location permission, so there is nothing to ask.
+  denied,
+
+  /// Background scanning is off, in the account or on the phone.
+  off,
+
+  /// Something is already running — usually the near-watch at a station, which is exactly what
+  /// this button must not interrupt.
+  busy,
+
+  /// No native layer at all (Android, a widget test, the simulator without the plugin).
+  unavailable;
+
+  static GeofenceRefresh parse(String s) => switch (s) {
+        'started' => GeofenceRefresh.started,
+        'denied' => GeofenceRefresh.denied,
+        'off' => GeofenceRefresh.off,
+        'busy' => GeofenceRefresh.busy,
+        _ => GeofenceRefresh.unavailable,
+      };
 }
 
 enum GeofencePermission {
@@ -230,15 +315,42 @@ class GeofenceStatus {
 
 /// One registered region as the debug page lists it (docs/25 §5).
 class GeofenceRegion {
-  const GeofenceRegion({required this.id, required this.name, this.distanceM, this.inside = false, this.radiusM = 0});
+  const GeofenceRegion({
+    required this.id,
+    required this.name,
+    this.lat,
+    this.lon,
+    this.distanceM,
+    this.inside = false,
+    this.radiusM = 0,
+  });
   final String id;
   final String name;
+
+  /// Where the circle actually is. Native has always sent this; it was thrown away here until
+  /// issue #29 wanted the set drawn rather than listed.
+  final double? lat;
+  final double? lon;
+
   final double? distanceM;
   final bool inside;
   final double radiusM;
 
+  bool get hasPosition => lat != null && lon != null;
+
   /// The umbrella is a region too, but it is not a station.
   bool get isUmbrella => id == 'umbrella';
+}
+
+/// One day's counters, as `countersHistory` reads them back off the phone (issue #29).
+class GeofenceDay {
+  const GeofenceDay({required this.day, required this.counters});
+
+  /// `yyyy-MM-dd`, the key the native side has always written under.
+  final String day;
+  final Map<String, int> counters;
+
+  int get(String name) => counters[name] ?? 0;
 }
 
 /// The coverage disc as the debug page shows it (docs/25 §1, §5).
@@ -300,12 +412,19 @@ class GeofenceConfig {
     required this.enabled,
     required this.riding,
     required this.stations,
-    this.umbrellaRadiusM = 8000,
-    this.stationRadiusM = 300,
-    this.nudgeRadiusM = 50,
+    this.umbrellaRadiusM = defaultUmbrellaRadiusM,
+    this.stationRadiusM = defaultStationRadiusM,
+    this.nudgeRadiusM = defaultNudgeRadiusM,
     this.quietFrom,
     this.quietTo,
   });
+  // The three radii the whole layer is made of. `GeofenceSync` never overrides them, so these
+  // are the numbers in force on every phone — and the debug page names them, because they are
+  // invisible everywhere else (issue #29).
+  static const defaultUmbrellaRadiusM = 8000;
+  static const defaultStationRadiusM = 300;
+  static const defaultNudgeRadiusM = 50;
+
   final String apiUrl;
   final String? token;
   final bool enabled;

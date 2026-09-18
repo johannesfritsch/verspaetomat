@@ -310,7 +310,7 @@ void main() {
     await wait(tester, 800);
     demo.reset();
     // docs/25 §5: the debug page, which exists so "why no nudge at Memmingen?" can be answered
-    // from the phone. The Entwicklung row is present because the tour runs a debug build.
+    // from the phone. Since issue #29 the Entwicklung row is in every build, release included.
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.einstellungen);
     await shot('einstellungen-entwicklung');
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.entwicklung);
@@ -321,6 +321,16 @@ void main() {
       const Offset(0, -220),
     );
     await shot('debug-log');
+    // issue #29: the drawing itself. On a simulator the phone monitors nothing, so the real page
+    // has nothing to draw — the Showcase entry carries an invented set so the picture can be seen.
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.zaunkarte);
+    await shot('zaunkarte');
+    await tester.dragUntilVisible(
+      find.byKey(const Key('zaunkarte-nah')),
+      find.byType(SingleChildScrollView).first,
+      const Offset(0, -220),
+    );
+    await shot('zaunkarte-nah');
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
     await wait(tester, 600);
     // docs/27: the shareable Fahrkarte. The arrival card, the punctual one (which is a

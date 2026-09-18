@@ -227,16 +227,102 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   func clearLog() { defaults.removeObject(forKey: logKey) }
 
+  // -- The two actions docs/25 §5 promised and nobody built (issue #29) ------
+  //
+  // Both exist so the fence can be tested where it runs — on a platform, on a real phone, from a
+  // shipped build — instead of being reasoned about from a laptop. Neither writes anything to
+  // the server: one asks a question that is already asked automatically, the other posts a
+  // notification to this phone.
+
+  /// Re-runs the lookup and redraws the region set around a fresh fix, now.
+  ///
+  /// This is the umbrella-exit path called by hand — the same one line for one behaviour, so
+  /// tapping the button exercises what actually happens on a journey rather than a copy of it.
+  ///
+  /// It refuses rather than interrupts. `beginMode` would overwrite whatever mode is running,
+  /// and the one that matters is `.dwell`: the phone is at a station with high-accuracy updates
+  /// on, waiting for a fix inside the nudge radius. Replacing that loses the nudge it was about
+  /// to schedule *and* leaves `stopUpdatingLocation` uncalled, so the GPS stays on at full
+  /// accuracy until something else ends the mode. A diagnostics button must not be able to do
+  /// that to the feature it exists to diagnose.
+  ///
+  /// Returns what happened, for the screen to say plainly.
+  func refreshNow() -> String {
+    guard authStatus == .authorizedAlways || authStatus == .authorizedWhenInUse else {
+      lastEvent = "refresh asked for, but there is no location permission"
+      return "denied"
+    }
+    guard let c = config, c.enabled else {
+      lastEvent = "refresh asked for, but scanning is off"
+      return "off"
+    }
+    if case .idle = mode {} else {
+      lastEvent = "refresh asked for while busy, left alone"
+      return "busy"
+    }
+    lastEvent = "refresh asked for by hand"
+    beginMode(.umbrellaFix, timeout: 20) { [weak self] in
+      // Without this the button is a promise nobody keeps: the fix never arrives, the mode times
+      // out, and the log says only that a refresh was asked for.
+      self?.lastEvent = "refresh got no fix in 20 s"
+    }
+    manager.requestLocation()
+    return "started"
+  }
+
+  /// Posts a notification to this phone in `delay` seconds, and nothing else.
+  ///
+  /// It answers the one question the status rows cannot: does a notification from this app
+  /// actually arrive on this phone, with the screen locked, right now. It deliberately does not
+  /// go through `scheduleNudge`: no cooldown is written, no station is marked as nudged, no
+  /// counter moves, and its payload is empty — so tapping it opens the app and does nothing,
+  /// and it can never be mistaken for, or turn into, a real check-in.
+  ///
+  /// The reply waits for `UNUserNotificationCenter`, because the whole value of the button is
+  /// that it reports the truth: on a phone where notifications are denied, `add` fails, and
+  /// saying "scheduled" there would be the exact false negative it exists to rule out.
+  func testNudge(delay: TimeInterval, reply: @escaping (Bool) -> Void) {
+    let content = UNMutableNotificationContent()
+    content.title = "Testhinweis"
+    content.body = "Wenn du das siehst, kommen Hinweise auf diesem Telefon an."
+    content.sound = .default
+    // Not "nudge": that thread is swallowed in the foreground by `willPresent`, and the whole
+    // point of this one is to be seen.
+    content.threadIdentifier = "test"
+    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, delay), repeats: false)
+    center.add(UNNotificationRequest(identifier: "test-nudge", content: content, trigger: trigger)) { [weak self] error in
+      DispatchQueue.main.async {
+        if let error = error {
+          self?.lastEvent = "test notification refused: \(error.localizedDescription)"
+          reply(false)
+        } else {
+          self?.lastEvent = "test notification in \(Int(delay)) s"
+          reply(true)
+        }
+      }
+    }
+  }
+
   // -- Counters since midnight (docs/25 §5) ---------------------------------
   //
   // So "why no nudge at Memmingen?" can be answered from the phone, and so the expected-traffic
   // table in the doc is falsifiable on a real trip rather than argued about.
 
-  private var countersDay: String {
+  /// `yyyy-MM-dd`, always Gregorian and always Latin digits.
+  ///
+  /// A bare `DateFormatter` follows the device's calendar and numbering, so on a phone set to a
+  /// Buddhist or Japanese calendar the keys come out as another year entirely, and Dart — which
+  /// builds the same string from `DateTime` arithmetic — stops matching them. Pinning the locale
+  /// makes the key mean one thing on every phone.
+  private static let dayFormatter: DateFormatter = {
     let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.calendar = Calendar(identifier: .gregorian)
     f.dateFormat = "yyyy-MM-dd"
-    return f.string(from: Date())
-  }
+    return f
+  }()
+
+  private var countersDay: String { Self.dayFormatter.string(from: Date()) }
 
   func bumpCounter(_ name: String) {
     let key = "geofence.count.\(countersDay).\(name)"
@@ -244,10 +330,35 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   }
 
   func counters() -> [String: Int] {
+    countersFor(day: countersDay)
+  }
+
+  private func countersFor(day: String) -> [String: Int] {
     var out: [String: Int] = [:]
-    let prefix = "geofence.count.\(countersDay)."
+    let prefix = "geofence.count.\(day)."
     for (k, v) in defaults.dictionaryRepresentation() where k.hasPrefix(prefix) {
       if let n = v as? Int { out[String(k.dropFirst(prefix.count))] = n }
+    }
+    return out
+  }
+
+  /// The counters of the days before today, newest first (issue #29).
+  ///
+  /// `bumpCounter` has always written one key per day and nothing has ever deleted them, so a
+  /// week of real traffic is already on the phone — it was simply unreachable, because
+  /// `counters()` only ever read today's prefix. This reads the rest back, which is the only
+  /// honest history the app has: no position was ever recorded, but how often it asked, nudged
+  /// and cancelled was.
+  func countersHistory(days: Int) -> [[String: Any]] {
+    var out: [[String: Any]] = []
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = .current
+    for back in 0..<max(1, days) {
+      guard let d = cal.date(byAdding: .day, value: -back, to: Date()) else { continue }
+      let day = Self.dayFormatter.string(from: d)
+      let c = countersFor(day: day)
+      if c.isEmpty { continue }
+      out.append(["day": day, "counters": c])
     }
     return out
   }
@@ -739,6 +850,19 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     case .umbrellaFix: endMode()
     default: break
     }
+  }
+
+  /// A region iOS refused to monitor (issue #29).
+  ///
+  /// Without this the refusal is silent: `startMonitoring` returns nothing, the region is simply
+  /// absent from `monitoredRegions`, and the debug page shows a set that looks complete. The
+  /// usual cause is the hard cap of 20 regions per app, which `regionSet` plus the umbrella can
+  /// reach. Nothing is retried here — the line exists so the absence can be seen rather than
+  /// guessed at.
+  func locationManager(_ m: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
+    let who = region.map { station(for: $0)?.name ?? $0.identifier } ?? "unknown region"
+    lastEvent = "iOS refused \(who): \(error.localizedDescription)"
+    bumpCounter("refused")
   }
 
   private func finishConfigure() {

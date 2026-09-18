@@ -60,7 +60,9 @@ Nobody should be nudged forever by an app they stopped using.
 
 ## 5. The debug page
 
-A sub-page under Einstellungen, `Entwicklung`, shown when `--dart-define=DEBUG_PAGE=1` and always in a debug build. It exists so a question like "why no nudge at Memmingen?" can be answered from the phone instead of guessed at from a laptop.
+A sub-page under Einstellungen, `Entwicklung`, **in every build including a release one** (issue #29). It exists so a question like "why no nudge at Memmingen?" can be answered from the phone instead of guessed at from a laptop.
+
+It used to need `--dart-define=DEBUG_PAGE=1`, which `tools/release.sh` never passed, so the page shipped inside every TestFlight build with no way in. It is safe in a passenger's hands: there is no write control on it in any form, and the app has no admin surface. The workshop tools that change what the app *is* — switching backend, the demo toys, the Showcase — stay behind `kDebugMode` in their own block in `einstellungen_screen.dart`.
 
 **Status**
 
@@ -80,7 +82,21 @@ A ring buffer of the last 500 entries with a timestamp, a source and a line of t
 
 The buffer survives a background kill and a relaunch. The page filters by source, and has `Alles kopieren` so a whole trip can be pasted into a message. Nothing in it leaves the phone by itself, and it holds no claim content: paths, not bodies.
 
-**Actions**: refresh the region set now, clear the log, force a nearby lookup, fire a test nudge in 10 seconds.
+**The map** (issue #29)
+
+The set drawn to scale, because the thing that is wrong is usually a shape: a disc around the wrong town, a station nowhere near the others, a circle that does not reach the platform. **No tiles and no map package** — nothing about where the phone has been leaves it to draw this, which is the point of the page. An equirectangular projection fitted to the regions, a scale bar, one circle per monitored region at its true radius, the nudge threshold drawn only where the scale can carry it, and the umbrella and the disc dashed. Native has always sent each region's `lat`/`lon`; Dart simply discarded them.
+
+Two rules it keeps: a region without coordinates is **not drawn** and is counted in a line that says so, and the disc centre is labelled as the disc centre with its age — never as the phone's position, which this app does not record. Tapping a region fills the frame with it, which is the only scale at which the 300 m circle and the 50 m nudge threshold are two different things.
+
+**Verlauf auf der Karte** (issue #29): the log walked one event at a time, with the station it happened at lit on the map. This is the whole of "the state at different times", and it records nothing new to do it: native's lines name their station ("enter Köln Hbf", "312 m from Memmingen") and the region set says where that station is, so the join places an event in time *and* space without a coordinate ever being stored. Its one limit is on screen rather than hidden — a line about a station that is no longer registered cannot be placed, because `stopAllRegions` wipes the set on every re-registration and no log line has ever carried a coordinate, so those lines are counted and left off. `GeofenceReplay.place` in `app/lib/platform/geofence_replay.dart`, with the rule under test.
+
+**Zäune**: the three radii the layer is made of — umbrella 8 km, station circle 300 m, nudge 50 m — named on the page, because they decide everything and appear nowhere else.
+
+**Die Tage davor** (issue #29): the counters of previous days. `bumpCounter` has always written one key per day and deleted none, so this is history the phone already had and could not show; `counters()` only ever read today's prefix. Nothing new is recorded for it, and there are no positions in it. A day with no row is not a zero — the app was off or not installed.
+
+**Actions**: refresh the region set now, clear the log, **force a nearby lookup** (`refreshNow`, the umbrella-exit path by hand, so one behaviour has one code path) and **fire a test notification in 10 seconds** (`testNudge`, which deliberately bypasses `scheduleNudge`: no cooldown written, no station marked, no counter moved, empty payload, so it can never become a real check-in — and thread `test`, not `nudge`, because `willPresent` swallows that one in the foreground).
+
+**Refused regions**: `monitoringDidFailFor` logs a line and bumps a `refused` counter. Without it a region iOS rejected — the usual cause being the hard cap of 20, which `regionSet` plus the umbrella can reach — is simply absent from the set with nothing saying why, and the map would look authoritative while missing the region whose absence is the bug.
 
 ## Expected traffic, so the numbers can be checked
 
