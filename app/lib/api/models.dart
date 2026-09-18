@@ -1003,8 +1003,8 @@ class ApiMail {
   final int? amountCents;
   final ApiMailOutcome? outcome;
 
-  /// Nothing left the house for this one: the route is a Probelauf, or no mail is configured at
-  /// all. The server has recorded it either way, so it is a real entry with a real address on it.
+  /// Nothing left the house for this one: the server has no mail configured. It recorded the mail
+  /// either way, so it is a real entry with a real address on it.
   final bool dryRun;
 
   factory ApiMail.fromJson(Map<String, dynamic> j) => ApiMail(

@@ -395,8 +395,8 @@ class _AntragScreenState extends State<AntragScreen> {
   /// ticket, a Verein, a signature — and whatever is left out is silently lost for the rest of the
   /// flow. Three were: the claim's own answering address, so the Senden step fell back to the
   /// passenger's `fahrgast-…` and printed a sender the mail does not use; and the route's label and
-  /// its live flag, so every claim called itself a Probelauf from the first attachment onwards, a
-  /// real route included (#22).
+  /// its label, so the Senden step lost what the server had said about the route from the first
+  /// attachment onwards (#22).
   ApiClaimDraft _withClaim(ApiClaim c) => ApiClaimDraft(
         claim: c,
         deskAddress: _draft?.deskAddress,

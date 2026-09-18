@@ -1407,10 +1407,10 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     };
     let to = route.to_address.clone();
     let incidents: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date").bind(id).fetch_all(&s.pool).await.map_err(internal)?;
-    // No rehearsal marker on the face of the mail any more. It existed so a Testlauf landing in a
-    // real inbox could not pass for a claim — and a Testlauf cannot land anywhere now, because a
-    // route that is not live sends nothing at all (#25). What is left is the mail exactly as it
-    // would go out, which is what the Senden step shows and what the passenger is asked to trust.
+    // No rehearsal marker on the face of the mail. There used to be one, because a route could be
+    // a stand-in and a stand-in's mail landing in a real inbox must not pass for a claim. Routing
+    // has no stand-ins any more: a desk has an address and the mail goes there (#25). What is left
+    // is the mail exactly as the Senden step showed it.
     let body = format!(
         "Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
         claim.account_holder, name, name

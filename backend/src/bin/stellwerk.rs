@@ -795,7 +795,7 @@ async fn main() -> anyhow::Result<()> {
                 let rows = v.as_array().cloned().unwrap_or_default();
                 if rows.is_empty() {
                     println!("Keine Route. Es kann nichts rausgehen, bis eine existiert:");
-                    println!("  stellwerk route set \"Servicecenter Fahrgastrechte\" du@example.org --label \"Probelauf\"");
+                    println!("  stellwerk route set \"Servicecenter Fahrgastrechte\" du@example.org");
                     println!("  stellwerk route default du@example.org      # für jeden Schalter ohne eigene Route");
                 } else {
                     println!("{:<34} {:<34} Bezeichnung", "Schalter", "geht wirklich an");
