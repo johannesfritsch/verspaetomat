@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
+import '../../content/legal.dart' show appVersion;
 import '../../platform/diagnose_log.dart';
 import '../../platform/geofence.dart';
 import '../../platform/geofence_replay.dart';
@@ -81,6 +82,23 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
 
   static const _sources = ['alle', 'geofence', 'http', 'push', 'app'];
 
+  /// How far back the log is shown and copied. The ring holds days, and a round of debugging is
+  /// usually about the last hour or the last trip — copying everything means pasting a week of
+  /// movements to answer a question about twenty minutes.
+  static const _windows = <String, Duration?>{
+    '1 h': Duration(hours: 1),
+    '3 h': Duration(hours: 3),
+    '6 h': Duration(hours: 6),
+    '12 h': Duration(hours: 12),
+    '24 h': Duration(hours: 24),
+    'alles': null,
+  };
+  String _window = '3 h';
+
+  /// How many lines are drawn. The whole list is still copied — this is about the weight of an
+  /// eager column, which is what made the page heavy enough to need tabs (issue #32).
+  static const _shown = 150;
+
   /// The five counters, in the order docs/25 §5 lists them, with the labels the table uses.
   static const _counterNames = <String, String>{
     'requests': 'Anfragen',
@@ -132,17 +150,59 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
   }
 
   Future<void> _copyAll() async {
-    final text = _visible.map((l) => l.plainWithDate).join('\n');
+    final lines = _visible;
+    final text = '${_copyHeader(lines)}\n\n${lines.map((l) => l.plainWithDate).join('\n')}\n';
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${_visible.length} Zeilen kopiert.')),
+        SnackBar(content: Text('${lines.length} Zeilen aus $_window kopiert, mit Kopfzeile.')),
       );
     }
   }
 
-  List<LogLine> get _visible =>
-      _filter == 'alle' ? _log : _log.where((l) => l.source == _filter).toList();
+  /// What the phone thinks, above the lines that got it there.
+  ///
+  /// A log on its own has cost two rounds of guessing already: the lines say what happened but
+  /// not what state the layer ended up in, so the first question back is always „und was steht
+  /// gerade auf der Seite?". This puts both in one paste.
+  String _copyHeader(List<LogLine> lines) {
+    final s = _status;
+    final session = RepoScope.read(context);
+    String when(DateTime? d) => d == null ? '–' : d.toUtc().toIso8601String();
+    return [
+      '# Verspätomat $appVersion · ${session.isLocal ? session.apiUrl : 'Vorführung'}',
+      '# Fenster: $_window · Quelle: $_filter · ${lines.length} Zeilen'
+          '${lines.isEmpty ? '' : ' · ${when(lines.first.at)} … ${when(lines.last.at)}'}',
+      if (s == null)
+        '# Status: nicht gelesen'
+      else ...[
+        '# Berechtigung: ${s.permission.name} · Mitteilungen: ${s.notifications ? 'an' : 'aus'} · Schicht: ${s.mode ?? '?'}',
+        '# Regionen: ${s.registered} registriert, gezogen ${when(s.regionsAt)}'
+            '${s.regionsCentre == null ? '' : ' um ${s.regionsCentre!.lat.toStringAsFixed(4)},${s.regionsCentre!.lon.toStringAsFixed(4)}'}',
+        '# Nearest: ${when(s.nearestAt)} · ${s.nearestCount} zurück',
+        if (s.disc != null)
+          '# Scheibe: ${s.disc!.lat.toStringAsFixed(4)},${s.disc!.lon.toStringAsFixed(4)} '
+              'r=${(s.disc!.radiusM / 1000).round()} km (${s.disc!.band}) gesetzt ${when(s.disc!.at)}',
+        '# Heute: ${_counterNames.keys.map((k) => '$k=${s.counters[k] ?? 0}').join(' ')}'
+            '${(s.counters['refused'] ?? 0) > 0 ? ' refused=${s.counters['refused']}' : ''}',
+        for (final r in _sortedRegions(s.regions))
+          '#   ${r.isUmbrella ? 'Schirm' : r.name}'
+              '${r.hasPosition ? ' ${r.lat!.toStringAsFixed(4)},${r.lon!.toStringAsFixed(4)}' : ' (ohne Koordinaten)'}'
+              '${r.distanceM == null ? '' : ' ${(r.distanceM! / 1000).toStringAsFixed(1)} km'}'
+              '${r.inside ? ' drin' : ''}',
+      ],
+    ].join('\n');
+  }
+
+  /// The lines the source filter and the time window both let through, oldest first.
+  List<LogLine> get _visible {
+    final window = _windows[_window];
+    final since = window == null ? null : DateTime.now().subtract(window);
+    return _log
+        .where((l) => _filter == 'alle' || l.source == _filter)
+        .where((l) => since == null || l.at.isAfter(since))
+        .toList();
+  }
 
   /// The event the map is currently showing, if the index still points at one.
   GeofencePlacedEvent? _replayed() {
@@ -525,7 +585,18 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
   List<Widget> _logTab() {
     return [
           // The log itself.
-          VSection('Log', trailing: Text('${_visible.length}', style: VText.caption)),
+          VSection('Zeitraum'),
+          const VGap.xs(),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final w in _windows.keys)
+                _FilterChip(label: w, selected: _window == w, onTap: () => setState(() => _window = w)),
+            ],
+          ),
+          const VGap.s(),
+          VSection('Quelle', trailing: Text('${_visible.length} Zeilen', style: VText.caption)),
           const VGap.xs(),
           Wrap(
             spacing: 6,
@@ -542,31 +613,39 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(border: Border.all(color: VColors.rule), borderRadius: BorderRadius.circular(4)),
             child: _visible.isEmpty
-                ? Text('Noch nichts aufgezeichnet.', style: VText.caption)
+                ? Text(
+                    _log.isEmpty ? 'Noch nichts aufgezeichnet.' : 'Nichts in diesem Zeitraum. Nimm ein größeres.',
+                    style: VText.caption,
+                  )
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      for (final l in _visible.reversed.take(120))
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 3),
-                          child: Text(l.plain, style: VText.mono),
+                      for (final l in _visible.reversed.take(_shown)) _LogRow(line: l),
+                      if (_visible.length > _shown) ...[
+                        const VGap.xs(),
+                        Text(
+                          '… und ${_visible.length - _shown} ältere. Kopiert wird der ganze Zeitraum, '
+                          'nicht nur das Sichtbare.',
+                          style: VText.caption,
                         ),
+                      ],
                     ],
                   ),
           ),
           const VGap.m(),
           Row(
             children: [
-              Expanded(child: VOutlineButton(label: 'Alles kopieren', icon: Icons.copy_all, onTap: _copyAll)),
+              Expanded(child: VOutlineButton(label: 'Kopieren', icon: Icons.copy_all, onTap: _copyAll)),
               const SizedBox(width: 8),
               Expanded(child: VOutlineButton(label: 'Log leeren', icon: Icons.delete_outline, onTap: _clearLog)),
             ],
           ),
-          const VGap.s(),
-          Row(
-            children: [
-              Expanded(child: VOutlineButton(label: 'Neu laden', icon: Icons.refresh, onTap: _load)),
-            ],
+          const VGap.xs(),
+          Text(
+            'Kopiert werden die ${_visible.length} Zeilen aus „$_window“ — mit einer Kopfzeile, die '
+            'festhält, was das Telefon in diesem Moment denkt: Berechtigung, Regionen, Scheibe, '
+            'Zähler. Das Log allein sagt, was passiert ist, aber nicht, wo es geendet hat.',
+            style: VText.caption,
           ),
           const VGap.xl(),
       const VGap.m(),
@@ -860,6 +939,51 @@ class _HistoryTable extends StatelessWidget {
   static String _dayLabel(String isoDay) {
     final parts = isoDay.split('-');
     return parts.length == 3 ? '${parts[2]}.${parts[1]}.' : isoDay;
+  }
+}
+
+/// One log line, laid out so a long log can be scanned rather than read.
+///
+/// Three columns of meaning, not three columns of layout: the time, the source as a short tag,
+/// and the line itself wrapping under neither of them. The old rendering put all three in one
+/// monospace run, so „13:52:07 geofence enter Köln Hbf" and „13:52:07 http GET /v1/…" started at
+/// different places and the eye had nothing to follow down the page.
+///
+/// A line that went wrong is drawn heavier rather than coloured: this app's two reds both mean
+/// something specific (STYLE.md), and a third meaning on a diagnostics page would spend a colour
+/// the rest of the app needs.
+class _LogRow extends StatelessWidget {
+  const _LogRow({required this.line});
+
+  final LogLine line;
+
+  @override
+  Widget build(BuildContext context) {
+    final mono = VText.mono.copyWith(fontSize: 12, height: 1.35);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 58, child: Text(line.time, style: mono.copyWith(color: VColors.ink3))),
+          SizedBox(
+            width: 62,
+            child: Text(
+              line.source,
+              style: VText.caption.copyWith(color: VColors.ink3),
+              maxLines: 1,
+              overflow: TextOverflow.clip,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              line.text,
+              style: line.bad ? mono.copyWith(fontWeight: FontWeight.w700, color: VColors.ink) : mono,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

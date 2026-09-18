@@ -69,7 +69,12 @@ class ApiClient {
   Future<void>? _reauth;
 
   Future<dynamic> _get(String path, [Map<String, String>? query]) => _retryOnce(() async {
-        final r = await _timed('GET', path, () async => _http.get(_uri(path, query), headers: await _headers(json: false)).timeout(_timeout));
+        final r = await _timed(
+          'GET',
+          path,
+          () async => _http.get(_uri(path, query), headers: await _headers(json: false)).timeout(_timeout),
+          query: query,
+        );
         return _decode(r);
       });
 
@@ -89,16 +94,51 @@ class ApiClient {
   }
 
   /// The one place every request passes through, so the debug page can show what the app asked
-  /// for and how long it took (docs/25 §5). The path and the status, never the body — the log
-  /// must be safe to paste into a message.
-  Future<http.Response> _timed(String method, String path, Future<http.Response> Function() run) async {
+  /// for and how long it took (docs/25 §5).
+  ///
+  /// The path, the query, the status, the size and a one-line summary of the answer's *shape* —
+  /// never a body. The log must stay safe to paste into a message, and a body would put a claim,
+  /// an address or a railway's reply in the clipboard. The summary exists because of issue #31:
+  /// „GET /v1/stations/nearby → 200 · 91 B" could not distinguish the server finding nothing from
+  /// the app asking about the wrong place, and that distinction was the whole bug. It now reads
+  /// „GET /v1/stations/nearby?lat=47.6817&lon=9.8331 → 200 · 91 B · keine Station".
+  ///
+  /// A failure keeps the server's own error text, which is short and written for a developer.
+  Future<http.Response> _timed(
+    String method,
+    String path,
+    Future<http.Response> Function() run, {
+    Map<String, String>? query,
+  }) async {
     final started = DateTime.now();
     try {
       final r = await run();
-      DiagnoseLog.instance.http(method, path, r.statusCode, DateTime.now().difference(started), bytes: r.bodyBytes.length);
+      // The summary reads the decoded answer, so a body that cannot be parsed simply has none.
+      Object? decoded;
+      if (r.statusCode < 400 && r.bodyBytes.isNotEmpty) {
+        try {
+          decoded = jsonDecode(r.body);
+        } catch (_) {
+          decoded = null;
+        }
+      }
+      DiagnoseLog.instance.http(
+        method,
+        path,
+        r.statusCode,
+        DateTime.now().difference(started),
+        bytes: r.bodyBytes.length,
+        query: query,
+        summary: DiagnoseLog.summarise(path, decoded),
+        error: r.statusCode >= 400 ? DiagnoseLog.serverError(r.body) : null,
+      );
       return r;
     } catch (e) {
-      DiagnoseLog.instance.add('http', '$method $path → ${shortErrorLine(e)} · ${DateTime.now().difference(started).inMilliseconds} ms');
+      DiagnoseLog.instance.add(
+        'http',
+        '$method $path${DiagnoseLog.formatQuery(query)} → ${shortErrorLine(e)} · ${DateTime.now().difference(started).inMilliseconds} ms',
+        bad: true,
+      );
       rethrow;
     }
   }

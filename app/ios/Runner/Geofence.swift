@@ -915,8 +915,29 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   /// guessed at.
   func locationManager(_ m: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
     let who = region.map { station(for: $0)?.name ?? $0.identifier } ?? "unknown region"
-    lastEvent = "iOS refused \(who): \(error.localizedDescription)"
+    lastEvent = "iOS refused \(who): \(Self.reason(for: error))"
     bumpCounter("refused")
+  }
+
+  /// Apple's sentence for a `CLError`, in three words instead of thirty.
+  ///
+  /// `localizedDescription` for every one of these is "The operation couldn't be completed.
+  /// (kCLErrorDomain error 4.)" — the same string whatever went wrong, with the one informative
+  /// part at the end. Five of those in a row filled a screen of the log and said nothing; the
+  /// code is the whole message, so it is the whole message here.
+  static func reason(for error: Error) -> String {
+    guard let code = CLError.Code(rawValue: (error as NSError).code) else {
+      return error.localizedDescription
+    }
+    switch code {
+    case .denied: return "location denied"
+    case .network: return "no network"
+    case .regionMonitoringDenied: return "region monitoring denied (needs Always)"
+    case .regionMonitoringFailure: return "region rejected — too many, or too small"
+    case .regionMonitoringSetupDelayed: return "setup delayed"
+    case .regionMonitoringResponseDelayed: return "response delayed, region replaced"
+    default: return "CLError \(code.rawValue)"
+    }
   }
 
   private func finishConfigure() {
