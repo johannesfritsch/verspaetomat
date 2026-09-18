@@ -382,14 +382,12 @@ class _AntragScreenState extends State<AntragScreen> {
   Future<void> _send() => _run(() async {
         final r = await RepoScope.read(context).repo.sendClaim(_claim!.id);
         _sent = r;
-        _sentDryRun = r.mail.subject.isNotEmpty && _looksDryRun(r);
+        // The server says whether anything left the house, and it is the only thing that knows:
+        // a route that is not live sends nothing, and neither does a backend without mail
+        // credentials. This used to be a stub that always said „rehearsal", so a real send was
+        // reported as a test too.
+        _sentDryRun = r.mail.dryRun || !(_draft?.routeLive ?? false);
       }, failure: 'Senden fehlgeschlagen');
-
-  bool _looksDryRun(ApiSendResult r) {
-    // The wire model carries no dry_run flag; the local backend records dry-runs
-    // when SMTP_URL is unset. Treat demo mode as a rehearsal too.
-    return RepoScope.read(context).isLocal == false || true;
-  }
 
   /// The draft with a fresh claim in it, and everything else the server said about it kept.
   ///
@@ -964,8 +962,8 @@ class _Pruefen extends StatelessWidget {
             if ((draft.deskEmail?.isNotEmpty ?? false) && !draft.routeLive) ...[
               const VGap.s(),
               Text(
-                'Probelauf: diese Adresse ist eine von uns, nicht die des Eisenbahnunternehmens. '
-                'Der Antrag geht dorthin und sonst nirgendwohin.',
+                'Probelauf: Es geht noch nichts raus. Der Antrag wird nur aufgezeichnet — die Adresse oben ist die, '
+                'an die er ginge.',
                 style: VText.caption,
               ),
             ],
@@ -1692,8 +1690,9 @@ class _Senden extends StatelessWidget {
           ] else if (!draft.routeLive) ...[
             VNoteBanner(
               icon: Icons.science_outlined,
-              text: 'Probelauf${draft.routeLabel == null ? '' : ' („${draft.routeLabel}")'}: '
-                  'diese E-Mail geht an ${draft.deskEmail ?? 'die eingetragene Adresse'} und nicht an das Eisenbahnunternehmen.'
+              text: 'Probelauf${draft.routeLabel == null ? '' : ' („${draft.routeLabel}")'}: So sähe die Mail aus, '
+                  'wenn sie rausginge. Im Probelauf verlässt nichts das Haus — abgeschickt wird erst, wenn diese '
+                  'Route als echte Stelle eingetragen ist.'
                   '${draft.routeViaDefault ? ' Für diese Stelle ist noch keine eigene Adresse hinterlegt.' : ''}',
             ),
             const VGap.s(),
@@ -1847,10 +1846,25 @@ class _SentState extends State<_Sent> {
                   const VGap.s(),
                   Text(Mock.longDate(DateTime.now()), style: VText.h2.copyWith(color: VColors.ink2, fontWeight: FontWeight.w400)),
                   const VGap.m(),
-                  Text('An ${widget.mail.to}, von deiner Adresse. Die Kopie ist in deinem Postfach.', style: VText.body.copyWith(color: VColors.ink2)),
+                  Text(
+                    widget.dryRun
+                        ? 'An ${widget.mail.to}, von deiner Adresse — im Probelauf.'
+                        : 'An ${widget.mail.to}, von deiner Adresse. Die Kopie ist in deinem Postfach.',
+                    style: VText.body.copyWith(color: VColors.ink2),
+                  ),
+                  // A Probelauf goes the whole way and stops at the letterbox: der Antrag steht
+                  // fertig da, mit Adresse und Anhängen, und nichts verlässt das Haus. Statt das
+                  // nur festzustellen, sagt der Schirm, was jetzt dran wäre — sonst ist „fertig"
+                  // ohne Fortsetzung, und niemand weiß, ob etwas fehlt oder ob es so gemeint ist.
                   if (widget.dryRun) ...[
-                    const VGap.s(),
-                    Text('Testlauf: keine echte Mail hat das Haus verlassen.', style: VText.caption),
+                    const VGap.m(),
+                    VNoteBanner(
+                      icon: Icons.science_outlined,
+                      text: 'Probelauf: es hat nichts das Haus verlassen. Echt liefe es jetzt so — die Stelle bekommt '
+                          'Formular, Ticketbild und Unterschrift, antwortet in der Regel innerhalb eines Monats an deine '
+                          'Verspätomat-Adresse, und was sie zahlt, geht direkt an deinen Verein. Du siehst die Antwort '
+                          'hier unter „Anträge".',
+                    ),
                   ],
                   const Spacer(),
                   if (canShare) ...[

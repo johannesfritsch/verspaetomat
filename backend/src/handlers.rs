@@ -1408,11 +1408,12 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     };
     let to = route.to_address.clone();
     let incidents: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by i.ride_date").bind(id).fetch_all(&s.pool).await.map_err(internal)?;
+    // No rehearsal marker on the face of the mail any more. It existed so a Testlauf landing in a
+    // real inbox could not pass for a claim — and a Testlauf cannot land anywhere now, because a
+    // route that is not live sends nothing at all (#25). What is left is the mail exactly as it
+    // would go out, which is what the Senden step shows and what the passenger is asked to trust.
     let body = format!(
-        "{}Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
-        // A route the operator has not marked live says so on the face of the mail, so a rehearsal
-        // that lands in a real inbox cannot be mistaken for a real claim.
-        if route.live { String::new() } else { format!("— Testlauf des Verspätomat über die Route \u{201e}{}\u{201c}. —\n\n", route.label) },
+        "Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
         claim.account_holder, name, name
     );
     let attachments = json!([
@@ -1420,11 +1421,7 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
         { "name": "EU-Antrag.txt", "content_type": "text/plain", "text": claim_summary_text(&claim, &incidents, &name) },
     ]);
     let message_id = new_message_id();
-    let subject = if route.live {
-        "Fahrgastrechte: EU-Antragsformular".to_string()
-    } else {
-        format!("[Testlauf · {}] Fahrgastrechte: EU-Antragsformular", route.label)
-    };
+    let subject = "Fahrgastrechte: EU-Antragsformular".to_string();
     let summary = claim_summary_text(&claim, &incidents, &name);
     let rows: Vec<(String, String, Option<String>, Option<Vec<u8>>)> = sqlx::query_as(
         "select ca.label, u.content_type, u.path, u.bytes from claim_attachments ca join uploads u on u.id = ca.upload_id where ca.claim_id = $1",
@@ -1453,18 +1450,33 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     if total * 4 / 3 > 9 * 1024 * 1024 {
         return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "attachments too large for one mail"));
     }
-    let sent = crate::mail::send(crate::mail::OutgoingMail {
-        from: &format!("{name} <{relay}>"),
-        to: &to,
-        bcc: Some(&email),
-        subject: &subject,
-        body: &body,
-        message_id: &message_id,
-        in_reply_to: None,
-        attachments: uploads,
-    })
-    .await
-    .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?;
+    // A Probelauf leaves nothing behind but a record. `live` is the one switch that decides
+    // delivery now: a route the operator has not asserted is the railway's real desk is a
+    // rehearsal, and a rehearsal that drops a real mail in a real inbox is the accident this
+    // table exists to prevent (#25). Everything up to here still happens — the PDF is rendered,
+    // the attachments are gathered and weighed, the claim is marked sent — so what the passenger
+    // walks through is the real thing, and the app says afterwards what would have followed.
+    let sent = if route.live {
+        crate::mail::send(crate::mail::OutgoingMail {
+            from: &format!("{name} <{relay}>"),
+            to: &to,
+            bcc: Some(&email),
+            subject: &subject,
+            body: &body,
+            message_id: &message_id,
+            in_reply_to: None,
+            attachments: uploads,
+        })
+        .await
+        .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?
+    } else {
+        let names: Vec<String> = uploads.iter().map(|(n, _, b)| format!("{n} ({} B)", b.len())).collect();
+        tracing::info!(
+            from = %format!("{name} <{relay}>"), to = %to, route = %route.label, attachments = %names.join(", "),
+            "claim mail (Probelauf): the route is not live, nothing sent"
+        );
+        crate::mail::SendResult::DryRun
+    };
     let dry_run = matches!(sent, crate::mail::SendResult::DryRun);
     let mail_id = Uuid::new_v4();
     let mail: MailRow = sqlx::query_as(
@@ -1596,7 +1608,7 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     // pressing "Antworten" in the app used to send a real mail to a real railway, with no redirect
     // consulted on this path at all. Reading the destination from mail_routes closes that by
     // construction — this path can only reach an address somebody put in the table.
-    let (relay, to) = match orig.claim_id {
+    let (relay, to, route_live, route_label) = match orig.claim_id {
         Some(cid) => {
             let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where id = $1").bind(cid).fetch_optional(&s.pool).await.map_err(internal)?;
             match claim {
@@ -1607,7 +1619,7 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
                             &format!("no mail route for desk '{}': set one with `stellwerk route set`", cl.desk),
                         ));
                     };
-                    (ensure_claim_address(&s.pool, &cl).await.map_err(internal)?, route.to_address)
+                    (ensure_claim_address(&s.pool, &cl).await.map_err(internal)?, route.to_address, route.live, route.label)
                 }
                 None => return Err(err(StatusCode::PRECONDITION_FAILED, "the claim behind this thread is gone; nothing to answer")),
             }
@@ -1657,18 +1669,25 @@ pub async fn mail_reply(State(s): State<AppState>, c: Customer, Path(id): Path<U
     }
     let attachments_json = json!(files.iter().map(|(name, ct, bytes, uid)| json!({ "name": name, "content_type": ct, "size": bytes.len(), "upload_id": uid })).collect::<Vec<_>>());
     let message_id = new_message_id();
-    let sent = crate::mail::send(crate::mail::OutgoingMail {
-        from: &format!("{name} <{relay}>"),
-        to: &to,
-        bcc: Some(&email),
-        subject: &format!("Re: {}", orig.subject),
-        body: &r.body,
-        message_id: &message_id,
-        in_reply_to: orig.message_id.as_deref(),
-        attachments: files.iter().map(|(name, ct, bytes, _)| (name.clone(), ct.clone(), bytes.clone())).collect(),
-    })
-    .await
-    .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?;
+    // Same rule as the claim itself: on a route that is not live, the answer is written down and
+    // nothing leaves (#25).
+    let sent = if route_live {
+        crate::mail::send(crate::mail::OutgoingMail {
+            from: &format!("{name} <{relay}>"),
+            to: &to,
+            bcc: Some(&email),
+            subject: &format!("Re: {}", orig.subject),
+            body: &r.body,
+            message_id: &message_id,
+            in_reply_to: orig.message_id.as_deref(),
+            attachments: files.iter().map(|(name, ct, bytes, _)| (name.clone(), ct.clone(), bytes.clone())).collect(),
+        })
+        .await
+        .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("mail: {e}")))?
+    } else {
+        tracing::info!(to = %to, route = %route_label, "reply (Probelauf): the route is not live, nothing sent");
+        crate::mail::SendResult::DryRun
+    };
     let dry_run = matches!(sent, crate::mail::SendResult::DryRun);
     let mail: MailRow = sqlx::query_as(
         "insert into mails (id, customer_id, claim_id, direction, message_id, in_reply_to, from_addr, to_addr, bcc_addr, subject, body, attachments, dry_run)

@@ -207,7 +207,8 @@ enum RouteCmd {
         /// Where this route's paper would go. Without it the operator directory's address is shown.
         #[arg(long = "postal")]
         postal: Option<String>,
-        /// Assert this is the railway's real desk. Without it every mail says it is a rehearsal.
+        /// Really send to this address. Without it the route is a Probelauf: the claim is built and
+        /// recorded, and nothing leaves the house.
         #[arg(long)]
         live: bool,
         #[arg(long)]
@@ -223,7 +224,7 @@ enum RouteCmd {
         /// Where this route's paper would go
         #[arg(long = "postal")]
         postal: Option<String>,
-        /// Assert this is the railway's real desk. Without it every mail says it is a rehearsal
+        /// Really send to this address. Without it the catch-all is a Probelauf and nothing leaves
         #[arg(long)]
         live: bool,
         #[arg(long)]
@@ -817,7 +818,7 @@ async fn main() -> anyhow::Result<()> {
                             desk,
                             r["to_address"].as_str().unwrap_or("–"),
                             r["label"].as_str().unwrap_or("–"),
-                            if r["live"].as_bool().unwrap_or(false) { "JA — echte Stelle" } else { "nein, Probelauf" }
+                            if r["live"].as_bool().unwrap_or(false) { "JA — geht wirklich raus" } else { "nein, Probelauf (sendet nichts)" }
                         );
                         println!("  Antworten zählen von: {}", strings(&r["answer_domains"]).join(", "));
                         let free = strings(&r["free_mail_answer_domains"]);

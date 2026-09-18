@@ -129,6 +129,12 @@ One binary, several loops:
   which is the correct state for a system nobody has told where to send. Manage it with
   `stellwerk route list | set <desk> <address> [--label …] [--live] | remove <desk>`, and read the
   answer to "where does this actually go" straight out of `route list`.
+  - **`live` decides delivery** (#25). A route marked `--live` is the railway's real desk and its
+    mail really goes out. A route without it is a Probelauf: the claim is built, the PDF rendered,
+    the mail recorded with `dry_run` — and **nothing leaves the house**. The app plays the whole
+    send through and then says what would have followed, so a rehearsal looks exactly like the real
+    thing and cannot be one. Before this, `live` only changed the subject line and the mail went out
+    regardless, which is why nobody could press „Absenden" in good conscience.
   - **One catch-all** (#25): the row keyed `*`, set with `stellwerk route default <address>`, is
     where a desk with no route of its own sends. It is an ordinary row in the same table, printed
     first by `route list` as „Auffanglinie", so the fallback is not a second mechanism to remember.
