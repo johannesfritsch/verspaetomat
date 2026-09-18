@@ -1162,6 +1162,13 @@ async fn draft_json(s: &AppState, c: &CustomerRow, claim: &ClaimRow, desk: &str)
     let route = mail_route(&s.pool, desk).await?;
     v["desk_email"] = json!(route.as_ref().map(|r| r.to_address.clone()));
     v["desk_route_label"] = json!(route.as_ref().map(|r| r.label.clone()));
+    // Kept only for the iOS builds still installable from TestFlight (1.0.0 (38) to (48)). Routing
+    // has no rehearsal any more (#25), but those builds read `desk_route_live` and take a missing
+    // key as false — their „Probelauf" state — so they would tell the passenger that nothing was
+    // sent while the mail really went out. That is a lie about a legal claim, so the key stays and
+    // says the truth for this server: everything it sends on is a real route. Nothing branches on
+    // it here. Drop it once no build below (50) is on anyone's phone.
+    v["desk_route_live"] = json!(true);
     // True when this desk has no address of its own and the catch-all answered. The app says so on
     // the step that shows the destination, so "nobody set one for this desk yet" is visible rather
     // than silently absorbed (#25). Additive: an older build ignores it.
