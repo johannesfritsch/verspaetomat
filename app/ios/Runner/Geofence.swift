@@ -503,6 +503,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   }
 
   private var discRadius: CLLocationDistance {
+    // The only thing left that the speed table decides: what the reach is before anything has
+    // been registered at all. From the first `registerUmbrella` onwards the umbrella owns it.
     get { defaults.object(forKey: "geofence.disc.r") as? Double ?? GeofenceRules.coverageRadius(speedMps: 0) }
     set { defaults.set(newValue, forKey: "geofence.disc.r") }
   }
@@ -874,8 +876,11 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       lastEvent = "inside the disc, nothing to do"
       return
     }
-    discRadius = GeofenceRules.coverageRadius(speedMps: speed)
-    lastEvent = "left the disc at \(Int(speed * 3.6)) km/h, radius now \(Int(discRadius / 1000)) km"
+    // The radius belongs to the umbrella and is recomputed by the lookup below. Setting it from
+    // speed here only changed it for the moment in between, and made this line report a number
+    // that was never used. The speed itself is still worth saying — it is how a log reads back as
+    // a journey.
+    lastEvent = "left the \(Int(discRadius / 1000)) km disc at \(Int(speed * 3.6)) km/h"
     refreshNearest(around: l, c)
   }
 
@@ -1032,9 +1037,11 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     switch mode {
     case .configureFix:
       registerUmbrella(at: l, c)
-      // The first fix of a configure draws the disc and the region set around where we are.
+      // The first fix of a configure draws the disc and the region set around where we are. The
+      // radius is NOT set here: `registerUmbrella` has just set it to the umbrella's, and writing
+      // the speed table's value over it put the two back out of step on every single launch —
+      // the very thing merging them was supposed to end.
       discCentre = l
-      discRadius = GeofenceRules.coverageRadius(speedMps: 0)
       registerStations(c)
       finishConfigure()
       // …and asks again if the list it just drew from belongs to somewhere else. Every other
