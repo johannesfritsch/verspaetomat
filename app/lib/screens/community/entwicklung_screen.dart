@@ -190,6 +190,8 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
         '# Status: nicht gelesen'
       else ...[
         '# Berechtigung: ${s.permission.name} · Mitteilungen: ${s.notifications ? 'an' : 'aus'} · Schicht: ${s.mode ?? '?'}',
+        '# Zuletzt aktiv: ${when(s.lastEventAt)}'
+            '${s.lastEventAt == null ? '' : ' (vor ${_howLong(DateTime.now().difference(s.lastEventAt!))})'}',
         '# Regionen: ${s.registered} registriert, gezogen ${when(s.regionsAt)}'
             '${s.regionsCentre == null ? '' : ' um ${s.regionsCentre!.lat.toStringAsFixed(4)},${s.regionsCentre!.lon.toStringAsFixed(4)}'}',
         '# Nearest: ${when(s.nearestAt)} · ${s.nearestCount} zurück'
@@ -556,6 +558,12 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
             ),
             _Row('… Bahnhöfe zurück', s.nearestAt == null ? '–' : '${s.nearestCount}'),
             _Row('Schicht macht', s.mode ?? '–'),
+            _Row(
+              'Zuletzt aktiv',
+              s.lastEventAt == null
+                  ? 'nie'
+                  : '${_stamp(s.lastEventAt)} (vor ${_howLong(DateTime.now().difference(s.lastEventAt!))})',
+            ),
             const VGap.xs(),
             Text(
               _setCaption(s),

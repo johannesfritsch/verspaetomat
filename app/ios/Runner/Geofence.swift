@@ -275,7 +275,11 @@ enum GeofenceRules {
       let d = (j["distance_m"] as? Double) ?? Double(j["distance_m"] as? Int ?? Int.max)
       return (GeofenceStation(id: id, name: name, lat: lat, lon: lon), d)
     }
-    return parsed.sorted { $0.1 < $1.1 }.prefix(maxRegions).map { $0.0 }
+    // NOT cut to `maxRegions`. The umbrella is sized from the nearest station we do *not*
+    // register, so the list has to be longer than the set — cutting it here made that station
+    // invisible, `firstUnregistered` always nil, and the radius always the search radius instead
+    // of the distance the rule was written to use. `regionSet` does the cutting.
+    return parsed.sorted { $0.1 < $1.1 }.map { $0.0 }
   }
 }
 
@@ -301,7 +305,16 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   private let manager = CLLocationManager(), defaults = UserDefaults.standard, center = UNUserNotificationCenter.current()
   private var lastEvent: String? {
-    didSet { if let e = lastEvent { NSLog("[geofence] %@", e); appendLog(e) } }
+    didSet {
+      if let e = lastEvent {
+        NSLog("[geofence] %@", e)
+        appendLog(e)
+        // When the layer was last alive at all. A log that simply stops says nothing on its own:
+        // it looks the same whether iOS delivered no events, the app was force-quit, or the log
+        // was cleared. This turns that silence into a fact the page can state.
+        defaults.set(Date(), forKey: "geofence.lastEvent.at")
+      }
+    }
   }
 
   // -- The log (docs/25 §5) --------------------------------------------------
@@ -715,6 +728,14 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     }
     startCoarseLayer()
     let n = registerStations(c)
+    // `stopAllRegions` just took the umbrella down, and the fix that puts it back may be ten
+    // seconds away — or never, if `requestLocation` times out indoors or in a tunnel. Until it
+    // lands there would be no umbrella at all, and the umbrella is the one trigger that brings
+    // the layer back to life: without it nothing fires however far the phone travels. Put it
+    // back now around the last place we knew, and let the fix re-centre it.
+    if let centre = discCentre {
+      registerUmbrella(at: centre, c)
+    }
     // `n` is what got registered, not what Dart sent — those differ whenever the nearby list is
     // carrying the set, and reading it as "Dart sent one station" sent me down the wrong path.
     lastEvent = "configure: sent \(c.stations.count) frequent, registered \(n) regions, "
@@ -782,6 +803,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         "umbrellaComputed": umbrellaRadius > 0,
         "umbrellaWhy": umbrellaWhy as Any,
         "mode": modeLabel,
+        "lastEventAt": (defaults.object(forKey: "geofence.lastEvent.at") as? Date)?.timeIntervalSince1970 as Any,
         // Every registered region, with whether the phone is inside it right now (docs/25 §5).
         "regions": manager.monitoredRegions.compactMap { r -> [String: Any]? in
           guard let c = r as? CLCircularRegion else { return nil }
