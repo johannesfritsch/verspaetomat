@@ -121,6 +121,9 @@ int fromIndex(List<ApiStop> stops, String? stationId, String stationName) {
 
 String normaliseStation(String name) => name
     .toLowerCase()
+    // The feeds disagree about ß: DELFI writes „Kißlegg", the Swiss feed „Kisslegg". Folding it
+    // is what makes them one platform rather than two (docs/30).
+    .replaceAll('ß', 'ss')
     .replaceAll('hauptbahnhof', 'hbf')
     .replaceAll(RegExp(r'\(.*?\)'), '')
     .replaceAll(RegExp(r'[,/]'), ' ')

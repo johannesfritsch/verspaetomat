@@ -116,6 +116,8 @@ class Geofence {
             ? (lat: (m['nearestLat'] as num).toDouble(), lon: (m['nearestLon'] as num).toDouble())
             : null,
         mode: m['mode']?.toString(),
+        umbrellaRadiusM: (m['umbrellaRadiusM'] as num?)?.toDouble() ?? 0,
+        maxRegionRadiusM: (m['maxRegionRadiusM'] as num?)?.toDouble() ?? 0,
         regions: [
           for (final r in (m['regions'] as List? ?? const []).whereType<Map>())
             GeofenceRegion(
@@ -300,6 +302,8 @@ class GeofenceStatus {
     this.nearestCount = 0,
     this.nearestCentre,
     this.mode,
+    this.umbrellaRadiusM = 0,
+    this.maxRegionRadiusM = 0,
   });
   const GeofenceStatus.unavailable()
       : permission = GeofencePermission.notDetermined,
@@ -317,7 +321,9 @@ class GeofenceStatus {
         nearestAt = null,
         nearestCount = 0,
         nearestCentre = null,
-        mode = null;
+        mode = null,
+        umbrellaRadiusM = 0,
+        maxRegionRadiusM = 0;
   final GeofencePermission permission;
   final bool notifications;
   final int registered;
@@ -357,6 +363,13 @@ class GeofenceStatus {
 
   /// What the layer is waiting for: `idle`, `configureFix`, `umbrellaFix`, `dwell:<station>`.
   final String? mode;
+
+  /// The umbrella as it is actually registered — computed from the last complete answer, or the
+  /// cautious default. No longer a constant (issue #31).
+  final double umbrellaRadiusM;
+
+  /// The widest circle this device will monitor. Nobody had ever read it off a phone.
+  final double maxRegionRadiusM;
 }
 
 /// One registered region as the debug page lists it (docs/25 §5).

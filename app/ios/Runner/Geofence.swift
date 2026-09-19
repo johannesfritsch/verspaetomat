@@ -26,8 +26,10 @@ struct GeofenceConfig: Codable {
 enum GeofenceRules {
   /// The region budget (docs/25 §2). iOS allows 20 monitored regions. The frequent set is worth
   /// its slots at home and worthless 300 km away, so it is spent on whichever matters here.
-  static let maxRegions = 20
-  static let maxFrequent = 16
+  /// Nineteen stations plus the umbrella: iOS takes twenty in total, and the one it refuses when
+  /// the set is full must never be the umbrella every other trigger hangs off.
+  static let maxRegions = 19
+  static let maxFrequent = 15
   static let nearestNearHome = 4
   /// Beyond this from every frequent station, the frequent set is dropped and all 20 slots go
   /// to what is actually around the passenger.
@@ -68,6 +70,69 @@ enum GeofenceRules {
   /// How far the coverage disc reaches, by how fast the phone is moving (docs/25 §1). Drawn
   /// around somewhere the passenger recently *was*, so a München → Memmingen trip costs two or
   /// three `stations/nearby` calls instead of about twenty.
+  /// How wide the umbrella should be, given what the server just said (issue #31).
+  ///
+  /// The umbrella's job is to fire before the phone can *stop* at a station nobody registered. So
+  /// its radius is the distance to the nearest station we did **not** register, less the station
+  /// circle, less what the phone travels while iOS is deciding to tell us.
+  ///
+  /// Three things this deliberately does not do:
+  ///
+  /// - **It never widens on an absence.** Only `complete` — the server positively asserting it
+  ///   searched `searchedRadius` and found everything in it — may take the radius past
+  ///   `cautiousRadius`. An empty answer is what a failed lookup, a thin timetable and a bad
+  ///   deploy all look like, and widening on that is how issue #31 sealed itself shut.
+  /// - **It uses an absolute margin, not a percentage.** Exit delivery takes minutes, not metres:
+  ///   a tenth of a 1.5 km city umbrella is 150 m, and a walker covers 400 m before iOS speaks.
+  ///   A percentage gives the most margin exactly where it is least needed.
+  /// - **It does not promise what the platform cannot.** At line speed the phone can be twenty
+  ///   kilometres past the boundary before the exit arrives, so "you cannot *reach* an
+  ///   unregistered station" is not achievable. What holds is: you cannot *stop* at one without
+  ///   a refresh having been triggered — and stopping is the only case a nudge needs.
+  static func umbrellaRadius(
+    registered: [GeofenceStation],
+    answer: NearbyAnswer,
+    here: CLLocation,
+    stationRadius: CLLocationDistance,
+    cautious: CLLocationDistance,
+    deviceMax: CLLocationDistance
+  ) -> (radius: CLLocationDistance, why: String) {
+    let ceiling = deviceMax > 0 ? min(deviceMax * 0.9, 200_000) : 200_000
+
+    func clamped(_ r: CLLocationDistance, _ why: String) -> (CLLocationDistance, String) {
+      let out = max(minRadius, min(r, ceiling))
+      return (out, out == ceiling && r > ceiling ? "\(why), clamped to device max" : why)
+    }
+
+    guard answer.complete else {
+      return clamped(cautious, "server did not claim a complete answer")
+    }
+
+    // The nearest station the server named that we are not watching. Beyond the answer's own
+    // reach we know nothing, so the search radius is the honest ceiling on this claim.
+    let registeredIds = Set(registered.map { $0.id })
+    let firstUnregistered = answer.stations
+      .filter { !registeredIds.contains($0.id) }
+      .map { here.distance(from: $0.location) }
+      .min()
+
+    guard let d = firstUnregistered else {
+      return clamped(answer.searchedRadius - margin, "nothing unregistered within \(Int(answer.searchedRadius / 1000)) km")
+    }
+    return clamped(d - stationRadius - margin, "nearest unwatched station \(Int(d / 1000)) km off")
+  }
+
+  /// What the phone covers while iOS makes up its mind about an exit. Absolute, because the
+  /// latency is a time and the distance it costs depends on speed, not on how big the circle is.
+  static let margin: CLLocationDistance = 1_000
+
+  /// How many stations to ask for. Enough that there is normally one we do not register, which is
+  /// the quantity the umbrella is sized from; the phone can watch nineteen.
+  static let nearbyLimit = 25
+
+  /// Below this a circle is not reliably delivered at all, so there is no point drawing one.
+  static let minRadius: CLLocationDistance = 1_000
+
   static func coverageRadius(speedMps: CLLocationSpeed) -> CLLocationDistance {
     let kmh = max(0, speedMps) * 3.6
     if kmh < 30 { return 5_000 }      // walking or local: be precise
@@ -126,7 +191,10 @@ enum GeofenceRules {
     if nearHome(frequent: frequent, here: here) {
       for s in frequent where !known(s) && out.count < maxFrequent { out.append(s) }
       var added = 0
-      for s in nearest where !known(s) && added < nearestNearHome {
+      // `maxRegions` binds here too. Fifteen plus four is nineteen, but the guard is on the total
+      // rather than on the arithmetic, so changing either constant cannot quietly hand iOS a
+      // twentieth region and cost us the umbrella.
+      for s in nearest where !known(s) && added < nearestNearHome && out.count < maxRegions {
         out.append(s)
         added += 1
       }
@@ -148,6 +216,12 @@ enum GeofenceRules {
   static func normalise(_ name: String) -> String {
     var s = name.lowercased()
       .replacingOccurrences(of: "hauptbahnhof", with: "hbf")
+      // ß is a letter, not an accent, so `diacriticInsensitive` leaves it alone — and the feeds
+      // disagree about it: DELFI writes „Kißlegg", the Swiss feed writes „Kisslegg". Without this
+      // the two are different places, which is two regions on one platform and the double nudge
+      // docs/30 was supposed to have ended. A test has asserted this since docs/30 and has been
+      // failing ever since, because nothing runs the Swift tests.
+      .replacingOccurrences(of: "ß", with: "ss")
       .folding(options: .diacriticInsensitive, locale: .current)
     s = String(s.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
     for suffix in ["bahnhof", "hbf", "bf"] where s.hasSuffix(suffix) && s.count > suffix.count {
@@ -172,6 +246,26 @@ enum GeofenceRules {
   }
 
   /// `{stations:[{id,name,lat,lon,distance_m}], ...}` → the nearest three.
+  /// What `stations/nearby` answered, with the scope it answered within (issue #31).
+  struct NearbyAnswer {
+    var stations: [GeofenceStation] = []
+    /// How far the server looked. Zero when it did not say — an older build, or the gazetteer path.
+    var searchedRadius: CLLocationDistance = 0
+    /// The server asserts every station within `searchedRadius` is in `stations`. Only this may
+    /// let the umbrella grow past the cautious default.
+    var complete: Bool = false
+  }
+
+  static func parseNearbyAnswer(_ data: Data) -> NearbyAnswer {
+    guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      return NearbyAnswer()
+    }
+    return NearbyAnswer(
+      stations: parseNearby(data),
+      searchedRadius: (root["search_radius_m"] as? Double) ?? Double(root["search_radius_m"] as? Int ?? 0),
+      complete: root["complete"] as? Bool ?? false)
+  }
+
   static func parseNearby(_ data: Data) -> [GeofenceStation] {
     guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let list = root["stations"] as? [[String: Any]] else { return [] }
@@ -450,6 +544,13 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   /// Where the nearby list was fetched. Without it a list is only dated, and a list from the
   /// right time in the wrong town looks exactly like a good one (issue #31).
+  /// The umbrella's radius, computed from the last complete answer and persisted so a relaunch
+  /// redraws the same circle instead of falling back to the cautious default (issue #31).
+  private var umbrellaRadius: CLLocationDistance {
+    get { defaults.object(forKey: "geofence.umbrella.r") as? Double ?? 0 }
+    set { defaults.set(newValue, forKey: "geofence.umbrella.r") }
+  }
+
   private var nearestCentre: CLLocation? {
     guard let lat = defaults.object(forKey: "geofence.nearest.lat") as? Double,
           let lon = defaults.object(forKey: "geofence.nearest.lon") as? Double else { return nil }
@@ -664,6 +765,9 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         "nearestCount": nearestCount,
         "nearestLat": nearestCentre?.coordinate.latitude as Any,
         "nearestLon": nearestCentre?.coordinate.longitude as Any,
+        // Nobody has ever read this off a real phone, and the umbrella is now sized against it.
+        "maxRegionRadiusM": manager.maximumRegionMonitoringDistance,
+        "umbrellaRadiusM": umbrellaRadius > 0 ? umbrellaRadius : (config?.umbrellaRadiusM ?? 0),
         "mode": modeLabel,
         // Every registered region, with whether the phone is inside it right now (docs/25 §5).
         "regions": manager.monitoredRegions.compactMap { r -> [String: Any]? in
@@ -766,10 +870,17 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   private func registerUmbrella(at l: CLLocation, _ c: GeofenceConfig) {
     if let old = manager.monitoredRegions.first(where: { $0.identifier == Self.umbrellaId }) { manager.stopMonitoring(for: old) }
-    let r = CLCircularRegion(center: l.coordinate, radius: c.umbrellaRadiusM, identifier: Self.umbrellaId)
+    // The computed radius when there is one, otherwise the cautious default from the config —
+    // which is what a fresh install, an old server and a failed lookup all get (issue #31).
+    let radius = umbrellaRadius > 0 ? umbrellaRadius : c.umbrellaRadiusM
+    let r = CLCircularRegion(center: l.coordinate, radius: radius, identifier: Self.umbrellaId)
     r.notifyOnEntry = false
     r.notifyOnExit = true
     manager.startMonitoring(for: r)
+    // The disc and the umbrella were two notions of the same reach that could disagree: the
+    // umbrella-exit path never consulted the disc, so on iOS the 8 km circle quietly overrode the
+    // 25/60 km speed table on every journey. One radius now, used by both.
+    discRadius = radius
   }
 
   private func station(for region: CLRegion) -> GeofenceStation? {
@@ -980,7 +1091,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     case .denied: return "location denied"
     case .network: return "no network"
     case .regionMonitoringDenied: return "region monitoring denied (needs Always)"
-    case .regionMonitoringFailure: return "region rejected — too many, or too small"
+    case .regionMonitoringFailure: return "region rejected — too many, too small, or too big"
     case .regionMonitoringSetupDelayed: return "setup delayed"
     case .regionMonitoringResponseDelayed: return "response delayed, region replaced"
     default: return "CLError \(code.rawValue)"
@@ -1009,21 +1120,39 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   /// nearest list describes somewhere else, and keeping it registered is worse than dropping it.
   private func refreshNearest(around l: CLLocation, _ c: GeofenceConfig) {
     let task = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
-    let finish = { [weak self] (found: [GeofenceStation]?) in
+    let finish = { [weak self] (answer: GeofenceRules.NearbyAnswer?) in
       DispatchQueue.main.async {
         guard let self = self else { return }
-        if let found = found {
+        if let answer = answer {
           self.defaults.set(Date(), forKey: "geofence.nearest.at")
-          self.defaults.set(found.count, forKey: "geofence.nearest.n")
+          self.defaults.set(answer.stations.count, forKey: "geofence.nearest.n")
           self.defaults.set(l.coordinate.latitude, forKey: "geofence.nearest.lat")
           self.defaults.set(l.coordinate.longitude, forKey: "geofence.nearest.lon")
-          self.nearest = found
+          self.nearest = answer.stations
           self.stopAllRegions()
+          // The umbrella goes on FIRST. It used to be registered after the stations, so under the
+          // twenty-region cap the one iOS refused was the umbrella itself — the mechanism every
+          // other trigger hangs off. That never bit only because the server capped the inputs.
+          let sized = GeofenceRules.umbrellaRadius(
+            registered: GeofenceRules.regionSet(frequent: c.stations, nearest: answer.stations, here: l),
+            answer: answer,
+            here: l,
+            stationRadius: c.stationRadiusM,
+            cautious: c.umbrellaRadiusM,
+            deviceMax: self.manager.maximumRegionMonitoringDistance)
+          self.umbrellaRadius = sized.radius
+          self.registerUmbrella(at: l, c)
           self.registerStations(c)
+          self.lastEvent = "umbrella \(Int(sized.radius / 1000)) km: \(sized.why)"
+        } else {
+          // A failed lookup keeps the set and the radius; only the centre follows the phone, so it
+          // is not pinned to a boundary it keeps re-crossing.
+          self.registerUmbrella(at: l, c)
         }
-        self.registerUmbrella(at: l, c)
         self.discCentre = l
-        let outcome = found == nil ? "lookup failed, set untouched" : "nearest \(found!.count)"
+        let outcome = answer == nil
+          ? "lookup failed, set untouched"
+          : "nearest \(answer!.stations.count)\(answer!.complete ? ", complete" : ", not exhaustive")"
         self.lastEvent = "recentred on \(Int(self.discRadius / 1000)) km disc, \(outcome)"
         self.onUmbrellaExit?()
         if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
@@ -1032,13 +1161,19 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     bumpCounter("nearby")
     bumpCounter("requests")
     guard var comps = URLComponents(string: c.apiUrl + "/v1/stations/nearby") else { return finish(nil) }
-    comps.queryItems = [URLQueryItem(name: "lat", value: "\(l.coordinate.latitude)"), URLQueryItem(name: "lon", value: "\(l.coordinate.longitude)")]
+    comps.queryItems = [
+      URLQueryItem(name: "lat", value: "\(l.coordinate.latitude)"),
+      URLQueryItem(name: "lon", value: "\(l.coordinate.longitude)"),
+      // More than the three the Bahnsteig wants: the umbrella is sized from the nearest station
+      // we do *not* register, so there has to be one to see.
+      URLQueryItem(name: "limit", value: "\(GeofenceRules.nearbyLimit)"),
+    ]
     guard let url = comps.url else { return finish(nil) }
     var req = URLRequest(url: url, timeoutInterval: 10)
     req.setValue("Bearer \(c.token)", forHTTPHeaderField: "Authorization")
     URLSession.shared.dataTask(with: req) { data, resp, _ in
       guard let data = data, (resp as? HTTPURLResponse)?.statusCode == 200 else { return finish(nil) }
-      finish(GeofenceRules.parseNearby(data))
+      finish(GeofenceRules.parseNearbyAnswer(data))
     }.resume()
   }
 

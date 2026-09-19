@@ -55,6 +55,10 @@ pub async fn health(State(s): State<AppState>) -> Json<Value> {
 pub struct LatLon {
     pub lat: Option<f64>,
     pub lon: Option<f64>,
+    /// How many stations to return. Absent means three, which is what every caller before issue
+    /// #31 wanted and still gets.
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 
 /// Nearby stations. The phone's position decides; a Stellwerk override per customer wins.
@@ -70,8 +74,23 @@ pub async fn stations_nearby(State(s): State<AppState>, c: Customer, Query(q): Q
         (None, Some(lat), Some(lon)) => (lat, lon, "gps", None),
         _ => return Ok(Json(json!({ "stations": [], "source": "none", "label": null }))),
     };
-    let stops = s.train.nearby_stops(lat, lon).await.map_err(internal)?;
-    Ok(Json(json!({ "stations": stops, "source": source, "label": label, "lat": lat, "lon": lon })))
+    // `limit` is opt-in and defaults to today's three (issue #31). The Bahnsteig re-resolves as
+    // the phone moves and must stay on the cheap path; only the geofence layer, which asks once
+    // per umbrella exit, asks for the wider list it needs to size its umbrella.
+    let limit = q.limit.unwrap_or(3).clamp(1, 25);
+    let answer = s.train.nearby_stops_within(lat, lon, limit).await.map_err(internal)?;
+    Ok(Json(json!({
+        "stations": answer.stations,
+        "source": source,
+        "label": label,
+        "lat": lat,
+        "lon": lon,
+        // How far this answer looked, and whether it is the whole truth within that distance. The
+        // phone sizes its umbrella from the nearest station it did *not* register, so it has to be
+        // able to tell "there is nothing further out" from "you only asked for three".
+        "search_radius_m": answer.searched_radius_m,
+        "complete": answer.complete,
+    })))
 }
 
 #[derive(Deserialize)]

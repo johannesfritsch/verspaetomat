@@ -12,6 +12,7 @@ use sqlx::PgPool;
 
 use super::transitous::TransitousClient;
 use super::{DepartureInfo, Itinerary, StopInfo, TripInfo};
+use super::transitous::NearbyAnswer;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TripOverride {
@@ -84,6 +85,10 @@ impl TrainSource {
 
     pub async fn nearby_stops(&self, lat: f64, lon: f64) -> Result<Vec<StopInfo>> {
         self.inner.nearby_stops(lat, lon).await
+    }
+
+    pub async fn nearby_stops_within(&self, lat: f64, lon: f64, limit: usize) -> Result<NearbyAnswer> {
+        self.inner.nearby_stops_within(lat, lon, limit).await
     }
 
     pub async fn search_stops(&self, text: &str) -> Result<Vec<StopInfo>> {

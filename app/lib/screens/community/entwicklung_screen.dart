@@ -493,14 +493,25 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
             // The three radii the whole layer is made of. They decide everything and are named
             // nowhere else in the app (issue #29).
             const VSection('Zäune'),
-            _Row('Schirm', '${(GeofenceConfig.defaultUmbrellaRadiusM / 1000).round()} km'),
+            _Row(
+              'Schirm',
+              s.umbrellaRadiusM > 0
+                  ? '${(s.umbrellaRadiusM / 1000).toStringAsFixed(1)} km'
+                  : '${(GeofenceConfig.defaultUmbrellaRadiusM / 1000).round()} km (Vorgabe)',
+            ),
+            if (s.maxRegionRadiusM > 0)
+              _Row('… das Gerät kann', '${(s.maxRegionRadiusM / 1000).round()} km'),
             _Row('Bahnhofskreis', '${GeofenceConfig.defaultStationRadiusM} m'),
             _Row('Hinweis ab', '${GeofenceConfig.defaultNudgeRadiusM} m'),
             const VGap.xs(),
             Text(
-              'Der Schirm weckt die App, wenn du ihn verlässt, und der Satz wird neu gezogen. Der '
-              'Bahnhofskreis ist absichtlich weit — kleine Kreise meldet iOS spät oder gar nicht. '
-              'Der Hinweis kommt erst, wenn ein Standort wirklich so nah liegt.',
+              'Der Schirm weckt die App, wenn du ihn verlässt, und der Satz wird neu gezogen. Seine '
+              'Größe ist keine feste Zahl mehr: sie reicht bis zum nächsten Bahnhof, den wir '
+              'gerade *nicht* überwachen, abzüglich des Bahnhofskreises und der Strecke, die du '
+              'zurücklegst, während iOS den Austritt meldet. In der Stadt sind das ein paar '
+              'Kilometer, im Allgäu viele — und wenn der Server nicht ausdrücklich sagt, dass er '
+              'vollständig gesucht hat, bleibt es bei der vorsichtigen Vorgabe. Der Bahnhofskreis '
+              'ist absichtlich weit: kleine Kreise meldet iOS spät oder gar nicht.',
               style: VText.caption,
             ),
             const VGap.m(),

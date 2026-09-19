@@ -38,6 +38,20 @@ const RANK_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,L
 /// city bus never becomes a leg of a journey (docs/28).
 const PLAN_MODES: &str = "RAIL,REGIONAL_RAIL,REGIONAL_FAST_RAIL,HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,SUBURBAN,BUS,COACH";
 
+/// A nearby answer with its own scope (issue #31).
+///
+/// `complete` is the only thing that may let the phone widen its umbrella past the cautious
+/// default, so it fails closed: it is true only when the radius search ran, returned something,
+/// and was not cut off at the limit.
+pub struct NearbyAnswer {
+    pub stations: Vec<StopInfo>,
+    /// How far this answer looked, in metres. Zero when the gazetteer path answered, which has no
+    /// radius of its own.
+    pub searched_radius_m: i64,
+    /// Every rail station within `searched_radius_m` is in `stations`.
+    pub complete: bool,
+}
+
 /// How much we want a stop id, lower being better (issue #31).
 ///
 /// MOTIS names one station once per platform — `…:9002_G`, `…:9002:2:1`, `…:9002:2:2` — and the
@@ -106,6 +120,16 @@ impl TransitousClient {
     /// dropped, and the rest are ordered so that inside a 300 m band the better station wins.
     /// At most three come back: the one the card offers and two alternatives.
     pub async fn nearby_stops(&self, lat: f64, lon: f64) -> Result<Vec<StopInfo>> {
+        Ok(self.nearby_stops_within(lat, lon, NEARBY_RESULTS).await?.stations)
+    }
+
+    /// The same search, with the answer's own scope attached (issue #31).
+    ///
+    /// The geofence layer needs to know *how far this answer looked* and *whether it is the whole
+    /// truth within that distance*, because it sizes the umbrella from the first station it did
+    /// **not** register — and an empty or truncated answer must never be read as "there is nothing
+    /// out there". That misreading is what kept Langenargen registered in Kißlegg.
+    pub async fn nearby_stops_within(&self, lat: f64, lon: f64, limit: usize) -> Result<NearbyAnswer> {
         let places: Vec<GeoPlace> = self
             .get_json("/api/v1/reverse-geocode", &[("place", format!("{lat},{lon}")), ("type", "STOP".into())])
             .await?;
@@ -153,16 +177,35 @@ impl TransitousClient {
         // stops — even standing on the platform, the Bahnhof is not among them. The stops are
         // then all correctly dropped as non-rail and the customer gets an empty answer while a
         // station is eight hundred metres away.
+        // The gazetteer path is never exhaustive: `reverse-geocode` hands back at most five places
+        // whatever is asked of it, so "these are all of them" is a claim it cannot support.
+        let mut searched_radius_m = 0;
+        let mut complete = false;
+
         if kept.is_empty() {
             kept = self.rail_stops_around(lat, lon).await;
+            // The radius path searched a known distance and saw every rail departure in it. It is
+            // exhaustive only if something came back and nothing was cut off the end — an empty
+            // answer is exactly what a failed upstream call looks like, and widening an umbrella
+            // on that is how the self-sealing loop of issue #31 got made.
+            searched_radius_m = NEARBY_FALLBACK_RADIUS_M;
+            complete = !kept.is_empty() && kept.len() <= limit;
         }
 
+        // Nearest first for the cut, best-ranked first for the answer. Truncating after the rank
+        // sort could drop a nearer station in favour of a better-ranked one further out — and then
+        // the first station we did *not* return is not the nearest one we did not return, which is
+        // the whole quantity the umbrella is sized from.
+        kept.sort_by_key(|s| s.distance_m.unwrap_or(i64::MAX));
+        if kept.len() > limit {
+            kept.truncate(limit);
+            complete = false;
+        }
         kept.sort_by(|a, b| {
             nearby_order(a.distance_m.unwrap_or(i64::MAX), a.rail_rank.unwrap_or(0), &a.name)
                 .cmp(&nearby_order(b.distance_m.unwrap_or(i64::MAX), b.rail_rank.unwrap_or(0), &b.name))
         });
-        kept.truncate(NEARBY_RESULTS);
-        Ok(kept)
+        Ok(NearbyAnswer { stations: kept, searched_radius_m, complete })
     }
 
     /// Railway stations within [`NEARBY_FALLBACK_RADIUS_M`] of a point, found through what departs
