@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -57,6 +58,10 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
   /// Which replayed event the map is showing, as an index into [_replay]. Null is "now".
   int? _replayAt;
 
+  /// Native's "a refresh has landed" signal, subscribed lazily so the page only listens once it
+  /// has asked for one.
+  StreamSubscription<void>? _refreshLanded;
+
   /// Which segment is open (issue #32). The page was one eager column about 2 700 pt tall, so the
   /// Showcase and the two actions sat below a 120-line log and nobody scrolled that far.
   int _tab = 0;
@@ -114,6 +119,12 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _refreshLanded?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -341,6 +352,13 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
   }
 
   Future<void> _refreshNow() async {
+    // The lookup is asynchronous: the fix takes a second, the request a few hundred milliseconds.
+    // Pressing „Neu laden" straight afterwards shows the state from *before* it — which is very
+    // probably what made this feature look like it had done nothing at all. Native already tells
+    // Dart when a refresh has landed, so the page reloads itself instead.
+    _refreshLanded ??= Geofence.instance.onUmbrellaExit.listen((_) {
+      if (mounted) _load();
+    });
     final result = await Geofence.instance.refreshNow();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -495,10 +513,10 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
             const VSection('Zäune'),
             _Row(
               'Schirm',
-              s.umbrellaRadiusM > 0
-                  ? '${(s.umbrellaRadiusM / 1000).toStringAsFixed(1)} km'
-                  : '${(GeofenceConfig.defaultUmbrellaRadiusM / 1000).round()} km (Vorgabe)',
+              '${(s.umbrellaRadiusM / 1000).toStringAsFixed(1)} km'
+                  '${s.umbrellaComputed ? '' : ' — Vorgabe, nicht gerechnet'}',
             ),
+            if (s.umbrellaWhy != null) _Row('… weil', s.umbrellaWhy!),
             if (s.maxRegionRadiusM > 0)
               _Row('… das Gerät kann', '${(s.maxRegionRadiusM / 1000).round()} km'),
             _Row('Bahnhofskreis', '${GeofenceConfig.defaultStationRadiusM} m'),

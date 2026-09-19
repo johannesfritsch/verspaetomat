@@ -118,6 +118,8 @@ class Geofence {
         mode: m['mode']?.toString(),
         umbrellaRadiusM: (m['umbrellaRadiusM'] as num?)?.toDouble() ?? 0,
         maxRegionRadiusM: (m['maxRegionRadiusM'] as num?)?.toDouble() ?? 0,
+        umbrellaComputed: m['umbrellaComputed'] == true,
+        umbrellaWhy: m['umbrellaWhy']?.toString(),
         regions: [
           for (final r in (m['regions'] as List? ?? const []).whereType<Map>())
             GeofenceRegion(
@@ -304,6 +306,8 @@ class GeofenceStatus {
     this.mode,
     this.umbrellaRadiusM = 0,
     this.maxRegionRadiusM = 0,
+    this.umbrellaComputed = false,
+    this.umbrellaWhy,
   });
   const GeofenceStatus.unavailable()
       : permission = GeofencePermission.notDetermined,
@@ -323,7 +327,9 @@ class GeofenceStatus {
         nearestCentre = null,
         mode = null,
         umbrellaRadiusM = 0,
-        maxRegionRadiusM = 0;
+        maxRegionRadiusM = 0,
+        umbrellaComputed = false,
+        umbrellaWhy = null;
   final GeofencePermission permission;
   final bool notifications;
   final int registered;
@@ -370,6 +376,14 @@ class GeofenceStatus {
 
   /// The widest circle this device will monitor. Nobody had ever read it off a phone.
   final double maxRegionRadiusM;
+
+  /// Whether the radius above was worked out from a server answer, or is the cautious fallback.
+  /// Without this the page prints the same „8,0 km" for both, which is what made the first
+  /// report of this feature undiagnosable.
+  final bool umbrellaComputed;
+
+  /// The reason in the words the rule used: „nearest unwatched station 12 km off".
+  final String? umbrellaWhy;
 }
 
 /// One registered region as the debug page lists it (docs/25 §5).

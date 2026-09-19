@@ -551,6 +551,12 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     set { defaults.set(newValue, forKey: "geofence.umbrella.r") }
   }
 
+  /// Why the umbrella is the size it is, kept so the page can say it without reading the log.
+  private var umbrellaWhy: String? {
+    get { defaults.string(forKey: "geofence.umbrella.why") }
+    set { defaults.set(newValue, forKey: "geofence.umbrella.why") }
+  }
+
   private var nearestCentre: CLLocation? {
     guard let lat = defaults.object(forKey: "geofence.nearest.lat") as? Double,
           let lon = defaults.object(forKey: "geofence.nearest.lon") as? Double else { return nil }
@@ -768,6 +774,11 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         // Nobody has ever read this off a real phone, and the umbrella is now sized against it.
         "maxRegionRadiusM": manager.maximumRegionMonitoringDistance,
         "umbrellaRadiusM": umbrellaRadius > 0 ? umbrellaRadius : (config?.umbrellaRadiusM ?? 0),
+        // Whether that number was worked out from an answer or is just the fallback. Printing
+        // only the metres cannot tell "computed 8 km" from "never computed, so 8 km" — and that
+        // is exactly the question that could not be answered from the page.
+        "umbrellaComputed": umbrellaRadius > 0,
+        "umbrellaWhy": umbrellaWhy as Any,
         "mode": modeLabel,
         // Every registered region, with whether the phone is inside it right now (docs/25 §5).
         "regions": manager.monitoredRegions.compactMap { r -> [String: Any]? in
@@ -1141,6 +1152,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
             cautious: c.umbrellaRadiusM,
             deviceMax: self.manager.maximumRegionMonitoringDistance)
           self.umbrellaRadius = sized.radius
+          self.umbrellaWhy = sized.why
           self.registerUmbrella(at: l, c)
           self.registerStations(c)
           self.lastEvent = "umbrella \(Int(sized.radius / 1000)) km: \(sized.why)"

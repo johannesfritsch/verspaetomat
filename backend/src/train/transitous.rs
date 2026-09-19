@@ -18,10 +18,10 @@ const PLAN_CACHE_TTL: Duration = Duration::from_secs(60);
 const NEARBY_CANDIDATES: usize = 8;
 /// How many stations the Bahnsteig is offered: the best one and two alternatives (docs/23 §1).
 const NEARBY_RESULTS: usize = 3;
-/// How far the fallback looks for a railway station when the gazetteer returned only bus stops
-/// (issue #31). Far enough to reach a small town's Bahnhof from its market square, near enough
-/// that it is still somewhere you could be going.
-const NEARBY_FALLBACK_RADIUS_M: i64 = 5_000;
+/// How far to look, widening until there are enough stations (issue #31). The first rung finds a
+/// town's own Bahnhof; the last is for country where the nearest twenty are genuinely spread over
+/// half a Landkreis. A city stops at the first rung and costs one upstream call.
+const NEARBY_RADII: [i64; 4] = [5_000, 15_000, 30_000, 50_000];
 /// Inside one band the better station wins; beyond it distance decides again (docs/23 §1).
 const RANK_BAND_M: i64 = 300;
 /// Departures read per candidate when ranking it: enough to see past a burst of one mode.
@@ -130,6 +130,14 @@ impl TransitousClient {
     /// **not** register — and an empty or truncated answer must never be read as "there is nothing
     /// out there". That misreading is what kept Langenargen registered in Kißlegg.
     pub async fn nearby_stops_within(&self, lat: f64, lon: f64, limit: usize) -> Result<NearbyAnswer> {
+        // Two different questions, two different searches. The Bahnsteig wants the best three to
+        // offer a passenger, and the gazetteer path ranks them well. The geofence layer wants the
+        // nearest N with nothing nearer missing, and a radius it can reason about — which only a
+        // radius search can state. Asking the gazetteer for that was the mistake: it caps at five
+        // places, and in Kißlegg it answers with none at all.
+        if limit > NEARBY_RESULTS {
+            return Ok(self.rail_stops_by_radius(lat, lon, limit).await);
+        }
         let places: Vec<GeoPlace> = self
             .get_json("/api/v1/reverse-geocode", &[("place", format!("{lat},{lon}")), ("type", "STOP".into())])
             .await?;
@@ -183,12 +191,8 @@ impl TransitousClient {
         let mut complete = false;
 
         if kept.is_empty() {
-            kept = self.rail_stops_around(lat, lon).await;
-            // The radius path searched a known distance and saw every rail departure in it. It is
-            // exhaustive only if something came back and nothing was cut off the end — an empty
-            // answer is exactly what a failed upstream call looks like, and widening an umbrella
-            // on that is how the self-sealing loop of issue #31 got made.
-            searched_radius_m = NEARBY_FALLBACK_RADIUS_M;
+            kept = self.rail_stops_around(lat, lon, NEARBY_RADII[0]).await;
+            searched_radius_m = NEARBY_RADII[0];
             complete = !kept.is_empty() && kept.len() <= limit;
         }
 
@@ -220,14 +224,41 @@ impl TransitousClient {
     ///
     /// One station appears once per platform (`…:1159_G`, `…:1159:2:1`, `…:1159:2:2`), so they are
     /// folded by name, preferring MOTIS' parent id — the one the rest of the app wants.
-    async fn rail_stops_around(&self, lat: f64, lon: f64) -> Vec<StopInfo> {
+    /// The nearest `want` railway stations, searching outwards until there are enough (issue #31).
+    ///
+    /// A fixed radius is the magic number this replaces: five kilometres around Kißlegg contains
+    /// exactly one station, so a phone asking for twenty-five got one and an umbrella sized from
+    /// nothing. The ladder stops at the first radius that satisfies the request, so a city costs
+    /// one upstream call and only genuinely empty country pays for the wider ones.
+    async fn rail_stops_by_radius(&self, lat: f64, lon: f64, want: usize) -> NearbyAnswer {
+        for radius in NEARBY_RADII {
+            let found = self.rail_stops_around(lat, lon, radius).await;
+            let enough = found.len() >= want;
+            if enough || radius == *NEARBY_RADII.last().unwrap() {
+                let mut stations = found;
+                stations.sort_by_key(|s| s.distance_m.unwrap_or(i64::MAX));
+                stations.truncate(want);
+                // `complete` says: these are the nearest by distance and nothing nearer is
+                // missing. Cutting the far end does not break that — the phone sizes its umbrella
+                // from the first station it does *not* register, which is well inside the cut.
+                // An empty answer is never complete: that is the shape of a failed lookup.
+                let complete = !stations.is_empty();
+                return NearbyAnswer { stations, searched_radius_m: radius, complete };
+            }
+        }
+        NearbyAnswer { stations: Vec::new(), searched_radius_m: 0, complete: false }
+    }
+
+    async fn rail_stops_around(&self, lat: f64, lon: f64, radius_m: i64) -> Vec<StopInfo> {
         let resp: Result<StopTimesResponse> = self
             .get_json(
                 "/api/v1/stoptimes",
                 &[
                     ("center", format!("{lat},{lon}")),
-                    ("n", "50".into()),
-                    ("radius", NEARBY_FALLBACK_RADIUS_M.to_string()),
+                    // Departures, not stations: a wide disc needs many before every station in
+                    // it has appeared at least once.
+                    ("n", if radius_m > 20_000 { "300" } else { "80" }.into()),
+                    ("radius", radius_m.to_string()),
                     ("mode", RANK_MODES.to_string()),
                 ],
             )
@@ -748,6 +779,21 @@ mod tests {
     #[ignore]
     async fn live_wangen_finds_its_bahnhof() {
         let c = TransitousClient::new();
+        // issue #31: the geofence layer asks for many, and must get them even in country where
+        // five kilometres contains exactly one station. Kißlegg is that country.
+        let many = c.nearby_stops_within(47.7914, 9.8921, 25).await.unwrap();
+        eprintln!(
+            "Kißlegg limit=25: {} stations, searched {} km, complete={}",
+            many.stations.len(),
+            many.searched_radius_m / 1000,
+            many.complete
+        );
+        assert!(many.stations.len() >= 15, "a phone with nineteen slots needs them filled: {}", many.stations.len());
+        assert!(many.complete, "a real answer has to be usable for sizing the umbrella");
+        // The Bahnsteig's three are unchanged and still ranked, not merely nearest.
+        let three = c.nearby_stops_within(47.7914, 9.8921, 3).await.unwrap();
+        assert!(three.stations.len() <= 3, "{three:?}", three = three.stations.len());
+
         // Kißlegg is the harder one: `reverse-geocode` answers with an empty list there, so the
         // fallback has nothing to anchor on and has to work from the coordinates alone.
         for (name, lat, lon) in [
