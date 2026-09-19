@@ -117,6 +117,7 @@ class Geofence {
             : null,
         mode: m['mode']?.toString(),
         lastEventAt: _at(m['lastEventAt']),
+        umbrellaUp: m['umbrellaUp'] == true,
         umbrellaRadiusM: (m['umbrellaRadiusM'] as num?)?.toDouble() ?? 0,
         maxRegionRadiusM: (m['maxRegionRadiusM'] as num?)?.toDouble() ?? 0,
         umbrellaComputed: m['umbrellaComputed'] == true,
@@ -306,6 +307,7 @@ class GeofenceStatus {
     this.nearestCentre,
     this.mode,
     this.lastEventAt,
+    this.umbrellaUp = false,
     this.umbrellaRadiusM = 0,
     this.maxRegionRadiusM = 0,
     this.umbrellaComputed = false,
@@ -329,6 +331,7 @@ class GeofenceStatus {
         nearestCentre = null,
         mode = null,
         lastEventAt = null,
+        umbrellaUp = false,
         umbrellaRadiusM = 0,
         maxRegionRadiusM = 0,
         umbrellaComputed = false,
@@ -376,6 +379,10 @@ class GeofenceStatus {
   /// When the native layer last did anything at all. A log that stops looks identical whether iOS
   /// delivered nothing, the app was force-quit, or the log was cleared — this says which.
   final DateTime? lastEventAt;
+
+  /// Whether the umbrella is actually registered. Without it the stations stay in place and the
+  /// page still looks populated, but nothing re-evaluates again — the quietest failure here.
+  final bool umbrellaUp;
 
   /// The umbrella as it is actually registered — computed from the last complete answer, or the
   /// cautious default. No longer a constant (issue #31).

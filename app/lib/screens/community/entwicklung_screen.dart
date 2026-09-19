@@ -192,7 +192,8 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
         '# Berechtigung: ${s.permission.name} · Mitteilungen: ${s.notifications ? 'an' : 'aus'} · Schicht: ${s.mode ?? '?'}',
         '# Zuletzt aktiv: ${when(s.lastEventAt)}'
             '${s.lastEventAt == null ? '' : ' (vor ${_howLong(DateTime.now().difference(s.lastEventAt!))})'}',
-        '# Regionen: ${s.registered} registriert, gezogen ${when(s.regionsAt)}'
+        '# Schirm: ${s.umbrellaUp ? '${(s.umbrellaRadiusM / 1000).toStringAsFixed(1)} km' : 'NICHT REGISTRIERT'}',
+      '# Regionen: ${s.registered} registriert, gezogen ${when(s.regionsAt)}'
             '${s.regionsCentre == null ? '' : ' um ${s.regionsCentre!.lat.toStringAsFixed(4)},${s.regionsCentre!.lon.toStringAsFixed(4)}'}',
         '# Nearest: ${when(s.nearestAt)} · ${s.nearestCount} zurück'
           '${s.nearestCentre == null ? ' · Ort unbekannt' : ' · geholt um ${s.nearestCentre!.lat.toStringAsFixed(4)},${s.nearestCentre!.lon.toStringAsFixed(4)}'}',
@@ -515,8 +516,10 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
             const VSection('Zäune'),
             _Row(
               'Schirm',
-              '${(s.umbrellaRadiusM / 1000).toStringAsFixed(1)} km'
-                  '${s.umbrellaComputed ? '' : ' — Vorgabe, nicht gerechnet'}',
+              s.umbrellaUp
+                  ? '${(s.umbrellaRadiusM / 1000).toStringAsFixed(1)} km'
+                      '${s.umbrellaComputed ? '' : ' — Vorgabe, nicht gerechnet'}'
+                  : 'NICHT registriert — nichts wird mehr neu gezogen',
             ),
             if (s.umbrellaWhy != null) _Row('… weil', s.umbrellaWhy!),
             if (s.maxRegionRadiusM > 0)

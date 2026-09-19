@@ -804,6 +804,10 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         "umbrellaWhy": umbrellaWhy as Any,
         "mode": modeLabel,
         "lastEventAt": (defaults.object(forKey: "geofence.lastEvent.at") as? Date)?.timeIntervalSince1970 as Any,
+        // Whether the one region that wakes everything else is actually being monitored. Its
+        // absence is the quietest failure this layer has: the stations stay registered, the page
+        // still looks populated, and nothing ever re-evaluates again.
+        "umbrellaUp": manager.monitoredRegions.contains { $0.identifier == Self.umbrellaId },
         // Every registered region, with whether the phone is inside it right now (docs/25 §5).
         "regions": manager.monitoredRegions.compactMap { r -> [String: Any]? in
           guard let c = r as? CLCircularRegion else { return nil }
