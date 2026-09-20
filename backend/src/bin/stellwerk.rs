@@ -18,6 +18,7 @@
 //!   stellwerk route list | set <desk> <address> [--label …] | default <address> | remove <desk>
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
+//!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
 //!   stellwerk scan
 //!
@@ -29,14 +30,14 @@
 //! Env overrides: STELLWERK_TARGET, STELLWERK_URL, ADMIN_TOKEN, STELLWERK_CONFIG (file path).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use verspaetomat_api::stations::gtfs;
+use verspaetomat_api::stations::{extract, gtfs};
 
 #[derive(Parser)]
 #[command(name = "stellwerk", about = "Verspätomat Stellwerk: simulate delays, arrivals, replies and time for one customer.")]
@@ -82,11 +83,34 @@ struct ConfigFile {
     targets: BTreeMap<String, Target>,
 }
 
+/// `site/static/stations/latest.json`: what a phone reads to find out whether it is holding the
+/// newest extract, without downloading 274 KB to find out. Key order is declaration order, so the
+/// bytes are deterministic and `dist_ist_aktuell` stays quiet.
+#[derive(Serialize)]
+struct ExtractPointer {
+    version: u32,
+    format: u16,
+    count: u32,
+    bytes: u64,
+    crc32: u32,
+    generated: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    feed_version: Option<String>,
+    url: String,
+}
+
 fn config_path() -> PathBuf {
     if let Ok(p) = std::env::var("STELLWERK_CONFIG") {
         return PathBuf::from(p);
     }
     dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".config").join("verspaetomat").join("stellwerk.toml")
+}
+
+/// The repo this binary was built from. `site/src/main.rs` does the same with
+/// `env!("CARGO_MANIFEST_DIR")`: a tool that writes into the working tree should not depend on
+/// which directory it was started in.
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
 fn load_config() -> anyhow::Result<ConfigFile> {
@@ -276,6 +300,25 @@ enum StationsCmd {
         /// How many of the built ids to ask the live API about before handing them over; 0 skips it
         #[arg(long, default_value_t = 20)]
         check: usize,
+    },
+    /// Render the phone's binary extract from the table and write it under site/static/stations
+    Extract {
+        /// Write the published files here instead of <repo>/site/static/stations. Required for any
+        /// target other than prod: the version is a station_imports id and is per-database, so a
+        /// dev extract in the repo would publish the laptop's table under production's name
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// How many older extracts to leave beside the new one, so a phone that has just read
+        /// latest.json still finds the file it was told about
+        #[arg(long, default_value_t = 1)]
+        keep: usize,
+        /// Also refresh <repo>/app/assets/stations/stations.vst. Off until #39's Dart half ships
+        /// the reader that uses it
+        #[arg(long)]
+        asset: bool,
+        /// Fetch it, check it, write nothing
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
 }
 
@@ -525,6 +568,18 @@ impl Api {
         let r = self.http.get(format!("{}{}", self.url, path)).header("x-admin-token", &self.token).send().await?;
         Self::body(r).await
     }
+    /// The one admin answer that is not JSON. A failure still is, so it reads like every other
+    /// command's failure.
+    async fn get_bytes(&self, path: &str) -> anyhow::Result<Vec<u8>> {
+        let r = self.http.get(format!("{}{}", self.url, path)).header("x-admin-token", &self.token).send().await?;
+        let status = r.status();
+        let body = r.bytes().await?;
+        if !status.is_success() {
+            let v: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+            anyhow::bail!("{} {}", status.as_u16(), v.get("error").and_then(|e| e.as_str()).unwrap_or("error"));
+        }
+        Ok(body.to_vec())
+    }
     async fn post(&self, path: &str, body: Value) -> anyhow::Result<Value> {
         let r = self.http.post(format!("{}{}", self.url, path)).header("x-admin-token", &self.token).json(&body).send().await?;
         Self::body(r).await
@@ -564,6 +619,16 @@ fn s(v: &Value, key: &str) -> String {
         Some(Value::Null) | None => "–".into(),
         Some(x) => x.to_string(),
     }
+}
+
+/// "273,7 KB (gzip 144,1 KB)" — German decimal comma, like the rest of the output.
+fn kb(raw: usize, gz: usize) -> String {
+    format!("{:.1} KB (gzip {:.1} KB)", raw as f64 / 1024.0, gz as f64 / 1024.0).replace('.', ",")
+}
+
+/// Paths inside the repo print relative, so the lines fit on one screen.
+fn rel(root: &Path, p: &Path) -> String {
+    p.strip_prefix(root).unwrap_or(p).display().to_string()
 }
 
 fn hhmm(v: &Value) -> String {
@@ -1041,6 +1106,132 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(note) = v["note"].as_str() {
                     println!("  {note}");
                 }
+            }
+            StationsCmd::Extract { out, keep, asset, dry_run } => {
+                let root = repo_root();
+                // A version is a station_imports id and means nothing outside its own database.
+                // Writing a dev extract into the repo would publish the laptop's table under
+                // production's filename, and the --keep sweep would then delete the real one.
+                let dir = match out {
+                    Some(d) => d,
+                    None => {
+                        anyhow::ensure!(
+                            name == "prod",
+                            "in den Baum schreibt nur --prod (die Version ist eine station_imports-Id und gilt nur für ihre Datenbank). Sonst --out <dir>."
+                        );
+                        root.join("site/static/stations")
+                    }
+                };
+
+                // The extract first: its header carries the version, so the status call is only
+                // needed for the Fahrplanstand and the count cross-check.
+                let bytes = api.patient(120)?.get_bytes("/admin/stations/extract").await?;
+                // The laptop runs the reader the phone will run, before anything is written.
+                let read = extract::parse(&bytes)?;
+                let version = read.version;
+                anyhow::ensure!(version > 0, "Auszug ohne Version: kein übernommener Import. Erst `stellwerk stations import`.");
+
+                let status = api.get("/admin/stations").await?;
+                let live = status["live"].as_u64().unwrap_or(0);
+                let feed_version = status["feed_version"].as_str().map(str::to_string);
+                anyhow::ensure!(
+                    status["version"].as_u64().unwrap_or(0) as u32 == version && read.stations.len() as u64 == live,
+                    "Auszug {version} mit {} Stationen passt nicht zu Import {} mit {live} — dazwischen lief ein Import. Nochmal laufen lassen.",
+                    read.stations.len(),
+                    status["version"]
+                );
+
+                // The gzip sibling Caddy serves with `precompressed gzip`. Its mtime is the
+                // import's, not the clock's, so the same table gzips to the same bytes.
+                let gz = {
+                    use std::io::Write;
+                    let mut e = flate2::GzBuilder::new().mtime(read.generated).write(Vec::new(), flate2::Compression::best());
+                    e.write_all(&bytes)?;
+                    e.finish()?
+                };
+                let pointer = ExtractPointer {
+                    version,
+                    format: read.format,
+                    count: read.stations.len() as u32,
+                    bytes: bytes.len() as u64,
+                    crc32: read.crc32,
+                    generated: chrono::DateTime::from_timestamp(read.generated as i64, 0)
+                        .unwrap_or_default()
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    feed_version: feed_version.clone(),
+                    url: format!("/stations/stations-{version}.vst"),
+                };
+                let mut pointer_bytes = serde_json::to_vec_pretty(&pointer)?;
+                pointer_bytes.push(b'\n');
+
+                let vst = dir.join(format!("stations-{version}.vst"));
+                let vstgz = dir.join(format!("stations-{version}.vst.gz"));
+                let json = dir.join("latest.json");
+                let asset_path = root.join("app/assets/stations/stations.vst");
+
+                println!(
+                    "Auszug {version}  ·  {} Stationen  ·  {}  ·  Fahrplanstand {}  ·  CRC {:08x}",
+                    read.stations.len(),
+                    kb(bytes.len(), gz.len()),
+                    feed_version.as_deref().unwrap_or("–"),
+                    read.crc32
+                );
+                if dry_run {
+                    println!("Trockenlauf: nichts geschrieben.");
+                    return Ok(());
+                }
+
+                // Every artefact, not just the .vst. Saying "unverändert" after checking one of
+                // four is claiming a state nobody verified.
+                let mut planned: Vec<(PathBuf, &[u8])> =
+                    vec![(vst, &bytes), (vstgz, &gz), (json, &pointer_bytes)];
+                if asset {
+                    // Same reason the site files need --prod, and one degree nastier. The app only
+                    // downloads a pointer whose version is *greater* than the one it already holds
+                    // (`station_store.dart:149`), and a dev version is whatever the laptop's
+                    // station_imports counter happens to have reached — higher than production's
+                    // almost immediately. Shipping a dev-rendered asset would therefore not go
+                    // stale loudly; it would pin every phone to the laptop's table for good and
+                    // never ask again.
+                    anyhow::ensure!(
+                        name == "prod",
+                        "--asset schreibt den Auszug in die App und geht nur mit --prod: die App lädt nur eine höhere Version nach, und eine Dev-Version ist höher als die echte."
+                    );
+                    planned.push((asset_path, &bytes));
+                }
+                let todo: Vec<(PathBuf, &[u8])> = planned
+                    .into_iter()
+                    .filter(|(p, want)| std::fs::read(p).map(|old| old != *want).unwrap_or(true))
+                    .collect();
+                if todo.is_empty() {
+                    println!("Unverändert: Auszug {version} liegt vollständig im Baum.");
+                    return Ok(());
+                }
+                for (p, content) in &todo {
+                    if let Some(parent) = p.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(p, content)?;
+                    println!("Geschrieben: {}", rel(&root, p));
+                }
+
+                // Keep the previous one: a phone that read latest.json a moment before the deploy
+                // is still asking for the file it was told about.
+                let mut old: Vec<(u32, PathBuf)> = std::fs::read_dir(&dir)?
+                    .filter_map(|e| e.ok())
+                    .filter_map(|e| {
+                        let n = e.file_name().to_string_lossy().to_string();
+                        let v: u32 = n.strip_prefix("stations-")?.strip_suffix(".vst")?.parse().ok()?;
+                        (v != version).then(|| (v, e.path()))
+                    })
+                    .collect();
+                old.sort_by(|a, b| b.0.cmp(&a.0));
+                for (v, path) in old.into_iter().skip(keep) {
+                    std::fs::remove_file(&path).ok();
+                    std::fs::remove_file(path.with_extension("vst.gz")).ok();
+                    println!("Entfernt: stations-{v}.vst und stations-{v}.vst.gz");
+                }
+                println!("Weiter: cd site && cargo run  ·  site/dist committen  ·  deployen  ·  danach erst die App bauen.");
             }
         },
         Cmd::MailTest { customer, to, claim } => {

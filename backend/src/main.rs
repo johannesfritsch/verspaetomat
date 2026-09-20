@@ -224,6 +224,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
         .route("/admin/overrides", get(admin::overrides).delete(admin::clear_overrides))
         .route("/admin/stations", get(admin::stations_status))
+        .route("/admin/stations/extract", get(admin::stations_extract))
         // Eight thousand stations is a couple of megabytes of JSON, which is well past the
         // default body limit — and it arrives in one piece because the matching has to see the
         // whole country at once to know what is missing from it.

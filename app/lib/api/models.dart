@@ -86,10 +86,20 @@ class DeviceAuth {
 
 /// Nearby stations plus where the position came from: gps, stellwerk (with a label), demo, or none.
 class ApiNearby {
-  const ApiNearby({required this.stations, required this.source, this.label});
+  const ApiNearby({required this.stations, required this.source, this.label, this.searchRadiusM = 0, this.complete = false});
   final List<ApiStation> stations;
   final String source;
   final String? label;
+
+  /// How far this answer reaches: the distance of the farthest station it actually returns, taken
+  /// after the cut to `limit`. `stations::Nearby::searched_radius_m`
+  /// (backend/src/stations/mod.rs:536).
+  final int searchRadiusM;
+
+  /// Nothing nearer is missing. False for an empty answer, always — the native umbrella sizing
+  /// fails closed on it (app/ios/Runner/Geofence.swift:108).
+  final bool complete;
+
   bool get simulated => source == 'stellwerk';
   bool get none => source == 'none';
 
@@ -105,7 +115,35 @@ class ApiNearby {
     if (j is List) return ApiNearby(stations: j.map((e) => ApiStation.fromJson(e as Map<String, dynamic>)).toList(), source: 'gps');
     final m = j as Map<String, dynamic>;
     final list = (m['stations'] as List? ?? const []).map((e) => ApiStation.fromJson(e as Map<String, dynamic>)).toList();
-    return ApiNearby(stations: list, source: (m['source'] ?? 'gps').toString(), label: m['label'] as String?);
+    return ApiNearby(
+      stations: list,
+      source: (m['source'] ?? 'gps').toString(),
+      label: m['label'] as String?,
+      searchRadiusM: _in(m['search_radius_m']) ?? 0,
+      complete: m['complete'] == true,
+    );
+  }
+}
+
+/// Where Stellwerk has put this customer (backend/src/admin.rs:416).
+///
+/// Test-only in practice and absent for everybody else. The phone answers „welcher Bahnhof ist
+/// hier?" from its own table now, so the override has to be held here rather than looked up
+/// server-side on every question.
+class ApiSimLocation {
+  const ApiSimLocation({required this.lat, required this.lon, required this.label});
+  final double lat;
+  final double lon;
+  final String label;
+
+  /// The SSE `location` payload, and the same shape inside `hello`. Null when the event is the
+  /// clear: backend/src/admin.rs:432 publishes `{"source":"gps"}` with no coordinates.
+  static ApiSimLocation? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final lat = j['lat'];
+    final lon = j['lon'];
+    if (lat is! num || lon is! num) return null;
+    return ApiSimLocation(lat: lat.toDouble(), lon: lon.toDouble(), label: '${j['label'] ?? ''}');
   }
 }
 

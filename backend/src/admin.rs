@@ -4,6 +4,7 @@
 use axum::{
     extract::{FromRequestParts, Path, Query, State},
     http::{request::Parts, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use chrono::{Duration, NaiveTime, TimeZone};
@@ -1282,12 +1283,65 @@ pub async fn stations_status(State(s): State<AppState>, _a: Admin) -> ApiResult 
     .await
     .map_err(internal)?;
     let retired: (i64,) = sqlx::query_as("select count(*) from stations where retired_at is not null").fetch_one(&s.pool).await.map_err(internal)?;
+    let latest: Option<(i32, Option<String>)> =
+        sqlx::query_as("select id, feed_version from station_imports where committed order by id desc limit 1")
+            .fetch_optional(&s.pool)
+            .await
+            .map_err(internal)?;
     Ok(Json(json!({
         "live": ix.len(),
         "retired": retired.0,
+        // Which extract the table would render as, and the Fahrplanstand behind it (issue #39), so
+        // `stellwerk stations extract` can write latest.json without a second source of truth.
+        // `feed_version` is an opaque string straight from the feed — today it is
+        // "2026-09-12T15:06:17". Nobody parses it. Both fields are additive; nothing is renamed.
+        "version": latest.as_ref().map(|(id, _)| *id).unwrap_or(0),
+        "feed_version": latest.as_ref().and_then(|(_, f)| f.clone()),
         "imports": runs.iter().map(|r| json!({
             "id": r.0, "feed_version": r.1, "added": r.2, "retired": r.3, "moved": r.4,
             "renamed": r.5, "total": r.6, "committed": r.7, "note": r.8, "started_at": r.9,
         })).collect::<Vec<_>>(),
     })))
+}
+
+/// `GET /admin/stations/extract` — the table as the bytes a phone will read (issue #39).
+///
+/// Rendered from the same in-memory index `/v1/stations/nearby` answers from, so the file and the
+/// server cannot disagree about a station: one `Index`, two ways of reading it.
+///
+/// The bytes are not stored here and are not served to passengers from here. `stellwerk stations
+/// extract` writes them into `site/static/stations/` and Caddy serves them from the website vhost,
+/// which carries no bearer token and gets a `log_skip`. This route is behind the admin token for
+/// the same reason `/admin/stations/import` is: it hands over the whole table in one request and
+/// it is a build step, not something a passenger's phone ever calls.
+pub async fn stations_extract(State(s): State<AppState>, _a: Admin) -> Result<Response, (StatusCode, Json<Value>)> {
+    let ix = s.stations();
+    if ix.is_empty() {
+        return Err(err(StatusCode::CONFLICT, "no stations in the table: nothing to extract"));
+    }
+    // The version and the timestamp are the import's, not `now()`. The extract has to be a
+    // function of the table: rendering the same table twice must give the same bytes, or every
+    // render is a commit in site/dist and a 280 KB diff nobody can read.
+    let run: Option<(i32, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "select id, coalesce(finished_at, started_at) from station_imports where committed order by id desc limit 1",
+    )
+    .fetch_optional(&s.pool)
+    .await
+    .map_err(internal)?;
+    // No committed import means no version, and a version-0 extract must never be published. The
+    // CLI refuses too; the two have to agree about what a valid extract is.
+    let (version, generated) = match run {
+        Some((id, at)) => (id as u32, at),
+        None => {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "no committed import in station_imports: run `stellwerk stations import` first",
+            ))
+        }
+    };
+    let bytes = crate::stations::extract::render(&ix, crate::stations::extract::Meta { version, generated }).map_err(internal)?;
+    tracing::info!(stations = ix.len(), version, bytes = bytes.len(), "stations extract rendered");
+    // Raw bytes, not base64: the only client writes the body straight to a file. Errors stay JSON,
+    // so a failure reads like every other stellwerk command's.
+    Ok(([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
 }

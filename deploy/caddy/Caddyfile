@@ -21,10 +21,31 @@
 {$SITE_DOMAIN:verspaetomat.de} {
 	encode zstd gzip
 	root * /srv/site
-	file_server
+	file_server {
+		# `encode` komprimiert nur die Content-Types aus seiner eingebauten Liste (text/*,
+		# application/json*, application/javascript*, application/xhtml+xml*, atom, rss,
+		# image/svg+xml*, application/wasm*). Der Stationsauszug ist application/octet-stream
+		# und steht nicht darauf — ohne die fertige .gz-Datei daneben ginge er mit vollen
+		# 280.244 Bytes raus.
+		precompressed gzip
+	}
 	# Schriften ändern sich nie, Bilder selten, HTML jedes Mal.
 	header /fonts/* Cache-Control "public, max-age=31536000, immutable"
 	header /shots/* Cache-Control "public, max-age=604800"
+	# Der Auszug (#39, docs/45): eine Version ändert sich nie, der Zeiger darf eine Stunde alt
+	# sein. Nur Suffix-Wildcards — das Verzeichnis enthält sonst nichts, und ein Muster mitten
+	# im Pfad wäre eine vermeidbare Wette auf Caddys Matcher in einer Datei, deren Fehlerfall
+	# die API mitnimmt.
+	header /stations/*.vst Cache-Control "public, max-age=31536000, immutable"
+	header /stations/latest.json Cache-Control "public, max-age=3600"
+	# Gemessen: Caddy hält `.vst` für eine Visio-Schablone und liefert sie als
+	# `application/vnd.visio` aus. Das ist keine unbekannte Endung, auf die man sich verlassen
+	# könnte — also festnageln, statt zu raten.
+	header /stations/*.vst Content-Type "application/octet-stream"
+	# `log_skip`, damit der Abruf des Auszugs nicht in Caddys stdout landet. Die
+	# Hintergrund-Abfragen der App laufen bis auf Weiteres weiter über /v1/stations/nearby am
+	# API-vhost und stehen dort mit IP im Log (#39, nativer Teil).
+	log_skip /stations/*
 	log {
 		output stdout
 		format console

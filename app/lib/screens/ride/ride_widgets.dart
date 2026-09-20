@@ -119,6 +119,10 @@ int fromIndex(List<ApiStop> stops, String? stationId, String stationName) {
   return loose >= 0 ? loose : 0;
 }
 
+/// The display-side fold, behind [sameStation] — **not** the server's.
+/// `serverStationFold` (app/lib/stations/station_rules.dart) is the port of
+/// `train::normalise_station_name` that the station search matches on; it folds differently
+/// (no ß→ss, „Bahnhof" and „ Bf" removed) and the two must never be swapped for one another.
 String normaliseStation(String name) => name
     .toLowerCase()
     // The feeds disagree about ß: DELFI writes „Kißlegg", the Swiss feed „Kisslegg". Folding it

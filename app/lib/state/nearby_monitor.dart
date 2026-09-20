@@ -111,7 +111,13 @@ class NearbyMonitor extends ChangeNotifier with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
     _listenToPosition();
-    if (_foreground) refresh();
+    if (_foreground) {
+      refresh();
+      // The second of the two places the station extract's weekly check rides on (issue #39).
+      // A borrowed trigger: this class's job is something else, but it is the one thing that
+      // reliably fires when the app is used, and the interval gate lives in the store.
+      unawaited(session.stationsUpdateCheck());
+    }
   }
 
   /// Demo mode changes the world without events; a debounced refresh follows the session.
@@ -262,6 +268,19 @@ class NearbyMonitor extends ChangeNotifier with WidgetsBindingObserver {
   /// A resolve is running: the fix, or the station list for it. The check-in's first sheet shows
   /// its placeholder rows for as long as this is true, instead of the tap waiting for it (#16).
   bool get resolving => _resolving;
+
+  /// We asked the table and it answered: there is no station within `kNearbyMaxM` of here
+  /// (issue #39).
+  ///
+  /// Not the same as having no fix, and not the same sentence. Guarded against firing mid-resolve,
+  /// when [nearby] still holds the previous answer, and true for a Stellwerk override in the
+  /// middle of nowhere, where there is no fix of this phone's to speak of.
+  bool get noStationNearby =>
+      !_resolving &&
+      !checking &&
+      nearby.source != 'none' &&
+      nearby.stations.isEmpty &&
+      (position != null || nearby.independentOfFix);
 
   /// The station on offer: the one picked from the `Von` row, else the best one within 300 m.
   /// Null while no fix is worth trusting.

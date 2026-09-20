@@ -63,6 +63,7 @@ number wins.
 | [31-website.md](31-website.md) | — | The website at verspaetomat.de: one page shaped like a Fahrkarte, four legal documents generated from the app so they cannot drift |
 | [43-karten-und-licht.md](43-karten-und-licht.md) | build 19 | Cards on a cool page and one red light: the redesign, what it replaces in 33/34/37, what it cost and what is still open |
 | [44-bahnhoefe-aus-unserer-datenbank.md](44-bahnhoefe-aus-unserer-datenbank.md) | build 20 | The stations are ours now: a table, ids of our own, imported from the Transitous GTFS — and no coordinate leaves the server for them |
+| [45-bahnhoefe-auf-dem-telefon.md](45-bahnhoefe-auf-dem-telefon.md) | build 20 | The station extract `.vst`, byte by byte: what the phone reads instead of asking, how it is published and how the format grows |
 
 Two numbers are used twice: `20-backend.md` and `21-data-requirements.md` came first, the decision
 series later walked into the same numbers. In prose and in code comments a bare **docs/20** or

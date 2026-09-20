@@ -23,6 +23,7 @@
 //! than on the server: it is a 338 MB download and a pass over 2.8 GB of stop times, and the VPS
 //! has an API to serve.
 
+pub mod extract;
 pub mod gtfs;
 
 use std::collections::HashMap;

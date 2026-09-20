@@ -1,14 +1,45 @@
 import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show kReleaseMode;
+
 import '../api/client.dart';
 import '../api/token_store.dart';
+import '../platform/diagnose_log.dart';
+import '../stations/station_store.dart';
 import 'app_repository.dart';
 
-/// The real thing: every call goes to the backend.
+/// The real thing: every call goes to the backend — except the two that no longer have to.
 class HttpRepository implements AppRepository {
-  HttpRepository({required this.client, required this.tokens});
+  HttpRepository({required this.client, required this.tokens, StationStore? stations})
+      : stations = stations ?? StationStore();
 
   final ApiClient client;
   final TokenStore tokens;
+
+  /// The phone's own copy of the station table (issue #39).
+  final StationStore stations;
+
+  /// Where Stellwerk says this customer is.
+  ///
+  /// The client-side half of what `handlers::stations_nearby` used to do server-side
+  /// (backend/src/handlers.rs:66-73): the override wins over the phone's own fix. It arrives on
+  /// the SSE `location` event (backend/src/admin.rs:422) and is seeded from `hello`
+  /// (backend/src/events.rs:82); `repo_scope.dart` sets it.
+  ApiSimLocation? simLocation;
+
+  void setSimLocation(ApiSimLocation? at) => simLocation = at;
+
+  /// The rung issue #39 leaves out, kept alive for `workflow_test.dart` and `stellwerk locate`.
+  ///
+  /// A compile-time constant, so a release build has **no reachable call** to
+  /// `/v1/stations/nearby` or `/v1/stations/search` at all: `!kReleaseMode` closes the door even
+  /// if somebody passed the define to a store build. The same shape as `GeofenceSync.automation`
+  /// (app/lib/platform/geofence_sync.dart:36) and `TicketPhoto.automation`
+  /// (app/lib/screens/claims/ticket_photo.dart:25).
+  static const bool allowServerStations = !kReleaseMode &&
+      (String.fromEnvironment('E2E') == 'true' ||
+          String.fromEnvironment('NO_LOCATION') == '1' ||
+          String.fromEnvironment('NO_LOCATION') == 'true');
 
   @override
   String get label => 'Lokal (${client.baseUrl})';
@@ -48,10 +79,66 @@ class HttpRepository implements AppRepository {
   @override
   Future<String> exportMe() => client.exportMe();
 
+  /// The stations around a point, from the phone's own table (issue #39).
+  ///
+  /// The ladder: the downloaded extract, else the one shipped with the build, else — only under
+  /// the automation defines, and never in a release build — the server. There is deliberately no
+  /// „ask the server" rung for a passenger: the whole point of the exercise is that a coordinate
+  /// stops leaving the phone for this question.
   @override
-  Future<ApiNearby> nearbyStations({double? lat, double? lon}) => client.stationsNearby(lat: lat, lon: lon);
+  Future<ApiNearby> nearbyStations({double? lat, double? lon}) async {
+    final local = await _localNearby(lat: lat, lon: lon);
+    if (local != null && local.stations.isNotEmpty) return local;
+    // Asking the server only after an empty local answer means the E2E exercises the new code
+    // when it works, and still passes on a machine whose asset is stale.
+    if (allowServerStations) return client.stationsNearby(lat: lat, lon: lon);
+    return local ?? const ApiNearby(stations: [], source: 'none');
+  }
+
+  /// Rungs 1–2: the extract, around the Stellwerk override when there is one and the phone's own
+  /// fix otherwise. Null when no extract could be read at all.
+  Future<ApiNearby?> _localNearby({double? lat, double? lon}) async {
+    final ix = await stations.index();
+    if (ix == null) return null;
+    final sim = simLocation;
+    if (sim != null) {
+      final answer = ix.nearby(lat: sim.lat, lon: sim.lon, source: 'stellwerk', label: sim.label);
+      _logNearby(answer);
+      return answer;
+    }
+    // No fix and no override is the same nothing the server answered (backend/src/handlers.rs:73).
+    if (lat == null || lon == null) return const ApiNearby(stations: [], source: 'none');
+    final answer = ix.nearby(lat: lat, lon: lon);
+    _logNearby(answer);
+    return answer;
+  }
+
+  /// The shape of the answer, never the query. The log has to stay safe to paste into a message
+  /// (app/lib/platform/diagnose_log.dart:12-16), and writing the passenger's position into it for
+  /// a lookup that no longer leaves the phone would add a disclosure at the moment this work
+  /// removes one.
+  void _logNearby(ApiNearby answer) {
+    if (answer.stations.isEmpty) {
+      DiagnoseLog.instance.add('stations', 'nearby → 0 · nichts in 50 km');
+      return;
+    }
+    DiagnoseLog.instance.add(
+      'stations',
+      'nearby → ${answer.stations.length} · ${answer.searchRadiusM} m${answer.complete ? ' · complete' : ''}',
+    );
+  }
+
   @override
-  Future<List<ApiStation>> searchStations(String query) => client.stationsSearch(query);
+  Future<List<ApiStation>> searchStations(String query) async {
+    final ix = await stations.index();
+    if (ix != null) {
+      final hits = ix.search(query);
+      DiagnoseLog.instance.add('stations', 'suche → ${hits.length}');
+      if (hits.isNotEmpty || !allowServerStations) return hits;
+    }
+    if (allowServerStations) return client.stationsSearch(query);
+    return const [];
+  }
   @override
   Future<List<ApiDeparture>> departures(String stationId) => client.departures(stationId);
   @override

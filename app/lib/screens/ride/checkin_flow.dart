@@ -316,7 +316,16 @@ class _VonSheetState extends State<_VonSheet> {
                 ] else if (nothingKnown)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: VSpace.s),
-                    child: Text('Wir wissen gerade nicht, wo du bist.', style: VText.bodyS),
+                    // Two empty answers reach this line and they are not the same sentence. The
+                    // phone knows where it is and our table has nothing there (issue #39), or the
+                    // phone does not know where it is at all. The search row below is the way on
+                    // either way.
+                    child: Text(
+                      near?.noStationNearby == true
+                          ? 'Im Umkreis von 50 Kilometern kennen wir keinen Bahnhof.'
+                          : 'Wir wissen gerade nicht, wo du bist.',
+                      style: VText.bodyS,
+                    ),
                   ),
 
                 if (!_frequentLoaded) ...[

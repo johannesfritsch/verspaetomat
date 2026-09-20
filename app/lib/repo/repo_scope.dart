@@ -157,7 +157,22 @@ class Session extends ChangeNotifier {
     mode = local ? BackendMode.local : BackendMode.demo;
     await _bootstrap();
     _startTicking();
+    // Never on the launch path: the stations the app already has are the ones it answers from,
+    // and a check that found a newer table ten seconds later is just as good.
+    unawaited(Future<void>.delayed(const Duration(seconds: 10), stationsUpdateCheck));
     if (me?.settings.onboardingDone == true) await prefs.setBool(onboardingDoneKey, true);
+  }
+
+  /// The check for a newer station extract (issue #39). A no-op in Demo, and a no-op inside the
+  /// store until the interval has passed — the gate is there, not here, so an extra call costs a
+  /// file read.
+  Future<void> stationsUpdateCheck() async {
+    if (!isLocal) return;
+    try {
+      await _http.stations.maybeCheckForUpdate();
+    } catch (_) {
+      // The website was unreachable. The extract in hand still answers.
+    }
   }
 
   /// The local dev backend keeps the original, unprefixed slot so existing dev accounts survive.
@@ -179,6 +194,41 @@ class Session extends ChangeNotifier {
     if (t == null) return;
     final es = EventStream(baseUrl: apiUrl, token: () => t);
     es.events.listen((e) async {
+      // These three run before `_eventsOut.add(e)` on purpose. `NearbyMonitor` listens to
+      // `_eventsOut`, not to `es.events`, and refreshes on anything `touchesLocation`
+      // (app/lib/api/events.dart:20) — so this ordering, not subscription order, is what
+      // guarantees the override is in place before the refresh it triggers asks for stations.
+      if (isLocal) {
+        // Stellwerk moved the customer (backend/src/admin.rs:422). The payload matters now: the
+        // app resolves the override from its own table, where it used to be the server that read
+        // the same row. A clear carries `{"source":"gps"}` and no coordinates, and folds to null.
+        if (e.kind == 'location') _http.setSimLocation(ApiSimLocation.fromJson(e.data));
+        // The reset deleted the row (backend/src/admin.rs:368) and published `reset`, not
+        // `location`. Clearing synchronously is the point: `reset` is in `touchesLocation`, so a
+        // refresh is already on its way, and an await would let it answer from an override the
+        // server no longer has.
+        if (e.kind == 'reset') _http.setSimLocation(null);
+        // Every connect *and* reconnect, so an override set while the socket was down is not
+        // missed until the next launch. Only when the server actually speaks this: an older
+        // backend sends no `sim_location` at all, and a reconnect must not then wipe an override
+        // we were told about over `location`.
+        if (e.kind == 'hello' && e.data.containsKey('sim_location')) {
+          final seed = ApiSimLocation.fromJson(e.data['sim_location']);
+          final held = _http.simLocation;
+          final changed = seed?.lat != held?.lat || seed?.lon != held?.lon;
+          _http.setSimLocation(seed);
+          // Nothing refreshes on `hello`, so when the seed changes what we hold, hand
+          // `NearbyMonitor` the one event it already reacts to.
+          if (changed && !_eventsOut.isClosed) {
+            _eventsOut.add(AppEvent('location', {
+              if (seed != null) 'lat': seed.lat,
+              if (seed != null) 'lon': seed.lon,
+              if (seed != null) 'label': seed.label,
+              'source': seed == null ? 'gps' : 'stellwerk',
+            }));
+          }
+        }
+      }
       _eventsOut.add(e);
       if (e.kind == 'mail') {
         try {
