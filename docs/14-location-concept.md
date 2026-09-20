@@ -1,16 +1,24 @@
 # 14 — Where is the customer? The location concept
 
-The one promise printed in the app: *Dein Standort bleibt am Bahnhof.* Everything below follows from it.
+The one promise printed in the app: *Dein Standort bleibt am Bahnhof.* Everything below follows from it. It is the goal, not yet a description: the foreground reached it with #39, the background layer has not.
 
-## Source of truth: the phone, at three moments only
+## Source of truth: the phone, and where each fix goes
 
-| Moment | What we read | Why | Stored? |
+| Moment | What we read | Where it goes | Stored? |
 |---|---|---|---|
-| Opening the Bahnsteig | one position fix | list stations nearby, show the nudge when a station is within 300 m | no |
-| Checking in | one position fix | mark the ride "verified" for the boards (within 500 m of the from-station) | lat/lon on the ride only |
-| During the ride | nothing | the server follows the train, not the phone | — |
+| App open, not riding | a low-accuracy stream reporting every 500 m (`nearby_monitor.dart:38,142-144`), plus a fresh fix at start, on resume and on any forced refresh | since #39, nowhere: the nearby list and the station search are answered from the extract on the phone | no |
+| Checking in | one position fix | `POST /v1/journeys`, `from_lat`/`from_lon` | lat/lon on that ride only — and the geofence set is built from it (`handlers.rs:422`) |
+| Entering a station region, app closed | iOS: up to six minutes of fixes (`nearWatchWindow`, `Geofence.swift:64`). Android: one fix after the platform's three-minute dwell (`GeofenceManager.kt:61,205`) | nowhere | no |
+| Leaving the covered area, app closed | one fix | **still `GET /v1/stations/nearby`** — the native layer is not part of #39 | no |
+| During the ride | nothing of its own | the server follows the train, not the phone — but the line above keeps firing, because `riding` suppresses the nudge and not the lookup | — |
 
-No continuous tracking, no location history. The background nudge (decided 10 September 2026) uses the operating system's region monitoring, not location updates: see [15-geofence.md](15-geofence.md). It adds one moment: the phone takes fixes for up to 90 s after entering a registered station region, and one nearby query when it leaves the umbrella region. Nothing from that is stored.
+No location history in the database. The background nudge (decided 10 September 2026) uses the
+operating system's region monitoring, not location updates: see [15-geofence.md](15-geofence.md).
+
+**What is not yet true.** docs/25 measured fourteen background lookups in fifty-nine minutes on one
+journey. #39 took the foreground off the wire; the native layer still asks, so a phone still reports
+where it is while nobody is looking at it. That is the next issue, and until it lands the
+Datenschutzerklärung says so in as many words.
 
 ## The server never guesses
 
@@ -54,7 +62,7 @@ A ride is `location_verified` only when the phone's own fix at check-in lies wit
 ## Stellwerk
 
 ```
-stellwerk locate Johannes "Köln Hbf"      # by station name (geocoded through Transitous)
+stellwerk locate Johannes "Köln Hbf"      # by station name (from our own table since #37)
 stellwerk locate Johannes 50.943,6.9586   # by coordinates
 stellwerk locate Johannes --clear         # the phone decides again
 stellwerk reset Johannes                  # also clears the location
@@ -68,4 +76,11 @@ The override lives in `sim_customer_location`, one row per customer, and applies
 
 ## Privacy summary
 
-Coordinates leave the phone only as a query parameter for nearby stations and, at check-in, as the verification fix stored on that ride. Nothing else stores or derives position. The Datenschutz-Folgenabschätzung in docs/05 should describe exactly this and nothing more.
+Coordinates leave the phone at two moments: at check-in, as the verification fix stored on that
+ride, and — with the app closed — on the native layer's `GET /v1/stations/nearby`, which #39 did
+not touch. The foreground stopped sending them with #39. Nothing stores or derives a position
+beyond the ride's own fix, and nothing outside this server sees one at all since #37.
+
+The Datenschutz-Folgenabschätzung in docs/05 should describe exactly this and nothing more — and
+docs/05:16 still says "location at two moments" in the old sense, which was already wrong before
+any of this and is on the list with the rest of the copy (#38).
