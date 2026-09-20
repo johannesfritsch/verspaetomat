@@ -154,11 +154,14 @@ class BoardRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final me = entry.isMe;
-    // No horizontal inset: the rows share the card's gutter with the tabs above them, the
+    // No inset on the left: the rows share the card's gutter with the tabs above them, the
     // hairlines between them and the footnote below them, and 8 pt of their own put the names on
-    // a different left edge from everything else in the card.
+    // a different left edge from everything else in the card. The right needs one, because your
+    // own row is the only one with something drawn behind it: the points stood on the very edge
+    // of the tint and read as a number that had been cut off (#35). Every row is inset by the
+    // same amount, tinted or not, so the figures stay in one column down the list.
     final content = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
+      padding: const EdgeInsets.fromLTRB(0, 9, VSpace.md, 9),
       child: Row(
         children: [
           _Rank(rank: entry.rank, me: me),
