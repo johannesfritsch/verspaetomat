@@ -45,7 +45,7 @@ pub fn points_for(final_delay_min: i64, cancelled: bool) -> i64 {
 }
 
 /// Start the follower loop. Returns a receiver on which every finalised ride is announced.
-pub fn spawn(pool: PgPool, client: Arc<TrainSource>, interval: Duration) -> broadcast::Receiver<RideFinalised> {
+pub fn spawn(pool: PgPool, client: Arc<TrainSource>, stations: crate::stations::Shared, interval: Duration) -> broadcast::Receiver<RideFinalised> {
     let (tx, rx) = broadcast::channel::<RideFinalised>(64);
     let announce = tx.clone();
     tokio::spawn(async move {
@@ -53,7 +53,7 @@ pub fn spawn(pool: PgPool, client: Arc<TrainSource>, interval: Duration) -> broa
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            if let Err(e) = poll_once(&pool, &client, &announce).await {
+            if let Err(e) = poll_once(&pool, &client, &crate::stations::snapshot(&stations), &announce).await {
                 tracing::warn!(error = %e, "trip follower: poll failed");
             }
         }
@@ -62,7 +62,7 @@ pub fn spawn(pool: PgPool, client: Arc<TrainSource>, interval: Duration) -> broa
 }
 
 /// One pass over all riding rides. Public so a demo control or a test can drive it.
-pub async fn poll_once(pool: &PgPool, client: &TrainSource, announce: &broadcast::Sender<RideFinalised>) -> Result<()> {
+pub async fn poll_once(pool: &PgPool, client: &TrainSource, stations: &crate::stations::Index, announce: &broadcast::Sender<RideFinalised>) -> Result<()> {
     let riding: Vec<RidingRow> = sqlx::query_as(
         "select id, customer_id, trip_id, exit_station_id, exit_station_name, planned_arrival \
          from rides where status = 'riding' order by checked_in_at",
@@ -74,7 +74,7 @@ pub async fn poll_once(pool: &PgPool, client: &TrainSource, announce: &broadcast
     for row in riding {
         match client.trip(&row.trip_id).await {
             Ok(trip) => {
-                if let Err(e) = apply_trip(pool, &row, &trip, announce).await {
+                if let Err(e) = apply_trip(pool, &row, &trip, stations, announce).await {
                     tracing::warn!(ride = %row.id, error = %e, "trip follower: apply failed");
                 }
             }
@@ -91,7 +91,7 @@ pub async fn poll_once(pool: &PgPool, client: &TrainSource, announce: &broadcast
     Ok(())
 }
 
-async fn apply_trip(pool: &PgPool, row: &RidingRow, trip: &TripInfo, announce: &broadcast::Sender<RideFinalised>) -> Result<()> {
+async fn apply_trip(pool: &PgPool, row: &RidingRow, trip: &TripInfo, stations: &crate::stations::Index, announce: &broadcast::Sender<RideFinalised>) -> Result<()> {
     let now = crate::clock::now();
 
     sqlx::query("insert into ride_snapshots (ride_id, source, payload) values ($1, 'transitous', $2)")
@@ -101,7 +101,7 @@ async fn apply_trip(pool: &PgPool, row: &RidingRow, trip: &TripInfo, announce: &
         .await
         .context("insert snapshot")?;
 
-    let exit = trip.find_stop(Some(row.exit_station_id.as_str()), &row.exit_station_name);
+    let exit = trip.find_stop(&stations.candidate_ids(&row.exit_station_id), &row.exit_station_name);
     let passed_stops = trip
         .stops
         .iter()

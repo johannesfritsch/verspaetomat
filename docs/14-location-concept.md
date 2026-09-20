@@ -22,6 +22,19 @@ No continuous tracking, no location history. The background nudge (decided 10 Se
 
 There is no default station. A fresh install with location denied sees the search field, not Köln Hbf.
 
+Since issue #37 the answer is computed from our own `stations` table (docs/44) rather than by
+asking Transitous. Two things follow, and both are worth saying plainly:
+
+- **The coordinates stop at us.** They used to be forwarded to `api.transitous.org` as part of the
+  lookup. They are not any more. Nothing outside this server ever sees where the passenger is.
+- **There is no live fallback.** If the table has no station near a point, the honest answer is
+  that there is none. A fallback would have fired hardest in the rural places a sparse answer is
+  the correct one for, and would have put the coordinates back on the wire for exactly the people
+  least able to notice.
+
+The station search is the same story: `GET /v1/stations/search` reads the table, so a station name
+typed into the `Von` row no longer leaves the server either.
+
 ## What the customer sees
 
 | State | Bahnsteig shows |

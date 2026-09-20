@@ -277,8 +277,12 @@ pub async fn current_payload(s: &AppState, j: &JourneyRow, just_arrived: bool) -
 // Creating journeys and legs
 // ---------------------------------------------------------------------------
 
-fn find_stop<'a>(t: &'a TripInfo, id: &str, name: &str) -> Option<(usize, &'a crate::train::TripStop)> {
-    t.find_stop(Some(id), name)
+/// The stop on this trip that a stored station id names.
+///
+/// The index turns our own id into every MOTIS id the station answers to, because the trip names
+/// its stops under whichever feed ran the train (issue #37).
+pub fn find_stop<'a>(t: &'a TripInfo, ix: &crate::stations::Index, id: &str, name: &str) -> Option<(usize, &'a crate::train::TripStop)> {
+    t.find_stop(&ix.candidate_ids(id), name)
 }
 
 /// A leg description from a live trip and its two stops (both must be on the trip, in order).
@@ -305,9 +309,9 @@ pub fn settle_operator(ops: &[OperatorRow], from_trip: &str, from_plan: Option<&
     }
 }
 
-fn leg_from_trip(t: &TripInfo, ops: &[OperatorRow], from_id: &str, from_name: &str, to_id: &str, to_name: &str) -> Result<PlanLeg, String> {
-    let (fi, from) = find_stop(t, from_id, from_name).ok_or_else(|| format!("{from_name} liegt nicht auf diesem Zug"))?;
-    let (ti, to) = find_stop(t, to_id, to_name).ok_or_else(|| format!("{to_name} liegt nicht auf diesem Zug"))?;
+fn leg_from_trip(t: &TripInfo, ops: &[OperatorRow], ix: &crate::stations::Index, from_id: &str, from_name: &str, to_id: &str, to_name: &str) -> Result<PlanLeg, String> {
+    let (fi, from) = find_stop(t, ix, from_id, from_name).ok_or_else(|| format!("{from_name} liegt nicht auf diesem Zug"))?;
+    let (ti, to) = find_stop(t, ix, to_id, to_name).ok_or_else(|| format!("{to_name} liegt nicht auf diesem Zug"))?;
     if ti <= fi {
         return Err(format!("{to_name} liegt vor {from_name}"));
     }
@@ -452,6 +456,7 @@ pub async fn create(State(s): State<AppState>, c: Customer, Json(b): Json<Create
         return Err(err(StatusCode::CONFLICT, "already riding; arrive or dismiss first"));
     }
     let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
+    let ix = s.stations();
     // Re-read every trip: the snapshot is what the timetable promises now, not what the app cached.
     let mut legs: Vec<PlanLeg> = Vec::with_capacity(b.legs.len());
     let mut trips: Vec<TripInfo> = Vec::with_capacity(b.legs.len());
@@ -459,7 +464,7 @@ pub async fn create(State(s): State<AppState>, c: Customer, Json(b): Json<Create
         let t = s.train.trip(&l.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip {}: {e}", l.trip_id)))?;
         let from_name = if i == 0 { b.from_station_name.as_str() } else { l.from_station_name.as_deref().unwrap_or("") };
         let to_name = if i == b.legs.len() - 1 { b.to_station_name.as_str() } else { l.to_station_name.as_deref().unwrap_or("") };
-        let mut leg = leg_from_trip(&t, &ops, &l.from_station_id, from_name, &l.to_station_id, to_name).map_err(|m| err(StatusCode::BAD_REQUEST, &m))?;
+        let mut leg = leg_from_trip(&t, &ops, &ix, &l.from_station_id, from_name, &l.to_station_id, to_name).map_err(|m| err(StatusCode::BAD_REQUEST, &m))?;
         leg.operator = settle_operator(&ops, &leg.operator, l.operator.as_deref());
         legs.push(leg);
         trips.push(t);
@@ -675,7 +680,8 @@ pub async fn plan(State(s): State<AppState>, _c: Customer, Query(q): Query<PlanQ
     // Room for both halves: on a dense line the last half hour alone would fill a list of four
     // and leave nothing to board.
     let n = if back > 0 { 7 } else { 4 };
-    let mut its = s.train.plan(&q.from, &q.to, time, n).await.map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("plan: {e}")))?;
+    let ix = s.stations();
+    let mut its = s.train.plan(&ix.upstream_id(&q.from), &ix.upstream_id(&q.to), time, n).await.map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("plan: {e}")))?;
     if let Some(ft) = &q.first_trip {
         its.retain(|it| it.legs.first().map(|l| &l.trip_id == ft).unwrap_or(false));
     }
@@ -780,6 +786,7 @@ pub async fn confirm(s: &AppState, customer: &CustomerRow, j: &JourneyRow, trip_
     };
     let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
     let t = s.train.trip(&trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip: {e}")))?;
+    let ix = s.stations();
     let mut legs = plan_legs(j);
     let idx = j.current_leg as usize; // 0-based index of the next leg in the plan
     let last_ride: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 order by leg_no desc limit 1").bind(j.id).fetch_optional(&s.pool).await.map_err(internal)?;
@@ -792,18 +799,18 @@ pub async fn confirm(s: &AppState, customer: &CustomerRow, j: &JourneyRow, trip_
         None => (j.origin_station_id.clone(), j.origin_station_name.clone()),
     };
     let leg = match &proposal {
-        Some(p) if p.trip_id == trip_id => leg_from_trip(&t, &ops, &p.from_station_id, &p.from_station_name, &p.to_station_id, &p.to_station_name)
-            .or_else(|_| leg_from_trip(&t, &ops, &from_id, &from_name, &p.to_station_id, &p.to_station_name))
+        Some(p) if p.trip_id == trip_id => leg_from_trip(&t, &ops, &ix, &p.from_station_id, &p.from_station_name, &p.to_station_id, &p.to_station_name)
+            .or_else(|_| leg_from_trip(&t, &ops, &ix, &from_id, &from_name, &p.to_station_id, &p.to_station_name))
             .map_err(|m| err(StatusCode::BAD_REQUEST, &m))?,
         _ => {
             // Any train from here: to the destination if it gets there, else to the next planned transfer.
-            let dest = leg_from_trip(&t, &ops, &from_id, &from_name, &j.destination_station_id, &j.destination_station_name);
+            let dest = leg_from_trip(&t, &ops, &ix, &from_id, &from_name, &j.destination_station_id, &j.destination_station_name);
             match dest {
                 Ok(l) => l,
                 Err(_) => {
                     let next_transfer = legs.get(idx + 1).map(|n| (n.from_station_id.clone(), n.from_station_name.clone()));
                     match next_transfer {
-                        Some((tid, tname)) => leg_from_trip(&t, &ops, &from_id, &from_name, &tid, &tname).map_err(|m| err(StatusCode::BAD_REQUEST, &m))?,
+                        Some((tid, tname)) => leg_from_trip(&t, &ops, &ix, &from_id, &from_name, &tid, &tname).map_err(|m| err(StatusCode::BAD_REQUEST, &m))?,
                         None => return Err(err(StatusCode::BAD_REQUEST, "dieser Zug fährt nicht zum Ziel")),
                     }
                 }
@@ -993,8 +1000,9 @@ pub async fn finish(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
 /// None when the trip cannot be read or the train is already at its exit stop.
 async fn next_stop_of(s: AppState, r: &RideRow) -> Option<(String, String)> {
     let t = s.train.trip(&r.trip_id).await.ok()?;
-    let (from_idx, _) = t.find_stop(Some(r.from_station_id.as_str()), &r.from_station_name)?;
-    let (exit_idx, _) = t.find_stop(Some(r.exit_station_id.as_str()), &r.exit_station_name)?;
+    let ix = s.stations();
+    let (from_idx, _) = t.find_stop(&ix.candidate_ids(&r.from_station_id), &r.from_station_name)?;
+    let (exit_idx, _) = t.find_stop(&ix.candidate_ids(&r.exit_station_id), &r.exit_station_name)?;
     let next = (from_idx + r.passed_stops.max(0) as usize + 1).min(exit_idx);
     let stop = t.stops.get(next)?;
     Some((stop.stop_id.clone().unwrap_or_else(|| r.exit_station_id.clone()), stop.name.clone()))
@@ -1037,8 +1045,9 @@ pub async fn change_train(State(s): State<AppState>, c: Customer, Path(id): Path
             // same exit stop when it reaches it.
             let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
             let t = s.train.trip(&b.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip: {e}")))?;
-            let leg = leg_from_trip(&t, &ops, &new_from_id, &new_from_name, &r.exit_station_id, &r.exit_station_name)
-                .or_else(|_| leg_from_trip(&t, &ops, &new_from_id, &new_from_name, &j.destination_station_id, &j.destination_station_name))
+            let ix = s.stations();
+            let leg = leg_from_trip(&t, &ops, &ix, &new_from_id, &new_from_name, &r.exit_station_id, &r.exit_station_name)
+                .or_else(|_| leg_from_trip(&t, &ops, &ix, &new_from_id, &new_from_name, &j.destination_station_id, &j.destination_station_name))
                 .map_err(|m| err(StatusCode::BAD_REQUEST, &m))?;
             // The effective plan carries the new train at the same position.
             let mut legs = plan_legs(&j);
@@ -1127,7 +1136,7 @@ pub async fn replan(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
     // The earliest way onward from here, so the app can propose it and so the pause the passenger
     // may now take is not billed to the railway (docs/21 §2).
     let mut updated = updated;
-    match s.train.plan(&station_id, &j.destination_station_id, crate::clock::now(), 3).await {
+    match s.train.plan(&s.stations().upstream_id(&station_id), &s.stations().upstream_id(&j.destination_station_id), crate::clock::now(), 3).await {
         Ok(its) if !its.is_empty() => {
             let it = &its[0];
             let arrival = it.live_arrival.unwrap_or(it.planned_arrival);
@@ -1191,7 +1200,7 @@ pub async fn on_leg_finalised(s: &AppState, ride: &RideRow) -> anyhow::Result<Le
         // Live view of the planned connection.
         let (next_departure, next_cancelled) = match s.train.trip(&planned_next.trip_id).await {
             Ok(t) => {
-                let stop = t.find_stop(Some(planned_next.from_station_id.as_str()), &planned_next.from_station_name).map(|(_, st)| st.clone());
+                let stop = t.find_stop(&s.stations().candidate_ids(&planned_next.from_station_id), &planned_next.from_station_name).map(|(_, st)| st.clone());
                 let dep = stop.as_ref().and_then(|st| st.live_departure.or(st.scheduled_departure)).unwrap_or(planned_next.planned_departure);
                 (dep, t.cancelled || stop.map(|st| st.cancelled).unwrap_or(false))
             }
@@ -1204,7 +1213,7 @@ pub async fn on_leg_finalised(s: &AppState, ride: &RideRow) -> anyhow::Result<Le
         let mut replanned = false;
         if missed {
             reason = Some(if next_cancelled { "ausfall" } else { "verpasst" });
-            match s.train.plan(&transfer_id, &j.destination_station_id, actual + Duration::minutes(1), 3).await {
+            match s.train.plan(&s.stations().upstream_id(&transfer_id), &s.stations().upstream_id(&j.destination_station_id), actual + Duration::minutes(1), 3).await {
                 Ok(its) if !its.is_empty() => {
                     let it = &its[0];
                     proposal = it.legs[0].clone();

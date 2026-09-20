@@ -75,10 +75,15 @@ pub async fn stations_nearby(State(s): State<AppState>, c: Customer, Query(q): Q
         _ => return Ok(Json(json!({ "stations": [], "source": "none", "label": null }))),
     };
     // `limit` is opt-in and defaults to today's three (issue #31). The Bahnsteig re-resolves as
-    // the phone moves and must stay on the cheap path; only the geofence layer, which asks once
-    // per umbrella exit, asks for the wider list it needs to size its umbrella.
+    // the phone moves; the geofence layer, which asks once per umbrella exit, asks for the wider
+    // list it needs to size its umbrella. Both are now the same scan and neither costs a request.
     let limit = q.limit.unwrap_or(3).clamp(1, 25);
-    let answer = s.train.nearby_stops_within(lat, lon, limit).await.map_err(internal)?;
+    // Answered from our own table (issue #37), with no fallback to the live lookup. A fallback
+    // would fire hardest in exactly the places a sparse answer is the correct one — Kißlegg,
+    // Wangen — and would quietly put the passenger's coordinates back on the wire for the people
+    // least able to notice. An empty answer here means the table is wrong, and the table is ours
+    // to fix.
+    let answer = s.stations().nearby(lat, lon, limit);
     Ok(Json(json!({
         "stations": answer.stations,
         "source": source,
@@ -98,13 +103,25 @@ pub struct SearchQ {
     pub q: String,
 }
 
+/// The search field's answer, from our own table (issue #37).
+///
+/// This had to move with `nearby` rather than after it: the two lists feed the same `Von` row, so
+/// a search that still answered with MOTIS ids would put two id namespaces on one screen and the
+/// station a passenger picked by hand would be written into the ride under a different kind of id
+/// than the one they tapped. It also takes a free-text station name off the wire, which was a
+/// small leak nobody had asked for.
 pub async fn stations_search(State(s): State<AppState>, _c: Customer, Query(q): Query<SearchQ>) -> ApiResult {
-    let stops = s.train.search_stops(&q.q).await.map_err(internal)?;
-    Ok(Json(json!(stops)))
+    Ok(Json(json!(s.stations().search(&q.q, SEARCH_RESULTS))))
 }
 
+/// How many stations a search offers. The `Von` row shows a short list; more than this is a
+/// scroll nobody reads.
+const SEARCH_RESULTS: usize = 12;
+
 pub async fn departures(State(s): State<AppState>, _c: Customer, Path(id): Path<String>) -> ApiResult {
-    let deps = s.train.departures(&id, 150).await.map_err(internal)?;
+    // Ours on the wire, MOTIS' on the way out. An id from a build older than the table is not one
+    // of ours and passes through unchanged.
+    let deps = s.train.departures(&s.stations().upstream_id(&id), 150).await.map_err(internal)?;
     let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
     let out: Vec<Value> = deps
         .into_iter()
@@ -679,11 +696,15 @@ pub struct LocationFix {
 }
 
 
-fn find_stop<'a>(t: &'a TripInfo, id: &str, name: &str) -> Option<&'a crate::train::TripStop> {
+/// The stop on this trip that a station id names — our own id, or a MOTIS id from a build older
+/// than the station table (issue #37). The index knows every id the station answers to, because
+/// the trip names its stops under whichever feed ran the train.
+fn find_stop<'a>(t: &'a TripInfo, ix: &crate::stations::Index, id: &str, name: &str) -> Option<&'a crate::train::TripStop> {
     let n = normalise_station_name(name);
+    let ids = ix.candidate_ids(id);
     t.stops
         .iter()
-        .find(|st| st.stop_id.as_deref() == Some(id))
+        .find(|st| st.stop_id.as_ref().is_some_and(|sid| ids.iter().any(|i| i == sid)))
         .or_else(|| t.stops.iter().find(|st| normalise_station_name(&st.name) == n))
         .or_else(|| t.stops.iter().find(|st| {
             let a = normalise_station_name(&st.name);
@@ -871,8 +892,8 @@ pub struct Nachtrag {
 
 pub async fn nachtrag(State(s): State<AppState>, c: Customer, Json(n): Json<Nachtrag>) -> ApiResult {
     let t = s.train.trip(&n.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip: {e}")))?;
-    let from = find_stop(&t, &n.from_station_id, &n.from_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "from station not on this trip"))?;
-    let exit = find_stop(&t, &n.exit_station_id, &n.exit_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "exit stop not on this trip"))?;
+    let from = find_stop(&t, &s.stations(), &n.from_station_id, &n.from_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "from station not on this trip"))?;
+    let exit = find_stop(&t, &s.stations(), &n.exit_station_id, &n.exit_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "exit stop not on this trip"))?;
     let planned_departure = from.scheduled_departure.or(from.scheduled_arrival).ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled departure"))?;
     let planned_arrival = exit.scheduled_arrival.ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled arrival"))?;
     let actual = exit.live_arrival.unwrap_or(planned_arrival);

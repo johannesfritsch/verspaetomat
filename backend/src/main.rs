@@ -1,8 +1,13 @@
 #![allow(clippy::type_complexity)]
+// `clock`, `stations` and `train` live in the library half of this crate, because
+// `stellwerk stations import` needs them too (see src/lib.rs). They are re-exported at the binary's
+// root so that every `crate::train::…` in the modules below keeps resolving, and so that exactly
+// one copy of them is compiled rather than one per target.
+pub use verspaetomat_api::{clock, stations, train};
+
 mod admin;
 mod auth;
 mod classify;
-mod clock;
 mod db;
 mod events;
 mod fixtures;
@@ -18,7 +23,6 @@ mod reply;
 mod rules;
 mod scanner;
 mod storage;
-mod train;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,6 +44,25 @@ pub struct AppState {
     pub train: Arc<TrainSource>,
     pub events: Arc<events::EventHub>,
     pub push: Arc<push::PushSender>,
+    /// Every station we know, in memory (issue #37). Read on every nearby lookup and every time a
+    /// station id has to be turned into something MOTIS answers to, so it is behind a lock that is
+    /// only ever taken to clone the `Arc` out of it — an import swaps a whole new index in and no
+    /// reader waits for it.
+    pub stations: stations::Shared,
+}
+
+impl AppState {
+    pub fn stations(&self) -> Arc<stations::Index> {
+        self.stations.read().expect("stations lock").clone()
+    }
+
+    /// Read the table back into the index. Called at startup and after an import commits.
+    pub async fn reload_stations(&self) -> anyhow::Result<usize> {
+        let index = stations::load(&self.pool).await?;
+        let n = index.len();
+        *self.stations.write().expect("stations lock") = Arc::new(index);
+        Ok(n)
+    }
 }
 
 #[tokio::main]
@@ -55,12 +78,26 @@ async fn main() -> anyhow::Result<()> {
     train.load_overrides(&pool).await?;
     let events = Arc::new(events::EventHub::default());
     let push_sender = Arc::new(push::PushSender::from_env()?);
-    let state = AppState { pool: pool.clone(), train: train.clone(), events: events.clone(), push: push_sender };
+    let state = AppState {
+        pool: pool.clone(),
+        train: train.clone(),
+        events: events.clone(),
+        push: push_sender,
+        stations: Arc::new(std::sync::RwLock::new(Arc::new(stations::Index::default()))),
+    };
+    // The stations are the only reference data the app cannot be served without: with an empty
+    // table the Bahnsteig has nothing to offer and the search finds nothing. Say so loudly at
+    // startup rather than letting it look like a quiet day at the station.
+    match state.reload_stations().await {
+        Ok(0) => tracing::warn!("no stations in the table — run `stellwerk stations import` (issue #37)"),
+        Ok(n) => tracing::info!(stations = n, "stations loaded"),
+        Err(e) => tracing::error!(error = %e, "stations could not be loaded"),
+    }
     // Pushes: the sender taps the event bus before anything publishes.
     push::spawn(state.clone());
 
     // The trip follower finalises rides; we turn finalised rides into incidents.
-    let mut finalised = train::follower::spawn(pool.clone(), train.clone(), Duration::from_secs(45));
+    let mut finalised = train::follower::spawn(pool.clone(), train.clone(), state.stations.clone(), Duration::from_secs(45));
     let state_for_follower = state.clone();
     tokio::spawn(async move {
         while let Ok(ev) = finalised.recv().await {
@@ -186,6 +223,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/routes/answers", post(admin::route_answers))
         .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
         .route("/admin/overrides", get(admin::overrides).delete(admin::clear_overrides))
+        .route("/admin/stations", get(admin::stations_status))
+        // Eight thousand stations is a couple of megabytes of JSON, which is well past the
+        // default body limit — and it arrives in one piece because the matching has to see the
+        // whole country at once to know what is missing from it.
+        .route("/admin/stations/import", post(admin::stations_import).layer(DefaultBodyLimit::max(32 * 1024 * 1024)))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

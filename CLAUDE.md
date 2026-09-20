@@ -21,6 +21,12 @@ cargo build --bins && cargo test && cargo clippy --bins      # must be warning-f
 
 # admin CLI against the local backend
 backend/target/debug/stellwerk customers | locate <who> "Köln Hbf" | delay <who> 68 | ff <who> | reply <who> accepted | reset <who> | forget <who> | push <who> | scan
+
+# stations (issue #37): the table the Bahnsteig and the search read. A fresh database has none,
+# and then every screen that names a station is empty — import once before anything else.
+backend/target/debug/stellwerk stations import          # downloads the feeds, builds, uploads
+backend/target/debug/stellwerk stations import --dry-run # what it would change
+backend/target/debug/stellwerk stations                  # count, feed version, last runs
 backend/target/debug/stellwerk backdate <who> --delay 70 --days 3 --count 3   # rides that already happened, with their cases
 
 # app on the iOS simulator, local mode
@@ -66,6 +72,10 @@ Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (stri
 
 - The backend owns every money rule (`backend/src/rules.rs`); the app never recomputes amounts or readiness.
 - The server never guesses a location; no default station (docs/14). The native geofence layer never talks to the admin API (docs/15).
+- Station ids on the wire are ours (`vs:4711`, `backend/src/stations/`), and the MOTIS ids they
+  stand for never leave the server. An id we have given out is never reused, and an id from a build
+  older than the table still works. There is no live fallback for nearby or search: an empty answer
+  means the table is wrong, and the table is ours to fix (issue #37, docs/44).
 - No streaks, no campaigns, no employer matching, no teams: removed on purpose.
 - Test customers: the E2E resets only its own customer. Do not reset or locate other people's customers without saying so.
 - Sub-screens use the standard header (caption eyebrow + h2 title); tabs use `TabHeader`. Figures in pairs share one size. See the visual pass notes in docs/30.

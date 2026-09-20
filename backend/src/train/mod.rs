@@ -152,11 +152,23 @@ pub struct TripInfo {
 
 impl TripInfo {
     /// Find the exit stop by id first, then by (normalised) name.
-    pub fn find_stop(&self, stop_id: Option<&str>, name: &str) -> Option<(usize, &TripStop)> {
-        if let Some(id) = stop_id {
-            if let Some(hit) = self.stops.iter().enumerate().find(|(_, s)| s.stop_id.as_deref() == Some(id)) {
-                return Some(hit);
-            }
+    ///
+    /// Several ids, because a station is one building and the feeds are many: since issue #37 a
+    /// station carries our own id in the database and one MOTIS id per feed that serves it, and
+    /// the trip that comes back names its stops under whichever feed ran the train. Berlin Hbf on
+    /// a VBB S-Bahn and Berlin Hbf on a DELFI regional service are two strings for one platform,
+    /// and passing both is what lets the exit stop be found by id rather than by name.
+    ///
+    /// The name is still the fallback, and still earns its place: a trip from a feed we hold no
+    /// id for at all has nothing else to match on.
+    pub fn find_stop(&self, ids: &[String], name: &str) -> Option<(usize, &TripStop)> {
+        if let Some(hit) = self
+            .stops
+            .iter()
+            .enumerate()
+            .find(|(_, s)| s.stop_id.as_ref().is_some_and(|sid| ids.iter().any(|id| id == sid)))
+        {
+            return Some(hit);
         }
         self.stops.iter().enumerate().find(|(_, s)| station_names_match(&s.name, name))
     }
@@ -524,5 +536,12 @@ mod tests {
 pub fn display_station_name(name: &str) -> String {
     let n = name.trim();
     let n = n.strip_suffix(" (DE)").unwrap_or(n);
+    // Berlin and Hamburg arrive with the modes that call there written in front of the name:
+    // „S+U Berlin Hauptbahnhof", „S Ostbahnhof (Berlin)", „S Heimfeld". It is a legend off a
+    // network map, not a name — nobody says it out loud, the building does not carry it, and a
+    // Fahrgastrechte form that named the station that way would be answering a question the
+    // railway did not ask. The import found 167 of them, every one a station whose real name is
+    // what follows the prefix (issue #37).
+    let n = ["S+U ", "S ", "U "].iter().find_map(|p| n.strip_prefix(p)).unwrap_or(n);
     n.to_string()
 }

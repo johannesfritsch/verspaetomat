@@ -17,6 +17,7 @@
 //!   stellwerk forget Johannes
 //!   stellwerk route list | set <desk> <address> [--label …] | default <address> | remove <desk>
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
+//!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
 //!   stellwerk scan
 //!
@@ -35,6 +36,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use verspaetomat_api::stations::gtfs;
 
 #[derive(Parser)]
 #[command(name = "stellwerk", about = "Verspätomat Stellwerk: simulate delays, arrivals, replies and time for one customer.")]
@@ -248,6 +250,35 @@ enum RouteCmd {
     },
 }
 
+/// Our own station table (issue #37).
+///
+/// The candidate set is built **here**, on the laptop: it is a 400 MB download and a pass over
+/// 2.8 GB of stop times, and the VPS has an API to serve. The same division of labour as `site/`,
+/// which is generated here and only served there. What crosses the wire is the finished set, and
+/// the server decides what it means for the ids it has already handed to phones.
+#[derive(Subcommand)]
+enum StationsCmd {
+    /// Build the set from the Transitous GTFS feeds and hand it to the server
+    Import {
+        /// Read de_DELFI.gtfs.zip and de_VBB.gtfs.zip from here instead of downloading them
+        #[arg(long)]
+        from: Option<PathBuf>,
+        /// Also write the built set here as JSON, to look at
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Ask the server what it would do. Nothing is written
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+        /// Skip the server's guards, and send even when the sample below came back short. The
+        /// first import needs this: an empty table cannot pass the retirement guard
+        #[arg(long)]
+        force: bool,
+        /// How many of the built ids to ask the live API about before handing them over; 0 skips it
+        #[arg(long, default_value_t = 20)]
+        check: usize,
+    },
+}
+
 #[derive(Subcommand)]
 enum ConfigCmd {
     /// Write the config file; with --ssh, fetch the server's ADMIN_TOKEN over SSH
@@ -457,6 +488,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: NgoCmd,
     },
+    /// Our own station table: build it from the Transitous GTFS feeds and hand it over
+    Stations {
+        #[command(subcommand)]
+        cmd: StationsCmd,
+    },
     /// Import an NGO's monthly statement (CSV date,amount,reference,counterparty; amount "4,50" or "4.50") and confirm matching claims
     /// Send one real test mail from the customer's relay address (assigned if missing); reply to it to test the inbound path
     MailTest {
@@ -500,6 +536,12 @@ impl Api {
     async fn delete(&self, path: &str) -> anyhow::Result<Value> {
         let r = self.http.delete(format!("{}{}", self.url, path)).header("x-admin-token", &self.token).send().await?;
         Self::body(r).await
+    }
+    /// The same target with a longer patience, for the one request that hands over eight thousand
+    /// stations and then waits while the server writes every one of them in a single transaction.
+    fn patient(&self, secs: u64) -> anyhow::Result<Api> {
+        let http = reqwest::Client::builder().timeout(Duration::from_secs(secs)).build()?;
+        Ok(Api { http, url: self.url.clone(), token: self.token.clone() })
     }
     async fn body(r: reqwest::Response) -> anyhow::Result<Value> {
         let status = r.status();
@@ -950,6 +992,55 @@ async fn main() -> anyhow::Result<()> {
             NgoCmd::Remove { id } => {
                 let v = api.delete(&format!("/admin/ngos/{id}")).await?;
                 println!("{}", if v["deleted"].as_bool().unwrap_or(false) { "gelöscht" } else { "deaktiviert (wird referenziert)" });
+            }
+        },
+        Cmd::Stations { cmd } => match cmd {
+            StationsCmd::Import { from, out, dry_run, force, check } => {
+                // The commentary goes to stderr so that the result on stdout stays pipeable, and
+                // it goes out at all because this takes minutes and silence would read as a hang.
+                let progress = std::sync::Arc::new(|line: &str| eprintln!("  {line}"));
+                let set = gtfs::build(gtfs::BuildOptions { from, progress: Some(progress) }).await?;
+                let r = gtfs::ranks(&set);
+                println!(
+                    "{} Stationen  ·  Fern {}  ·  Nahverkehr {}  ·  nur S-Bahn {}  ·  Fahrplanstand {}",
+                    set.stations.len(),
+                    r[3],
+                    r[2],
+                    r[1],
+                    set.feed_version.as_deref().unwrap_or("–")
+                );
+                if let Some(path) = &out {
+                    std::fs::write(path, serde_json::to_vec_pretty(&set)?)?;
+                    println!("Geschrieben: {}", path.display());
+                }
+                // An id that is verbatim in stops.txt is still only a guess about what MOTIS
+                // answers to until MOTIS has answered to it.
+                if check > 0 {
+                    let (ok, tried, failures) = gtfs::sample_upstream(&set, check).await?;
+                    println!("Stichprobe bei Transitous: {ok} von {tried} Ids beantwortet");
+                    for f in failures.iter().take(10) {
+                        println!("  {f}");
+                    }
+                    if ok < tried && !force {
+                        anyhow::bail!("{} Id(s) kennt die API nicht — nichts gesendet (--check 0 oder --force)", tried - ok);
+                    }
+                }
+                let v = api
+                    .patient(600)?
+                    .post(&format!("/admin/stations/import?force={force}&dry_run={dry_run}"), serde_json::to_value(&set)?)
+                    .await?;
+                println!(
+                    "{}: {} neu  ·  {} stillgelegt  ·  {} verschoben  ·  {} umbenannt  ·  {} insgesamt",
+                    if v["committed"].as_bool().unwrap_or(false) { "Übernommen" } else { "Nicht übernommen" },
+                    s(&v, "added"),
+                    s(&v, "retired"),
+                    s(&v, "moved"),
+                    s(&v, "renamed"),
+                    s(&v, "total")
+                );
+                if let Some(note) = v["note"].as_str() {
+                    println!("  {note}");
+                }
             }
         },
         Cmd::MailTest { customer, to, claim } => {

@@ -12,7 +12,7 @@ use tokio::task::JoinSet;
 use super::{agency_to_operator, category_for, haversine_m, parse_line, DepartureInfo, Itinerary, PlanLeg, StopInfo, TripInfo, TripStop};
 
 const DEFAULT_BASE: &str = "https://api.transitous.org";
-const USER_AGENT: &str = "verspaetomat-api/0.1 (+https://verspaetomat.de)";
+pub(crate) const USER_AGENT: &str = "verspaetomat-api/0.1 (+https://verspaetomat.de)";
 const DEPARTURE_CACHE_TTL: Duration = Duration::from_secs(30);
 const PLAN_CACHE_TTL: Duration = Duration::from_secs(60);
 const NEARBY_CANDIDATES: usize = 8;
@@ -493,7 +493,9 @@ pub fn nearby_order(distance_m: i64, rail_rank: i32, name: &str) -> (i64, i32, i
     (distance_m / RANK_BAND_M, -rail_rank, if looks_like_station(name) { 0 } else { 1 }, distance_m)
 }
 
-fn looks_like_station(name: &str) -> bool {
+/// A name that says „this is a railway station" rather than „this is a stop somewhere".
+/// Used as a tiebreaker wherever two stops are otherwise equally good (docs/23 §1).
+pub fn looks_like_station(name: &str) -> bool {
     let n = name.trim_end_matches(')').trim();
     n.ends_with("Hbf") || n.ends_with("Hauptbahnhof") || n.ends_with("Bahnhof") || n.ends_with(" Bf") || n.contains(" Hbf")
 }

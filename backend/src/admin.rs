@@ -115,7 +115,7 @@ pub async fn delay(State(s): State<AppState>, _a: Admin, Path(key): Path<String>
     let mut o = s.train.get_override(&r.trip_id).unwrap_or(TripOverride { trip_id: r.trip_id.clone(), ..Default::default() });
     o.extra_delay_min += b.minutes;
     s.train.set_override(&s.pool, o.clone()).await.map_err(internal)?;
-    let _ = crate::train::follower::poll_once(&s.pool, &s.train, &tokio::sync::broadcast::channel(1).0).await;
+    let _ = crate::train::follower::poll_once(&s.pool, &s.train, &s.stations(), &tokio::sync::broadcast::channel(1).0).await;
     let r: RideRow = sqlx::query_as("select * from rides where id = $1").bind(r.id).fetch_one(&s.pool).await.map_err(internal)?;
     s.events.publish(c.id, "ride", json!({ "ride_id": r.id, "status": "riding", "live_delay_min": r.live_delay_min }));
     Ok(Json(json!({ "override": o, "ride": r })))
@@ -127,7 +127,7 @@ pub async fn cancel(State(s): State<AppState>, _a: Admin, Path(key): Path<String
     let mut o = s.train.get_override(&r.trip_id).unwrap_or(TripOverride { trip_id: r.trip_id.clone(), ..Default::default() });
     o.cancelled = true;
     s.train.set_override(&s.pool, o.clone()).await.map_err(internal)?;
-    let _ = crate::train::follower::poll_once(&s.pool, &s.train, &tokio::sync::broadcast::channel(1).0).await;
+    let _ = crate::train::follower::poll_once(&s.pool, &s.train, &s.stations(), &tokio::sync::broadcast::channel(1).0).await;
     let fin = handlers::on_ride_finalised(&s, r.id).await.map_err(internal)?;
     let r: RideRow = sqlx::query_as("select * from rides where id = $1").bind(r.id).fetch_one(&s.pool).await.map_err(internal)?;
     s.events.publish(c.id, "ride", json!({ "ride_id": r.id, "status": r.status, "cancelled": true, "silent": fin.silent_ride, "journey_id": r.journey_id }));
@@ -139,7 +139,7 @@ pub async fn fast_forward(State(s): State<AppState>, _a: Admin, Path(key): Path<
     let c = resolve(&s, &key).await?;
     let Some(r) = current_ride(&s, c.id).await? else { return Err(err(StatusCode::CONFLICT, "customer is not riding")) };
     let t = s.train.trip(&r.trip_id).await.map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("trip: {e}")))?;
-    let exit = t.find_stop(Some(r.exit_station_id.as_str()), &r.exit_station_name).map(|(_, st)| st.clone());
+    let exit = t.find_stop(&s.stations().candidate_ids(&r.exit_station_id), &r.exit_station_name).map(|(_, st)| st.clone());
     let arrival = exit.and_then(|st| st.live_arrival.or(st.scheduled_arrival)).unwrap_or(r.planned_arrival + Duration::minutes(r.live_delay_min as i64));
     let target = clock::now() - Duration::minutes(4); // past the 3-minute grace
     let mut o = s.train.get_override(&r.trip_id).unwrap_or(TripOverride { trip_id: r.trip_id.clone(), ..Default::default() });
@@ -147,7 +147,7 @@ pub async fn fast_forward(State(s): State<AppState>, _a: Admin, Path(key): Path<
         o.time_shift_secs += (arrival - target).num_seconds();
     }
     s.train.set_override(&s.pool, o.clone()).await.map_err(internal)?;
-    crate::train::follower::poll_once(&s.pool, &s.train, &tokio::sync::broadcast::channel(1).0).await.map_err(internal)?;
+    crate::train::follower::poll_once(&s.pool, &s.train, &s.stations(), &tokio::sync::broadcast::channel(1).0).await.map_err(internal)?;
     let r2: RideRow = sqlx::query_as("select * from rides where id = $1").bind(r.id).fetch_one(&s.pool).await.map_err(internal)?;
     if r2.status != RideStatus::Arrived {
         return Err(err(StatusCode::CONFLICT, "follower did not finalise the ride; check the exit stop"));
@@ -163,7 +163,7 @@ pub async fn fast_forward(State(s): State<AppState>, _a: Admin, Path(key): Path<
 
 pub async fn poll(State(s): State<AppState>, _a: Admin) -> ApiResult {
     let (tx, mut rx) = tokio::sync::broadcast::channel(64);
-    crate::train::follower::poll_once(&s.pool, &s.train, &tx).await.map_err(internal)?;
+    crate::train::follower::poll_once(&s.pool, &s.train, &s.stations(), &tx).await.map_err(internal)?;
     let mut finalised = Vec::new();
     while let Ok(ev) = rx.try_recv() {
         let fin = handlers::on_ride_finalised(&s, ev.ride_id).await.map_err(internal)?;
@@ -398,9 +398,18 @@ pub async fn locate(State(s): State<AppState>, _a: Admin, Path(key): Path<String
     let (lat, lon, label) = match (b.lat, b.lon, b.station) {
         (Some(lat), Some(lon), station) => (lat, lon, station.unwrap_or_default()),
         (_, _, Some(name)) => {
-            let hits = s.train.search_stops(&name).await.map_err(internal)?;
-            let hit = hits.into_iter().next().ok_or_else(|| err(StatusCode::NOT_FOUND, "no station with that name"))?;
-            (hit.lat, hit.lon, hit.name)
+            // Our own table first (issue #37): it holds the coordinates and asking Transitous for
+            // them is a request nobody needs. The geocoder stays as the fallback because this is
+            // an admin path — no passenger's position is involved — and because `stellwerk locate`
+            // has to keep working on a machine whose stations have not been imported yet.
+            match s.stations().search(&name, 1).into_iter().next() {
+                Some(h) => (h.lat, h.lon, h.name),
+                None => {
+                    let hits = s.train.search_stops(&name).await.map_err(internal)?;
+                    let hit = hits.into_iter().next().ok_or_else(|| err(StatusCode::NOT_FOUND, "no station with that name"))?;
+                    (hit.lat, hit.lon, hit.name)
+                }
+            }
         }
         _ => return Err(err(StatusCode::BAD_REQUEST, "give lat and lon, or a station name")),
     };
@@ -558,9 +567,15 @@ fn parse_ticket(v: &str) -> Result<TicketType, (StatusCode, Json<Value>)> {
     })
 }
 
-/// The feed's id for a station name, or one of ours when the geocoder has nothing to say.
-/// Test data must not depend on Transitous being reachable.
+/// The id for a station name: ours from the table, else the feed's, else an invented one.
+///
+/// Test data must not depend on Transitous being reachable — and since issue #37 it mostly does
+/// not, because the table answers first and a backdated ride then carries the same kind of id a
+/// real one does.
 async fn station_ref(s: &AppState, name: &str) -> (String, String) {
+    if let Some(h) = s.stations().search(name, 1).into_iter().next() {
+        return (h.id, h.name);
+    }
     if let Ok(hits) = s.train.search_stops(name).await {
         if let Some(h) = hits.into_iter().next() {
             return (h.id, h.name);
@@ -1217,4 +1232,62 @@ pub async fn route_remove(State(s): State<AppState>, _a: Admin, Json(b): Json<Ro
 pub async fn desks(State(s): State<AppState>, _a: Admin) -> ApiResult {
     let rows: Vec<(String,)> = sqlx::query_as("select distinct desk from operators order by desk").fetch_all(&s.pool).await.map_err(internal)?;
     Ok(Json(json!(rows.into_iter().map(|(d,)| d).collect::<Vec<_>>())))
+}
+
+// ---------------------------------------------------------------------------
+// Stations (issue #37)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+pub struct ImportQ {
+    /// Skip the guards. Needed for the very first import, which would otherwise be refused for
+    /// retiring nothing against nothing, and for the day an upstream change really does move a
+    /// thousand stations and a human has decided that is fine.
+    #[serde(default)]
+    pub force: bool,
+    /// Say what would happen and write none of it.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `POST /admin/stations/import` — take a candidate set built on a laptop and make it the table.
+///
+/// The heavy half of this job (a 338 MB download and a pass over 2.8 GB of stop times) happens in
+/// `stellwerk`, the same way the website is built on a laptop and not on the server. What arrives
+/// here is a list of stations with no ids on it, and the only thing that cannot be done anywhere
+/// else is deciding which of them are stations we have already named — because those ids are on
+/// phones, in ride rows and in muted-station lists, and they have to keep meaning what they meant.
+pub async fn stations_import(
+    State(s): State<AppState>,
+    _a: Admin,
+    Query(q): Query<ImportQ>,
+    Json(set): Json<crate::stations::CandidateSet>,
+) -> ApiResult {
+    let report = crate::stations::commit(&s.pool, &set, q.force, q.dry_run).await.map_err(internal)?;
+    if report.committed {
+        let n = s.reload_stations().await.map_err(internal)?;
+        tracing::info!(stations = n, added = report.added, retired = report.retired, "stations imported");
+    }
+    Ok(Json(json!(report)))
+}
+
+/// `GET /admin/stations` — what is in the table and how it got there.
+pub async fn stations_status(State(s): State<AppState>, _a: Admin) -> ApiResult {
+    let ix = s.stations();
+    let runs: Vec<(i32, Option<String>, i32, i32, i32, i32, i32, bool, Option<String>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "select id, feed_version, added, retired, moved, renamed, total, committed, note, started_at \
+         from station_imports order by id desc limit 5",
+    )
+    .fetch_all(&s.pool)
+    .await
+    .map_err(internal)?;
+    let retired: (i64,) = sqlx::query_as("select count(*) from stations where retired_at is not null").fetch_one(&s.pool).await.map_err(internal)?;
+    Ok(Json(json!({
+        "live": ix.len(),
+        "retired": retired.0,
+        "imports": runs.iter().map(|r| json!({
+            "id": r.0, "feed_version": r.1, "added": r.2, "retired": r.3, "moved": r.4,
+            "renamed": r.5, "total": r.6, "committed": r.7, "note": r.8, "started_at": r.9,
+        })).collect::<Vec<_>>(),
+    })))
 }

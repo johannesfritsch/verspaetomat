@@ -24,7 +24,7 @@ Where Rust costs more: development speed for a solo developer new to it, and slo
 | Runtime | tokio |
 | Database | Postgres 16, sqlx with migrations; one schema per entity in 21 |
 | Live train data | Transitous (MOTIS) HTTP API and the gtfs.de realtime protobuf feed via `prost`; DB RIS::Journeys behind the same trait later |
-| Stations | DB RIS::Stations or DELFI stop directory, imported nightly into Postgres with PostGIS for "nearby" |
+| Stations | Our own `stations` table, imported from the Transitous GTFS feeds by `stellwerk stations import` (issue #37, docs/44). Held in memory and scanned; no PostGIS — eight thousand rows do not need an index |
 | Outbound mail | `lettre` over SMTP to a transactional provider (Postmark, Mailgun or SES) with SPF, DKIM, DMARC on the relay domain |
 | Inbound mail | Provider inbound webhook → `POST /internal/inbound-mail` (JSON) or `/internal/inbound-mail/raw` (RFC 822, parsed with `mail-parser`); attachments as uploads of kind `inbound` today, object storage later |
 | PDF | Typst template rendered server-side; signature PNG embedded |
