@@ -148,6 +148,7 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
     return Loader<_AntraegeData>(
       controller: _loader,
       placeholder: (context) => VTabScaffold(
+        art: VHeaderSceneArt.landscapeAntraege,
         header: VTabHeader(title: 'Anträge', narrow: true, onSettings: () => context.push(Routes.einstellungen)),
         children: const [VSkeletonCard(trailing: true), VSkeletonList()],
       ),
@@ -230,10 +231,11 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
         ];
 
         return VTabScaffold(
-          // The same band as Home and Wir, so the three top-level tabs read as one app. This was
-          // switched off once on the argument that Anträge is a desk and not a view; side by side
-          // with two illustrated tabs it read as a page from somewhere else instead. The landscape
-          // stands in until Anträge has a drawing of its own.
+          // The band was switched off here once, on the argument that Anträge is a desk and not a
+          // view; side by side with the illustrated tabs it read as a page from somewhere else
+          // instead. Now it has hills of its own, with the clipboard and its tick standing in
+          // them: the same landscape every tab wears, saying what this one is for (#36).
+          art: VHeaderSceneArt.landscapeAntraege,
           onRefresh: () async => refresh(),
           header: VTabHeader(
             title: 'Anträge',

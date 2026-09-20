@@ -30,6 +30,7 @@ class IchScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Loader<_IchData>(
       placeholder: (context) => VTabScaffold(
+        art: VHeaderSceneArt.landscapeIch,
         header: VTabHeader(
           title: RepoScope.read(context).me?.nickname ?? 'Ich',
           subtitle: 'Gemeinsam für pünktlichere Züge',
@@ -79,6 +80,7 @@ class IchScreen extends StatelessWidget {
         final ngoName = session.ngos.where((n) => n.id == ngoId).map((n) => n.name).firstOrNull;
 
         return VTabScaffold(
+          art: VHeaderSceneArt.landscapeIch,
           onRefresh: () async => refresh(),
           header: VTabHeader(
             title: name,

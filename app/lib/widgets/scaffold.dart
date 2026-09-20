@@ -392,15 +392,16 @@ class VTabHeader extends StatelessWidget {
 ///               lets the last card run under it, and the scaffold pays for that with bottom
 ///               padding deep enough to scroll that card clear.
 ///
-/// Anträge and Ich pass `scene: false`, which is why their titles start near the top of the
-/// screen while Home's and Wir's start halfway down a hillside.
+/// Every tab wears a band and [art] says which drawing it is: the plain hills on Home, and one
+/// apiece for Anträge, Wir and Ich. That is why a tab's title starts halfway down a hillside
+/// rather than near the top of the screen.
 class VTabScaffold extends StatelessWidget {
   const VTabScaffold({
     super.key,
     required this.header,
     required this.children,
     this.scene = true,
-    this.sceneHeart = false,
+    this.art = VHeaderSceneArt.landscape,
     this.padding,
     this.bottom,
     this.onRefresh,
@@ -415,8 +416,8 @@ class VTabScaffold extends StatelessWidget {
   /// Whether the illustrated band is drawn behind the header.
   final bool scene;
 
-  /// Wir floats a heart over the hills; Home does not.
-  final bool sceneHeart;
+  /// Which drawing the band carries. Each tab has one of its own; Home keeps the plain hills.
+  final VHeaderSceneArt art;
 
   /// The page gutter. The default is the 16 pt one every card on every tab uses.
   final EdgeInsets? padding;
@@ -454,7 +455,7 @@ class VTabScaffold extends StatelessWidget {
                 right: -pad.right,
                 top: -top,
                 bottom: -VSpace.l,
-                child: ClipRect(child: VHeaderScene(art: sceneHeart ? VHeaderSceneArt.landscapeHeart : VHeaderSceneArt.landscape)),
+                child: ClipRect(child: VHeaderScene(art: art)),
               ),
               // The floor is on the header, not on the scene, because the scene is sized by the
               // header: a tab whose title block is one short word would otherwise squeeze the

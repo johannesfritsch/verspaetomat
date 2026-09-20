@@ -41,7 +41,7 @@ void main() {
 
   _preview('header-scene-home', height: 210, (context) => const VHeaderScene(height: 190));
 
-  _preview('header-scene-wir', height: 210, (context) => const VHeaderScene(height: 190, art: VHeaderSceneArt.landscapeHeart));
+  _preview('header-scene-wir', height: 210, (context) => const VHeaderScene(height: 190, art: VHeaderSceneArt.landscapeWir));
 
   // The scene has to survive being narrow and being wide: it bleeds off the right edge, and the
   // title stands over its left half at every width.

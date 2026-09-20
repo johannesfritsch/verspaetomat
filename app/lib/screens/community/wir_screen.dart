@@ -78,7 +78,7 @@ class _WirScreenState extends State<WirScreen> {
     return Loader<_WirData>(
       controller: _loader,
       placeholder: (context) => VTabScaffold(
-        sceneHeart: true,
+        art: VHeaderSceneArt.landscapeWir,
         header: VTabHeader(title: 'Wir', tagline: 'Gemeinsam mehr bewegen.', narrow: true, onSettings: () => context.push(Routes.einstellungen)),
         children: const [VSkeletonBoard(look: VBoardLook.red), VSkeletonList()],
       ),
@@ -99,7 +99,7 @@ class _WirScreenState extends State<WirScreen> {
         final c = data.community;
         final st = data.standing;
         return VTabScaffold(
-          sceneHeart: true,
+          art: VHeaderSceneArt.landscapeWir,
           onRefresh: () async => refresh(),
           header: VTabHeader(
             title: 'Wir',
