@@ -82,8 +82,8 @@ const datenschutz = LegalDoc(
   id: 'datenschutz',
   eyebrow: 'Rechtliches',
   title: 'Datenschutz',
-  lead: 'Was wir speichern, warum, wie lange, und was du jederzeit selbst löschen kannst. Kurz: kein Konto, kein Tracking, keine Werbung, kein Standort während der Fahrt.',
-  stand: 'Stand: 17. September 2026',
+  lead: 'Was wir speichern, warum, wie lange, und was du jederzeit selbst löschen kannst. Kurz: kein Konto, kein Tracking, keine Werbung. Wo du bist, erfahren wir beim Einchecken — und solange der Hinweis am Bahnhof eingeschaltet ist, auch dann, wenn dein Telefon im Hintergrund neu sortiert, welche Bahnhöfe es beobachtet.',
+  stand: 'Stand: 20. September 2026',
   sections: [
     LegalSection('Verantwortlicher', [
       '$legalCompany\n$legalAddress\nE-Mail: $legalEmail. Siehe Impressum.',
@@ -94,16 +94,21 @@ const datenschutz = LegalDoc(
       'Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Nutzung der App).',
     ]),
     LegalSection('Was wir speichern', [
-      'Beim Fahren: den Bahnhof, an dem du eingecheckt hast, den Zug, den Ausstieg, die Zeiten laut Fahrplan und Live-Daten, die daraus berechneten Geduldspunkte und Abzeichen. Optional einen Anzeigenamen, den du selbst wählst.',
+      'Beim Fahren: den Bahnhof, an dem du eingecheckt hast, die Position, mit der du das bestätigt hast, den Zug, den Ausstieg, die Zeiten laut Fahrplan und Live-Daten, die daraus berechneten Geduldspunkte und Abzeichen. Optional einen Anzeigenamen, den du selbst wählst.',
       'Beim ersten Antrag, nicht früher: Name, Anschrift, deine private E-Mail-Adresse und bei Zeitkarten die Ticketnummer. Name, Anschrift und Ticketnummer stehen auf dem Antragsformular, weil das Eisenbahnunternehmen sie verlangt. Deine private E-Mail-Adresse steht nicht darauf: Im Formular steht die Verspätomat-Adresse dieses Antrags, damit die Antwort dorthin geht. Deine eigene Adresse benutzen wir nur, um dir jede Mail in Kopie zu schicken.',
       'Pro Antrag: das Bild deines Tickets für die betroffenen Monate und deine Unterschrift (getippt oder gezeichnet). Beides landet nur im PDF und in der Mail an das Unternehmen.',
       'Der Schriftverkehr über deine Verspätomat-Adresse: die Anträge, die du abschickst, und die Antworten des Unternehmens. Dazu unten mehr.',
       'Einstellungen wie Ticketart, gewählter Verein, Standortmodus, stumme Bahnhöfe.',
     ]),
     LegalSection('Standort', [
-      'Dein Standort bleibt am Bahnhof. Die App fragt dein Telefon genau zweimal nach einer Position: wenn du den Bahnsteig öffnest, um Bahnhöfe in der Nähe zu zeigen, und beim Einchecken, um die Fahrt für die Ranglisten als „vor Ort“ zu bestätigen. Die erste Position wird nicht gespeichert; die zweite liegt nur an dieser einen Fahrt.',
-      'Während der Fahrt folgen wir dem Zug in den Fahrplandaten, nicht deinem Telefon. Es gibt keine Standortverläufe. Ohne Standortfreigabe funktioniert die App vollständig; du wählst den Bahnhof dann selbst.',
-      'Hinweis am Bahnhof im Hintergrund (Standard, abschaltbar): Mit der Freigabe „Immer“ merkt sich dein Telefon bis zu 19 Bahnhöfe als Zonen: die Bahnhöfe, an denen du in den letzten 30 Tagen eingecheckt hast, dein Stammbahnhof und die drei nächsten in deiner Umgebung, dazu einen Kreis von 8 km um deinen aktuellen Aufenthaltsort. Das Betriebssystem weckt die App nur, wenn du eine dieser Zonen betrittst oder verlässt. Beim Betreten eines Bahnhofs prüft die App für höchstens 90 Sekunden, ob du dort stehst, und zeigt dann eine Mitteilung. Beim Verlassen des Kreises fragt die App einmal nach Bahnhöfen in der Nähe, dieselbe Anfrage wie beim Öffnen des Bahnsteigs. Sonst verlässt nichts das Telefon: keine Position wird gespeichert oder übertragen, weder bei uns noch bei Dritten. Abschalten: Einstellungen → „Hinweis am Bahnhof“ oder Standortmodus „Nur wenn die App offen ist“; in den Systemeinstellungen die Freigabe „Immer“ entziehen.',
+      'Solange die App offen ist und du nicht gerade auf einer Fahrt bist, lässt sie sich von deinem Telefon melden, wenn du dich um mehr als 500 Meter bewegt hast — grob, nicht metergenau. Nach einer frischen Position fragt sie beim Start, bei der Rückkehr in den Vordergrund und immer dann, wenn sich für sie etwas geändert hat. Mit dieser Position fragt sie unseren Server, welche Bahnhöfe in der Nähe liegen; gespeichert wird sie dabei nicht. Was die Hintergrund-Schicht tut, steht weiter unten.',
+      'Beim Einchecken schickst du uns eine Position mit. Sie bestätigt, dass du wirklich am Abfahrtsbahnhof stehst; nur dann zählt die Fahrt in den Ranglisten. Sie hängt an dieser einen Fahrt und verschwindet mit ihr — und aus den Positionen deiner Fahrten entstehen die Zonen, um die es gleich geht.',
+      'Hinweis am Bahnhof im Hintergrund (Standard, abschaltbar): Mit der Freigabe „Immer“ merkt sich dein Telefon bis zu 19 Bahnhöfe als Zonen — bis zu 15 Bahnhöfe, an denen du in den letzten 30 Tagen eingecheckt hast, dein Stammbahnhof ist immer darunter, dazu die vier nächsten in deiner Umgebung. Weiter als 50 Kilometer von all diesen Bahnhöfen entfernt zählen nur noch die nächsten um dich herum; auf Android können es dann bis zu 20 sein. Dazu kommt ein weiterer Kreis um deinen Aufenthaltsort: Auf dem iPhone reicht er bis kurz vor den nächsten Bahnhof, den dein Telefon nicht ohnehin beobachtet — mindestens ein Kilometer, auf freier Strecke bis zu 200 Kilometer; auf Android sind es immer 8 Kilometer. Das Betriebssystem weckt die App nur, wenn du eine dieser Zonen betrittst oder verlässt.',
+      'Beim Betreten einer Bahnhofszone sieht die App nach, ob du wirklich dort stehst. Auf dem iPhone schaltet sie dafür bis zu sechs Minuten lang ihre eigene Ortung ein und meldet sich etwa 45 Sekunden, nachdem eine Position auf 50 Meter herangekommen ist; kommt keine so nah, geht die Ortung ohne Hinweis wieder aus. Auf Android nimmt sie nach drei Minuten in der Zone eine einzelne Position und meldet sich, wenn die höchstens 300 Meter entfernt ist oder gar nicht erst zustande kommt. Diese Positionen verlassen das Telefon nicht.',
+      'Was das Telefon im Hintergrund doch verlässt, ist die Frage „welche Bahnhöfe sind hier?“ — mit deiner Position und deiner Gerätekennung, an unseren Server. Sie geht raus, wenn du den großen Kreis verlässt, wenn das Betriebssystem einen größeren Ortswechsel meldet, und wenn die App ihre Zonen neu setzt und die Bahnhofsliste, die sie dafür hält, von woanders stammt; ihre Zonen setzt sie unter anderem neu, wenn eine Fahrt beginnt oder endet. Das passiert auch während einer Fahrt: Eine offene Fahrt unterdrückt den Hinweis, nicht diese Frage. Auf einer längeren Fahrt können im Lauf einer Stunde mehrere solcher Fragen zusammenkommen.',
+      'Während der Fahrt folgen wir dem Zug in den Fahrplandaten, nicht deinem Telefon.',
+      'Bei Dritten landet davon nichts: Seit das Bahnhofsverzeichnis bei uns liegt, bekommt kein anderer Dienst deine Koordinaten zu sehen. Bei uns landet eine Position an den beiden genannten Stellen — beim Einchecken, wo sie an der Fahrt bleibt, und bei der Frage aus dem Hintergrund, die wir beantworten und nicht speichern. Standortverläufe führen wir nicht. Was unser Server beim Beantworten protokolliert, steht unten unter „Kein Tracking, keine Werbung“.',
+      'Ohne Standortfreigabe funktioniert die App vollständig; du wählst den Bahnhof dann selbst. Abschalten: Einstellungen → „Hinweis am Bahnhof“ oder Standortmodus „Nur wenn die App offen ist“; in den Systemeinstellungen die Freigabe „Immer“ entziehen.',
       'Rechtsgrundlage: deine Einwilligung über die Standortfreigabe des Betriebssystems (Art. 6 Abs. 1 lit. a DSGVO), jederzeit in den Systemeinstellungen widerrufbar.',
     ]),
     LegalSection('Deine Verspätomat-Adresse', [
@@ -132,7 +137,7 @@ const datenschutz = LegalDoc(
       'Die Zahlen unter „Wir“ sind Summen über alle Fahrgäste ohne Namen. In den Ranglisten erscheinst du nur mit deinem Anzeigenamen und nur, wenn „Mich in Ranglisten zeigen“ eingeschaltet ist.',
     ]),
     LegalSection('Kein Tracking, keine Werbung', [
-      'Die App enthält keine Werbung, keine Analyse-SDKs und keine Tracker. Wir messen nicht, wie du die App nutzt. Der Server schreibt technische Protokolle (Zeitpunkt, Route, Fehler) und löscht sie nach 14 Tagen.',
+      'Die App enthält keine Werbung, keine Analyse-SDKs und keine Tracker. Wir messen nicht, wie du die App nutzt. Unser Server schreibt technische Protokolle: Zeitpunkt, angefragte Adresse, Fehler — bei der Bahnhofsfrage aus dem Hintergrund steht in dieser Adresse auch die Position, nach der gefragt wurde. Wir werten diese Protokolle nicht aus und geben sie nicht weiter; sie liegen auf unserem Server in der Europäischen Union.',
     ]),
     LegalSection('Deine Rechte', [
       'Auskunft und Übertragbarkeit: Einstellungen → Deine Daten → „Daten exportieren“ gibt dir alles, was wir über dich haben, als Datei.',
