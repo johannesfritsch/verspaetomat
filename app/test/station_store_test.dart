@@ -49,6 +49,16 @@ StationPointer pointerFor(Uint8List bytes, int version, {int count = 0, int crc 
       url: '/stations/stations-$version.vst',
     );
 
+/// The two copies as they really are today, measured on both databases.
+///
+/// `generated` is `coalesce(finished_at, started_at)` of the `station_imports` row — when that
+/// database ran its import. It is **not** `feed_version`, which is the GTFS schedule version and
+/// is the identical opaque string `"2026-09-12T15:06:17"` on both sides, because both imported
+/// the same feed. Nothing parses `feed_version`, and because it ties it could not order the two
+/// copies even if something did.
+final _prodGenerated = DateTime.utc(2026, 9, 20, 17, 7, 39);
+final _devGenerated = DateTime.utc(2026, 9, 20, 16, 11, 20);
+
 void main() {
   late Directory tmp;
 
@@ -106,22 +116,39 @@ void main() {
     expect(again.sourceKind, StationSourceKind.downloaded);
   });
 
-  test('a valid download always wins, whatever the two extracts say about themselves', () async {
-    // **The regression this file exists for**, with the measured numbers: production's newest
-    // committed import is id 1 and a laptop's is 7, and production's import also *finished*
-    // earlier than the laptop's render. So both a serial comparison (`1 >= 7`) and a timestamp
-    // comparison would drop the real download and pin every phone to the bundled snapshot —
-    // silently, for years. The asset is not consulted at all.
-    final fromProduction = buildVst(plausibleTable(count: 1300), version: 1, generatedAt: DateTime.utc(2026, 9, 12));
-    final fromLaptop = buildVst(plausibleTable(count: 1200), version: 7, generatedAt: DateTime.utc(2026, 9, 20));
+  test('a valid download wins although its serial is lower — todays real numbers', () async {
+    // The live configuration. A serial comparison reads `1 >= 7`, drops the real download and
+    // pins every phone to the bundled snapshot; production's serial passes 7 in about three
+    // years. A timestamp comparison happens to get this one right, because production's import
+    // ran 56 minutes after the dev render — see the next test for why that is not reassuring.
+    final fromProduction = buildVst(plausibleTable(count: 1300), version: 1, generatedAt: _prodGenerated);
+    final fromLaptop = buildVst(plausibleTable(count: 1200), version: 7, generatedAt: _devGenerated);
     await Directory('${tmp.path}/stations').create(recursive: true);
     await File('${tmp.path}/stations/${StationStore.fileName}').writeAsBytes(fromProduction);
     final store = storeWith(_FakeDownload(), asset: fromLaptop);
     await store.index();
+    expect(store.sourceKind, StationSourceKind.downloaded, reason: 'a serial from another database decided this');
+    expect(store.tableVersion, 1);
+    expect((await store.index())!.extract.count, 1300);
+  });
+
+  test('and still wins after one more dev render, when the clock says the other thing', () async {
+    // The same two copies after somebody runs a dev import and re-renders the asset — two
+    // minutes' work. Now the asset is the newer one by the clock as well, so a timestamp
+    // comparison drops the real download too.
+    //
+    // This is the case that matters most. A freshness rule on `generated` passes today and starts
+    // failing silently after a routine laptop command, which means it ships. `feed_version` is no
+    // use either: it is identical on both sides, so it cannot order anything.
+    final fromProduction = buildVst(plausibleTable(count: 1300), version: 1, generatedAt: _prodGenerated);
+    final reRendered = buildVst(plausibleTable(count: 1200), version: 8, generatedAt: _prodGenerated.add(const Duration(hours: 1)));
+    await Directory('${tmp.path}/stations').create(recursive: true);
+    await File('${tmp.path}/stations/${StationStore.fileName}').writeAsBytes(fromProduction);
+    final store = storeWith(_FakeDownload(), asset: reRendered);
+    await store.index();
     expect(store.sourceKind, StationSourceKind.downloaded,
         reason: 'neither the serial nor the clock may be compared across databases');
     expect(store.tableVersion, 1);
-    expect((await store.index())!.extract.count, 1300);
   });
 
   test('the asset answers only when there is no valid download', () async {

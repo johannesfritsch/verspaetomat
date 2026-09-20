@@ -474,8 +474,6 @@ mod tests {
         assert!(!is_journey_mode("TRAM", "1"));
     }
 
-    use super::*;
-
     #[test]
     fn line_parsing() {
         assert_eq!(parse_line("RE7 (17429)"), ("RE 7".to_string(), Some("17429".to_string())));
