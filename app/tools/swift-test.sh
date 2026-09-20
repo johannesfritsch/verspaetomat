@@ -15,6 +15,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# `flutter test integration_test/…` leaves the iOS build configured for *that* run: its generated
+# `listener.dart` lives in a temp directory that is deleted when it finishes, and the next
+# xcodebuild picks the stale path up through the Run Script phase and dies with
+# „Target kernel_snapshot_program failed" — which looks like a broken test suite and is not one.
+# One cheap regeneration is worth more than the note it would otherwise take to explain.
+flutter build ios --config-only --simulator >/dev/null 2>&1 || true
+
 if [ -z "${SIM_DEST:-}" ]; then
   pick=$(xcrun simctl list -j devices available | python3 -c '
 import json, re, sys
@@ -43,15 +50,43 @@ print(best[3] + " " + best[2])
 fi
 
 echo "== swift tests"
-# `-quiet` swallows the `** TEST SUCCEEDED **` banner, so the exit status is the signal and the
-# line below is the one a human reads. `set -e` means nothing after a failure gets printed.
+# xcodebuild prints a failing test's *name* and nothing else — the assertion message lives only in
+# the result bundle. A release gate that aborts without saying why is a gate people learn to
+# distrust, so the bundle is kept and unpacked on failure.
+RESULT="${TMPDIR:-/tmp}/verspaetomat-swift-tests.xcresult"
+rm -rf "$RESULT"
+
+set +e
 xcodebuild test \
   -workspace ios/Runner.xcworkspace \
   -scheme Runner \
   -configuration Debug \
   -destination "$SIM_DEST" \
   -only-testing:RunnerTests \
+  -resultBundlePath "$RESULT" \
   CODE_SIGNING_ALLOWED=NO \
   -quiet
+status=$?
+set -e
+
+if [ "$status" -ne 0 ]; then
+  echo "== failures"
+  xcrun xcresulttool get test-results tests --path "$RESULT" 2>/dev/null | python3 -c '
+import json, sys
+def walk(node, test=None):
+    kind = node.get("nodeType")
+    if kind == "Test Case":
+        test = node.get("name", "?")
+    if kind == "Failure Message":
+        print("  " + (test or "?"))
+        for line in node.get("name", "").splitlines():
+            print("    " + line)
+    for child in node.get("children", []):
+        walk(child, test)
+for root in json.load(sys.stdin).get("testNodes", []):
+    walk(root)
+' || echo "  (could not read $RESULT)"
+  exit "$status"
+fi
 
 echo "== swift tests passed"
