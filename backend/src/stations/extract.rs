@@ -35,6 +35,12 @@ pub const MAX_NAME_LEN: usize = 255;
 /// What the table cannot say about itself: which import it is, and when that import finished.
 /// Both come from `station_imports` rather than from the clock, so rendering the same table twice
 /// produces the same bytes — otherwise every render would be a 280 KB commit in site/dist.
+///
+/// Neither field orders two extracts from *different* databases. `version` is a serial of its own
+/// database (production stands at 1 where this laptop stands at 7) and `generated` is an accident
+/// of when each one happened to run its import. A reader decides freshness by whether a download
+/// validated, never by comparing these against a bundled copy — docs/45, "Drei Zahlen, die keine
+/// Reihenfolge sind".
 pub struct Meta {
     pub version: u32,
     pub generated: DateTime<Utc>,

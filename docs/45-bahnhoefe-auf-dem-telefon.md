@@ -46,7 +46,7 @@ Dateianfang, außer die Tabelle sagt etwas anderes.
 | 8 | 4 | `u32` | `count` | Anzahl der Datensätze |
 | 12 | 4 | `u32` | `record_len` | `20` — Bytes pro Datensatz |
 | 16 | 4 | `u32` | `blob_len` | Bytes im Namensblock |
-| 20 | 4 | `u32` | `generated` | Unix-Sekunden, UTC (reicht bis 2106) |
+| 20 | 4 | `u32` | `generated` | Unix-Sekunden, UTC (reicht bis 2106) — wann *dieser Datenbank* ihr Import fertig wurde, siehe unten |
 | 24 | 4 | `u32` | `version` | die Seriennummer des Auszugs, siehe unten |
 | 28 | 4 | `u32` | `crc32` | CRC-32/ISO-HDLC über die Bytes `[header_len, EOF)` |
 
@@ -236,7 +236,10 @@ ist eingecheckt und `dist_ist_aktuell` vergleicht jede Datei Byte für Byte — 
 }
 ```
 
-`serde_json::to_vec_pretty` plus abschließendes Newline; die Schlüsselreihenfolge ist die
+`generated` ist die Importzeit dieser Datenbank, `feed_version` die Fahrplanversion aus dem Feed —
+zwei verschiedene Dinge, die beide wie ein ISO-Zeitstempel aussehen und nebeneinander stehen. Wer
+sie verwechselt, liest das Fahrplandatum als Importzeit; das ist beim Schreiben der Dart-Hälfte
+einmal passiert. `serde_json::to_vec_pretty` plus abschließendes Newline; die Schlüsselreihenfolge ist die
 Deklarationsreihenfolge, die Bytes sind also stabil und `dist_ist_aktuell` bleibt still. `crc32` ist
 eine JSON-Zahl — ein `u32` ist in einem Double exakt. `url` ist site-relativ, der Host ist damit
 Sache der App und eine Staging-Seite funktioniert unverändert. `feed_version` ist eine
@@ -247,7 +250,9 @@ zerlegt sie.
 
 1. Höchstens wöchentlich: `GET /stations/latest.json` mit `If-None-Match: <der ETag-Wert, den sie
    zuletzt bekommen hat, Byte für Byte, samt Suffix>`. `304` → nichts zu tun.
-2. `version` gleich der gehaltenen → nichts zu tun.
+2. `version` gleich der des **heruntergeladenen** Auszugs, den das Telefon hält → nichts zu tun.
+   Ausdrücklich nicht gegen die Version des mitgelieferten Assets vergleichen: siehe „Drei Zahlen,
+   die keine Reihenfolge sind" weiter unten.
 3. Sonst `GET <url>`, dann prüfen: die Länge des **ausgepackten** Körpers gleich `bytes`;
    `header_len` aus den Bytes 6..8 lesen und `crc32(body[header_len..])` gegen das `crc32` des
    Zeigers halten; `magic`, `format`, `count` und `version` im Kopf gegen den Zeiger halten. Bei
@@ -259,6 +264,30 @@ zerlegt sie.
    `Content-Length: 280244`. Die Prüfung gehört hinter das Auspacken.
 4. Nach `<documents>/stations/stations-<v>.vst.part` schreiben, fsync, an die richtige Stelle
    umbenennen, dann die ältere Datei löschen. Das Umbenennen ist der Commit.
+
+### Drei Zahlen, die keine Reihenfolge sind
+
+Im Kopf und im Zeiger stehen drei Zahlen, die aussehen, als könnte man mit ihnen entscheiden,
+welcher von zwei Auszügen der neuere ist. Keine davon kann das, sobald die beiden aus
+verschiedenen Datenbanken kommen — und genau das ist der Normalfall, weil das mitgelieferte Asset
+irgendwann gerendert wurde und der Download von der Produktion kommt.
+
+| Zahl | was sie ist | warum sie nicht ordnet |
+|---|---|---|
+| `version` | die Id der jüngsten übernommenen Zeile in `station_imports` | eine Seriennummer ihrer eigenen Datenbank. Gemessen am 20. September 2026: Produktion steht bei **1**, die Entwicklungsdatenbank bei **7**. Die 7 ist nicht neuer als die 1, sie ist aus einer anderen Zählung. |
+| `generated` | `coalesce(finished_at, started_at)` der Importzeile — wann *dieser Datenbank* ihr Import lief | ein Zufall des Zeitpunkts. Gemessen: Produktion `2026-09-20T17:07:39Z`, ein Laptop-Render `2026-09-20T16:11:20Z` — die Produktion liegt heute 56 Minuten vorn und nach dem nächsten Import auf dem Laptop wieder hinten. Es ist **kein** Renderzeitpunkt und **nicht** das Fahrplandatum. |
+| `feed_version` | die Fahrplanversion aus dem GTFS-Feed, undurchsichtig | auf beiden Seiten dieselbe, sobald beide denselben Feed importiert haben — gemessen beide `2026-09-12T15:06:17`. Gleichstand ordnet nichts. |
+
+Die Regel, die als einzige gegen alle drei immun ist: **ein Download, der die Prüfung aus Schritt 3
+besteht, ersetzt immer das mitgelieferte Asset.** Das Asset ist der Boden für den ersten Start und
+nie eine Zahl, die man schlagen muss. Ein Vergleich von `version` gehört allein zwischen den Zeiger
+und den zuletzt *heruntergeladenen* Auszug, also innerhalb einer Datenbank.
+
+Das ist keine Vorsichtsmaßnahme gegen etwas Ausgedachtes. Mit der Regel „höhere `version` gewinnt"
+hätte ein Telefon den ersten echten Download verworfen (`1 >= 7` ist falsch) und den Laptop-Stand
+behalten, bis die Produktion sieben Importe weit ist — bei zweimal im Jahr rund drei Jahre. Mit der
+Regel „neueres `generated` gewinnt" wäre es heute gutgegangen und hätte zwei Minuten später
+angefangen, still zu scheitern: so lange dauert ein Import auf dem Laptop und ein neues Render.
 
 ### Drei gemessene Eigenheiten der Auslieferung
 
