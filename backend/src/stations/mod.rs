@@ -72,6 +72,12 @@ pub struct Station {
     pub rank: i16,
     /// The MOTIS ids for this station, the preferred one first. Never empty.
     pub sources: Vec<String>,
+    /// The name lowercased, and the name through `normalise_station_name`. Both, because a search
+    /// has to match a half-typed word as well as a fully spelled one, and the two want different
+    /// folds — see [`Index::search`]. Precomputed because the alternative is folding eight
+    /// thousand names on every keystroke.
+    plain: String,
+    normal: String,
 }
 
 impl Station {
@@ -228,18 +234,28 @@ impl Index {
     /// better station before a lesser one — so "köln" offers Köln Hbf before Köln Süd and before
     /// "Bergisch Gladbach, Kölner Straße".
     pub fn search(&self, q: &str, limit: usize) -> Vec<StopInfo> {
-        let needle = normalise_station_name(q);
-        if needle.is_empty() {
+        // Two needles for two folds. `normalise_station_name` exists to decide whether two
+        // *complete* station names are the same place, and on the way it rewrites whole words —
+        // „Hauptbahnhof" becomes „Hbf", a trailing „Bahnhof" disappears. That is right for what it
+        // was built for and wrong for a half-typed query: „Berlin Haupt" folds to itself while
+        // „Berlin Hauptbahnhof" folds to „berlin hbf", and the search found nothing while the
+        // station sat there. So a station matches on either fold — the plain lowercase name, which
+        // keeps every prefix a passenger can type, or the normalised one, which is what makes
+        // „Berlin Hbf" find a station the feed spells out in full.
+        let plain = q.trim().to_lowercase();
+        let normal = normalise_station_name(q);
+        if plain.is_empty() {
             return Vec::new();
         }
         let mut hits: Vec<(u8, i16, u8, &Station)> = self
             .all
             .iter()
             .filter_map(|s| {
-                let hay = normalise_station_name(&s.name);
-                let class = if hay.starts_with(&needle) {
+                let starts = s.plain.starts_with(&plain) || (!normal.is_empty() && s.normal.starts_with(&normal));
+                let holds = s.plain.contains(&plain) || (!normal.is_empty() && s.normal.contains(&normal));
+                let class = if starts {
                     0
-                } else if hay.contains(&needle) {
+                } else if holds {
                     1
                 } else {
                     return None;
@@ -292,7 +308,8 @@ pub async fn load(pool: &PgPool) -> anyhow::Result<Index> {
             index.by_source.insert(s.clone(), at);
         }
         index.by_id.insert(id, at);
-        index.all.push(Station { id, name, lat, lon, rank, sources: srcs });
+        let (plain, normal) = (name.to_lowercase(), normalise_station_name(&name));
+        index.all.push(Station { id, name, lat, lon, rank, sources: srcs, plain, normal });
     }
     Ok(index)
 }
@@ -525,7 +542,16 @@ mod tests {
     use super::*;
 
     fn station(id: i32, name: &str, lat: f64, lon: f64, rank: i16) -> Station {
-        Station { id, name: name.into(), lat, lon, rank, sources: vec![format!("de-DELFI_test:{id}")] }
+        Station {
+            id,
+            name: name.into(),
+            lat,
+            lon,
+            rank,
+            sources: vec![format!("de-DELFI_test:{id}")],
+            plain: name.to_lowercase(),
+            normal: normalise_station_name(name),
+        }
     }
 
     fn index(stations: Vec<Station>) -> Index {
@@ -614,6 +640,23 @@ mod tests {
             station(2, "Köln Hbf", 50.9430, 6.9586, 3),
         ]);
         assert_eq!(ix.search("köln", 5)[0].name, "Köln Hbf");
+    }
+
+    /// Found on the deployed server: „Berlin" offered Berlin Hauptbahnhof and „Berlin Haupt"
+    /// offered nothing at all, because `normalise_station_name` rewrites the whole word
+    /// „Hauptbahnhof" to „Hbf" and half a word is not a word. Both spellings have to find it, and
+    /// so does the one the feed does not use.
+    #[test]
+    fn a_half_typed_hauptbahnhof_still_finds_it() {
+        let ix = index(vec![station(1, "Berlin Hauptbahnhof", 52.5251, 13.3694, 3)]);
+        for q in ["Berlin", "Berlin Haupt", "Berlin Hauptbahnhof", "berlin hbf", "Berlin Hbf"] {
+            assert_eq!(ix.search(q, 5).len(), 1, "{q} found nothing");
+        }
+        // And a station the feed spells short is still found when it is typed out in full.
+        let ix = index(vec![station(1, "Köln Hbf", 50.9430, 6.9586, 3)]);
+        for q in ["Köln Hbf", "Köln Hauptbahnhof", "köln h"] {
+            assert_eq!(ix.search(q, 5).len(), 1, "{q} found nothing");
+        }
     }
 
     /// Two towns, one station name. Matching them to each other would hand one town's id to the
