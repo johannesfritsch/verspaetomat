@@ -629,6 +629,10 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
             _Row('… ausgelöst', '${s.counters['fired'] ?? 0}'),
             _Row('… abgebrochen', '${s.counters['cancelled'] ?? 0}'),
             if ((s.counters['refused'] ?? 0) > 0) _Row('Von iOS abgelehnt', '${s.counters['refused']}'),
+            // #40: where the background layer gets "which stations are near me" from. The
+            // server switches it (`stations_local`), and this line is the proof that the
+            // switch arrives in both directions — it ships before the path it guards.
+            _Row('Bahnhöfe', s.stationsLocal ? 'aus der Datei' : 'vom Server'),
             const VGap.m(),
 
             // The days before today (issue #29). Nothing new is recorded for this: the counters

@@ -49,4 +49,28 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.3.0")
     // NotificationCompat / ContextCompat for the nudge notification.
     implementation("androidx.core:core:1.16.0")
+    // The first tests this module has had (issue #40). Plain JVM, no Robolectric: `StationExtract`
+    // takes a `File` and imports nothing from `android.*`, which is what keeps them that way.
+    testImplementation("junit:junit:4.13.2")
+}
+
+// Deliberately NO `testOptions { unitTests.isReturnDefaultValues = true }`. The reader and the scan
+// import nothing from `android.*`; leaving the framework stubs throwing is what keeps it that way,
+// because an accidental `Log` or `Location.distanceBetween` then fails the test loudly instead of
+// quietly returning 0.
+tasks.withType<Test>().configureEach {
+    // `rootProject.projectDir` is app/android, so its grandparent is the repository root. The
+    // parity suite reads the shipped extract and the shared probe fixture from there.
+    val repo = rootProject.projectDir.parentFile.parentFile
+    systemProperty("verspaetomat.repo", repo.absolutePath)
+    // An override for the probe fixture, so a freshly generated one can be tried before it lands.
+    System.getProperty("verspaetomat.probes")?.let { systemProperty("verspaetomat.probes", it) }
+    // Both are read by the parity suite and neither is on the compile classpath, so without this
+    // a new extract or a regenerated fixture leaves the task UP-TO-DATE and the suite passes on
+    // last week's answer.
+    inputs.files(
+        repo.resolve("app/assets/stations/stations.vst"),
+        repo.resolve("testdata/stations/nearby-probes.tsv"),
+    ).withPropertyName("stationParityFixtures").withPathSensitivity(PathSensitivity.NONE).optional(true)
+    testLogging { events("passed", "skipped", "failed") }
 }

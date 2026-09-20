@@ -19,6 +19,7 @@
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
+//!   stellwerk switch [stations-local on|off]
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
 //!   stellwerk scan
 //!
@@ -555,6 +556,14 @@ enum Cmd {
         #[arg(long)]
         clear: bool,
     },
+    /// Server-side switches that turn a shipped behaviour off without a new build.
+    /// Without arguments: show them all
+    Switch {
+        /// stations-local
+        name: Option<String>,
+        /// on | off
+        value: Option<String>,
+    },
 }
 
 struct Api {
@@ -858,6 +867,26 @@ async fn main() -> anyhow::Result<()> {
             };
             println!("Uhr: {}  (Versatz {} s)", s(&v, "now"), s(&v, "offset_secs"));
         }
+        Cmd::Switch { name, value } => {
+            let v = match (name.as_deref(), value.as_deref()) {
+                (None, _) | (Some("stations-local"), None) => api.get("/admin/switches").await?,
+                (Some("stations-local"), Some(x)) => {
+                    let on = match x {
+                        "on" | "true" | "1" | "an" => true,
+                        "off" | "false" | "0" | "aus" => false,
+                        _ => anyhow::bail!("on oder off, nicht {x:?}"),
+                    };
+                    api.post("/admin/switches", json!({ "stations_local": on })).await?
+                }
+                (Some(other), _) => anyhow::bail!("unbekannter Schalter {other:?}; bekannt: stations-local"),
+            };
+            let local = v.get("stations_local").and_then(Value::as_bool).unwrap_or(false);
+            println!(
+                "stations-local: {}   (Bahnhöfe im Hintergrund {})",
+                if local { "an" } else { "aus" },
+                if local { "aus der Datei" } else { "vom Server" }
+            );
+        }
         Cmd::Reset { customer } => {
             let v = api.post(&format!("/admin/customers/{customer}/reset"), json!({})).await?;
             println!("Zurückgesetzt: {}  ({} Overrides gelöscht)", s(&v, "reset"), s(&v, "trip_overrides_cleared"));
@@ -1106,6 +1135,17 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(note) = v["note"].as_str() {
                     println!("  {note}");
                 }
+                // The import is what makes the probe fixture stale — the extract is merely the
+                // next thing anybody runs. Every reader suite that consumes that file pins its
+                // `crc32`/`count` against the table, so without this they go red together and the
+                // cause is two commands back. It fails safely: a stale fixture cannot pass
+                // wrongly, only fail loudly — but the next person should not have to work that
+                // out at midnight.
+                if v["committed"].as_bool().unwrap_or(false) {
+                    println!("  Die Tabelle ist neu — der Probe-Fixture gehört noch zur alten und macht die Leser-Tests rot");
+                    println!("  (laut und richtig benannt, nie still falsch). Neu erzeugen:");
+                    println!("    cd backend && cargo test --release --lib write_the_nearby_probe_fixture -- --ignored");
+                }
             }
             StationsCmd::Extract { out, keep, asset, dry_run } => {
                 let root = repo_root();
@@ -1231,7 +1271,10 @@ async fn main() -> anyhow::Result<()> {
                     std::fs::remove_file(path.with_extension("vst.gz")).ok();
                     println!("Entfernt: stations-{v}.vst und stations-{v}.vst.gz");
                 }
-                println!("Weiter: cd site && cargo run  ·  site/dist committen  ·  deployen  ·  danach erst die App bauen.");
+                println!(
+                    "Weiter: Probe-Fixture neu erzeugen  ·  cd site && cargo run  ·  site/dist committen  ·  deployen  ·  danach erst die App bauen."
+                );
+                println!("  Fixture: cd backend && cargo test --release --lib write_the_nearby_probe_fixture -- --ignored");
             }
         },
         Cmd::MailTest { customer, to, claim } => {

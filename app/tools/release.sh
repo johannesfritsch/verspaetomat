@@ -35,6 +35,13 @@ echo "== Verspätomat $VERSION ($BUILD) → $API_URL"
 flutter build ios --release --config-only --build-name="$VERSION" --build-number="$BUILD" \
   --dart-define=API_URL="$API_URL" --dart-define=BACKEND=local --dart-define=APP_VERSION="$VERSION ($BUILD)" >/dev/null
 
+# Before the archive, not after the upload (issue #40). The Swift unit tests have existed since
+# docs/30 and nothing ever ran them, which is how `Geofence.swift` came to document an assertion
+# as "failing ever since". This repo has no CI to hang them on — it deploys by `git push` plus
+# `ssh verspaetomat .../deploy.sh` — so `release.sh` is the one gate every TestFlight build passes
+# through. Deliberately no SKIP_TESTS.
+tools/swift-test.sh
+
 echo "== archive"
 rm -rf "$ARCHIVE"
 xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release \

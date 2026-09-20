@@ -222,6 +222,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/routes/remove", post(admin::route_remove))
         .route("/admin/routes/answers", post(admin::route_answers))
         .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
+        .route("/admin/switches", get(admin::switches).post(admin::switch_set))
         .route("/admin/overrides", get(admin::overrides).delete(admin::clear_overrides))
         .route("/admin/stations", get(admin::stations_status))
         .route("/admin/stations/extract", get(admin::stations_extract))

@@ -489,6 +489,19 @@ pub fn rail_rank(departures: &[(&str, &str)], name: &str) -> i32 {
 /// Hbf, Transitous also has an SNCF stop called plain "Munich", 90 m from the entrance and just
 /// as long-distance. Two stops of the same rank inside one 300 m band are in practice one
 /// station, and then the passenger should read the name they see on the building.
+///
+/// **That is no longer the case this rule mostly handles.** Measured on the table of #37: of 641
+/// long-distance stations, ten have any other station within 300 m at all, and none has more than
+/// one. The platform clusters docs/23 was written against were a property of the gazetteer, and
+/// the import's fold — same normalised name within `stations::SAME_STATION_M` — collapses them
+/// into one row before the ordering ever sees them. The case moved from query time to import
+/// time, which is the better place for it.
+///
+/// The band still earns its keep, on a different case: two *different* stations at similar
+/// distances, where the ladder and the name decide which one a passenger means. The probe fixture
+/// (`testdata/stations/nearby-probes.tsv`) puts two stations in one band on 292 of its 300 points
+/// and an exact metre tie on 87, so a reader that sorts on distance alone fails it. Keep the rule;
+/// just do not port it believing it is about a Hauptbahnhof's own forecourt.
 pub fn nearby_order(distance_m: i64, rail_rank: i32, name: &str) -> (i64, i32, i32, i64) {
     (distance_m / RANK_BAND_M, -rail_rank, if looks_like_station(name) { 0 } else { 1 }, distance_m)
 }

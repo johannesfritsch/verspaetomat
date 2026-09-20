@@ -10,6 +10,7 @@
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
 		A1D25002294A63AB00263BE5 /* GeofenceRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D25001294A618700263BE5 /* GeofenceRulesTests.swift */; };
+		A1D25004294A63AB00263BE5 /* GeofenceStationsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D25003294A618700263BE5 /* GeofenceStationsTests.swift */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
 		45EC6675887167F29560AE32 /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 089238132B0FB4E365D120DF /* Pods_RunnerTests.framework */; };
 		6D5F45B3C219DAA412E658C6 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8D455677ECA32E4BB138E9BD /* Pods_Runner.framework */; };
@@ -20,6 +21,7 @@
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		A1B2C3D4E5F60718293A4B5D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* PrivacyInfo.xcprivacy */; };
 		B7E0F1A2C3D4E5F60718A002 /* Geofence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E0F1A2C3D4E5F60718A001 /* Geofence.swift */; };
+		B7E0F1A2C3D4E5F60718A006 /* GeofenceStations.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E0F1A2C3D4E5F60718A005 /* GeofenceStations.swift */; };
 		B7E0F1A2C3D4E5F60718A004 /* GeofenceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E0F1A2C3D4E5F60718A003 /* GeofenceChannel.swift */; };
 /* End PBXBuildFile section */
 
@@ -53,6 +55,7 @@
 		170091ACE4D795C40D1951BD /* Pods-RunnerTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.debug.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug.xcconfig"; sourceTree = "<group>"; };
 		331C807B294A618700263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		A1D25001294A618700263BE5 /* GeofenceRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeofenceRulesTests.swift; sourceTree = "<group>"; };
+		A1D25003294A618700263BE5 /* GeofenceStationsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeofenceStationsTests.swift; sourceTree = "<group>"; };
 		331C8081294A63A400263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = AppFrameworkInfo.plist; path = Flutter/AppFrameworkInfo.plist; sourceTree = "<group>"; };
 		74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -73,6 +76,7 @@
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B5C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B7E0F1A2C3D4E5F60718A001 /* Geofence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Geofence.swift; sourceTree = "<group>"; };
+		B7E0F1A2C3D4E5F60718A005 /* GeofenceStations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeofenceStations.swift; sourceTree = "<group>"; };
 		B7E0F1A2C3D4E5F60718A003 /* GeofenceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeofenceChannel.swift; sourceTree = "<group>"; };
 		C94D07E9E4C4E4E98DF8AD69 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		E8B566A0BBBF6C955D0423BA /* Pods-RunnerTests.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.profile.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.profile.xcconfig"; sourceTree = "<group>"; };
@@ -103,6 +107,7 @@
 			children = (
 				331C807B294A618700263BE5 /* RunnerTests.swift */,
 				A1D25001294A618700263BE5 /* GeofenceRulesTests.swift */,
+				A1D25003294A618700263BE5 /* GeofenceStationsTests.swift */,
 			);
 			path = RunnerTests;
 			sourceTree = "<group>";
@@ -152,6 +157,7 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				B7E0F1A2C3D4E5F60718A001 /* Geofence.swift */,
+				B7E0F1A2C3D4E5F60718A005 /* GeofenceStations.swift */,
 				B7E0F1A2C3D4E5F60718A003 /* GeofenceChannel.swift */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
@@ -388,6 +394,7 @@
 			files = (
 				331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */,
 				A1D25002294A63AB00263BE5 /* GeofenceRulesTests.swift in Sources */,
+				A1D25004294A63AB00263BE5 /* GeofenceStationsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -397,6 +404,7 @@
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				B7E0F1A2C3D4E5F60718A002 /* Geofence.swift in Sources */,
+				B7E0F1A2C3D4E5F60718A006 /* GeofenceStations.swift in Sources */,
 				B7E0F1A2C3D4E5F60718A004 /* GeofenceChannel.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,

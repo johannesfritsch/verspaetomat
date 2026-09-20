@@ -53,6 +53,14 @@ object GeofenceManager {
     private const val MAX_STATIONS = 16
     private const val NEAREST_NEAR_HOME = 4
 
+    /// How many stations the local lookup asks for (issue #40). The server was never sent a
+    /// `limit`, so it answered with its default of three and Android quietly got a worse answer
+    /// than iOS for as long as the umbrella has existed. Off the disk 25 costs the same as 3 —
+    /// one scan either way — so it asks for what it can actually register, and the same number
+    /// iOS asks for (`GeofenceRules.nearbyLimit`). Raising it is what forced the dedupe in
+    /// `addAll` to fold by place instead of by id.
+    private const val NEARBY_LIMIT = 25
+
     /// Beyond this from every frequent station, the frequent set is dropped entirely.
     private const val AWAY_FROM_HOME_M = 50_000.0
 
@@ -113,6 +121,13 @@ object GeofenceManager {
     }
 
     /**
+     * **Nothing calls this, and issue #40 deliberately left it that way.** Android registers a
+     * flat 8 km umbrella (`addAll`, `umbrellaRadiusM`) while iOS computes 1 to 200 km from the
+     * answer's own reach. #40 changed where the answer comes from, not how the umbrella is sized
+     * — and sizing is where issue #31 lived, so it gets its own change with its own switch rather
+     * than riding along on this one. The local answer now carries `searchRadiusM` and `complete`
+     * (`NearbyAnswer`), so whoever does wire it will not have to fetch anything new.
+     *
      * How far the coverage disc reaches, by how fast the phone is moving (docs/25 §1). Android
      * keeps the umbrella as its coarse trigger, but sizes it from the same table, so a long
      * leg costs one refresh instead of one per field.
@@ -191,8 +206,32 @@ object GeofenceManager {
         val frequent = Station.list(cfg.optJSONArray("stations"))
         val atHome = nearHome(frequent, fix)
         val stations = if (atHome) frequent.take(MAX_STATIONS) else emptyList()
-        val ids = stations.map { it.id }.toMutableSet()
-        val extra = nearest(ctx).filter { ids.add(it.id) }.take(if (atHome) NEAREST_NEAR_HOME else MAX_REGIONS)
+        // Dedupe by PLACE, not by id (issue #40). Reading locally made the nearby list 25 deep
+        // instead of the server's 3, and at that depth it reaches a station's own Haltestelle under
+        // a second id: two circles on one platform, which is the double nudge docs/30 and issue #11
+        // were supposed to have ended. iOS has guarded this since docs/30 with `samePlace`; Android
+        // deduped on `id` alone and got away with it only because three stations never reached that
+        // far. The 250 m and the name test are `StationNames.samePlace`, ported from
+        // `GeofenceRules.samePlace` so the two platforms fold one platform the same way.
+        //
+        // Id **or** place, exactly as Swift's `known()` (Geofence.swift:196-198). `samePlace` is
+        // the addition, not the replacement: two entries carrying the same id survive a
+        // place-only test whenever their names fold apart or they sit more than 250 m from each
+        // other — the malformed-feed case the id check was cheap insurance against, and what
+        // Android already did. Dropping it would trade one regression for another.
+        //
+        // A plain loop rather than a `filter` that mutates `kept` inside an `.also`. That version
+        // was correct and read like a bug: whether entries past the budget may still suppress a
+        // later candidate is not a question the next reader should have to work out.
+        val budget = if (atHome) NEAREST_NEAR_HOME else MAX_REGIONS
+        val kept = stations.toMutableList()
+        val extra = ArrayList<Station>()
+        for (cand in nearest(ctx)) {
+            if (extra.size >= budget) break
+            if (kept.any { it.id == cand.id || StationNames.samePlace(it, cand) }) continue
+            kept.add(cand)
+            extra.add(cand)
+        }
         val radius = cfg.optDouble("stationRadiusM", 300.0).toFloat()
         val umbrellaRadius = cfg.optDouble("umbrellaRadiusM", 8000.0).toFloat()
         val fences = ArrayList<Geofence>()
@@ -274,7 +313,15 @@ object GeofenceManager {
         currentLocation(ctx) { fix ->
             if (fix == null) return@currentLocation done()
             Thread {
-                val fetched = fetchNearby(cfg.optString("apiUrl"), cfg.optString("token"), fix.latitude, fix.longitude)
+                // Issue #40: off the disk when the server says it may, otherwise the old way.
+                // `null` means the same thing on both paths — „could not look up, keep what is
+                // registered" — so the caller below is untouched. An empty list is an answer.
+                val fetched = if (cfg.optBoolean("stationsLocal", false)) {
+                    LocalStations.nearby(LocalStations.file(ctx), fix.latitude, fix.longitude, NEARBY_LIMIT)
+                        ?.stations?.map { Station(it.id, it.name, it.lat, it.lon) }
+                } else {
+                    fetchNearby(cfg.optString("apiUrl"), cfg.optString("token"), fix.latitude, fix.longitude)
+                }
                 if (fetched != null) {
                     prefs(ctx).edit().putString("nearest", JSONArray(fetched.map { it.toJson() }).toString()).apply()
                 }

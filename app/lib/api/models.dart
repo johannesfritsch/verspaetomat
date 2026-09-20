@@ -498,6 +498,7 @@ class ApiGeofence {
     this.snoozeUntil,
     this.idle = false,
     this.lastCheckin,
+    this.stationsLocal = false,
   });
   final bool enabled;
   final List<ApiGeofenceStation> stations;
@@ -514,6 +515,11 @@ class ApiGeofence {
   final bool idle;
   final DateTime? lastCheckin;
 
+  /// #40's kill switch. False is the old path: the native background layer asks
+  /// `/v1/stations/nearby`. True is the .vst on disk (docs/45). Absent means false, which is
+  /// what an older backend and [ApiGeofence.empty] both give.
+  final bool stationsLocal;
+
   static const empty = ApiGeofence(enabled: false, stations: []);
 
   factory ApiGeofence.fromJson(Map<String, dynamic> j) => ApiGeofence(
@@ -524,6 +530,7 @@ class ApiGeofence {
         snoozeUntil: DateTime.tryParse(_s(j['nudge_snooze_until'] ?? j['snooze_until']))?.toLocal(),
         idle: _b(j['idle']),
         lastCheckin: DateTime.tryParse(_s(j['last_checkin']))?.toLocal(),
+        stationsLocal: _b(j['stations_local']),
       );
 }
 

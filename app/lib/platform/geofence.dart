@@ -122,6 +122,7 @@ class Geofence {
         maxRegionRadiusM: (m['maxRegionRadiusM'] as num?)?.toDouble() ?? 0,
         umbrellaComputed: m['umbrellaComputed'] == true,
         umbrellaWhy: m['umbrellaWhy']?.toString(),
+        stationsLocal: m['stationsLocal'] == true,
         regions: [
           for (final r in (m['regions'] as List? ?? const []).whereType<Map>())
             GeofenceRegion(
@@ -312,6 +313,7 @@ class GeofenceStatus {
     this.maxRegionRadiusM = 0,
     this.umbrellaComputed = false,
     this.umbrellaWhy,
+    this.stationsLocal = false,
   });
   const GeofenceStatus.unavailable()
       : permission = GeofencePermission.notDetermined,
@@ -335,7 +337,8 @@ class GeofenceStatus {
         umbrellaRadiusM = 0,
         maxRegionRadiusM = 0,
         umbrellaComputed = false,
-        umbrellaWhy = null;
+        umbrellaWhy = null,
+        stationsLocal = false;
   final GeofencePermission permission;
   final bool notifications;
   final int registered;
@@ -398,6 +401,11 @@ class GeofenceStatus {
 
   /// The reason in the words the rule used: „nearest unwatched station 12 km off".
   final String? umbrellaWhy;
+
+  /// #40: which source the background lookup is on, read back off the phone. Shipped before the
+  /// path it guards, so that flipping the switch from a laptop and watching this change is the
+  /// proof that the switch works in both directions. False is the old path.
+  final bool stationsLocal;
 }
 
 /// One registered region as the debug page lists it (docs/25 §5).
@@ -504,6 +512,7 @@ class GeofenceConfig {
     this.nudgeRadiusM = defaultNudgeRadiusM,
     this.quietFrom,
     this.quietTo,
+    this.stationsLocal = false,
   });
   // The three radii the whole layer is made of. `GeofenceSync` never overrides them, so these
   // are the numbers in force on every phone — and the debug page names them, because they are
@@ -527,6 +536,11 @@ class GeofenceConfig {
   final String? quietFrom;
   final String? quietTo;
 
+  /// #40: whether native resolves "nearby" from the .vst on disk instead of asking the server.
+  /// Server-owned (`stations_local` on /v1/me/geofence); false is the old path, and false is
+  /// what every layer falls back to when the key is missing.
+  final bool stationsLocal;
+
   Map<String, dynamic> toChannel() => {
         'apiUrl': apiUrl,
         'token': token,
@@ -536,6 +550,7 @@ class GeofenceConfig {
         'umbrellaRadiusM': umbrellaRadiusM,
         'stationRadiusM': stationRadiusM,
         'nudgeRadiusM': nudgeRadiusM,
+        'stationsLocal': stationsLocal,
         'quietFrom': quietFrom,
         'quietTo': quietTo,
       };

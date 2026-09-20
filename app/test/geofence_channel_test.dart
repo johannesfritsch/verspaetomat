@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:verspaetomat/api/models.dart';
 import 'package:verspaetomat/platform/geofence.dart';
 
 /// #29: the shape native answers with, pinned on this side.
@@ -162,6 +163,56 @@ void main() {
 
       answer((_) => throw MissingPluginException('no platform'));
       expect(await Geofence.instance.testNudge(), isFalse);
+    });
+  });
+
+  /// #40's kill switch, on the Dart rung of it. The thing worth pinning is not that `true`
+  /// travels — it is that *absent* means the old path at every point it can go missing, because
+  /// a switch whose default is the new behaviour protects nobody on the build it first appears
+  /// in, and because builds 64 and 65 are in TestFlight and have never heard of the field.
+  group('stationsLocal', () {
+    test('a backend that has never heard of the field means the old path', () {
+      final old = ApiGeofence.fromJson({'enabled': true, 'stations': <dynamic>[], 'quiet_from': '22:00'});
+      expect(old.stationsLocal, isFalse);
+      expect(ApiGeofence.empty.stationsLocal, isFalse);
+    });
+
+    test('an answer carrying a key this build does not know is not rejected', () {
+      final newer = ApiGeofence.fromJson({'enabled': true, 'stations': <dynamic>[], 'stations_local': true, 'something_else': 42});
+      expect(newer.stationsLocal, isTrue);
+    });
+
+    test('configure carries it to native, and false when nobody said otherwise', () async {
+      late MethodCall seen;
+      answer((call) {
+        seen = call;
+        return {'registered': 1};
+      });
+
+      const base = GeofenceConfig(apiUrl: 'http://x', token: 't', enabled: true, riding: false, stations: []);
+      await Geofence.instance.configure(base);
+      expect((seen.arguments as Map)['stationsLocal'], isFalse);
+
+      await Geofence.instance.configure(const GeofenceConfig(
+        apiUrl: 'http://x',
+        token: 't',
+        enabled: true,
+        riding: false,
+        stations: [],
+        stationsLocal: true,
+      ));
+      expect((seen.arguments as Map)['stationsLocal'], isTrue);
+    });
+
+    test('status reads it back, and a native answer without the key is the old path', () async {
+      answer((_) => {'permission': 'always', 'notifications': true, 'registered': 1, 'stationsLocal': true});
+      expect((await Geofence.instance.status()).stationsLocal, isTrue);
+
+      // What build 65's native layer answers: the key is simply not there.
+      answer((_) => {'permission': 'always', 'notifications': true, 'registered': 1});
+      expect((await Geofence.instance.status()).stationsLocal, isFalse);
+
+      expect(const GeofenceStatus.unavailable().stationsLocal, isFalse);
     });
   });
 }

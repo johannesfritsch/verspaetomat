@@ -551,6 +551,330 @@ mod tests {
         hits.iter().map(|(_, _, _, s)| s.id).collect()
     }
 
+    /// The limits the callers actually use: `Geofence.swift` asks for 25 to size its umbrella,
+    /// the Bahnsteig and Android's default ask for 3 (`handlers.rs` clamps to 1..=25).
+    const FIXTURE_LIMITS: [usize; 2] = [3, 25];
+
+    /// A bearing from a station id, by integer arithmetic only.
+    ///
+    /// Deliberately not a float PRNG: the fixture has to be reproducible from Rust today and
+    /// checkable by hand from Dart, Swift or Kotlin tomorrow, and a multiply-and-mask reproduces
+    /// bit-identically in all four. Knuth's multiplicative constant, the low 32 bits.
+    fn bearing_of(id: u32) -> f64 {
+        let h = (id as u64).wrapping_mul(2_654_435_761) & 0xffff_ffff;
+        (h as f64 / 4_294_967_296.0) * std::f64::consts::TAU
+    }
+
+    /// 200..1500 m from the station, also from the id, so a probe is neither always on the
+    /// forecourt nor always a village away.
+    fn offset_of(id: u32) -> f64 {
+        let h = (id as u64).wrapping_mul(40_503).wrapping_add(12_345) & 0xffff;
+        200.0 + (h as f64 / 65_536.0) * 1_300.0
+    }
+
+    /// Onto the micro-degree grid, the grid the extract stores and the grid the fixture prints.
+    /// Rounding *before* the answer is computed is the whole point: a generator that computes at
+    /// full precision and prints a rounded coordinate hands the reader an input up to 5.6 cm away
+    /// from the one the answer belongs to, and `Index::nearby` sorts on the rounded metre and
+    /// bands at `d / 300`, so sub-metre shifts flip orders at a band edge.
+    fn on_grid(v: f64) -> f64 {
+        (v * 1_000_000.0).round() / 1_000_000.0
+    }
+
+    /// The nearest stations from a point, nearest first, with everything `nearby_order` ranks on:
+    /// the rounded metre, the rank, and whether the name says „Bahnhof".
+    fn sorted_hits(ix: &Index, lat: f64, lon: f64) -> Vec<(i64, i16, bool)> {
+        let mut h: Vec<(i64, i16, bool)> = ix
+            .all
+            .iter()
+            .filter_map(|s| {
+                let m = haversine(lat, lon, s.lat, s.lon);
+                (m <= 50_000.0).then(|| {
+                    (m.round() as i64, s.rank, crate::train::transitous::looks_like_station(&s.name))
+                })
+            })
+            .collect();
+        h.sort_by_key(|(d, _, _)| *d);
+        h
+    }
+
+    /// How much this probe would tell four implementations apart.
+    ///
+    /// The cases that separate readers are the ones where the ordering is decided by something
+    /// other than plain distance: an exact tie, a 300 m band edge, a rank or a name flag breaking
+    /// a band, or a station sitting a metre outside the cut. A fixture of uniformly random points
+    /// mostly asserts that everybody can subtract.
+    ///
+    /// Only the first 26 count — the 25 an answer can carry plus the one just past the boundary.
+    /// Scoring the 40 nearest regardless of distance quietly selected for *sparse* country: out at
+    /// forty kilometres the ring is long and rounded metres collide by coincidence, so an earlier
+    /// version of this filled the fixture with Brandenburg and had almost nothing inside 300 m —
+    /// which is the docs/23 §1 case the ranking exists for.
+    fn how_telling(h: &[(i64, i16, bool)]) -> u32 {
+        let mut score = 0;
+        let window = h.len().min(26);
+        for i in 0..window.saturating_sub(1) {
+            let (a, b) = (h[i], h[i + 1]);
+            if a.0 == b.0 {
+                score += 100; // an exact tie: only a stable sort by id gets this right
+            } else if a.0 / 300 != b.0 / 300 && b.0 - a.0 <= 5 {
+                score += 30; // a band edge with the two stations almost touching
+            }
+            // Inside one band the distance stops deciding and the ladder takes over. This is the
+            // tiebreak that puts München Hbf above the tram stop on its own forecourt.
+            if a.0 / 300 == b.0 / 300 && (a.1 != b.1 || a.2 != b.2) {
+                score += 40;
+            }
+        }
+        for limit in FIXTURE_LIMITS {
+            if h.len() > limit && h[limit].0 - h[limit - 1].0 <= 2 {
+                score += 50; // the truncation boundary is a photo finish
+            }
+        }
+        // A passenger standing at a station, which is where the app actually asks.
+        if h.first().is_some_and(|(d, _, _)| *d <= 300) {
+            score += 40;
+        }
+        score
+    }
+
+    /// At most this many probes from any one degree square, so the fixture covers the country
+    /// rather than whichever corner happens to score highest.
+    const PER_CELL: usize = 4;
+
+    /// Write `testdata/stations/nearby-probes.tsv`: what `Index::nearby` answers, for the Rust,
+    /// Dart, Swift and Kotlin readers to check themselves against rather than against each other.
+    ///
+    /// Needs Postgres (`DATABASE_URL`, default `postgres://localhost/verspaetomat`). Regenerate:
+    ///
+    /// ```text
+    /// cd backend && cargo test --release --lib write_the_nearby_probe_fixture -- --ignored --nocapture
+    /// ```
+    ///
+    /// Idempotent: everything it writes is a pure function of the table, so two runs over one
+    /// table produce byte-identical files.
+    #[tokio::test]
+    #[ignore]
+    async fn write_the_nearby_probe_fixture() {
+        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/verspaetomat".into());
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(4)
+            .connect(&url)
+            .await
+            .expect("connect to postgres");
+        let ix = crate::stations::load(&pool).await.expect("load the table");
+
+        // The header ties the answers to one extract. Both numbers are a pure function of the
+        // table: the CRC covers [header_len, EOF), so neither moves when the import serial or the
+        // generated timestamp does, and the meta passed here cannot leak into the fixture.
+        let bytes = render(&ix, Meta { version: 0, generated: at(0) }).expect("render");
+        let head = parse(&bytes).expect("parse");
+        let (crc32, count) = (head.crc32, head.stations.len());
+
+        // The repo's named hard cases, plus the two guards the acceptance argument rests on.
+        let named: Vec<(&str, f64, f64)> = vec![
+            ("München Hbf entrance", 48.1402, 11.5600),
+            ("Köln", 50.9430, 6.9586),
+            ("Kißlegg", 47.7914, 9.8921),
+            ("Wangen Zentrum", 47.6817, 9.8331),
+            ("Berlin Hbf", 52.5251, 13.3694),
+            // Not a negative: 442 of the live rows sit outside Germany and Paris answers with
+            // Gare de Lyon. Kept as a positive so that filtering the import to a German bounding
+            // box would fail here rather than quietly change what `complete` means.
+            ("Paris — the table is not German-only", 48.8566, 2.3522),
+            // The negatives: nothing within 50 km, so complete is false and the radius is 0.
+            ("Madrid — nothing within 50 km", 40.4168, -3.7038),
+            ("North Sea — nothing within 50 km", 54.5000, 4.0000),
+        ];
+
+        // Standing at a major station: the station's own coordinate, exactly. This is the query
+        // the Bahnsteig makes most often, and probes offset a few hundred metres never sit on it.
+        //
+        // It is *not* docs/23 §1. That case — several stops inside one 300 m band, the ladder
+        // rather than the distance deciding which name is shown — came from the Transitous
+        // gazetteer, which carried one stop per platform. Our own table does not: #37's fold
+        // merges same-named stations within `SAME_STATION_M` (1 km) into one row. Measured on the
+        // live table: of the 641 rank-3 stations the most any has inside 300 m is *one* neighbour
+        // and only ten have any at all; of the 184 that also read as a station by name — the ones
+        // picked below — three do. So the close-range band tie barely exists here; the band ties
+        // that do the work are between different stations at similar distances further out, which
+        // the spread below covers.
+        //
+        // Ordered by that neighbour count anyway, so the ten that can exercise a close tie come
+        // first. Ordering by id instead put these in sparse Carinthia, because the low ids belong
+        // to the international stops.
+        // (neighbours inside 300 m, id, name, lat, lon)
+        let mut crowded: Vec<(usize, i32, String, f64, f64)> = Vec::new();
+        for st in &ix.all {
+            if st.rank != 3 || !crate::train::transitous::looks_like_station(&st.name) {
+                continue;
+            }
+            let neighbours = ix
+                .all
+                .iter()
+                .filter(|o| o.id != st.id && haversine(st.lat, st.lon, o.lat, o.lon) <= 300.0)
+                .count();
+            crowded.push((neighbours, st.id, st.name.clone(), on_grid(st.lat), on_grid(st.lon)));
+        }
+        crowded.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let mut forecourt: Vec<(String, f64, f64)> = Vec::new();
+        let mut forecourt_cells: HashMap<(i32, i32), usize> = HashMap::new();
+        for (_, _, name, lat, lon) in &crowded {
+            let cell = (lat.floor() as i32, lon.floor() as i32);
+            let n = forecourt_cells.entry(cell).or_insert(0);
+            if *n == 0 {
+                *n += 1;
+                forecourt.push((name.clone(), *lat, *lon));
+            }
+            if forecourt.len() == 24 {
+                break;
+            }
+        }
+        eprintln!(
+            "at-a-station: {} probes on a rank-3 station itself, one per degree square; the most crowded station in \
+             the table has {} neighbour(s) inside 300 m and {} of {} rank-3 stations have any",
+            forecourt.len(),
+            crowded.first().map(|c| c.0).unwrap_or(0),
+            crowded.iter().filter(|c| c.0 > 0).count(),
+            crowded.len()
+        );
+
+        // A deterministic spread, chosen for what it can tell apart rather than sampled at random.
+        // (score, id, name, lat, lon)
+        let mut scored: Vec<(u32, u32, String, f64, f64)> = Vec::with_capacity(ix.all.len());
+        for s in &ix.all {
+            let id = s.id as u32;
+            let (bearing, off) = (bearing_of(id), offset_of(id));
+            let lat = on_grid(s.lat + off * bearing.cos() / 111_320.0);
+            let lon = on_grid(s.lon + off * bearing.sin() / (111_320.0 * s.lat.to_radians().cos()));
+            scored.push((how_telling(&sorted_hits(&ix, lat, lon)), id, s.name.clone(), lat, lon));
+        }
+        // Score first, then id: a total order with no ties, so the choice does not depend on the
+        // sort's stability or on the table's iteration order.
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let mut per_cell: HashMap<(i32, i32), usize> = HashMap::new();
+        let mut spread: Vec<(u32, u32, String, f64, f64)> = Vec::new();
+        for p in scored {
+            let cell = (p.3.floor() as i32, p.4.floor() as i32);
+            let n = per_cell.entry(cell).or_insert(0);
+            if *n < PER_CELL {
+                *n += 1;
+                spread.push(p);
+            }
+            if spread.len() == 300 - named.len() - forecourt.len() {
+                break;
+            }
+        }
+        eprintln!(
+            "spread: {} probes over {} degree squares, scores {}..{}",
+            spread.len(),
+            per_cell.len(),
+            spread.last().map(|p| p.0).unwrap_or(0),
+            spread.first().map(|p| p.0).unwrap_or(0)
+        );
+
+        let mut out = String::new();
+        out.push_str("# nearby-probes.tsv — what `Index::nearby` answers, for every reader of the .vst extract to\n");
+        out.push_str("# check itself against. Rust, Dart, Swift and Kotlin assert against this file rather than\n");
+        out.push_str("# against each other: four readings of one ordering is four chances to drift.\n");
+        out.push_str("#\n");
+        out.push_str("# Regenerate (needs Postgres; this file is the output):\n");
+        out.push_str("#   cd backend && cargo test --release --lib write_the_nearby_probe_fixture -- --ignored --nocapture\n");
+        out.push_str("#\n");
+        out.push_str("# Columns, tab separated:\n");
+        out.push_str("#   lat  lon  limit  search_radius_m  complete  ids  label\n");
+        out.push_str("#\n");
+        out.push_str("# `complete` is 1 or 0 — it is `!hits.is_empty()`, which the umbrella sizing fails closed on.\n");
+        out.push_str("# `search_radius_m` is the wire spelling (`handlers.rs`); `searched_radius_m` is only the Rust\n");
+        out.push_str("# struct's field name. `ids` are bare record ids in the answer's order, comma separated and\n");
+        out.push_str("# empty when nothing is near — the wire's `vs:` prefix has no business in a fixture. `label`\n");
+        out.push_str("# is for whoever reads a failure, and is never asserted on.\n");
+        out.push_str("#\n");
+        out.push_str("# No row is marked `ambiguous`, deliberately. A tie looks like it would need that, but both\n");
+        out.push_str("# of `Index::nearby`'s sorts are stable and the extract's records ascend by id, so two\n");
+        out.push_str("# stations at the same rounded metre resolve the same way in every language. Marking rows\n");
+        out.push_str("# lenient that are in fact determined would only hide a real divergence.\n");
+        out.push_str("#\n");
+        out.push_str("# Coordinates are on the micro-degree grid — the grid the extract stores — and every answer\n");
+        out.push_str("# was computed from exactly the value printed here. Parse the coordinate back and you hold\n");
+        out.push_str("# the bit-identical input, so no reader can diverge through rounding.\n");
+        out.push_str("#\n");
+        out.push_str("# The line below names the extract these answers belong to. Both numbers are a pure function\n");
+        out.push_str("# of the table — the CRC covers [header_len, EOF), so neither moves when the import serial or\n");
+        out.push_str("# the generated timestamp does. A fixture for another import is not a looser assertion, it is\n");
+        out.push_str("# a wrong one.\n");
+        out.push_str(&format!("# crc32=0x{crc32:08x} count={count}\n"));
+
+        // What the fixture actually exercises, counted rather than hoped for. A band tie is the
+        // case where two stations in one answer fall in the same `d / 300` bucket, so the distance
+        // has stopped deciding and the docs/23 ladder — rank, then the name flag — has taken over.
+        // A reader that sorts on distance alone passes every probe without one.
+        let (mut with_band_tie, mut with_exact_tie, mut empty) = (0usize, 0usize, 0usize);
+        let mut rows = 0usize;
+        // A tab or a newline in a label would shift every column after it, so a name is flattened
+        // rather than trusted. None of the live names carry one; the guard is for the next import.
+        fn flat(s: &str) -> String {
+            s.chars().map(|c| if c.is_control() || c == '\t' { ' ' } else { c }).collect()
+        }
+        let mut probes: Vec<(String, f64, f64)> =
+            named.iter().map(|(what, lat, lon)| (flat(what), on_grid(*lat), on_grid(*lon))).collect();
+        probes.extend(forecourt.iter().map(|(name, lat, lon)| (format!("at {}", flat(name)), *lat, *lon)));
+        probes.extend(
+            spread.iter().map(|(_, id, name, lat, lon)| (format!("near {} ({id})", flat(name)), *lat, *lon)),
+        );
+        for (label, lat, lon) in &probes {
+            for limit in FIXTURE_LIMITS {
+                let a = ix.nearby(*lat, *lon, limit);
+                let ids: Vec<String> = a
+                    .stations
+                    .iter()
+                    .filter_map(|s| parse_wire_id(&s.id))
+                    .map(|n| n.to_string())
+                    .collect();
+                out.push_str(&format!(
+                    "{:.6}\t{:.6}\t{}\t{}\t{}\t{}\t{}\n",
+                    lat,
+                    lon,
+                    limit,
+                    a.searched_radius_m,
+                    u8::from(a.complete),
+                    ids.join(","),
+                    label
+                ));
+                rows += 1;
+
+                if limit == 25 {
+                    let mut d: Vec<i64> = a.stations.iter().filter_map(|s| s.distance_m).collect();
+                    d.sort_unstable();
+                    if d.is_empty() {
+                        empty += 1;
+                    }
+                    if d.windows(2).any(|w| w[0] / 300 == w[1] / 300) {
+                        with_band_tie += 1;
+                    }
+                    if d.windows(2).any(|w| w[0] == w[1]) {
+                        with_exact_tie += 1;
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "exercises: {with_band_tie} probes put two stations in one 300 m band, {with_exact_tie} have an exact \
+             metre tie, {empty} answer with nothing at all"
+        );
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/stations/nearby-probes.tsv");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create testdata/stations");
+        std::fs::write(&path, out.as_bytes()).expect("write the fixture");
+        eprintln!(
+            "wrote {} — {} probes × {} limits = {rows} rows, {} bytes, crc32={crc32} count={count}",
+            path.display(),
+            probes.len(),
+            FIXTURE_LIMITS.len(),
+            out.len()
+        );
+    }
+
     /// The whole live table, at scale: does a reader holding only the file answer what the server
     /// answers? Not five probe points — every station's own doorstep, a grid over the country, and
     /// a few hundred queries drawn from real names.

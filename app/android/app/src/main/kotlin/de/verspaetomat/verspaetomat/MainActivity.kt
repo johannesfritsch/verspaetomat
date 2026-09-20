@@ -75,6 +75,9 @@ class MainActivity : FlutterActivity() {
         m["registered"] = GeofenceManager.registeredCount(this)
         m["lastEvent"] = GeofenceManager.lastEvent(this)
         m["ignored"] = GeofenceManager.ignoredTally(this)
+        // #40: which source the background lookup is on, read back out of the persisted config.
+        // `optBoolean` with a default is why an older build ignores the key instead of failing.
+        m["stationsLocal"] = GeofenceManager.config(this)?.optBoolean("stationsLocal", false) ?: false
         GeofenceManager.takePendingNudge(this)?.let {
             m["pendingNudge"] = mapOf("stationId" to it.optString("stationId"), "stationName" to it.optString("stationName"))
         }

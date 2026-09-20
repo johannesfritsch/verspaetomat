@@ -20,6 +20,16 @@ struct GeofenceConfig: Codable {
   var nudgeDelay: TimeInterval = GeofenceRules.defaultNudgeDelay
   /// How close the phone has to actually be before the nudge is scheduled (issue #8, docs/35).
   var nudgeRadiusM: Double = GeofenceRules.defaultNudgeRadius
+  /// #40's kill switch, from the server (`stations_local` on /v1/me/geofence). nil and false
+  /// both mean the old path: ask `/v1/stations/nearby`.
+  ///
+  /// OPTIONAL ON PURPOSE. This struct is Codable and persisted to UserDefaults, and Swift's
+  /// synthesized `init(from:)` does not use a property's default value: a non-optional
+  /// `Bool = false` makes JSONDecoder throw `keyNotFound` on every config a build before this
+  /// one wrote, the getter's `try?` turns that into `config == nil`, and the layer guards on
+  /// that — so the whole background layer would be dead from the upgrade until the next
+  /// foreground `configure`. `nudgeDelay` and `nudgeRadiusM` above already carry that hazard.
+  var stationsLocal: Bool?
 }
 
 /// Pure rules, kept free of CoreLocation state so they can be unit-tested.
@@ -219,8 +229,11 @@ enum GeofenceRules {
       // ß is a letter, not an accent, so `diacriticInsensitive` leaves it alone — and the feeds
       // disagree about it: DELFI writes „Kißlegg", the Swiss feed writes „Kisslegg". Without this
       // the two are different places, which is two regions on one platform and the double nudge
-      // docs/30 was supposed to have ended. A test has asserted this since docs/30 and has been
-      // failing ever since, because nothing runs the Swift tests.
+      // docs/30 was supposed to have ended. A test has asserted this since docs/30, and until #40
+      // nobody knew whether it passed, because nothing ran the Swift tests. Something does now —
+      // `app/tools/swift-test.sh`, which `release.sh` calls before every archive — and it passes.
+      // The comment that used to stand here said it had been failing ever since. It had not; it
+      // had been unobserved, which is a different thing and reads worse once somebody looks.
       .replacingOccurrences(of: "ß", with: "ss")
       .folding(options: .diacriticInsensitive, locale: .current)
     s = String(s.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
@@ -711,7 +724,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       stationRadiusM: args["stationRadiusM"] as? Double ?? 300,
       quietFrom: args["quietFrom"] as? String, quietTo: args["quietTo"] as? String,
       nudgeDelay: args["nudgeDelayS"] as? Double ?? GeofenceRules.defaultNudgeDelay,
-      nudgeRadiusM: args["nudgeRadiusM"] as? Double ?? GeofenceRules.defaultNudgeRadius)
+      nudgeRadiusM: args["nudgeRadiusM"] as? Double ?? GeofenceRules.defaultNudgeRadius,
+      stationsLocal: args["stationsLocal"] as? Bool)
     config = c
     // A journey that started while a nudge was already pending used to let it fire anyway: the
     // notification lives in iOS, not in the app, and nothing took it back (issue #11). The same
@@ -801,6 +815,10 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         // only the metres cannot tell "computed 8 km" from "never computed, so 8 km" — and that
         // is exactly the question that could not be answered from the page.
         "umbrellaComputed": umbrellaRadius > 0,
+        // #40: which source the background lookup is on. Shipped before the path it guards, so
+        // that flipping it from a laptop and watching this line change is the proof that the
+        // switch works in both directions.
+        "stationsLocal": config?.stationsLocal == true,
         "umbrellaWhy": umbrellaWhy as Any,
         "mode": modeLabel,
         "lastEventAt": (defaults.object(forKey: "geofence.lastEvent.at") as? Date)?.timeIntervalSince1970 as Any,
@@ -1202,6 +1220,23 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         self.onUmbrellaExit?()
         if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
       }
+    }
+    // Issue #40: the answer comes off the disk when the server says it may. `finish` is the same
+    // closure either way — only the source changes — and `StationTable.answer` keeps the one
+    // distinction that matters: nil is „could not look up, keep the set", an empty answer is
+    // „looked, and there is nothing here". Synchronously, because the work is an mmap and a scan
+    // of 152 KB (≈1.3 ms measured); a hop to a global queue would buy nothing and add a window in
+    // which this process can be suspended before the block is ever scheduled. `finish` hops to
+    // main by itself.
+    //
+    // `nearby` and `requests` are deliberately NOT bumped here. docs/25's „fourteen in
+    // fifty-nine minutes" is read off `counters["nearby"]`, and that number is the one this issue
+    // exists to drive to zero — inflating it with answers that never left the phone would destroy
+    // the only measurement we have of whether any of this worked.
+    if c.stationsLocal == true {
+      bumpCounter("localNearby")
+      return finish(StationTable.shared.answer(
+        lat: l.coordinate.latitude, lon: l.coordinate.longitude, limit: GeofenceRules.nearbyLimit))
     }
     bumpCounter("nearby")
     bumpCounter("requests")

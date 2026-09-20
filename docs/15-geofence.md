@@ -28,9 +28,9 @@ Dart → native:
 
 | Method | Arguments | Returns |
 |---|---|---|
-| `configure` | `{apiUrl, token, enabled, riding, stations: [{id, name, lat, lon}], umbrellaRadiusM: 8000, stationRadiusM: 300, quietFrom: "22:00"?, quietTo: "06:00"?}` | `{registered: int}` — native persists the config, drops all regions, registers `stations` (≤ 16 after native adds the nearest 3 it may already know) plus the umbrella at the current position (one fix; if no fix, umbrella is skipped and retried on next configure) |
+| `configure` | all eleven keys `GeofenceConfig.toChannel()` sends, and no others: `{apiUrl, token, enabled, riding, stations: [{id, name, lat, lon}], umbrellaRadiusM: 8000, stationRadiusM: 300, nudgeRadiusM: 50, stationsLocal: false, quietFrom: "22:00"?, quietTo: "06:00"?}`. Both native sides additionally accept `nudgeDelayS`, which nothing sends today, so both fall back to their own default | `{registered: int}` — native persists the config, drops all regions, registers `stations` (≤ 16 after native adds the nearest 3 it may already know) plus the umbrella at the current position (one fix; if no fix, umbrella is skipped and retried on next configure) |
 | `requestPermission` | `{always: bool}` | permission string |
-| `status` | — | `{permission: notDetermined/denied/whileInUse/always, notifications: bool, registered: int, lastEvent: string?}` |
+| `status` | — | **Abridged — this row has never been the full list.** iOS returns 26 keys plus `lastEvent` and `pendingNudge` when there are any; Android returns 6 plus `pendingNudge`. The ones named here are the ones prose elsewhere refers to: `{permission: notDetermined/denied/whileInUse/always, notifications: bool, registered: int, lastEvent: string?, ignored: {stationId: int}, counters: {name: int}, stationsLocal: bool, …}`. The Entwicklung page (`entwicklung_screen.dart`) renders whatever is there and is the readable list |
 | `stop` | — | removes all regions, keeps nothing |
 
 Native → Dart:
@@ -43,7 +43,11 @@ Permission strings: `notDetermined`, `denied`, `whileInUse`, `always`. `enabled=
 
 ## Backend
 
-`GET /v1/me/geofence` → `{enabled, stations: [{id, name, lat, lon, checkins}], quiet_from, quiet_to}`. Stations come from the customer's rides of the last 30 days (`from_lat/from_lon` stored at check-in from migration 0019 on) plus the home station; muted stations are excluded server-side. `enabled` is `loc_mode == always && nudge_enabled`. `loc_mode` defaults to `always` for new customers.
+`GET /v1/me/geofence` → all eight keys the handler returns: `{enabled, idle, last_checkin, stations: [{id, name, lat, lon, checkins}], quiet_from, quiet_to, snooze_until, stations_local}`. Stations come from the customer's rides of the last 30 days (`from_lat/from_lon` stored at check-in from migration 0019 on) plus the home station; muted stations are excluded server-side. `enabled` is `loc_mode == always && nudge_enabled`, minus a running snooze (docs/24 §3) and minus the 30-day idle switch-off (docs/25 §4) — `idle`, `last_checkin` and `snooze_until` say which of those is folded in.
+
+`stations_local` is #40's kill switch, and **false is the old path**: the native background layer asks `GET /v1/stations/nearby` on umbrella exit, as builds 64 and 65 do. True arms the local resolve from the `.vst` extract on disk (docs/45). It governs the native layer and nothing else — Dart's foreground lookup has had no server rung since #39, gated by a compile-time constant, and no server-side flag can give a release binary back a call it does not contain. Absent means false at every layer, so an old build ignores it and a new build against an old backend keeps the old path.
+
+It lives in one row of `app_switches` (migration 0037), global rather than per-customer, and is flipped with `stellwerk --prod switch stations-local on|off` — one UPDATE, no restart. **The flip reaches the phone at the next `configure`, which is the next time the app is opened**, not the next time it leaves an umbrella; and `GeofenceSync.sync()` returns early without a logged-in session *and* a healthy backend, so the switch needs a reachable server on both ends and cannot rescue a phone whose backend is down. That bound is not new: `enabled: false` from a running snooze and the idle switch-off already reach the phone only through the same `configure`.
 
 ## Settings and onboarding
 

@@ -145,12 +145,21 @@ class GeofenceSync with WidgetsBindingObserver {
         stations: [for (final s in geo.stations) GeofenceStationConfig(id: s.id, name: s.name, lat: s.lat, lon: s.lon)],
         quietFrom: geo.quietFrom,
         quietTo: geo.quietTo,
+        stationsLocal: geo.stationsLocal,
       );
       // Identical config → no round trip to native (it re-registers regions on every configure).
-      final fp = '${config.enabled}|${config.riding}|${config.quietFrom}|${config.quietTo}|${config.stations.map((s) => s.id).join(',')}|${config.token?.length}';
+      // `stationsLocal` belongs in here: it is #40's kill switch, and without it a flip that
+      // changes nothing else would be skipped — the switch would test green on a cold start and
+      // do nothing at exactly the moment somebody is trying to kill something.
+      final fp =
+          '${config.enabled}|${config.riding}|${config.stationsLocal}|${config.quietFrom}|${config.quietTo}|${config.stations.map((s) => s.id).join(',')}|${config.token?.length}';
       if (fp == _lastFingerprint) return;
-      _lastFingerprint = fp;
+      // `configure` first, then the fingerprint. [Geofence.configure] swallows
+      // `MissingPluginException` and `PlatformException` and returns 0, so committing the
+      // fingerprint first records a `configure` that never reached native as delivered — and
+      // nothing retries it until something else in the fingerprint changes.
       await _geofence.configure(config);
+      _lastFingerprint = fp;
       _scheduleSnoozeExpiry(geo.snoozeUntil);
       // docs/25 §4: stations whose nudges nobody answered three times running go quiet for a
       // month. The tally is native, because it is counted while the app is not running.

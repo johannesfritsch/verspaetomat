@@ -346,6 +346,31 @@ Weiter: cd site && cargo run  ·  site/dist committen  ·  deployen  ·  danach 
 In Produktion steht statt `--out` nur `stellwerk --prod stations extract`; die Dateien landen dann
 in `site/static/stations/` und heißen nach der Importnummer der Produktionsdatenbank.
 
+### Nach einem angenommenen Import
+
+Ein Import ändert die Tabelle, und an der Tabelle hängt mehr als der Auszug. Der Reihe nach:
+
+1. **`stellwerk --prod stations import`** — die neue Tabelle. Alles Weitere hängt daran.
+2. **`cd backend && cargo test --release --lib write_the_nearby_probe_fixture -- --ignored`** —
+   `testdata/stations/nearby-probes.tsv` neu erzeugen. Die Datei nennt in ihrem Kopf `crc32` und
+   `count` der Tabelle, zu der sie gehört, und der Dart-, der Swift- und der Kotlin-Leser prüfen das
+   gegen den Auszug in ihrer Hand. (Rust prüft nicht dagegen — Rust erzeugt sie.) Nach einem Import
+   passt sie nicht mehr.
+3. **`stellwerk --prod stations extract`** — `.vst`, `.vst.gz`, `latest.json`, und mit `--asset`
+   die Kopie in der App.
+4. **`cd site && cargo run`**, `site/dist` committen, deployen. Website, Backend, dann TestFlight.
+
+Schritt 2 erzeugt aus der Datenbank, auf die `DATABASE_URL` zeigt — also der lokalen, nicht der
+Produktion. Damit das stimmt, muss derselbe Import auch dort angekommen sein. Die Probe darauf ist
+eingebaut und kostet nichts: Das `crc32` im Kopf des Fixtures muss dem `crc32` in der
+veröffentlichten `latest.json` gleichen. Tut es das nicht, beschreiben die beiden verschiedene
+Tabellen, und das fällt beim nächsten Testlauf auf statt auf einem Telefon.
+
+Schritt 2 vergessen heißt: die Leser-Testsuites werden rot, alle mit „the probe fixture belongs to
+a different extract". **Das ist ein Papierschnitt, kein Datenproblem** — ein veralteter Fixture kann
+nie ein falsches Bestehen erzeugen, immer nur ein lautes und richtig benanntes Fehlschlagen. Der
+Befehl steht auch in den ersten Zeilen der Datei selbst.
+
 `Unverändert: Auszug <v> liegt vollständig im Baum.` steht erst da, wenn **jede** Datei geprüft
 wurde, die der Satz behauptet — die `.vst`, die `.vst.gz`, `latest.json` und, mit `--asset`, die
 Kopie unter `app/assets/`. Fehlt eine davon, wird genau sie geschrieben und genau sie gemeldet.
@@ -359,11 +384,17 @@ Was das kostet: Jeder angenommene Import legt fünf Dateien ins Repository — d
 Gits eigener Kompression etwa 735 KB. Zweimal im Jahr sind das rund **1,5 MB Repository-Wachstum pro
 Jahr**. `--keep` begrenzt den Arbeitsbaum, nicht die Historie.
 
-`--asset` schreibt `app/assets/stations/stations.vst` und ist **aus**, bis die Dart-Hälfte den Leser
-mitbringt, der die Datei benutzt. Vorher wären es 274 KB totes Gewicht in jedem IPA und APK, und
-eine Datei, die gegen einen Leser veralten kann, den es nicht gibt. Der `assets:`-Eintrag in
-`app/pubspec.yaml` kommt mit dem Leser, im selben Commit — die Datei benannt, nicht das Verzeichnis,
-damit nie zwei Versionen in einem Build landen.
+`--asset` schreibt `app/assets/stations/stations.vst`, die Kopie, die eine frische Installation
+ohne Netz schon hat. Sie kam mit der Dart-Hälfte, im selben Commit wie der `assets:`-Eintrag in
+`app/pubspec.yaml` — die Datei benannt, nicht das Verzeichnis, damit nie zwei Versionen in einem
+Build landen.
+
+`--asset` geht **nur mit `--prod`**, und das ist keine Förmlichkeit. Die App lädt einen Auszug nur
+herunter, wenn sie noch keinen heruntergeladenen hält; das mitgelieferte Asset ist der Boden für den
+ersten Start. Ein aus der Entwicklungsdatenbank gerendertes Asset trägt deren Seriennummer, und die
+ist höher als die der Produktion — gemessen 7 gegen 1. Eine frühere Fassung dieses Befehls hat genau
+das getan, und ein Telefon hätte den ersten echten Download verworfen und den Laptop-Stand behalten,
+bis die Produktion sieben Importe weit ist. Bei zweimal im Jahr sind das rund drei Jahre.
 
 ## Warum es keine unauthentifizierte Route auf der API gibt
 

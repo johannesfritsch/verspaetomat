@@ -360,6 +360,39 @@ pub async fn set_clock(State(s): State<AppState>, _a: Admin, Json(b): Json<Clock
     Ok(Json(json!({ "now": clock::now(), "offset_secs": secs })))
 }
 
+// ---------------------------------------------------------------------------
+// Switches (#40): turn a shipped behaviour off from the server, without a new build.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct SwitchesBody {
+    #[serde(default)]
+    pub stations_local: Option<bool>,
+}
+
+pub async fn switches(State(s): State<AppState>, _a: Admin) -> ApiResult {
+    Ok(Json(read_switches(&s.pool).await.map_err(internal)?))
+}
+
+/// Every field is optional: a body that names one switch leaves the others alone, so a second
+/// switch can never be cleared by a command that did not mention it.
+pub async fn switch_set(State(s): State<AppState>, _a: Admin, Json(b): Json<SwitchesBody>) -> ApiResult {
+    if let Some(v) = b.stations_local {
+        sqlx::query("update app_switches set stations_local = $1, updated_at = now() where id = 1")
+            .bind(v)
+            .execute(&s.pool)
+            .await
+            .map_err(internal)?;
+    }
+    Ok(Json(read_switches(&s.pool).await.map_err(internal)?))
+}
+
+async fn read_switches(pool: &sqlx::PgPool) -> sqlx::Result<Value> {
+    let (stations_local, updated_at): (bool, chrono::DateTime<chrono::Utc>) =
+        sqlx::query_as("select stations_local, updated_at from app_switches where id = 1").fetch_one(pool).await?;
+    Ok(json!({ "stations_local": stations_local, "updated_at": updated_at }))
+}
+
 pub async fn reset(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     let trips: Vec<String> = sqlx::query_scalar("select distinct trip_id from rides where customer_id = $1").bind(c.id).fetch_all(&s.pool).await.map_err(internal)?;
@@ -782,6 +815,84 @@ mod tests {
         assert!(backdate_times(now("2026-03-30T10:00:00Z"), 1, at(2, 30), 52, 70).is_none());
     }
 
+    /// #40: the partial-update rule, at the level where it is actually decided. `switch_set`
+    /// writes a column only for a field serde produced a `Some` for, so a body that does not
+    /// name a switch cannot clear it — and a second switch added later inherits that for free.
+    #[test]
+    fn a_switch_body_names_only_what_it_sets() {
+        let none: SwitchesBody = serde_json::from_str("{}").unwrap();
+        assert_eq!(none.stations_local, None);
+        let off: SwitchesBody = serde_json::from_str(r#"{"stations_local":false}"#).unwrap();
+        assert_eq!(off.stations_local, Some(false));
+        let on: SwitchesBody = serde_json::from_str(r#"{"stations_local":true}"#).unwrap();
+        assert_eq!(on.stations_local, Some(true));
+        // An unknown switch is ignored rather than rejected, so an older server survives a
+        // newer stellwerk naming a switch it has never heard of.
+        let other: SwitchesBody = serde_json::from_str(r#"{"something_else":true}"#).unwrap();
+        assert_eq!(other.stations_local, None);
+    }
+
+    /// Needs Postgres (`DATABASE_URL`, default `postgres://localhost/verspaetomat`), like the
+    /// station sweep in `stations::extract`. Run it with
+    ///
+    /// ```text
+    /// cargo test --bin verspaetomat-api switches -- --ignored --nocapture
+    /// ```
+    ///
+    /// It restores whatever the row held before, so running it against a dev database that has
+    /// the switch flipped on does not silently flip it back.
+    #[tokio::test]
+    #[ignore]
+    async fn switches_round_trip_and_default_to_the_old_path() {
+        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://localhost/verspaetomat".into());
+        let pool = sqlx::postgres::PgPoolOptions::new().max_connections(2).connect(&url).await.expect("connect to postgres");
+
+        // What a *fresh* database answers, independently of whatever this one has been set to:
+        // the column's own default is the behaviour that already shipped, and migration 0037
+        // inserts the single row without naming it.
+        let default_clause: Option<String> = sqlx::query_scalar(
+            "select column_default from information_schema.columns
+             where table_name = 'app_switches' and column_name = 'stations_local'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("the column exists");
+        assert_eq!(default_clause.as_deref(), Some("false"));
+
+        // What `handlers::geofence` does when the row is missing altogether: `fetch_optional`
+        // gives `None` and the handler's `unwrap_or(false)` keeps the old path.
+        let missing: Option<bool> = sqlx::query_scalar("select stations_local from app_switches where id = 2")
+            .fetch_optional(&pool)
+            .await
+            .expect("query");
+        assert_eq!(missing.unwrap_or(false), false);
+
+        let before = read_switches(&pool).await.expect("read");
+        let was = before["stations_local"].as_bool().expect("a boolean");
+
+        let set = |v: bool| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query("update app_switches set stations_local = $1, updated_at = now() where id = 1")
+                    .bind(v)
+                    .execute(&pool)
+                    .await
+                    .expect("update");
+                read_switches(&pool).await.expect("read")
+            }
+        };
+
+        assert_eq!(set(true).await["stations_local"], json!(true));
+        assert_eq!(set(false).await["stations_local"], json!(false));
+        assert_eq!(set(true).await["stations_local"], json!(true));
+
+        // A body that names nothing writes nothing: `switch_set`'s `if let Some(v)` never runs.
+        let empty: SwitchesBody = serde_json::from_str("{}").unwrap();
+        assert!(empty.stations_local.is_none());
+        assert_eq!(read_switches(&pool).await.expect("read")["stations_local"], json!(true));
+
+        set(was).await;
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -427,11 +427,23 @@ pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
         .await
         .map_err(internal)?;
     let idle = went_idle(last_checkin, c.0.created_at, now);
+    // #40's kill switch. Read per call rather than cached: this handler already runs two or three
+    // queries and is called about once per app resume, and a cached copy would have to be reached
+    // by the admin write — the one thing that has to work in seconds. `unwrap_or(false)` covers a
+    // database whose row is somehow missing, with the old path.
+    let stations_local: bool = sqlx::query_scalar("select stations_local from app_switches where id = 1")
+        .fetch_optional(&s.pool)
+        .await
+        .map_err(internal)?
+        .unwrap_or(false);
     Ok(Json(json!({
         "enabled": nudges_enabled(&c.0) && !idle,
         "idle": idle,
         "last_checkin": last_checkin,
         "stations": stations,
+        // #40: false is what builds 64 and 65 do — the native background layer asks
+        // /v1/stations/nearby. True arms the .vst on disk (docs/45). Absent means false.
+        "stations_local": stations_local,
         "quiet_from": c.0.quiet_from.map(|t| t.format("%H:%M").to_string()),
         "quiet_to": c.0.quiet_to.map(|t| t.format("%H:%M").to_string()),
         "snooze_until": c.0.nudge_snooze_until,
