@@ -88,11 +88,21 @@ class GeofenceSync with WidgetsBindingObserver {
   /// while the OS was never asked (an older build skipped the prompt) gets asked now.
   Future<void> _repairPermissions(GeofenceStatus status) async {
     if (automation) return;
+    // Never while the setup is still running (#43). This runs once per launch as soon as the
+    // session has loaded, which during onboarding is somewhere on the Willkommen cards — and it
+    // cannot tell a fresh account from an old one that really did say yes, because `notifications`
+    // defaults to TRUE on the server (migration 0002) and the OS has never been asked. So on every
+    // first launch it fired the notification dialog over whatever card happened to be showing,
+    // before the screen whose job it is had said a word.
+    //
+    // The setup screens ask for themselves, one question per screen, and they finish by setting
+    // `onboarding_done`. Until then there is nothing to repair: nobody has answered anything yet.
     for (var i = 0; i < 20 && session.me == null; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
     final settings = session.me?.settings;
     if (settings == null || !session.isLocal) return;
+    if (!settings.onboardingDone) return;
     if (settings.notifications && !status.notifications) {
       await _geofence.registerPush();
     }
