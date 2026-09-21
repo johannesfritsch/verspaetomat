@@ -24,7 +24,6 @@ import 'package:verspaetomat/widgets/kit.dart' show VCard, VDropzone, VGhostButt
 // Welcher Zug? pages — are gone, and the flow's own shots (`einchecken-*`) cover what is left.
 const tour = <(String, String)>[
   ('showcase', Routes.showcase),
-  ('welcome', Routes.welcome),
   ('permissions', Routes.permissions),
   ('setup', Routes.setup),
   ('bahnsteig', Routes.bahnsteig),
@@ -93,6 +92,22 @@ void main() {
       await tester.tapAt(const Offset(200, 60));
       await wait(tester, 700);
     }
+    // Willkommen is five cards behind one route (#43), and photographing the route photographed
+    // the first one. That is how the old screen's last card — the only one that grew two rows
+    // under its button — went unseen: every visual pass looked at card 1. Tap „Weiter" through
+    // all five, so a change to any of them shows up in the tour.
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.welcome);
+    await wait(tester, 1500);
+    for (final name in ['willkommen-gemeinsam', 'willkommen-einchecken', 'willkommen-warten', 'willkommen-zweck', 'willkommen-losgehts']) {
+      await shot(name);
+      // „Weiter" on the first four cards, „Einrichten" on the last — which is the end of the
+      // walk, so the label is only tapped when there is a card after it.
+      final weiter = find.widgetWithText(VPrimaryButton, 'Weiter');
+      if (weiter.evaluate().isEmpty) break;
+      await tester.tap(weiter);
+      await wait(tester, 600);
+    }
+
     // The boards on Wir are below the fold, so the route's own shot never showed them and the
     // ranks went unphotographed through their redesign (#24). Scroll to them.
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
