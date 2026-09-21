@@ -3,7 +3,10 @@ import 'package:go_router/go_router.dart';
 import '../../repo/app_repository.dart' show ApiArrivalResult;
 import '../../router.dart';
 import '../../state/ride_monitor.dart';
-import '../onboarding/permissions_screen.dart';
+import '../onboarding/fertig_screen.dart';
+import '../onboarding/mitteilungen_screen.dart';
+import '../onboarding/standort_immer_screen.dart';
+import '../onboarding/standort_screen.dart';
 import '../onboarding/setup_screen.dart';
 import '../onboarding/welcome_screen.dart';
 import 'angekommen_screen.dart';
@@ -23,8 +26,11 @@ GoRouterWidgetBuilder bahnsteigBuilder = (_, __) => const BahnsteigScreen();
 
 final rideRoutes = <RouteBase>[
   GoRoute(path: Routes.welcome, builder: (_, __) => const WelcomeScreen()),
-  GoRoute(path: Routes.permissions, builder: (_, __) => const PermissionsScreen()),
+  GoRoute(path: Routes.permissions, builder: (_, __) => const MitteilungenScreen()),
+  GoRoute(path: Routes.standort, builder: (_, __) => const StandortScreen()),
+  GoRoute(path: Routes.standortImmer, builder: (_, __) => const StandortImmerScreen()),
   GoRoute(path: Routes.setup, builder: (_, __) => const SetupScreen()),
+  GoRoute(path: Routes.fertig, builder: (_, __) => const FertigScreen()),
   // The ride lives in the sheet over Home (docs/19); the route stays for pushes and deep links.
   GoRoute(
     path: Routes.unterwegs,

@@ -21,14 +21,13 @@ class SetupScreen extends StatelessWidget {
     final ngoId = session.me?.settings.ngoId ?? demo.ngoId;
     final ngos = session.ngos;
     return VScreen(
-      eyebrow: 'Schritt 2 von 2',
+      eyebrow: 'Schritt 3 von 4',
       title: 'Dein Ticket, dein Zweck',
       bottom: VPrimaryButton(
-        label: 'Fertig',
-        onTap: () async {
-          await session.completeOnboarding();
-          if (context.mounted) context.go(Routes.bahnsteig);
-        },
+        label: 'Weiter',
+        // Onboarding is finished on „Los geht's", not here: this screen confirms two values the
+        // server has already defaulted correctly, and that is a poor last act before the Bahnsteig.
+        onTap: () => context.go(Routes.fertig),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

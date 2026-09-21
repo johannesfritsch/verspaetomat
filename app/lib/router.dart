@@ -24,8 +24,13 @@ import 'widgets/kit.dart';
 class Routes {
   Routes._();
   static const welcome = '/welcome';
-  static const permissions = '/permissions';
-  static const setup = '/setup';
+  // The setup, in the order it is asked (#43). `permissions` keeps its path so an older link and
+  // INITIAL_ROUTE still land on the first question.
+  static const permissions = '/permissions'; // Schritt 1: Mitteilungen
+  static const standort = '/standort'; // Schritt 2
+  static const standortImmer = '/standort/immer'; // the rest of Schritt 2, not a step of its own
+  static const setup = '/setup'; // Schritt 3 und 4: Ticket und Zweck
+  static const fertig = '/fertig'; // „Los geht's!", and the end of onboarding
 
   static const bahnsteig = '/bahnsteig'; // "Home" in the nav
   static const antraege = '/antraege'; // ?claim=<claim id> scrolls to that claim
