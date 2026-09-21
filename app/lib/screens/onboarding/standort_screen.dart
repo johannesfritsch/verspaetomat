@@ -59,7 +59,7 @@ class _StandortScreenState extends State<StandortScreen> {
     if (mounted) _onward();
   }
 
-  void _onward() => context.go(Routes.setup);
+  void _onward() => context.go(Routes.zweckWaehlen);
 
   @override
   Widget build(BuildContext context) {

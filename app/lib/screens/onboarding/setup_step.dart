@@ -20,7 +20,7 @@ class SetupStep extends StatelessWidget {
   const SetupStep({
     super.key,
     this.step,
-    this.total = 4,
+    this.total = 3,
     this.onBack,
     required this.asset,
     required this.title,
@@ -32,6 +32,7 @@ class SetupStep extends StatelessWidget {
     this.onSecondary,
     this.footnote,
     this.busy = false,
+    this.imageHeight = 250,
   });
 
   /// Which numbered step this is, or null for the two that are not steps: „Fast geschafft" is a
@@ -52,6 +53,10 @@ class SetupStep extends StatelessWidget {
   final VoidCallback? onSecondary;
   final String? footnote;
   final bool busy;
+
+  /// Smaller where the screen's content is the point rather than its picture: the Verein list is
+  /// as long as the table of Vereine, and the picture must not push it under the button.
+  final double imageHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -101,7 +106,7 @@ class SetupStep extends StatelessWidget {
           // screen had: the one sentence saying nothing is gated was the one you had to scroll
           // for. Same height on all of them, because the picture is the constant here.
           SizedBox(
-            height: 250,
+            height: imageHeight,
             child: Image.asset(
               asset,
               fit: BoxFit.contain,

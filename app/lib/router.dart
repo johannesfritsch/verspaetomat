@@ -29,7 +29,7 @@ class Routes {
   static const permissions = '/permissions'; // Schritt 1: Mitteilungen
   static const standort = '/standort'; // Schritt 2
   static const standortImmer = '/standort/immer'; // the rest of Schritt 2, not a step of its own
-  static const setup = '/setup'; // Schritt 3 und 4: Ticket und Zweck
+  static const zweckWaehlen = '/zweck-waehlen'; // Schritt 3: der Verein (Routes.zweck ist die Vereinsseite)
   static const fertig = '/fertig'; // „Los geht's!", and the end of onboarding
 
   static const bahnsteig = '/bahnsteig'; // "Home" in the nav

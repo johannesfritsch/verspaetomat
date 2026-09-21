@@ -7,7 +7,7 @@ import '../onboarding/fertig_screen.dart';
 import '../onboarding/mitteilungen_screen.dart';
 import '../onboarding/standort_immer_screen.dart';
 import '../onboarding/standort_screen.dart';
-import '../onboarding/setup_screen.dart';
+import '../onboarding/zweck_screen.dart';
 import '../onboarding/welcome_screen.dart';
 import 'angekommen_screen.dart';
 import 'bahnsteig_screen.dart';
@@ -29,7 +29,7 @@ final rideRoutes = <RouteBase>[
   GoRoute(path: Routes.permissions, builder: (_, __) => const MitteilungenScreen()),
   GoRoute(path: Routes.standort, builder: (_, __) => const StandortScreen()),
   GoRoute(path: Routes.standortImmer, builder: (_, __) => const StandortImmerScreen()),
-  GoRoute(path: Routes.setup, builder: (_, __) => const SetupScreen()),
+  GoRoute(path: Routes.zweckWaehlen, builder: (_, __) => const ZweckScreen()),
   GoRoute(path: Routes.fertig, builder: (_, __) => const FertigScreen()),
   // The ride lives in the sheet over Home (docs/19); the route stays for pushes and deep links.
   GoRoute(
