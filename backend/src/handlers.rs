@@ -212,7 +212,7 @@ pub async fn badges(State(s): State<AppState>, c: Customer) -> ApiResult {
 // Customer
 // ---------------------------------------------------------------------------
 
-async fn customer_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value> {
+async fn customer_json(pool: &PgPool, flags: &crate::flags::Table, c: &CustomerRow) -> anyhow::Result<Value> {
     let week_ago = crate::clock::now() - Duration::days(7);
     let (points_total, points_week): (i64, i64) = sqlx::query_as(
         // docs/22 §1: an abandoned leg keeps the patience it earned, so points count it too.
@@ -226,6 +226,10 @@ async fn customer_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value> 
     let (level, next, next_at) = level_for(points_total);
     Ok(json!({
         "id": c.id,
+        // #41: the cold-start copy. `/v1/me` is fetched before the geofence config exists, so a
+        // phone that has just been installed and targeted gets its overrides here rather than
+        // waiting for its first resume. Same map, same replace-not-merge rule.
+        "flags": flags.wire_map(Some(c.into())),
         "nickname": c.nickname,
         "relay_address": c.relay_address,
         "personal_data": c.full_name.as_ref().map(|n| json!({
@@ -266,7 +270,7 @@ fn level_for(points: i64) -> (&'static str, &'static str, i64) {
 }
 
 pub async fn me(State(s): State<AppState>, c: Customer) -> ApiResult {
-    Ok(Json(customer_json(&s.pool, &c.0).await.map_err(internal)?))
+    Ok(Json(customer_json(&s.pool, &s.flags(), &c.0).await.map_err(internal)?))
 }
 
 #[derive(Deserialize)]
@@ -382,7 +386,7 @@ pub async fn patch_me(State(s): State<AppState>, c: Customer, Json(p): Json<MePa
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
-    Ok(Json(customer_json(&s.pool, &row).await.map_err(internal)?))
+    Ok(Json(customer_json(&s.pool, &s.flags(), &row).await.map_err(internal)?))
 }
 
 /// The customer's geofence set (docs/15): frequent check-in stations of the last 30 days,
@@ -444,6 +448,18 @@ pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
         // #40: false is what builds 64 and 65 do — the native background layer asks
         // /v1/stations/nearby. True arms the .vst on disk (docs/45). Absent means false.
         "stations_local": stations_local,
+        // #41, and the reason it is here rather than only on the public document: the public one
+        // is unauthenticated and cacheable, so it can carry nothing that depends on who is
+        // asking — which is every per-customer override and every rollout. Without this, both
+        // reach the admin view and no phone at all.
+        //
+        // It is free: `s.flags()` is the in-memory snapshot and `c.0` is the row this request has
+        // already loaded, so no query is added to a handler called once per app resume.
+        //
+        // The client REPLACES its document with this map, never merges key by key. A merge
+        // silently loses an override that forces a flag *off* while the global value is on, which
+        // is exactly the „take this one person back out of the rollout" case targeting exists for.
+        "flags": s.flags().wire_map(Some((&c.0).into())),
         "quiet_from": c.0.quiet_from.map(|t| t.format("%H:%M").to_string()),
         "quiet_to": c.0.quiet_to.map(|t| t.format("%H:%M").to_string()),
         "snooze_until": c.0.nudge_snooze_until,
@@ -598,7 +614,7 @@ pub async fn put_personal_data(State(s): State<AppState>, c: Customer, Json(p): 
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
-    Ok(Json(customer_json(&s.pool, &row).await.map_err(internal)?))
+    Ok(Json(customer_json(&s.pool, &s.flags(), &row).await.map_err(internal)?))
 }
 
 /// The device's recovery code. Minted on first ask and then kept.

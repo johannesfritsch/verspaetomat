@@ -34,6 +34,14 @@ class FlagDoc {
 
   bool get isEmpty => values.isEmpty;
 
+  /// The same inner object, already decoded — as it arrives on `/v1/me` and `/v1/me/geofence`
+  /// (issue #41), where it is this customer's fully resolved set rather than the public one.
+  ///
+  /// One shape, two carriers, one parser: the server renders both through `Table::wire_map`, so
+  /// „absent means the default" holds identically here.
+  static FlagDoc fromMap(Map<String, Object?> values) =>
+      FlagDoc(values: Map.unmodifiable({for (final e in values.entries) if (e.key.isNotEmpty) e.key: e.value}));
+
   /// Never throws, and answers null for anything it does not recognise as a document.
   ///
   /// Null and an empty document are deliberately different: null means "keep what you had" — a

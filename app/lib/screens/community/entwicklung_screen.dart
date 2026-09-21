@@ -190,6 +190,7 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
       // #41: „auf welchen Flaggen war dieses Telefon?" in the paste, so the answer does not cost
       // a second round trip. Every flag, not just the ones that are on — „aus" is an answer.
       '# Flaggen: ${session.flags.all.map((f) => '${f.flag.cli}=${f.on ? 'an' : 'aus'}(${f.source.label})').join(' ')}'
+          ' · ${session.flags.personal == null ? 'für alle' : 'für dieses Konto'}'
           ' · ETag ${session.flagStore.etag ?? '–'} · bestätigt ${when(session.flags.confirmedAt)}'
           '${session.flags.unknownNames.isEmpty ? '' : ' · Server schaltet zusätzlich: ${session.flags.unknownNames.join(',')}'}',
       if (s == null)
@@ -642,8 +643,13 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
     return [
       const VSection('Flaggen'),
       for (final state in flags.all) _FlagRow(state),
+      // Which of the two sets actually answered the rows above. It is the first thing to know
+      // when a targeted flag looks wrong: „für dieses Konto" means the server resolved it for
+      // this account — override, rollout, global — and „für alle" means this phone has not had an
+      // authenticated answer yet and is reading the public document.
+      _Row('Antwort gilt', flags.personal == null ? 'für alle' : 'für dieses Konto'),
       _Row(
-        'Dokument',
+        'Öffentliches Dokument',
         confirmed == null
             ? 'noch keins geholt'
             // „gesetzt" and not „Flaggen": the document carries only what differs from the

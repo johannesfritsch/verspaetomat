@@ -29,6 +29,23 @@ class HttpRepository implements AppRepository {
 
   void setSimLocation(ApiSimLocation? at) => simLocation = at;
 
+  /// Called with the `flags` map off every authenticated payload that carries one (issue #41),
+  /// or with null when the server sent no such key.
+  ///
+  /// It lives here rather than at the call sites because the payload that matters most is
+  /// `GET /v1/me/geofence`, and that one is refetched on every resume by `GeofenceSync`
+  /// (app/lib/platform/geofence_sync.dart) — code this must not reach into. Hooking the
+  /// repository catches the resume path, the cold start and every settings write with one seam
+  /// and no change to the callers.
+  ///
+  /// `Session` sets it. Nothing else listens.
+  void Function(Map<String, Object?>? flags)? onFlags;
+
+  ApiCustomer _noteFlags(ApiCustomer c) {
+    onFlags?.call(c.flags);
+    return c;
+  }
+
   /// The rung issue #39 leaves out, kept alive for `workflow_test.dart` and `stellwerk locate`.
   ///
   /// A compile-time constant, so a release build has **no reachable call** to
@@ -60,11 +77,11 @@ class HttpRepository implements AppRepository {
   @override
   Future<bool> health() => client.health();
   @override
-  Future<ApiCustomer> getMe() => client.me();
+  Future<ApiCustomer> getMe() async => _noteFlags(await client.me());
   @override
-  Future<ApiCustomer> patchMe(MePatch patch) => client.patchMe(patch);
+  Future<ApiCustomer> patchMe(MePatch patch) async => _noteFlags(await client.patchMe(patch));
   @override
-  Future<ApiCustomer> putPersonalData(ApiPersonalData data) => client.putPersonalData(data);
+  Future<ApiCustomer> putPersonalData(ApiPersonalData data) async => _noteFlags(await client.putPersonalData(data));
   @override
   Future<String?> recoveryCode({bool rotate = false}) => client.recoveryCode(rotate: rotate);
   @override
@@ -155,9 +172,13 @@ class HttpRepository implements AppRepository {
   @override
   Future<ApiGeofence> geofence() async {
     try {
-      return await client.geofence();
+      final g = await client.geofence();
+      // The payload refetched on every resume, so this is what keeps a warm app's flags current.
+      onFlags?.call(g.flags);
+      return g;
     } on ApiException catch (e) {
-      // An older backend without the route: no stations, nothing to watch.
+      // An older backend without the route: no stations, nothing to watch. And nothing learned
+      // about flags either — `ApiGeofence.empty` carries null, not an empty map.
       if (e.status == 404) return ApiGeofence.empty;
       rethrow;
     }

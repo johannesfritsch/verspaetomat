@@ -85,6 +85,59 @@ void main() {
     }
   });
 
+  group('the authenticated map replaces the document, it is never merged into it', () {
+    // The case this whole shape exists for, and the one a per-key merge silently breaks.
+    //
+    // Somebody is taken back out of a rollout: globally the flag is on, for them it is forced
+    // off. The public document says `{"stations_local": true}`. Their own map omits the key,
+    // because `false` is the default and the server never sends a value equal to its default.
+    //
+    // A merge looks for the key in the personal map, does not find it, falls through to the
+    // document, and answers TRUE — the override lost, exactly when somebody was switching one
+    // person off. If this test ever goes red because a lookup was „simplified", that is the bug.
+    test('a person taken out of a rollout reads false, not the global true', () {
+      final held = withDoc('{"flags":{"stations_local":true}}');
+      expect(held.on(f), isTrue, reason: 'the rollout reached this phone');
+
+      final afterTargeting = held.copyWith(personal: FlagDoc.fromMap(const <String, Object?>{}));
+      expect(afterTargeting.on(f), isFalse,
+          reason: 'their own empty map is the complete answer and must replace the document');
+      expect(afterTargeting.stateOf(f).source, FlagSource.shipped);
+    });
+
+    test('and the other way round: targeted on while the world is off', () {
+      final held = withDoc('{"flags":{}}');
+      expect(held.on(f), isFalse);
+      final targeted = held.copyWith(personal: FlagDoc.fromMap(const {'stations_local': true}));
+      expect(targeted.on(f), isTrue);
+      expect(targeted.stateOf(f).source, FlagSource.server);
+    });
+
+    test('the public document is the fallback only until a personal answer arrives', () {
+      final beforeLogin = withDoc('{"flags":{"stations_local":true}}');
+      expect(beforeLogin.on(f), isTrue, reason: 'nothing else to go on yet');
+      expect(beforeLogin.personal, isNull);
+    });
+
+    test('a newer document never overrules a personal answer that is already held', () {
+      // Ordering rule 1: an authenticated answer beats the document however fresh the document
+      // is, because only the authenticated one knows who is asking.
+      final targeted = Flags(personal: FlagDoc.fromMap(const <String, Object?>{}));
+      final andThenTheDocumentArrived = targeted.copyWith(doc: FlagDoc.parse('{"flags":{"stations_local":true}}')!);
+      expect(andThenTheDocumentArrived.on(f), isFalse);
+    });
+
+    test('a pin still beats both, so a test can pin a targeted flag', () {
+      final targeted = Flags(personal: FlagDoc.fromMap(const {'stations_local': true}));
+      expect(targeted.copyWith(pins: {Flag.stationsLocal: false}).on(f), isFalse);
+    });
+
+    test('an unknown name in the personal map is reported like one in the document', () {
+      final targeted = Flags(personal: FlagDoc.fromMap(const {'etwas_neues': true}));
+      expect(targeted.unknownNames, ['etwas_neues']);
+    });
+  });
+
   test('sameAnswersAs is what stops a 304 every half hour rebuilding the tree', () {
     final a = withDoc('{"flags":{"stations_local":true}}');
     expect(a.sameAnswersAs(a.copyWith(confirmedAt: DateTime.now().toUtc())), isTrue,

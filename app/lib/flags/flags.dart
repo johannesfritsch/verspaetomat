@@ -113,29 +113,44 @@ class FlagState {
 /// so a screen can ask on its way into `build()` and **no screen ever waits on a flag**.
 @immutable
 class Flags {
-  const Flags({this.doc = FlagDoc.empty, this.confirmedAt, this.pins = const <Flag, bool>{}});
+  const Flags({
+    this.doc = FlagDoc.empty,
+    this.personal,
+    this.confirmedAt,
+    this.pins = const <Flag, bool>{},
+  });
 
   /// Before the first answer, in Demo, offline, and on a phone that has never reached the
   /// server: every flag false. Named so that the fallback is a thing you can point at.
   static const none = Flags();
 
-  /// The document as the server wrote it, including names this build does not know.
+  /// The public document from `GET /v1/flags.json`: what is true for everybody.
   ///
-  /// **If a per-customer set ever arrives, it replaces this one — it is not merged into it, key
-  /// by key.** Nothing carries per-customer flags today (`handlers.rs` has no `flags` key), so
-  /// this is a note for whoever wires one up rather than a description of code that exists, and
-  /// it is written down because the wrong version of it is the obvious version.
-  ///
-  /// Per-key precedence looks right and silently breaks the one case targeting exists for.
-  /// Taking one person back out of a rollout means global `true`, override `false`. The document
-  /// says `{"stations_local":true}`. The customer's own map **omits** the key, because `false` is
-  /// the default and the server never sends a value equal to its default. A per-key lookup misses
-  /// it, falls through to the document, and answers `true` — the override lost, precisely when
-  /// somebody was trying to switch one person off.
-  ///
-  /// So a customer's map is the complete and authoritative answer for that customer, and this
-  /// document is the fallback before there is one: first launch, logged out, offline.
+  /// It is consulted **only when [personal] is null** — before this install has ever had an
+  /// authenticated answer. It cannot express targeting or a rollout at all, by design: it is one
+  /// cacheable string served to every phone, and putting a customer in it would publish ids.
   final FlagDoc doc;
+
+  /// This customer's own resolved set, off `/v1/me` or `/v1/me/geofence`, or null before one has
+  /// arrived.
+  ///
+  /// **It replaces [doc] wholesale. It is never merged into it, key by key.** That is the whole
+  /// reason this field exists rather than an override map, and the merge version is the obvious
+  /// version, so here is the case it breaks:
+  ///
+  /// Take one person back out of a rollout. Globally the flag is on, and for them it is forced
+  /// off. The public document says `{"stations_local": true}`. Their own map **omits the key**,
+  /// because `false` is the default and the server never sends a value equal to its default. A
+  /// per-key lookup finds nothing, falls through to the document, and answers `true` — the
+  /// override silently lost, precisely in the case somebody was trying to switch one person off.
+  /// Replacing gives `{}`, which falls to false, which is right.
+  ///
+  /// So: an authenticated answer always beats the document, because only it knows who is asking.
+  final FlagDoc? personal;
+
+  /// Which set is actually answering. The public document is the fallback for a phone that has
+  /// not yet had a personal answer: first launch, Demo, offline before the first `/v1/me`.
+  FlagDoc get effective => personal ?? doc;
 
   /// When the server last confirmed [doc] — a 200 or a 304. A failed fetch does not move it,
   /// because a failed call is not an answer.
@@ -162,11 +177,15 @@ class Flags {
     final pinned = pins[f];
     if (pinned != null) return FlagState(f, on: pinned, source: FlagSource.pinned);
 
+    // One set answers, never two: `personal` when this install has had an authenticated answer,
+    // the public document until then. See [personal] for why merging the two loses an override.
+    final answering = effective;
+
     // The server sends a key only when it differs from the default, so this is the branch almost
     // every read takes, almost always.
-    if (!doc.values.containsKey(f.wire)) return FlagState(f, on: false, source: FlagSource.shipped);
+    if (!answering.values.containsKey(f.wire)) return FlagState(f, on: false, source: FlagSource.shipped);
 
-    final value = doc.values[f.wire];
+    final value = answering.values[f.wire];
     if (value is! bool) return FlagState(f, on: false, source: FlagSource.unreadable);
     return FlagState(f, on: value, source: FlagSource.server);
   }
@@ -181,10 +200,11 @@ class Flags {
   ///
   /// Benign and confusing: the server says on, the phone has no code behind it. Showing them is
   /// how that gets noticed instead of guessed at.
-  List<String> get unknownNames => doc.values.keys.where((n) => Flag.parse(n) == null).toList()..sort();
+  List<String> get unknownNames => effective.values.keys.where((n) => Flag.parse(n) == null).toList()..sort();
 
-  Flags copyWith({FlagDoc? doc, DateTime? confirmedAt, Map<Flag, bool>? pins}) => Flags(
+  Flags copyWith({FlagDoc? doc, FlagDoc? personal, DateTime? confirmedAt, Map<Flag, bool>? pins}) => Flags(
         doc: doc ?? this.doc,
+        personal: personal ?? this.personal,
         confirmedAt: confirmedAt ?? this.confirmedAt,
         pins: pins ?? this.pins,
       );

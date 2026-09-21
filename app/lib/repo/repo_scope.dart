@@ -36,6 +36,10 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
     _flags.addListener(notifyListeners);
     _mock = MockRepository(demo);
     _http = HttpRepository(client: ApiClient(baseUrl: apiUrl, tokens: this.tokens), tokens: this.tokens);
+    // #41: every authenticated payload that carries a `flags` map hands it to the store. This
+    // hook is what covers `GET /v1/me/geofence` on resume — `GeofenceSync` fetches that one and
+    // the session never sees the response.
+    _http.onFlags = _flags.setPersonal;
     _http.client.awaitDevice = () => _deviceReady.future;
     _http.client.onUnauthorized = () async {
       await this.tokens.clear();
@@ -346,6 +350,10 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
         // A token the server does not know (reset database, other server) is replaced
         // by the client's 401 handler and the request retried, so this just works.
         me = await repo.getMe();
+        // Demo answers from the mock, which never goes through `_http.onFlags`. It says „nothing
+        // is switched on" with an empty map rather than staying silent, so switching out of local
+        // mode does not leave the old account's flags standing.
+        _flags.setPersonal(me?.flags);
         ngos = await repo.ngos();
       }
       await _restartEvents();

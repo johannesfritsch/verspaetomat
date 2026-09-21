@@ -165,6 +165,40 @@ class FlagStore extends ChangeNotifier {
   void unpin(Flag f) => _apply(_flags.copyWith(pins: {..._flags.pins}..remove(f)));
 
   // ---------------------------------------------------------------------------------------------
+  // The authenticated answer
+  // ---------------------------------------------------------------------------------------------
+
+  /// This customer's resolved set, off `/v1/me` or `/v1/me/geofence` (issue #41).
+  ///
+  /// [raw] null means the payload carried no `flags` key at all — an older backend, or a build
+  /// pointed at one. Nothing is learned and nothing is forgotten: the public document keeps
+  /// answering. That distinction is the reason `ApiCustomer.flags` is nullable rather than
+  /// defaulting to `{}`; folding the two together would let a build pointed at a server without
+  /// the key blank every flag on the phone.
+  ///
+  /// **The map replaces the public document wholesale — it is never merged into it.** See
+  /// [Flags.personal] for the rollout-exit case that a per-key merge silently breaks.
+  ///
+  /// **Ordering, and why last-one-wins is the rule.** `/v1/me` and `/v1/me/geofence` carry the
+  /// same map and can land in either order, with `flags.json` possibly between them. Two rules,
+  /// in this priority:
+  ///
+  /// 1. *An authenticated answer always beats the public document*, however recently the document
+  ///    arrived, because only the authenticated one knows who is asking. The document cannot
+  ///    express an override or a rollout at all, so a fresher document is not a better answer —
+  ///    it is an answer to a different question. [_apply] never clears [Flags.personal].
+  /// 2. *Among authenticated answers, the last one received wins.* Both are rendered from the
+  ///    same in-memory snapshot on the same server, so they can only disagree across a flip that
+  ///    happened between the two requests — a window of milliseconds. Ordering them properly
+  ///    would mean carrying the issue time of each request down to here, which buys correctness
+  ///    measured in milliseconds for a value whose delivery is measured in minutes, and the next
+  ///    resume corrects it regardless. What matters is that neither is ever merged.
+  void setPersonal(Map<String, Object?>? raw) {
+    if (raw == null) return;
+    _apply(_flags.copyWith(personal: FlagDoc.fromMap(raw)));
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // Asking the server
   // ---------------------------------------------------------------------------------------------
 

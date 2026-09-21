@@ -20,6 +20,15 @@ DateTime? _date(dynamic v) => v == null ? null : DateTime.tryParse(v.toString())
 List<String> _sl(dynamic v) => v == null ? const [] : (v as List).map((e) => e.toString()).toList();
 List<Map<String, dynamic>> _ml(dynamic v) => v == null ? const [] : (v as List).map((e) => (e as Map).cast<String, dynamic>()).toList();
 Map<String, dynamic>? _m(dynamic v) => v == null ? null : (v as Map).cast<String, dynamic>();
+
+/// The `flags` map off an authenticated payload (issue #41), or **null when the key is absent**.
+///
+/// The difference is load-bearing and is not the usual „absent means the default" rule. Null
+/// means „this server does not speak flags at all" — an older backend, or a build pointed at one
+/// — and the app must then keep whatever the public document told it. An empty map means „this
+/// server resolved your flags and you have none set", which replaces the document with nothing.
+/// Folding the two together would let a deploy-order mistake blank every flag on every phone.
+Map<String, Object?>? _flagMap(dynamic v) => v is Map ? Map<String, Object?>.unmodifiable(v.map((k, x) => MapEntry(k.toString(), x))) : null;
 String _fmtDate(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 // ---------------------------------------------------------------------------
@@ -499,6 +508,7 @@ class ApiGeofence {
     this.idle = false,
     this.lastCheckin,
     this.stationsLocal = false,
+    this.flags,
   });
   final bool enabled;
   final List<ApiGeofenceStation> stations;
@@ -520,6 +530,14 @@ class ApiGeofence {
   /// what an older backend and [ApiGeofence.empty] both give.
   final bool stationsLocal;
 
+  /// The same resolved map as [ApiCustomer.flags], on the payload the app refetches on **every
+  /// resume** (issue #41). `/v1/me` is not refetched on resume, so this is the carrier that keeps
+  /// a warm app current. Null when the server sent no such key.
+  ///
+  /// [stationsLocal] above is untouched and stays where it is: it is #40's field, it is what
+  /// builds 64–66 read, and nothing on the wire is renamed while an older build is in the field.
+  final Map<String, Object?>? flags;
+
   static const empty = ApiGeofence(enabled: false, stations: []);
 
   factory ApiGeofence.fromJson(Map<String, dynamic> j) => ApiGeofence(
@@ -531,6 +549,7 @@ class ApiGeofence {
         idle: _b(j['idle']),
         lastCheckin: DateTime.tryParse(_s(j['last_checkin']))?.toLocal(),
         stationsLocal: _b(j['stations_local']),
+        flags: _flagMap(j['flags']),
       );
 }
 
@@ -565,6 +584,7 @@ class ApiCustomer {
     this.nextLevelName = '',
     this.nextLevelAt = 0,
     this.homeStation = '',
+    this.flags,
   });
   final String id;
   final String nickname;
@@ -578,6 +598,13 @@ class ApiCustomer {
   final int nextLevelAt;
   final String homeStation;
 
+  /// This customer's fully resolved flags (issue #41), or null when the server sent no such key.
+  ///
+  /// Authoritative and complete: override, then rollout bucket, then global, then default, with
+  /// anything at its default omitted. It **replaces** the public document rather than merging
+  /// into it — see [Flags.doc] for why the merge version silently loses an override.
+  final Map<String, Object?>? flags;
+
   factory ApiCustomer.fromJson(Map<String, dynamic> j) => ApiCustomer(
         id: _s(j['id']),
         nickname: _s(j['nickname']),
@@ -590,6 +617,7 @@ class ApiCustomer {
         nextLevelName: _s(j['next_level_name']),
         nextLevelAt: _i(j['next_level_at']),
         homeStation: _s(j['home_station']),
+        flags: _flagMap(j['flags']),
       );
 }
 

@@ -564,6 +564,11 @@ class MockRepository implements AppRepository {
         nextLevelName: Mock.nextLevelName,
         nextLevelAt: Mock.nextLevelAt,
         homeStation: Mock.homeStation,
+        // #41: Demo has no server, so nothing has been switched on — and it says so rather than
+        // staying silent. An empty map is „you have no flags set"; null would be „this backend
+        // does not speak flags", which would leave Demo answering out of whatever document a
+        // local-mode session had fetched earlier.
+        flags: const <String, Object?>{},
       );
 
   @override

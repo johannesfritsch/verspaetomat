@@ -249,6 +249,42 @@ void main() {
     store.dispose();
   });
 
+  test('an authenticated map replaces the document wholesale', () async {
+    final store = await storeWith({'flags.doc': _onBody}, client: _CannedClient([]));
+    expect(store.on(Flag.stationsLocal), isTrue, reason: 'the public document says so');
+
+    var notified = 0;
+    store.addListener(() => notified++);
+
+    // What `/v1/me` sends for somebody taken back out of a rollout: the key omitted, because
+    // `false` is the default. A merge would keep the document's `true`.
+    store.setPersonal(const <String, Object?>{});
+
+    expect(store.on(Flag.stationsLocal), isFalse);
+    expect(notified, 1, reason: 'the answer changed, so the app is told');
+    store.dispose();
+  });
+
+  test('a payload with no flags key teaches nothing and forgets nothing', () async {
+    // An older backend, or a build pointed at one. Null is not an empty map.
+    final store = await storeWith({'flags.doc': _onBody}, client: _CannedClient([]));
+    store.setPersonal(null);
+    expect(store.on(Flag.stationsLocal), isTrue, reason: 'the document still answers');
+    store.dispose();
+  });
+
+  test('a later document does not overrule the authenticated answer already held', () async {
+    final client = _CannedClient([const FlagFetchFresh(body: _onBody, etag: '"12"')]);
+    final store = await storeWith({}, client: client);
+    store.setPersonal(const <String, Object?>{});
+    expect(store.on(Flag.stationsLocal), isFalse);
+
+    await store.refreshNow(); // the public document arrives, saying the flag is on for everybody
+    expect(store.on(Flag.stationsLocal), isFalse,
+        reason: 'only the authenticated answer knows who is asking');
+    store.dispose();
+  });
+
   test('a disposed store does not answer an event that lands after it', () async {
     final client = _CannedClient([const FlagFetchNotModified()]);
     final store = await storeWith({'flags.doc': _onBody}, client: client);
