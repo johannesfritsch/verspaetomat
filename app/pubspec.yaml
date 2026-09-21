@@ -80,6 +80,9 @@ flutter:
     - assets/achievements/
     - assets/header/
     - assets/brand/
+    # The five Willkommen illustrations (#43). Cropped to the artwork band: the title,
+    # the subtitle and the bottom bar are drawn in Archivo, not baked into the picture.
+    - assets/onboarding/
     # The station table the phone answers from (issue #39). The exact file, not the
     # directory, so two versions can never ship in one build.
     - assets/stations/stations.vst
