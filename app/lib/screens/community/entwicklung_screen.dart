@@ -66,7 +66,11 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
   /// Which segment is open (issue #32). The page was one eager column about 2 700 pt tall, so the
   /// Showcase and the two actions sat below a 120-line log and nobody scrolled that far.
   int _tab = 0;
-  static const _tabs = ['Zustand', 'Zahlen', 'Log'];
+  /// „Flaggen" stands on its own rather than under „Zustand": a flag is the one thing on this
+  /// page that a person changes from a laptop and then wants to read back on a phone, and it was
+  /// the last block of a tab you had to scroll to reach. The other three describe the geofence
+  /// layer; this one describes the app.
+  static const _tabs = ['Zustand', 'Flaggen', 'Zahlen', 'Log'];
 
   /// Built once per load, not per frame: the join is every log line against every region, and it
   /// would otherwise run several times for each pixel the replay slider moves.
@@ -456,12 +460,12 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
           // is the weight this change exists to remove — and would let the tour photograph the
           // wrong one under the right name without failing.
           if (_tab == 0 && s != null) ..._zustand(context, s, session),
-          // Outside the `s != null` guard on purpose: which flags this phone is on is a question
-          // about the app, not about the geofence layer, and it has to be answerable on a phone
-          // whose native side never answered.
-          if (_tab == 0) ..._flaggen(session),
-          if (_tab == 1 && s != null) ..._zahlen(s),
-          if (_tab == 2) ..._logTab(),
+          // No `s != null` guard: which flags this phone is on is a question about the app, not
+          // about the geofence layer, and it has to be answerable on a phone whose native side
+          // never answered at all.
+          if (_tab == 1) ..._flaggen(session),
+          if (_tab == 2 && s != null) ..._zahlen(s),
+          if (_tab == 3) ..._logTab(),
           const VGap.xl(),
         ],
       ),

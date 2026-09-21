@@ -315,9 +315,16 @@ void main() {
     await shot('einstellungen-entwicklung');
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.entwicklung);
     await shot('debug-status');
-    // issue #32: the page is three segments now and only the open one is built, so the log has to
+    // Which flags this phone is on (#41). Its own segment since it stopped being a footnote under
+    // „Zustand": it is the one thing here somebody changes from a laptop and then reads back on a
+    // phone.
+    await tester.tap(find.text('Flaggen'));
+    await wait(tester, 400);
+    await shot('debug-flaggen');
+    // issue #32: the page is four segments now and only the open one is built, so the log has to
     // be selected rather than scrolled to. Tapping by label keeps this honest — an IndexedStack
-    // would have kept the key findable and photographed the wrong segment under the right name.
+    // would have kept the key findable and photographed the wrong segment under the right name,
+    // and it is why adding a segment above did not break this.
     await tester.tap(find.text('Log'));
     await wait(tester, 400);
     await tester.dragUntilVisible(

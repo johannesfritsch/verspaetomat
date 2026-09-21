@@ -431,15 +431,16 @@ pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
         .await
         .map_err(internal)?;
     let idle = went_idle(last_checkin, c.0.created_at, now);
-    // #40's kill switch. Read per call rather than cached: this handler already runs two or three
-    // queries and is called about once per app resume, and a cached copy would have to be reached
-    // by the admin write — the one thing that has to work in seconds. `unwrap_or(false)` covers a
-    // database whose row is somehow missing, with the old path.
-    let stations_local: bool = sqlx::query_scalar("select stations_local from app_switches where id = 1")
-        .fetch_optional(&s.pool)
-        .await
-        .map_err(internal)?
-        .unwrap_or(false);
+    // #40's kill switch, now an ordinary flag (#41, migration 0039). The snapshot is in memory
+    // and every admin write reloads it, so the one thing that has to work in seconds still does,
+    // and the query this used to run is gone — which was the point: at a million installs this
+    // handler runs about once per app resume per phone.
+    //
+    // `Some(…)` rather than `None`: this caller is authenticated, so a rollout buckets on their
+    // id and an override for them wins. Reading it globally would hand the wrong answer to
+    // exactly the person somebody was targeting.
+    let flags = s.flags();
+    let stations_local = flags.bool(&crate::flags::STATIONS_LOCAL, Some((&c.0).into()));
     Ok(Json(json!({
         "enabled": nudges_enabled(&c.0) && !idle,
         "idle": idle,
@@ -447,6 +448,10 @@ pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
         "stations": stations,
         // #40: false is what builds 64 and 65 do — the native background layer asks
         // /v1/stations/nearby. True arms the .vst on disk (docs/45). Absent means false.
+        //
+        // It is also in `flags` below, and that is not a mistake: a build that has never heard of
+        // the flag map reads this field, and the field is what the native layer is configured
+        // from. It stays until no build that reads it is installable.
         "stations_local": stations_local,
         // #41, and the reason it is here rather than only on the public document: the public one
         // is unauthenticated and cacheable, so it can carry nothing that depends on who is
@@ -459,7 +464,7 @@ pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
         // The client REPLACES its document with this map, never merges key by key. A merge
         // silently loses an override that forces a flag *off* while the global value is on, which
         // is exactly the „take this one person back out of the rollout" case targeting exists for.
-        "flags": s.flags().wire_map(Some((&c.0).into())),
+        "flags": flags.wire_map(Some((&c.0).into())),
         "quiet_from": c.0.quiet_from.map(|t| t.format("%H:%M").to_string()),
         "quiet_to": c.0.quiet_to.map(|t| t.format("%H:%M").to_string()),
         "snooze_until": c.0.nudge_snooze_until,

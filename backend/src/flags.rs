@@ -68,11 +68,12 @@ pub static STATIONS_LOCAL: BoolFlag = BoolFlag {
     wire: true,
     note: "#40. Whether the NATIVE background layer answers \"which stations are near me\" from \
            the .vst extract on disk (docs/45) instead of GET /v1/stations/nearby. \
-           NOT READ BY ANYTHING YET: handlers::geofence still reads app_switches (0037) and the \
-           `stations_local` field on GET /v1/me/geofence still comes from there, byte for byte, \
-           for the builds in TestFlight. Setting this flag changes no behaviour until that call \
-           site moves — the last step of #41. May not be retired while build 64 or later is \
-           installable.",
+           Read by handlers::geofence, which puts it on the `stations_local` field of \
+           GET /v1/me/geofence — the field builds 64 and later configure the native layer from. \
+           app_switches (0037) is gone; migration 0039 moved this here. \
+           May not be retired while build 64 or later is installable: a phone whose app is never \
+           opened keeps its last configured value indefinitely, so retiring the flag would leave \
+           those phones on whatever they last heard.",
 };
 
 pub enum Spec {
@@ -537,6 +538,36 @@ mod tests {
         // This is what fails if somebody drops the key from the salt — the overlap would be 100 %.
         let overlap = a.intersection(&b).count();
         assert!((70..=130).contains(&overlap), "the two tenths overlap {overlap} times, not ~100");
+    }
+
+    /// `handlers::geofence` sends `stations_local` twice: as its own top-level field, which is
+    /// what builds 64 and later configure the native layer from, and inside `flags`, which is
+    /// what everything after reads. Migration 0039 made the field a view of the flag, and the
+    /// whole point of that was that the two can no longer disagree — so this checks they cannot,
+    /// including in the case that is easy to get wrong: the map OMITS a key equal to its default,
+    /// so "absent" has to mean the same false the field carries.
+    #[test]
+    fn the_geofence_field_and_the_flag_map_never_disagree() {
+        let customer = Uuid::new_v4();
+        let none = json!({});
+        let off = json!({ "stations_local": false });
+
+        let same = |t: &Table, overrides: &Value| {
+            let who = Some(Who::new(customer, overrides));
+            let field = t.bool(&STATIONS_LOCAL, who);
+            // Absent from the map is the default, which for a bool is false (0037's rule).
+            let from_map = t.wire_map(who)["stations_local"].as_bool().unwrap_or(false);
+            assert_eq!(field, from_map, "the field says {field} and the map says {from_map}");
+            field
+        };
+
+        assert!(!same(&Table::default(), &none), "nothing set: both false");
+        assert!(same(&table(STATIONS_LOCAL.key, json!(true), None), &none), "globally on: both true");
+        assert!(!same(&table(STATIONS_LOCAL.key, json!(false), None), &none), "globally off: both false");
+        // The case targeting exists for, and the one where a key-by-key merge on the client would
+        // answer true: globally on, this one person forced off.
+        assert!(!same(&table(STATIONS_LOCAL.key, json!(true), None), &off), "one person taken back out");
+        assert!(same(&table(STATIONS_LOCAL.key, json!(true), Some(10_000)), &none), "a full rollout");
     }
 
     #[test]

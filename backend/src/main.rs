@@ -259,7 +259,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/routes/remove", post(admin::route_remove))
         .route("/admin/routes/answers", post(admin::route_answers))
         .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
-        .route("/admin/switches", get(admin::switches).post(admin::switch_set))
         .route("/admin/flags", get(admin::flags_list))
         .route("/admin/flags/{key}", get(admin::flag_get).post(admin::flag_set).delete(admin::flag_clear))
         .route("/admin/customers/{key}/flags", get(admin::customer_flags))

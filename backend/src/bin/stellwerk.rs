@@ -19,7 +19,7 @@
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
-//!   stellwerk switch [stations-local on|off]
+//!   stellwerk switch …                     (alter Name für flags)
 //!   stellwerk flags [<key> [on|off|<wert>]] [--for <kunde>] [--pct N|off] [--clear] [--reason "…"] [--dry-run] [--yes]
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
 //!   stellwerk scan
@@ -557,8 +557,8 @@ enum Cmd {
         #[arg(long)]
         clear: bool,
     },
-    /// Server-side switches that turn a shipped behaviour off without a new build.
-    /// Without arguments: show them all
+    /// Alter Name für `flags` (#40). Tut dasselbe, verlangt für einen globalen Wechsel
+    /// ebenso `--yes` — und den kann nur `flags` mitgeben
     Switch {
         /// stations-local
         name: Option<String>,
@@ -1199,25 +1199,15 @@ async fn main() -> anyhow::Result<()> {
             };
             println!("Uhr: {}  (Versatz {} s)", s(&v, "now"), s(&v, "offset_secs"));
         }
+        // `switch` is now a second door into `flags` (#41, migration 0039). It stays because it
+        // is the command that is written down in docs/15 and in the runbook, and because muscle
+        // memory is a bad thing to break for no gain — but it has no machinery of its own any
+        // more: there is one table, one endpoint and one set of safety rails behind both spellings.
         Cmd::Switch { name, value } => {
-            let v = match (name.as_deref(), value.as_deref()) {
-                (None, _) | (Some("stations-local"), None) => api.get("/admin/switches").await?,
-                (Some("stations-local"), Some(x)) => {
-                    let on = match x {
-                        "on" | "true" | "1" | "an" => true,
-                        "off" | "false" | "0" | "aus" => false,
-                        _ => anyhow::bail!("on oder off, nicht {x:?}"),
-                    };
-                    api.post("/admin/switches", json!({ "stations_local": on })).await?
-                }
-                (Some(other), _) => anyhow::bail!("unbekannter Schalter {other:?}; bekannt: stations-local"),
-            };
-            let local = v.get("stations_local").and_then(Value::as_bool).unwrap_or(false);
-            println!(
-                "stations-local: {}   (Bahnhöfe im Hintergrund {})",
-                if local { "an" } else { "aus" },
-                if local { "aus der Datei" } else { "vom Server" }
-            );
+            let key = name.unwrap_or_else(|| "stations-local".into());
+            let same = format!("stellwerk flags {}{}", key.replace('-', "_"), value.as_deref().map(|v| format!(" {v} --yes")).unwrap_or_default());
+            eprintln!("Hinweis: `switch` heißt jetzt `flags` (#41). Dasselbe: {same}");
+            flags_cmd(&api, Some(key), value, None, None, false, None, false, false).await?;
         }
         Cmd::Flags { key, value, for_customer, pct, clear, reason, dry_run, yes } => {
             flags_cmd(&api, key, value, for_customer, pct, clear, reason, dry_run, yes).await?;
