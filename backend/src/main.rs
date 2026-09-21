@@ -11,6 +11,7 @@ mod classify;
 mod db;
 mod events;
 mod fixtures;
+mod flags;
 mod handlers;
 mod journeys;
 mod mail;
@@ -49,6 +50,11 @@ pub struct AppState {
     /// only ever taken to clone the `Arc` out of it — an import swaps a whole new index in and no
     /// reader waits for it.
     pub stations: stations::Shared,
+    /// Every feature flag a human has set (issue #41), in memory. Read wherever a flag is read
+    /// and rendered once into the public document, so the whole system adds no query to any
+    /// request path. Behind the same lock as `stations`, and for the same reason: an admin write
+    /// swaps a whole new table in and no reader waits for it.
+    pub flags: flags::Shared,
 }
 
 impl AppState {
@@ -61,6 +67,19 @@ impl AppState {
         let index = stations::load(&self.pool).await?;
         let n = index.len();
         *self.stations.write().expect("stations lock") = Arc::new(index);
+        Ok(n)
+    }
+
+    pub fn flags(&self) -> Arc<flags::Table> {
+        self.flags.read().expect("flags lock").clone()
+    }
+
+    /// Read the flags back into the snapshot. Called at startup and after every admin write, so
+    /// a flip is in force on the next request and no handler ever queries for one.
+    pub async fn reload_flags(&self) -> anyhow::Result<usize> {
+        let table = flags::load(&self.pool).await?;
+        let n = table.len();
+        *self.flags.write().expect("flags lock") = Arc::new(table);
         Ok(n)
     }
 }
@@ -84,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
         events: events.clone(),
         push: push_sender,
         stations: Arc::new(std::sync::RwLock::new(Arc::new(stations::Index::default()))),
+        flags: Arc::new(std::sync::RwLock::new(Arc::new(flags::Table::default()))),
     };
     // The stations are the only reference data the app cannot be served without: with an empty
     // table the Bahnsteig has nothing to offer and the search finds nothing. Say so loudly at
@@ -93,6 +113,18 @@ async fn main() -> anyhow::Result<()> {
         Ok(n) => tracing::info!(stations = n, "stations loaded"),
         Err(e) => tracing::error!(error = %e, "stations could not be loaded"),
     }
+    // Flags (#41): give every descriptor in `flags.rs` a row, mark every row the registry has
+    // stopped claiming, then read the lot into memory. A failure here is not fatal — an empty
+    // snapshot answers every flag with the behaviour that already shipped, which is the whole
+    // point of the default.
+    if let Err(e) = flags::reconcile(&pool).await {
+        tracing::error!(error = %e, "flags could not be reconciled");
+    }
+    match state.reload_flags().await {
+        Ok(n) => tracing::info!(flags = n, "flags loaded"),
+        Err(e) => tracing::error!(error = %e, "flags could not be loaded — every flag answers with its default"),
+    }
+
     // Pushes: the sender taps the event bus before anything publishes.
     push::spawn(state.clone());
 
@@ -144,6 +176,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/operators", get(handlers::operators))
         .route("/v1/ngos", get(handlers::ngos))
         .route("/v1/badges", get(handlers::badges))
+        // The public flag document (#41): unauthenticated, out of memory, ETag and 304. An
+        // authenticated read would be a Postgres write per read (auth.rs: `update devices set
+        // last_seen_at`), which is the one thing this box cannot have at any interval worth
+        // having.
+        .route("/v1/flags.json", get(flags::document))
         // customer
         .route("/v1/events", get(events::stream))
         .route("/v1/me", get(handlers::me).patch(handlers::patch_me).delete(handlers::delete_me))
@@ -223,6 +260,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/routes/answers", post(admin::route_answers))
         .route("/admin/clock", get(admin::get_clock).post(admin::set_clock))
         .route("/admin/switches", get(admin::switches).post(admin::switch_set))
+        .route("/admin/flags", get(admin::flags_list))
+        .route("/admin/flags/{key}", get(admin::flag_get).post(admin::flag_set).delete(admin::flag_clear))
+        .route("/admin/customers/{key}/flags", get(admin::customer_flags))
+        .route("/admin/customers/{key}/flags/{flag}", put(admin::customer_flag_set).delete(admin::customer_flag_clear))
         .route("/admin/overrides", get(admin::overrides).delete(admin::clear_overrides))
         .route("/admin/stations", get(admin::stations_status))
         .route("/admin/stations/extract", get(admin::stations_extract))

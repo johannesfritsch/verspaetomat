@@ -45,6 +45,16 @@ services:
       - uploads:/data/uploads
     expose:
       - "8080"
+    # Every open SSE stream (`GET /v1/events`) holds a socket for as long as the app has it open,
+    # on top of the Postgres pool and the outbound mail and push connections. The default soft
+    # limit is 1024 on most hosts, and reaching it is silent: accept() fails with EMFILE, the
+    # client sees a dropped connection and reconnects (app/lib/api/events.dart backs off 2…64 s),
+    # so at the ceiling every app cycles reconnects instead of anything saying what is wrong.
+    # 65536 is far above what one CX22 can serve and costs nothing to grant (#42).
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   caddy:
     image: caddy:2
@@ -65,6 +75,14 @@ services:
       - ../site/dist:/srv/site:ro
       - caddy_data:/data
       - caddy_config:/config
+    # Caddy pays twice for every stream it proxies: the client socket, and the upstream connection
+    # to the API, which is occupied for the whole life of the stream and cannot go back into the
+    # keep-alive pool (the Caddyfile's `flush_interval -1` is what keeps it unbuffered). Two
+    # descriptors per streaming app, plus the ordinary requests and ACME. Same reasoning as above.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
 volumes:
   pgdata:

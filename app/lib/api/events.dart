@@ -4,7 +4,12 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 /// One event from the backend's per-customer stream (`GET /v1/events`).
-/// Kinds: hello, location, ride, journey, incident, claim, mail, clock, reset, resync.
+/// Kinds: hello, location, ride, journey, incident, claim, mail, clock, reset, resync, flags.
+///
+/// The predicates below are a **closed set**: a kind none of them names is still delivered, but
+/// nothing in the app reacts to it. `flags` (issue #41) is the first kind with no predicate — it
+/// is handled by name in `repo_scope.dart`, because what it asks for is a fetch on another host
+/// and not a refresh of anything a screen draws.
 class AppEvent {
   const AppEvent(this.kind, this.data);
   final String kind;

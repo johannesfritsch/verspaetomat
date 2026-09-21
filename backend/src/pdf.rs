@@ -225,6 +225,7 @@ pub fn test_customer() -> CustomerRow {
         home_station_id: None,
         home_station_name: None,
         muted_stations: json!([]),
+        flag_overrides: json!({}),
         nudge_enabled: true,
         nudge_snooze_until: None,
         quiet_from: None,

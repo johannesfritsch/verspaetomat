@@ -1,7 +1,8 @@
 //! The deadline scanner: one tokio task, hourly (first pass 30 s after start), on the
 //! simulated clock. It warns 21 days before an incident's legal deadline, expires open
 //! incidents at the deadline for every customer, nudges when a sent claim passed its
-//! expected reply date without an answer, and sweeps attachments of closed claims.
+//! expected reply date without an answer, sweeps attachments of closed claims, and drops the
+//! event channels of streams that have since closed.
 //! Every pass is idempotent: `warned_at` and `nudged_at` mark what already went out.
 
 use std::time::Duration;
@@ -23,7 +24,7 @@ pub fn spawn(state: AppState) {
         tokio::time::sleep(FIRST_RUN_AFTER).await;
         loop {
             match run_once(&state).await {
-                Ok(v) => tracing::info!(warned = %v["warned"], expired = %v["expired"], nudged = %v["nudged"], asked = %v["asked"], retained = %v["retained"], "deadline scanner pass"),
+                Ok(v) => tracing::info!(warned = %v["warned"], expired = %v["expired"], nudged = %v["nudged"], asked = %v["asked"], retained = %v["retained"], swept = %v["swept"], "deadline scanner pass"),
                 Err(e) => tracing::error!("deadline scanner: {e}"),
             }
             tokio::time::sleep(INTERVAL).await;
@@ -39,7 +40,11 @@ pub async fn run_once(s: &AppState) -> anyhow::Result<Value> {
     let nudged = nudge(s, today).await?;
     let asked = ask_stale(s).await?;
     let retained = sweep_retention(&s.pool).await?;
-    Ok(json!({ "today": today, "expired": expired, "warned": warned, "nudged": nudged, "asked": asked, "retained": retained }))
+    // (f) The broadcast channel of every stream that has ended since the last pass (#42). It rides
+    // along here rather than on a task of its own: the map is small, the sweep takes one lock and
+    // no I/O, and an entry nobody listens on costs a few KiB until the next hour comes round.
+    let swept = s.events.sweep();
+    Ok(json!({ "today": today, "expired": expired, "warned": warned, "nudged": nudged, "asked": asked, "retained": retained, "swept": swept }))
 }
 
 /// (e) A journey still `riding` or `transfer` three hours past its planned arrival: ask once

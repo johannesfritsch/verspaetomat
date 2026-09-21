@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
 import '../../content/legal.dart' show appVersion;
+import '../../flags/flags.dart';
 import '../../platform/diagnose_log.dart';
 import '../../platform/geofence.dart';
 import '../../platform/geofence_replay.dart';
@@ -186,6 +187,11 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
       '# Verspätomat $appVersion · ${session.isLocal ? session.apiUrl : 'Vorführung'}',
       '# Fenster: $_window · Quelle: $_filter · ${lines.length} Zeilen'
           '${lines.isEmpty ? '' : ' · ${when(lines.first.at)} … ${when(lines.last.at)}'}',
+      // #41: „auf welchen Flaggen war dieses Telefon?" in the paste, so the answer does not cost
+      // a second round trip. Every flag, not just the ones that are on — „aus" is an answer.
+      '# Flaggen: ${session.flags.all.map((f) => '${f.flag.cli}=${f.on ? 'an' : 'aus'}(${f.source.label})').join(' ')}'
+          ' · ETag ${session.flagStore.etag ?? '–'} · bestätigt ${when(session.flags.confirmedAt)}'
+          '${session.flags.unknownNames.isEmpty ? '' : ' · Server schaltet zusätzlich: ${session.flags.unknownNames.join(',')}'}',
       if (s == null)
         '# Status: nicht gelesen'
       else ...[
@@ -449,6 +455,10 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
           // is the weight this change exists to remove — and would let the tour photograph the
           // wrong one under the right name without failing.
           if (_tab == 0 && s != null) ..._zustand(context, s, session),
+          // Outside the `s != null` guard on purpose: which flags this phone is on is a question
+          // about the app, not about the geofence layer, and it has to be answerable on a phone
+          // whose native side never answered.
+          if (_tab == 0) ..._flaggen(session),
           if (_tab == 1 && s != null) ..._zahlen(s),
           if (_tab == 2) ..._logTab(),
           const VGap.xl(),
@@ -618,6 +628,57 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
     ];
   }
 
+  /// Which flags this phone is actually on (issue #41).
+  ///
+  /// It is the first question when something misbehaves in the field, and until now it was
+  /// unanswerable from the device: a flag is a value on a server, and what reached *this* phone
+  /// depends on when it last foregrounded and how old its copy of the document is. Both are here,
+  /// beside the answer they produced.
+  List<Widget> _flaggen(Session session) {
+    final flags = session.flags;
+    final store = session.flagStore;
+    final doc = flags.doc;
+    final confirmed = flags.confirmedAt;
+    return [
+      const VSection('Flaggen'),
+      for (final state in flags.all) _FlagRow(state),
+      _Row(
+        'Dokument',
+        confirmed == null
+            ? 'noch keins geholt'
+            // „gesetzt" and not „Flaggen": the document carries only what differs from the
+            // default, so an empty one is the ordinary state and not a missing answer.
+            : '${doc.values.length} gesetzt · ETag ${store.etag ?? '–'}',
+      ),
+      _Row(
+        'Bestätigt',
+        confirmed == null
+            ? 'nie'
+            : '${_stamp(confirmed.toLocal())} (vor ${_howLong(DateTime.now().toUtc().difference(confirmed))})',
+      ),
+      _Row(
+        'Nächste Abfrage',
+        !session.isLocal
+            ? 'nie — Vorführung fragt niemanden'
+            : store.nextCheckAt == null
+                ? 'beim nächsten Öffnen'
+                : _stamp(store.nextCheckAt!.toLocal()),
+      ),
+      if (flags.unknownNames.isNotEmpty) _Row('Server schaltet zusätzlich', flags.unknownNames.join(', ')),
+      if (store.unknownForced.isNotEmpty) _Row('FLAGS= unbekannt', store.unknownForced.join(', ')),
+      const VGap.xs(),
+      Text(
+        'Eine Flagge ist „aus", solange niemand sie ausdrücklich angeschaltet hat — aus ist immer '
+        'das, was dieser Build ohnehin schon getan hat. Der Wert kommt beim Öffnen der App und '
+        'nach einer Umstellung über die Ereignisse; ein Telefon, das niemand öffnet, bleibt '
+        'beliebig lange auf dem alten Wert. „Server schaltet zusätzlich" heißt: der Server hat eine '
+        'Flagge gesetzt, für die dieser Build keinen Code hat — sie tut hier nichts.',
+        style: VText.caption,
+      ),
+      const VGap.m(),
+    ];
+  }
+
   /// The counters, today and before.
   List<Widget> _zahlen(GeofenceStatus s) {
     return [
@@ -749,6 +810,48 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
     if (!_geofence.enabled) return 'aus · im Konto abgeschaltet';
     if (s.registered == 0) return 'an · aber keine Region registriert';
     return 'an';
+  }
+}
+
+/// One flag: what it resolves to on this phone, where that came from, and what it does.
+///
+/// The sentence underneath is the point. A row saying „stations-local · an" invites the reading
+/// that the phone is therefore doing the thing — which is false for a flag this build registers
+/// but does not yet read, and that is exactly the misreading a debug page must not cause.
+class _FlagRow extends StatelessWidget {
+  const _FlagRow(this.state);
+  final FlagState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final f = state.flag;
+    final readBy = f.readBy;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: 150, child: Text(f.cli, style: VText.bodyS.copyWith(color: VColors.ink2))),
+              Expanded(
+                child: Text('${state.on ? 'an' : 'aus'} · ${state.source.label}', style: VText.bodySStrong),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              readBy == null
+                  ? '${f.about} Dieser Build liest sie noch nicht.'
+                  : '${f.about} Gelesen von: $readBy.',
+              style: VText.caption,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

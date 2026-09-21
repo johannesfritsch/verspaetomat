@@ -20,6 +20,7 @@
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
 //!   stellwerk switch [stations-local on|off]
+//!   stellwerk flags [<key> [on|off|<wert>]] [--for <kunde>] [--pct N|off] [--clear] [--reason "…"] [--dry-run] [--yes]
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
 //!   stellwerk scan
 //!
@@ -564,6 +565,34 @@ enum Cmd {
         /// on | off
         value: Option<String>,
     },
+    /// Feature flags (#41): behaviour the server turns on without a new build, for everybody,
+    /// for a percentage or for one person. Without arguments: every flag
+    Flags {
+        /// The flag's key, e.g. stations_local. Unknown keys print the known ones
+        key: Option<String>,
+        /// The new value: on|off for a bool, a whole number for an int, the text for a string
+        value: Option<String>,
+        /// Only for this customer (nickname, id or id prefix), whatever the rollout says.
+        /// Named `for_customer` rather than `target` because clap derives an argument's id from
+        /// the field name, and `--target` is already the global one that picks a backend.
+        #[arg(long = "for")]
+        for_customer: Option<String>,
+        /// Hand the value to this percentage of customers; `off` gives it to everybody
+        #[arg(long)]
+        pct: Option<String>,
+        /// Forget what anybody set: back to the default that already shipped
+        #[arg(long)]
+        clear: bool,
+        /// Why. The only thing flag_log records that a human did not already know
+        #[arg(long)]
+        reason: Option<String>,
+        /// Say what would change and write nothing
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+        /// Confirm a change that reaches every phone
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 struct Api {
@@ -658,6 +687,309 @@ fn dhm(v: &Value) -> String {
         Some(d) => d.with_timezone(&chrono::Local).format("%d.%m. %H:%M").to_string(),
         None => "–".into(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Feature flags (#41)
+// ---------------------------------------------------------------------------
+
+/// The whole promise, said once after every write, because it is the thing that is easy to
+/// forget: nothing here reaches a phone by itself.
+const FLAG_LANDS: &str = "Kommt beim nächsten Öffnen der App an; ein Telefon, das niemand öffnet, behält den alten Wert.";
+
+/// on/off for a bool, a whole number for an int, the text itself for a string.
+fn flag_value(kind: &str, raw: &str) -> anyhow::Result<Value> {
+    match kind {
+        "bool" => match raw {
+            "on" | "true" | "1" | "an" => Ok(json!(true)),
+            "off" | "false" | "0" | "aus" => Ok(json!(false)),
+            _ => anyhow::bail!("on oder off, nicht {raw:?}"),
+        },
+        "int" => match raw.parse::<i64>() {
+            Ok(n) => Ok(json!(n)),
+            Err(_) => anyhow::bail!("eine ganze Zahl, nicht {raw:?}"),
+        },
+        _ => Ok(json!(raw)),
+    }
+}
+
+/// The same value, the way a human reads it.
+fn flag_show(kind: &str, v: &Value) -> String {
+    match v {
+        Value::Null => "–".into(),
+        Value::Bool(b) if kind == "bool" => if *b { "an" } else { "aus" }.into(),
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn flag_rollout(v: &Value) -> String {
+    match v.as_i64() {
+        None => "alle".into(),
+        Some(bp) => format!("{} %", (bp as f64) / 100.0),
+    }
+}
+
+/// What `flag_log` holds: a bare value for one person's override, and the whole setting —
+/// value and rollout — for a global change, so that ending a rollout does not read as "an → an".
+fn flag_log_value(kind: &str, v: &Value) -> String {
+    match v.get("value") {
+        None => flag_show(kind, v),
+        Some(inner) => match flag_rollout(&v["rollout_bp"]) {
+            r if r == "alle" => flag_show(kind, inner),
+            r => format!("{} ({r})", flag_show(kind, inner)),
+        },
+    }
+}
+
+fn flag_source(v: &Value) -> &'static str {
+    match v.as_str() {
+        Some("override") => "eigene Einstellung",
+        Some("rollout") => "Ausrollung",
+        Some("global") => "global",
+        _ => "Standard",
+    }
+}
+
+fn flag_reach(reach: &Value) -> String {
+    let about = if reach["estimated"].as_bool().unwrap_or(false) { "etwa " } else { "" };
+    format!(
+        "{about}{} von {} Kundinnen ({} mit eigener Einstellung)",
+        reach["reached"].as_i64().unwrap_or(0),
+        reach["customers"].as_i64().unwrap_or(0),
+        reach["with_override"].as_i64().unwrap_or(0)
+    )
+}
+
+/// What a write did, or would do. Says nothing about the parts it did not touch.
+fn flag_transition(kind: &str, v: &Value) -> String {
+    let (from, to) = (&v["from"], &v["to"]);
+    let mut parts = Vec::new();
+    if from["value"] != to["value"] {
+        parts.push(format!("{} → {}", flag_show(kind, &from["value"]), flag_show(kind, &to["value"])));
+    }
+    if from["rollout_bp"] != to["rollout_bp"] {
+        parts.push(format!("Ausrollung {} → {}", flag_rollout(&from["rollout_bp"]), flag_rollout(&to["rollout_bp"])));
+    }
+    if parts.is_empty() {
+        format!("unverändert bei {}", flag_show(kind, &to["value"]))
+    } else {
+        parts.join(", ")
+    }
+}
+
+/// `reason` and `dry_run` ride in the query string: DELETE carries no body here, and stellwerk's
+/// `delete` helper sends none.
+fn flag_query(reason: Option<&String>, dry_run: bool) -> String {
+    let mut q = Vec::new();
+    if let Some(r) = reason {
+        q.push(format!("reason={}", url::form_urlencoded::byte_serialize(r.as_bytes()).collect::<String>()));
+    }
+    if dry_run {
+        q.push("dry_run=true".into());
+    }
+    if q.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", q.join("&"))
+    }
+}
+
+fn print_flag_table(all: &[Value]) {
+    println!("{:<22} {:<7} {:<10} {:<10} {:<11} {:<8} Geändert", "Schalter", "Art", "Wert", "Standard", "Ausrollung", "Gezielt");
+    for f in all {
+        let kind = s(f, "kind");
+        let value = if f["value"].is_null() { &f["default"] } else { &f["value"] };
+        println!(
+            "{:<22} {:<7} {:<10} {:<10} {:<11} {:<8} {}{}",
+            s(f, "key"),
+            kind,
+            flag_show(&kind, value),
+            flag_show(&kind, &f["default"]),
+            flag_rollout(&f["rollout_bp"]),
+            f["overrides"].as_i64().unwrap_or(0),
+            dhm(&f["updated_at"]),
+            if f["orphan"].as_bool().unwrap_or(false) { "  (verwaist)" } else { "" }
+        );
+    }
+}
+
+fn print_flag(f: &Value) {
+    let kind = s(f, "kind");
+    let value = if f["value"].is_null() { &f["default"] } else { &f["value"] };
+    println!("{}  ({})", s(f, "key"), kind);
+    println!("  Wert:        {:<12} Standard: {}", flag_show(&kind, value), flag_show(&kind, &f["default"]));
+    println!("  Ausrollung:  {}", flag_rollout(&f["rollout_bp"]));
+    println!("  In der App:  {}", if f["wire"].as_bool().unwrap_or(false) { "ja" } else { "nein, nur im Server" });
+    println!("  Geändert:    {}", dhm(&f["updated_at"]));
+    println!("  Betroffen:   {}", flag_reach(&f["reach"]));
+    if f["orphan"].as_bool().unwrap_or(false) {
+        println!("  Verwaist:    keine Beschreibung in flags.rs beansprucht diesen Schlüssel noch; er wird nicht mehr ausgeliefert.");
+    }
+    if let Some(note) = f["note"].as_str() {
+        println!("  Hinweis:     {note}");
+    }
+    let overrides = f["overrides_list"].as_array().cloned().unwrap_or_default();
+    if !overrides.is_empty() {
+        println!("  Eigene Einstellung:");
+        for o in &overrides {
+            println!("    {:<24} {}", s(o, "nickname"), flag_show(&kind, &o["value"]));
+        }
+    }
+    let log = f["log"].as_array().cloned().unwrap_or_default();
+    if !log.is_empty() {
+        println!("  Zuletzt geändert:");
+        for l in &log {
+            let who = match l["customer"].as_str() {
+                None => "alle".to_string(),
+                Some(id) => id.chars().take(8).collect(),
+            };
+            println!(
+                "    {}  {:<10} {} → {}  {}",
+                dhm(&l["at"]),
+                who,
+                flag_log_value(&kind, &l["from"]),
+                flag_log_value(&kind, &l["to"]),
+                l["reason"].as_str().unwrap_or("")
+            );
+        }
+    }
+}
+
+fn print_customer_flags(v: &Value, all: &[Value]) {
+    println!("{} ({}):", s(v, "customer"), s(v, "id"));
+    let Some(flags) = v["flags"].as_object() else { return };
+    if flags.is_empty() {
+        println!("  keine Schalter");
+    }
+    for (key, e) in flags {
+        let kind = all.iter().find(|f| f["key"] == json!(key)).map(|f| s(f, "kind")).unwrap_or_default();
+        println!("  {:<24} {:<10} ({})", key, flag_show(&kind, &e["value"]), flag_source(&e["source"]));
+    }
+}
+
+/// Reading and writing feature flags.
+///
+/// The vocabulary is the registry in `backend/src/flags.rs` and nothing else: an unknown key
+/// prints the known ones and writes nothing, so a typo cannot become a flag that silently
+/// resolves to its default forever (docs/42).
+#[allow(clippy::too_many_arguments)]
+async fn flags_cmd(
+    api: &Api,
+    key: Option<String>,
+    value: Option<String>,
+    target: Option<String>,
+    pct: Option<String>,
+    clear: bool,
+    reason: Option<String>,
+    dry_run: bool,
+    yes: bool,
+) -> anyhow::Result<()> {
+    let all = api.get("/admin/flags").await?.as_array().cloned().unwrap_or_default();
+
+    let Some(asked) = key else {
+        match target {
+            Some(who) => print_customer_flags(&api.get(&format!("/admin/customers/{who}/flags")).await?, &all),
+            None if all.is_empty() => println!("Keine Schalter: flags.rs beschreibt keinen."),
+            None => print_flag_table(&all),
+        }
+        return Ok(());
+    };
+
+    // `stations-local` and `stations_local` are the same switch; anything else is not a switch.
+    //
+    // Orphans are excluded here although the listing above shows them. An orphan is a row whose
+    // key no `flags.rs` item claims any more: it is never loaded into the snapshot and never
+    // served, so setting one writes a value nothing will ever read — an implicit no-op wearing
+    // the clothes of a successful command. The listing wants them visible so they can be cleared;
+    // this path wants them gone, and „unbekannt" is the honest word for a key that does nothing.
+    let live: Vec<&serde_json::Value> = all.iter().filter(|f| f["orphan"] != json!(true)).collect();
+    let key = [asked.clone(), asked.replace('-', "_")]
+        .into_iter()
+        .find(|k| live.iter().any(|f| f["key"] == json!(k)))
+        .ok_or_else(|| {
+            anyhow::anyhow!("unbekannter Schalter {asked:?}; bekannt: {}", live.iter().map(|f| s(f, "key")).collect::<Vec<_>>().join(", "))
+        })?;
+    let spec = live.iter().find(|f| f["key"] == json!(&key)).expect("just matched").to_owned().clone();
+    let kind = s(&spec, "kind");
+
+    // One person: never asks, publishes nothing, and takes them out of a rollout as easily as it
+    // puts them in.
+    if let Some(who) = target {
+        if !clear && value.is_none() {
+            print_customer_flags(&api.get(&format!("/admin/customers/{who}/flags")).await?, &all);
+            return Ok(());
+        }
+        let v = if clear {
+            api.delete(&format!("/admin/customers/{who}/flags/{key}{}", flag_query(reason.as_ref(), dry_run))).await?
+        } else {
+            let mut body = json!({ "value": flag_value(&kind, value.as_deref().unwrap_or_default())? });
+            if let Some(r) = &reason {
+                body["reason"] = json!(r);
+            }
+            if dry_run {
+                body["dry_run"] = json!(true);
+            }
+            api.put(&format!("/admin/customers/{who}/flags/{key}"), body).await?
+        };
+        println!("{key} für {}: {} → {}", s(&v, "customer"), flag_show(&kind, &v["from"]), flag_show(&kind, &v["to"]));
+        let now = &v["flags"][&key];
+        println!("Gilt für sie jetzt: {}  ({})", flag_show(&kind, &now["value"]), flag_source(&now["source"]));
+        println!("{}", if dry_run { "Nur angeschaut, nichts geändert (--dry-run)." } else { FLAG_LANDS });
+        return Ok(());
+    }
+
+    if !clear && value.is_none() && pct.is_none() {
+        print_flag(&api.get(&format!("/admin/flags/{key}")).await?);
+        return Ok(());
+    }
+    if clear && (value.is_some() || pct.is_some()) {
+        anyhow::bail!("--clear vergisst alles, was jemand gesagt hat; zusammen mit einem Wert ergibt es keinen Sinn");
+    }
+
+    // Everything below is global: the one operation that changes behaviour on every phone with
+    // no review and no build. Without --yes the server is asked what it *would* do, the answer is
+    // printed with the number of people behind it, and nothing is written.
+    let write = yes && !dry_run;
+    let v = if clear {
+        api.delete(&format!("/admin/flags/{key}{}", flag_query(reason.as_ref(), !write))).await?
+    } else {
+        let mut body = serde_json::Map::new();
+        if let Some(raw) = &value {
+            body.insert("value".into(), flag_value(&kind, raw)?);
+        }
+        if let Some(p) = &pct {
+            body.insert(
+                "rollout_bp".into(),
+                match p.as_str() {
+                    "off" | "aus" | "alle" => Value::Null,
+                    n => match n.trim_end_matches('%').trim().parse::<f64>() {
+                        Ok(x) if (0.0..=100.0).contains(&x) => json!((x * 100.0).round() as i64),
+                        _ => anyhow::bail!("--pct will 0 bis 100 oder off, nicht {n:?}"),
+                    },
+                },
+            );
+        }
+        if let Some(r) = &reason {
+            body.insert("reason".into(), json!(r));
+        }
+        body.insert("dry_run".into(), json!(!write));
+        api.post(&format!("/admin/flags/{key}"), Value::Object(body)).await?
+    };
+
+    println!("{key}: {}", flag_transition(&kind, &v));
+    println!("Betroffen: {}", flag_reach(&v["reach"]));
+    if let Some(note) = spec["note"].as_str() {
+        println!("Hinweis: {note}");
+    }
+    if write {
+        println!("{FLAG_LANDS}");
+    } else if dry_run {
+        println!("Nur angeschaut, nichts geändert (--dry-run).");
+    } else {
+        anyhow::bail!("nichts geändert — wiederhole mit --yes");
+    }
+    Ok(())
 }
 
 fn print_journey(v: &Value) {
@@ -886,6 +1218,9 @@ async fn main() -> anyhow::Result<()> {
                 if local { "an" } else { "aus" },
                 if local { "aus der Datei" } else { "vom Server" }
             );
+        }
+        Cmd::Flags { key, value, for_customer, pct, clear, reason, dry_run, yes } => {
+            flags_cmd(&api, key, value, for_customer, pct, clear, reason, dry_run, yes).await?;
         }
         Cmd::Reset { customer } => {
             let v = api.post(&format!("/admin/customers/{customer}/reset"), json!({})).await?;

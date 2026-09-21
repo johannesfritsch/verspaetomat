@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::auth::internal;
 use crate::clock;
+use crate::flags;
 use crate::db::rows::*;
 use crate::handlers::{self, InboundMail};
 use crate::train::sim::TripOverride;
@@ -391,6 +392,378 @@ async fn read_switches(pool: &sqlx::PgPool) -> sqlx::Result<Value> {
     let (stations_local, updated_at): (bool, chrono::DateTime<chrono::Utc>) =
         sqlx::query_as("select stations_local, updated_at from app_switches where id = 1").fetch_one(pool).await?;
     Ok(json!({ "stations_local": stations_local, "updated_at": updated_at }))
+}
+
+// ---------------------------------------------------------------------------
+// Feature flags (#41): the general form of the switch above.
+// ---------------------------------------------------------------------------
+//
+// Every write here changes behaviour on every phone with no review and no build, so: an unknown
+// key is a 404 and never an implicit create, every write records why in `flag_log`, every write
+// can be asked what it would do without doing it, and a global write says how many people it
+// reaches before it is allowed to happen (the CLI turns that into the --yes gate).
+
+type FlagDbRow = (String, String, Value, Option<i32>, bool, chrono::DateTime<chrono::Utc>);
+
+fn unknown_flag() -> (StatusCode, Json<Value>) {
+    (StatusCode::NOT_FOUND, Json(json!({ "error": "unknown flag", "known": flags::keys() })))
+}
+
+/// How many people a global setting reaches. Two counts, no scan of ids: a rollout's share is
+/// reported as the estimate it is rather than by hashing the whole table.
+async fn reach(s: &AppState, key: &str, rollout_bp: Option<i32>) -> Result<Value, (StatusCode, Json<Value>)> {
+    let total: i64 = sqlx::query_scalar("select count(*)::bigint from customers").fetch_one(&s.pool).await.map_err(internal)?;
+    let overridden: i64 = sqlx::query_scalar("select count(*)::bigint from customers where jsonb_exists(flag_overrides, $1)")
+        .bind(key)
+        .fetch_one(&s.pool)
+        .await
+        .map_err(internal)?;
+    let open = total - overridden;
+    let reached = match rollout_bp {
+        None => open,
+        Some(bp) => ((open as f64) * (bp as f64) / 10_000.0).round() as i64,
+    };
+    Ok(json!({ "customers": total, "with_override": overridden, "reached": reached, "estimated": rollout_bp.is_some() }))
+}
+
+async fn flag_db_row(s: &AppState, key: &str) -> Result<Option<FlagDbRow>, (StatusCode, Json<Value>)> {
+    sqlx::query_as("select key, kind, value, rollout_bp, orphan, updated_at from flags where key = $1")
+        .bind(key)
+        .fetch_optional(&s.pool)
+        .await
+        .map_err(internal)
+}
+
+/// One line of the listing: what the registry says, and what a human has said since.
+fn flag_json(row: Option<&FlagDbRow>, overrides: i64, last: Option<&Value>) -> Value {
+    let key = row.map(|r| r.0.clone()).unwrap_or_default();
+    let spec = flags::spec(&key);
+    let mut v = json!({
+        "key": key,
+        "kind": spec.map(flags::Spec::kind).map(Value::from).unwrap_or(row.map(|r| Value::from(r.1.clone())).unwrap_or(Value::Null)),
+        "default": spec.map(flags::Spec::default_json).unwrap_or(Value::Null),
+        "wire": spec.map(flags::Spec::wire).map(Value::from).unwrap_or(Value::Null),
+        "note": spec.map(flags::Spec::note).map(Value::from).unwrap_or(Value::Null),
+        // What is stored, raw — including a value of the wrong type, so a human can see the row
+        // the warning in the deploy log is about. `default` beside it is what is actually served.
+        "value": row.map(|r| r.2.clone()).unwrap_or(Value::Null),
+        "rollout_bp": row.and_then(|r| r.3).map(Value::from).unwrap_or(Value::Null),
+        "orphan": row.map(|r| r.4).unwrap_or(spec.is_none()),
+        "updated_at": row.map(|r| json!(r.5)).unwrap_or(Value::Null),
+        "overrides": overrides,
+    });
+    v["last_change"] = last.cloned().unwrap_or(Value::Null);
+    v
+}
+
+/// `GET /admin/flags`: every flag the registry claims, plus every orphan row still on disk.
+pub async fn flags_list(State(s): State<AppState>, _a: Admin) -> ApiResult {
+    let rows: Vec<FlagDbRow> = sqlx::query_as("select key, kind, value, rollout_bp, orphan, updated_at from flags order by key")
+        .fetch_all(&s.pool)
+        .await
+        .map_err(internal)?;
+    let counts: Vec<(String, i64)> =
+        sqlx::query_as("select k, count(*)::bigint from customers c, lateral jsonb_object_keys(c.flag_overrides) k group by k")
+            .fetch_all(&s.pool)
+            .await
+            .map_err(internal)?;
+    let last: Vec<(String, chrono::DateTime<chrono::Utc>, Option<String>, Option<Uuid>)> =
+        sqlx::query_as("select distinct on (key) key, at, reason, customer_id from flag_log order by key, at desc")
+            .fetch_all(&s.pool)
+            .await
+            .map_err(internal)?;
+
+    let count_of = |key: &str| counts.iter().find(|(k, _)| k == key).map(|(_, n)| *n).unwrap_or(0);
+    let last_of = |key: &str| {
+        last.iter()
+            .find(|(k, ..)| k == key)
+            .map(|(_, at, reason, customer)| json!({ "at": at, "reason": reason, "customer": customer }))
+    };
+
+    let mut out = Vec::new();
+    // Registry order first: that is the order a human reads them in the source.
+    for spec in flags::ALL {
+        let row = rows.iter().find(|r| r.0 == spec.key());
+        let mut v = flag_json(row, count_of(spec.key()), last_of(spec.key()).as_ref());
+        // A flag the reconcile has not reached yet still has a key and a default.
+        v["key"] = json!(spec.key());
+        v["kind"] = json!(spec.kind());
+        v["default"] = spec.default_json();
+        v["wire"] = json!(spec.wire());
+        v["note"] = json!(spec.note());
+        v["orphan"] = json!(false);
+        out.push(v);
+    }
+    for row in rows.iter().filter(|r| flags::spec(&r.0).is_none()) {
+        out.push(flag_json(Some(row), count_of(&row.0), last_of(&row.0).as_ref()));
+    }
+    Ok(Json(json!(out)))
+}
+
+/// `GET /admin/flags/{key}`: the flag, who has an override, and the last ten changes.
+pub async fn flag_get(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
+    let row = flag_db_row(&s, &key).await?;
+    if row.is_none() && flags::spec(&key).is_none() {
+        return Err(unknown_flag());
+    }
+    let overrides: Vec<(Uuid, String, Value)> = sqlx::query_as(
+        "select id, nickname, flag_overrides -> $1 from customers where jsonb_exists(flag_overrides, $1) order by nickname",
+    )
+    .bind(&key)
+    .fetch_all(&s.pool)
+    .await
+    .map_err(internal)?;
+    let log: Vec<(chrono::DateTime<chrono::Utc>, Option<Uuid>, Option<Value>, Option<Value>, Option<String>)> =
+        sqlx::query_as("select at, customer_id, from_value, to_value, reason from flag_log where key = $1 order by at desc limit 10")
+            .bind(&key)
+            .fetch_all(&s.pool)
+            .await
+            .map_err(internal)?;
+
+    let mut v = flag_json(row.as_ref(), overrides.len() as i64, None);
+    if let Some(spec) = flags::spec(&key) {
+        v["key"] = json!(spec.key());
+        v["kind"] = json!(spec.kind());
+        v["default"] = spec.default_json();
+        v["wire"] = json!(spec.wire());
+        v["note"] = json!(spec.note());
+        v["orphan"] = json!(false);
+    }
+    v["reach"] = reach(&s, &key, row.as_ref().and_then(|r| r.3)).await?;
+    v["overrides_list"] = json!(overrides
+        .iter()
+        .map(|(id, nickname, value)| json!({ "customer": id, "nickname": nickname, "value": value }))
+        .collect::<Vec<_>>());
+    v["log"] = json!(log
+        .iter()
+        .map(|(at, customer, from, to, reason)| json!({ "at": at, "customer": customer, "from": from, "to": to, "reason": reason }))
+        .collect::<Vec<_>>());
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+pub struct FlagBody {
+    /// The global value, as JSON of the flag's kind. Absent leaves it alone.
+    #[serde(default)]
+    pub value: Option<Value>,
+    /// Absent leaves the rollout alone; `null` hands the value to everybody.
+    #[serde(default, deserialize_with = "crate::admin::double_option")]
+    pub rollout_bp: Option<Option<i32>>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Say what would change and write nothing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `POST /admin/flags/{key}`: the global value and the rollout.
+///
+/// Partial, like `SwitchesBody`: a body that names one thing leaves the others alone, and an
+/// unknown top-level field is ignored rather than rejected, so an older server survives a newer
+/// stellwerk.
+pub async fn flag_set(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<FlagBody>) -> ApiResult {
+    let Some(spec) = flags::spec(&key) else { return Err(unknown_flag()) };
+    if let Some(v) = &b.value {
+        if !spec.accepts(v) {
+            return Err(err(StatusCode::BAD_REQUEST, &format!("value is not a {}", spec.kind())));
+        }
+    }
+    if let Some(Some(bp)) = b.rollout_bp {
+        if !(0..=10_000).contains(&bp) {
+            return Err(err(StatusCode::BAD_REQUEST, "rollout_bp is basis points, 0..=10000"));
+        }
+    }
+    let row = flag_db_row(&s, &key).await?;
+    let was_value = row.as_ref().map(|r| r.2.clone()).unwrap_or_else(|| spec.default_json());
+    let was_rollout = row.as_ref().and_then(|r| r.3);
+    let value = b.value.clone().unwrap_or_else(|| was_value.clone());
+    let rollout = match b.rollout_bp {
+        Some(bp) => bp,
+        None => was_rollout,
+    };
+    let reach = reach(&s, &key, rollout).await?;
+
+    if !b.dry_run {
+        let mut tx = s.pool.begin().await.map_err(internal)?;
+        sqlx::query(
+            "insert into flags (key, kind, value, rollout_bp) values ($1, $2, $3, $4)
+             on conflict (key) do update set value = excluded.value, rollout_bp = excluded.rollout_bp,
+                 kind = excluded.kind, orphan = false, updated_at = now()",
+        )
+        .bind(spec.key())
+        .bind(spec.kind())
+        .bind(&value)
+        .bind(rollout)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+        // The whole setting, not just the value: ending a rollout changes nothing about the
+        // value, and a history that records it as "true → true" hides what happened.
+        sqlx::query("insert into flag_log (key, customer_id, from_value, to_value, reason) values ($1, null, $2, $3, $4)")
+            .bind(spec.key())
+            .bind(json!({ "value": was_value, "rollout_bp": was_rollout }))
+            .bind(json!({ "value": value, "rollout_bp": rollout }))
+            .bind(&b.reason)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+        s.reload_flags().await.map_err(internal)?;
+        // publish_all goes through `all_sender`, not `sender_for`, so it allocates nothing per
+        // customer and leaks nothing (#42). No build that exists today reacts to a `flags` event
+        // — events.dart classifies through a closed set of predicates and drops the rest — so
+        // this is a convenience for the dev loop and never a delivery guarantee. A flag lands on
+        // a phone at its next foreground fetch, and on a phone nobody opens, never.
+        s.events.publish_all("flags", json!({ "etag": s.flags().etag() }));
+    }
+
+    let mut out = flag_get(State(s.clone()), Admin, Path(key.clone())).await?;
+    out.0["dry_run"] = json!(b.dry_run);
+    out.0["from"] = json!({ "value": was_value, "rollout_bp": was_rollout });
+    out.0["to"] = json!({ "value": value, "rollout_bp": rollout });
+    out.0["reach"] = reach;
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+pub struct FlagClearQuery {
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `DELETE /admin/flags/{key}`: forget what a human said, back to the shipped default.
+///
+/// The row goes; the next startup's reconcile puts it back at the default. Deliberately not a
+/// write of the default value: "nobody has said anything about this" and "somebody has said the
+/// default" should not look the same in the log.
+pub async fn flag_clear(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Query(q): Query<FlagClearQuery>) -> ApiResult {
+    let Some(spec) = flags::spec(&key) else { return Err(unknown_flag()) };
+    let row = flag_db_row(&s, &key).await?;
+    let was_value = row.as_ref().map(|r| r.2.clone());
+    let reach = reach(&s, &key, None).await?;
+    if !q.dry_run {
+        let mut tx = s.pool.begin().await.map_err(internal)?;
+        sqlx::query("delete from flags where key = $1").bind(spec.key()).execute(&mut *tx).await.map_err(internal)?;
+        sqlx::query("insert into flag_log (key, customer_id, from_value, to_value, reason) values ($1, null, $2, null, $3)")
+            .bind(spec.key())
+            .bind(was_value.clone().map(|v| json!({ "value": v, "rollout_bp": row.as_ref().and_then(|r| r.3) })))
+            .bind(&q.reason)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+        s.reload_flags().await.map_err(internal)?;
+        s.events.publish_all("flags", json!({ "etag": s.flags().etag() }));
+    }
+    Ok(Json(json!({
+        "key": spec.key(), "dry_run": q.dry_run,
+        "from": { "value": was_value, "rollout_bp": row.as_ref().and_then(|r| r.3) },
+        "to": { "value": spec.default_json(), "rollout_bp": Value::Null },
+        "default": spec.default_json(), "reach": reach,
+    })))
+}
+
+/// `GET /admin/customers/{key}/flags`: what this one phone is actually on, and where each answer
+/// came from. The first question when something misbehaves in the field.
+pub async fn customer_flags(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    Ok(Json(json!({
+        "customer": c.nickname, "id": c.id,
+        "flags": s.flags().explain(Some((&c).into())),
+        "overrides": c.flag_overrides,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct CustomerFlagBody {
+    pub value: Value,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `PUT /admin/customers/{who}/flags/{flag}`: this one person, whatever the rollout says.
+///
+/// Nothing is published: `EventHub::publish` allocates a permanent channel for a customer who
+/// has never connected (#42), and a person who has just been targeted is almost certainly not
+/// connected. The override arrives on their next authenticated fetch.
+pub async fn customer_flag_set(
+    State(s): State<AppState>,
+    _a: Admin,
+    Path((key, flag)): Path<(String, String)>,
+    Json(b): Json<CustomerFlagBody>,
+) -> ApiResult {
+    let Some(spec) = flags::spec(&flag) else { return Err(unknown_flag()) };
+    if !spec.accepts(&b.value) {
+        return Err(err(StatusCode::BAD_REQUEST, &format!("value is not a {}", spec.kind())));
+    }
+    let c = resolve(&s, &key).await?;
+    let was = c.flag_overrides.get(spec.key()).cloned();
+    if !b.dry_run {
+        let mut tx = s.pool.begin().await.map_err(internal)?;
+        sqlx::query("update customers set flag_overrides = flag_overrides || jsonb_build_object($2::text, $3::jsonb) where id = $1")
+            .bind(c.id)
+            .bind(spec.key())
+            .bind(&b.value)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        sqlx::query("insert into flag_log (key, customer_id, from_value, to_value, reason) values ($1, $2, $3, $4, $5)")
+            .bind(spec.key())
+            .bind(c.id)
+            .bind(&was)
+            .bind(&b.value)
+            .bind(&b.reason)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+    }
+    let after: CustomerRow = if b.dry_run { c.clone() } else { resolve(&s, &c.id.to_string()).await? };
+    Ok(Json(json!({
+        "customer": c.nickname, "id": c.id, "key": spec.key(), "dry_run": b.dry_run,
+        "from": was, "to": b.value,
+        "flags": s.flags().explain(Some((&after).into())),
+    })))
+}
+
+/// `DELETE /admin/customers/{who}/flags/{flag}`: back to whatever everybody else gets.
+pub async fn customer_flag_clear(
+    State(s): State<AppState>,
+    _a: Admin,
+    Path((key, flag)): Path<(String, String)>,
+    Query(q): Query<FlagClearQuery>,
+) -> ApiResult {
+    let Some(spec) = flags::spec(&flag) else { return Err(unknown_flag()) };
+    let c = resolve(&s, &key).await?;
+    let was = c.flag_overrides.get(spec.key()).cloned();
+    if !q.dry_run {
+        let mut tx = s.pool.begin().await.map_err(internal)?;
+        sqlx::query("update customers set flag_overrides = flag_overrides - $2::text where id = $1")
+            .bind(c.id)
+            .bind(spec.key())
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        sqlx::query("insert into flag_log (key, customer_id, from_value, to_value, reason) values ($1, $2, $3, null, $4)")
+            .bind(spec.key())
+            .bind(c.id)
+            .bind(&was)
+            .bind(&q.reason)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+    }
+    let after: CustomerRow = if q.dry_run { c.clone() } else { resolve(&s, &c.id.to_string()).await? };
+    Ok(Json(json!({
+        "customer": c.nickname, "id": c.id, "key": spec.key(), "dry_run": q.dry_run,
+        "from": was, "to": Value::Null,
+        "flags": s.flags().explain(Some((&after).into())),
+    })))
 }
 
 pub async fn reset(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
@@ -832,6 +1205,43 @@ mod tests {
         assert_eq!(other.stations_local, None);
     }
 
+    /// #41: the same rule for flags, plus the one serde trap that would break it. `rollout_bp`
+    /// is a nested Option because "stop the rollout" (`null`) and "this body does not mention
+    /// the rollout" (absent) are different instructions, and a plain `Option<i32>` reads both as
+    /// `None`.
+    #[test]
+    fn a_flag_body_names_only_what_it_sets() {
+        let none: FlagBody = serde_json::from_str("{}").unwrap();
+        assert_eq!(none.value, None);
+        assert_eq!(none.rollout_bp, None);
+        assert!(!none.dry_run);
+
+        let value_only: FlagBody = serde_json::from_str(r#"{"value":true}"#).unwrap();
+        assert_eq!(value_only.value, Some(json!(true)));
+        assert_eq!(value_only.rollout_bp, None, "a body that says nothing about the rollout must not end it");
+
+        let stop: FlagBody = serde_json::from_str(r#"{"rollout_bp":null}"#).unwrap();
+        assert_eq!(stop.rollout_bp, Some(None), "an explicit null is the instruction to hand the value to everybody");
+
+        let tenth: FlagBody = serde_json::from_str(r#"{"rollout_bp":1000}"#).unwrap();
+        assert_eq!(tenth.rollout_bp, Some(Some(1000)));
+
+        // An unknown field is ignored rather than rejected, so an older server survives a newer
+        // stellwerk.
+        let other: FlagBody = serde_json::from_str(r#"{"something_else":true}"#).unwrap();
+        assert_eq!(other.value, None);
+    }
+
+    /// An explicit `false` is a value, not an absence: it is how one person is taken back out of
+    /// a rollout, and `CustomerFlagBody::value` is required precisely so that "clear" has to be
+    /// a DELETE rather than a body serde cannot tell from `{}`.
+    #[test]
+    fn targeting_one_person_off_is_not_the_same_as_clearing() {
+        let off: CustomerFlagBody = serde_json::from_str(r#"{"value":false}"#).unwrap();
+        assert_eq!(off.value, json!(false));
+        assert!(serde_json::from_str::<CustomerFlagBody>("{}").is_err(), "an empty body must not read as an instruction");
+    }
+
     /// Needs Postgres (`DATABASE_URL`, default `postgres://localhost/verspaetomat`), like the
     /// station sweep in `stations::extract`. Run it with
     ///
@@ -966,9 +1376,14 @@ pub struct NgoUpsert {
 }
 
 /// Distinguishes "field absent" from "field set to null" for a patch-style body.
-pub fn double_option<'de, D>(d: D) -> Result<Option<Option<String>>, D::Error>
+///
+/// serde reads both into a plain `Option<T>` as `None`, which would make "remove this" and "this
+/// body does not mention it" the same request — the very rule the partial-update test pins. The
+/// outer `Option` is presence, the inner one is the value.
+pub fn double_option<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
 {
     serde::Deserialize::deserialize(d).map(Some)
 }

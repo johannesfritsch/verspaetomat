@@ -167,6 +167,11 @@ pub struct CustomerRow {
     pub home_station_id: Option<String>,
     pub home_station_name: Option<String>,
     pub muted_stations: serde_json::Value,
+    /// Feature flags set for this one person (issue #41), `{"key": <json>}`. On the customer row
+    /// rather than in a join table because `select c.*` already runs on every authenticated
+    /// request: an override costs no query, and having none costs an empty object.
+    #[serde(default)]
+    pub flag_overrides: serde_json::Value,
     #[serde(default)]
     pub nudge_enabled: bool,
     #[serde(default)]

@@ -7,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/client.dart';
 import '../api/token_store.dart';
+import '../flags/flag_store.dart';
+import '../flags/flags.dart';
 import '../state/demo_state.dart';
 import 'app_repository.dart';
 import 'http_repository.dart';
@@ -23,11 +25,15 @@ extension BackendModeX on BackendMode {
 
 /// The session: which backend is active, who the customer is, and the
 /// small amount of shared state screens need (NGOs, health).
-class Session extends ChangeNotifier {
-  Session({required this.demo, required this.prefs, required this.apiUrl, TokenStore? tokens})
+class Session extends ChangeNotifier with WidgetsBindingObserver {
+  Session({required this.demo, required this.prefs, required this.apiUrl, TokenStore? tokens, FlagStore? flagStore})
       // One keychain slot per API host: a build pointed at the local backend and one pointed at
       // the server keep separate device tokens instead of invalidating each other.
       : tokens = tokens ?? TokenStore(namespace: _namespaceFor(apiUrl)) {
+    // Built here, not in `init()`: it reads its document straight out of `prefs`, which is
+    // already loaded, so `flags` answers correctly in the first frame rather than after a fetch.
+    _flags = flagStore ?? FlagStore(prefs: prefs, apiUrl: apiUrl);
+    _flags.addListener(notifyListeners);
     _mock = MockRepository(demo);
     _http = HttpRepository(client: ApiClient(baseUrl: apiUrl, tokens: this.tokens), tokens: this.tokens);
     _http.client.awaitDevice = () => _deviceReady.future;
@@ -50,6 +56,16 @@ class Session extends ChangeNotifier {
 
   late final MockRepository _mock;
   late final HttpRepository _http;
+  late final FlagStore _flags;
+
+  /// What the server last said about this build's flags, resolved for this phone (issue #41).
+  ///
+  /// A value, read synchronously: `session.flags.on(Flag.stationsLocal)`. Never null, never
+  /// awaited, false for anything nobody has positively switched on — see [Flags.on].
+  Flags get flags => _flags.flags;
+
+  /// The store behind [flags], for the Entwicklung page and for tests that pin one.
+  FlagStore get flagStore => _flags;
 
   BackendMode mode = BackendMode.demo;
   ApiCustomer? me;
@@ -155,12 +171,42 @@ class Session extends ChangeNotifier {
     // Einstellungen; debug builds keep Demo as the default so the showcase runs without a server.
     final local = forced == 'local' || (forced.isEmpty && stored == 'local') || (forced.isEmpty && stored == null && kReleaseMode);
     mode = local ? BackendMode.local : BackendMode.demo;
+    // #41: a foregrounding is the moment a phone gets to learn a flag changed. The store gates
+    // the check, so a resume storm costs a map lookup.
+    WidgetsBinding.instance.addObserver(this);
+    _observing = true;
     await _bootstrap();
     _startTicking();
     // Never on the launch path: the stations the app already has are the ones it answers from,
-    // and a check that found a newer table ten seconds later is just as good.
-    unawaited(Future<void>.delayed(const Duration(seconds: 10), stationsUpdateCheck));
+    // and a check that found a newer table ten seconds later is just as good. The flag document
+    // rides along for the same reason — the value in hand is the one the first frame drew with.
+    unawaited(Future<void>.delayed(const Duration(seconds: 10), () async {
+      await stationsUpdateCheck();
+      await flagsUpdateCheck();
+    }));
     if (me?.settings.onboardingDone == true) await prefs.setBool(onboardingDoneKey, true);
+  }
+
+  bool _observing = false;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(flagsUpdateCheck());
+  }
+
+  /// The check for a newer flag document (issue #41). A no-op in Demo, which has no server to
+  /// ask, and a no-op inside the store until its interval has passed.
+  ///
+  /// Nothing waits on this and nothing it does can fail a screen: the held document stands
+  /// through a timeout, a 500, a body that is not a document, and a flag service that is simply
+  /// not there.
+  Future<void> flagsUpdateCheck() async {
+    if (!isLocal) return;
+    try {
+      await _flags.maybeCheckForUpdate();
+    } catch (_) {
+      // The server was unreachable. The flags in hand still answer.
+    }
   }
 
   /// The check for a newer station extract (issue #39). A no-op in Demo, and a no-op inside the
@@ -227,6 +273,32 @@ class Session extends ChangeNotifier {
               'source': seed == null ? 'gps' : 'stellwerk',
             }));
           }
+        }
+
+        // #41. Three kinds mean „das Flaggen-Dokument könnte veraltet sein", and **no shipped
+        // build handles any of them**: `AppEvent`'s predicates (app/lib/api/events.dart:13-20)
+        // classify through a closed set of kinds and everything else falls through all of them,
+        // so this is the entire client half of the broadcast.
+        //
+        // Every refresh here is jittered inside the store. A global flip reaches every
+        // foregrounded phone in the same second, and without spreading them that is thousands of
+        // requests in one second against a box with a pool of eight.
+        if (e.kind == 'flags' || e.kind == 'resync') {
+          // `flags` is a global write (backend/src/admin.rs:615). `resync` is the stream telling
+          // us it lagged and dropped events (backend/src/events.rs:132) — without it a flip that
+          // arrived during a burst is lost until the interval runs out.
+          _flags.refreshSoon();
+        } else if (e.kind == 'hello') {
+          // Every connect *and* reconnect. On iOS the isolate is suspended in the background and
+          // the socket dies, so a flip that happened while it was down was never delivered.
+          //
+          // The gated check, not a refresh: `hello` carries nothing about flags
+          // (backend/src/events.rs:120 is `{kind, customer, now}`), so there is no field to read
+          // and no way to tell "I missed one" from "nothing happened". Writing the branch anyway
+          // is how the `sim_location` arm twenty lines up came to be code that has never once
+          // run; this one is deliberately not that. The gate makes it free when the document is
+          // fresh and correct when it is not.
+          unawaited(flagsUpdateCheck());
         }
       }
       _eventsOut.add(e);
@@ -422,6 +494,9 @@ class Session extends ChangeNotifier {
     _events?.dispose();
     _eventsOut.close();
     demo.removeListener(_onDemoChanged);
+    if (_observing) WidgetsBinding.instance.removeObserver(this);
+    _flags.removeListener(notifyListeners);
+    _flags.dispose();
     super.dispose();
   }
 }
