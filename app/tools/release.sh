@@ -32,15 +32,21 @@ ARCHIVE="build/ios/archive/Runner.xcarchive"
 AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
 
 echo "== Verspätomat $VERSION ($BUILD) → $API_URL"
-flutter build ios --release --config-only --build-name="$VERSION" --build-number="$BUILD" \
-  --dart-define=API_URL="$API_URL" --dart-define=BACKEND=local --dart-define=APP_VERSION="$VERSION ($BUILD)" >/dev/null
 
 # Before the archive, not after the upload (issue #40). The Swift unit tests have existed since
 # docs/30 and nothing ever ran them, which is how `Geofence.swift` came to document an assertion
 # as "failing ever since". This repo has no CI to hang them on — it deploys by `git push` plus
 # `ssh verspaetomat .../deploy.sh` — so `release.sh` is the one gate every TestFlight build passes
 # through. Deliberately no SKIP_TESTS.
+#
+# And before the `--config-only` below, not after: `swift-test.sh` builds for the simulator, which
+# rewrites `Generated.xcconfig` — including the build number, back to pubspec's. Running it after
+# the line below silently archived build 1 instead of build 66, which App Store Connect rejected
+# as a duplicate. The archive must be the last thing to touch that file.
 tools/swift-test.sh
+
+flutter build ios --release --config-only --build-name="$VERSION" --build-number="$BUILD" \
+  --dart-define=API_URL="$API_URL" --dart-define=BACKEND=local --dart-define=APP_VERSION="$VERSION ($BUILD)" >/dev/null
 
 echo "== archive"
 rm -rf "$ARCHIVE"
