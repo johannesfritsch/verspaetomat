@@ -92,7 +92,7 @@ class ShowcaseScreen extends StatelessWidget {
             const _Entry('Sollen wir uns melden?', 'Setup 1 · Mitteilungen', Routes.permissions, demoOnly: true),
             const _Entry('Am Bahnsteig erinnern?', 'Setup 2 · Standort', Routes.standort, demoOnly: true),
             const _Entry('Fast geschafft', 'Setup 2 · „Immer"', Routes.standortImmer, demoOnly: true),
-            const _Entry('Dein Ticket, dein Zweck', 'Setup 3 und 4', Routes.setup, demoOnly: true),
+            const _Entry('Wähle einen Verein', 'Setup 3 · Zweck', Routes.zweckWaehlen, demoOnly: true),
             const _Entry("Los geht's!", 'Setup · Ende', Routes.fertig, demoOnly: true),
             const _Entry('Bahnsteig', 'Home', Routes.bahnsteig),
             const _Entry('Unterwegs', 'die Fahrt', Routes.unterwegs),

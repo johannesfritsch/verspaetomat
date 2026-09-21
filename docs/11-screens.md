@@ -14,34 +14,37 @@ All copy below is German because that is what the customer reads. Explanations a
 
 ---
 
-## 1. Welcome (three cards, swipe)
+## 1. Willkommen (five cards, swipe)
 
-**Card 1 — the idea.** A large "+14" with a red plus counts up from 0. "Du wartest sowieso. Mach was draus." One line below: "Verspätungen werden Punkte. Große Verspätungen werden Spenden."
+Five drawn cards, each with an illustration, a two-tone heading and one line under it (#43). „Gemeinsam unterwegs." · „Einchecken." · „Warten zählt." · „Zusammen helfen." · „Los geht's."
 
-**Card 2 — the promise.** Three short lines, each with a small icon: "Dein Standort bleibt am Bahnhof." "Kein Geld läuft durch uns." "Kein Euro gilt als gespendet, bevor er es ist."
+The bottom bar is identical on all five — same height, same three slots, same coordinates — so nothing a thumb is already travelling towards moves underneath it. Left: „Überspringen", which skips to the setup, and on the last card „Schon dabei?", which opens Konto wiederherstellen. Centre: five dots. Right: „Weiter", and „Einrichten" on the last card.
 
-**Card 3 — start.** "Los geht's" and, in small type, "Ohne Konto. Ohne Kreditkarte."
-
-No account is created here. Sign-in is offered later, only for people who want a backup.
+No account is created here.
 
 ---
 
-## 2. Permissions (one screen, two asks)
+## 2. Einrichtung (one question per screen)
 
-- **Mitteilungen:** "Damit wir dir beim Ankommen sagen können, wie spät es war." Asked first; nearly everyone accepts.
-- **Standort am Bahnhof:** explained with the clock image: "Wir schauen nur, ob du an einem Bahnhof stehst. Während der Fahrt folgen wir dem Zug, nicht dir." Three options, "Auch im Hintergrund" preselected (docs/15): it asks the OS for the Always permission when tapped or on "Weiter"; "Nur wenn die App offen ist" asks for While Using; "Später, ich checke selbst ein" asks for nothing. Every path continues.
+Three numbered steps, each with its own illustration, one question, one or two paragraphs, a red button and a quiet one. **Each screen stands still until its system dialog has been answered** — the old setup asked its questions on one page and the dialogs arrived on the page after.
 
-Every path continues to the next screen. Nothing is gated.
+**Schritt 1 — Mitteilungen.** „Sollen wir uns melden?" Asked first, because it is the one answer here worth something whatever is decided about location: the arrival with its delay, the transfer question, „Post von der Bahn", „Verfällt bald", „Noch keine Antwort". „Mitteilungen erlauben" · „Ohne Mitteilungen weiter". The second is an answer, not a postponement — it is written down and nothing asks again.
+
+**Schritt 2 — Standort.** „Sollen wir dich am Bahnsteig erinnern?" One ask, nothing preselected. „Standort erlauben" · „Ich checke selbst ein". The copy says „Wir schauen nur, ob du an einem Bahnhof stehst. Kein Tracking, keine Historie. Während der Fahrt folgen wir dem Zug, nicht dir."; the sentence „Nichts verlässt dein Telefon" joins it only when the flag `stations_local` is on, because until then the background question still reaches our server (docs/15).
+
+**Fast geschafft** — the second state of Schritt 2, not a step of its own, so it carries a back arrow and no counter. iOS offers „Einmal / Beim Verwenden / Nicht erlauben" on a cold ask and never „Immer"; this is where the upgrade is asked, once While-Using is in hand. „Auf „Immer" stellen" · „Reicht mir so". The second is a working outcome: the station is still confirmed at check-in, only the reminder is missing.
 
 ---
 
-## 3. Dein Ticket, dein Zweck (setup)
+## 3. Wähle einen Verein (Schritt 3), then „Los geht's!"
 
-**Ticket.** Large cards: "Deutschlandticket", "Andere Zeitkarte", "Einzelfahrkarten". One line under each with what a delay is worth. The D-Ticket card says honestly: "1,50 € pro Verspätung ab 60 Minuten. Ausgezahlt ab 4 €. Wir sammeln für dich." Can be changed per ride and in the profile.
+**Zweck.** The NGO list as the table sends it, each row a badge (the partner's own mark when it has sent one, otherwise a glyph), the name and one sentence. „Deine Entschädigung geht direkt dorthin. Von der Bahn, nicht über uns." „Weiter" · „Später entscheiden", which is a real answer — `ngo_id` has a default and nothing is owed to anybody yet.
 
-**Zweck.** The NGO list, three to five partners, each as a card with a photo, one sentence, and the money confirmed so far ("Bestätigt über Verspätomat: 12.410 €"). The customer picks one default. Tapping a card opens screen 14.
+**The ticket is not asked here.** It decides what a delay is worth, so it is asked where a delay is: the „Ticket wählen" row on the check-in step, and Einstellungen.
 
-Personal details and the ticket number are **not** asked here. They are asked the first time a claim is ready.
+**„Los geht's!"** asks nothing. Three lines — „Einchecken und Minuten sammeln", „Zusammen zählt jede Minute mehr", „Ab 60 Minuten zahlt die Bahn an deinen Verein" — and „Zum Bahnsteig", which is where onboarding is marked done.
+
+Personal details and the ticket number are **not** asked in the setup. They are asked the first time a claim is ready, together with the twelve recovery words.
 
 ---
 

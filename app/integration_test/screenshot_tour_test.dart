@@ -27,7 +27,7 @@ const tour = <(String, String)>[
   ('setup-mitteilungen', Routes.permissions),
   ('setup-standort', Routes.standort),
   ('setup-immer', Routes.standortImmer),
-  ('setup', Routes.setup),
+  ('setup-zweck', Routes.zweckWaehlen),
   ('setup-fertig', Routes.fertig),
   ('bahnsteig', Routes.bahnsteig),
   ('unterwegs', Routes.unterwegs),
