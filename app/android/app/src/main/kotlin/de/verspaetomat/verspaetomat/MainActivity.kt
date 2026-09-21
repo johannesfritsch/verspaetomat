@@ -21,6 +21,7 @@ class MainActivity : FlutterActivity() {
 
     private var channel: MethodChannel? = null
     private var permissionResult: MethodChannel.Result? = null
+    private var notificationResult: MethodChannel.Result? = null
     private var wantAlways = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,6 +50,10 @@ class MainActivity : FlutterActivity() {
                         val always = (call.arguments as? Map<*, *>)?.get("always") as? Boolean ?: true
                         requestPermission(always, result)
                     }
+                    // Notifications, and nothing else. iOS has had this since #40; Android never
+                    // did, because the only thing that asked for POST_NOTIFICATIONS was the tail
+                    // of the location chain below (#43).
+                    "registerPush" -> requestNotifications(result)
                     "status" -> result.success(status())
                     "clearIgnored" -> {
                         GeofenceManager.clearIgnored(this, call.argument<String>("stationId") ?: "")
@@ -130,10 +135,28 @@ class MainActivity : FlutterActivity() {
         } else onBackgroundDone()
     }
 
-    private fun onBackgroundDone() {
-        if (Build.VERSION.SDK_INT >= 33 && !NudgeNotification.allowed(this)) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
-        } else finishPermission()
+    // Location is done when location is done. Asking for notifications here meant the location
+    // choice raised the notification dialog behind it, on whatever screen came next and whether
+    // or not anybody had asked for notifications (#43). `registerPush` owns that question now.
+    private fun onBackgroundDone() = finishPermission()
+
+    private fun requestNotifications(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < 33 || NudgeNotification.allowed(this)) {
+            result.success(NudgeNotification.allowed(this))
+            return
+        }
+        if (notificationResult != null) {
+            result.error("busy", "a notification request is already running", null)
+            return
+        }
+        notificationResult = result
+        ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
+    }
+
+    private fun finishNotifications() {
+        val r = notificationResult ?: return
+        notificationResult = null
+        r.success(NudgeNotification.allowed(this))
     }
 
     private fun finishPermission() {
@@ -147,7 +170,7 @@ class MainActivity : FlutterActivity() {
         when (requestCode) {
             REQ_FINE -> onFineDone()
             REQ_BACKGROUND -> onBackgroundDone()
-            REQ_NOTIFICATIONS -> finishPermission()
+            REQ_NOTIFICATIONS -> finishNotifications()
         }
     }
 

@@ -760,10 +760,12 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     manager.requestLocation()
   }
 
+  /// Location only. It used to ask for notifications here too, unconditionally, which meant the
+  /// location choice dragged the notification dialog along behind it — onto whatever screen came
+  /// next, whether or not anybody had tapped „Mitteilungen erlauben" (#43). The two questions are
+  /// asked on their own screens now, and `registerPush` is the only thing that asks for
+  /// notifications.
   func requestPermission(always: Bool, reply: @escaping (String) -> Void) {
-    center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-      if granted { DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() } }
-    }
     let status = authStatus
     switch (status, always) {
     case (.notDetermined, _):
