@@ -89,8 +89,11 @@ class ShowcaseScreen extends StatelessWidget {
             // The three onboarding screens write the ticket, the NGO and the onboarding flag, and
             // raise the OS prompts. Not from an index.
             const _Entry('Willkommen', 'drei Karten', Routes.welcome, demoOnly: true),
-            const _Entry('Berechtigungen', 'Mitteilungen, Standort', Routes.permissions, demoOnly: true),
-            const _Entry('Dein Ticket, dein Zweck', 'Setup', Routes.setup, demoOnly: true),
+            const _Entry('Sollen wir uns melden?', 'Setup 1 · Mitteilungen', Routes.permissions, demoOnly: true),
+            const _Entry('Am Bahnsteig erinnern?', 'Setup 2 · Standort', Routes.standort, demoOnly: true),
+            const _Entry('Fast geschafft', 'Setup 2 · „Immer"', Routes.standortImmer, demoOnly: true),
+            const _Entry('Dein Ticket, dein Zweck', 'Setup 3 und 4', Routes.setup, demoOnly: true),
+            const _Entry("Los geht's!", 'Setup · Ende', Routes.fertig, demoOnly: true),
             const _Entry('Bahnsteig', 'Home', Routes.bahnsteig),
             const _Entry('Unterwegs', 'die Fahrt', Routes.unterwegs),
             _Entry('Angekommen +68', 'Anspruch, Bündel bereit', '${Routes.angekommen}?variant=68', demoOnly: true),
