@@ -43,7 +43,7 @@ class _StandortImmerScreenState extends State<StandortImmerScreen> {
     if (mounted) _onward();
   }
 
-  void _onward() => context.go(Routes.zweckWaehlen);
+  void _onward() => context.go(Routes.fertig);
 
   @override
   Widget build(BuildContext context) {

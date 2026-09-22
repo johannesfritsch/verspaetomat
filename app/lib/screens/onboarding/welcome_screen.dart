@@ -102,7 +102,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   /// Both the button on the last card and „Überspringen" end here: the cards explain, they never
   /// gate, so skipping them costs nothing but the explanation.
-  void _done() => context.go(Routes.permissions);
+  void _done() => context.go(Routes.zweckWaehlen);
 
   @override
   Widget build(BuildContext context) {

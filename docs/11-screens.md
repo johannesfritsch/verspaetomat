@@ -28,21 +28,23 @@ No account is created here.
 
 Three numbered steps, each with its own illustration, one question, one or two paragraphs, a red button and a quiet one. **Each screen stands still until its system dialog has been answered** — the old setup asked its questions on one page and the dialogs arrived on the page after.
 
-**Schritt 1 — Mitteilungen.** „Sollen wir uns melden?" Asked first, because it is the one answer here worth something whatever is decided about location: the arrival with its delay, the transfer question, „Post von der Bahn", „Verfällt bald", „Noch keine Antwort". „Mitteilungen erlauben" · „Ohne Mitteilungen weiter". The second is an answer, not a postponement — it is written down and nothing asks again.
+**Schritt 1 — Wähle einen Verein.** The NGO list as the table sends it, each row a badge (the partner's own mark when it has sent one, otherwise a glyph), the name and one sentence. „Deine Entschädigung geht direkt dorthin. Von der Bahn, nicht über uns." „Weiter" · „Später entscheiden", which is a real answer — `ngo_id` has a default and nothing is owed to anybody yet.
 
-**Schritt 2 — Standort.** „Sollen wir dich am Bahnsteig erinnern?" One ask, nothing preselected. „Standort erlauben" · „Ich checke selbst ein". The copy says „Wir schauen nur, ob du an einem Bahnhof stehst. Kein Tracking, keine Historie. Während der Fahrt folgen wir dem Zug, nicht dir."; the sentence „Nichts verlässt dein Telefon" joins it only when the flag `stations_local` is on, because until then the background question still reaches our server (docs/15).
-
-**Fast geschafft** — the second state of Schritt 2, not a step of its own, so it carries a back arrow and no counter. iOS offers „Einmal / Beim Verwenden / Nicht erlauben" on a cold ask and never „Immer"; this is where the upgrade is asked, once While-Using is in hand. „Auf „Immer" stellen" · „Reicht mir so". The second is a working outcome: the station is still confirmed at check-in, only the reminder is missing.
-
----
-
-## 3. Wähle einen Verein (Schritt 3), then „Los geht's!"
-
-**Zweck.** The NGO list as the table sends it, each row a badge (the partner's own mark when it has sent one, otherwise a glyph), the name and one sentence. „Deine Entschädigung geht direkt dorthin. Von der Bahn, nicht über uns." „Weiter" · „Später entscheiden", which is a real answer — `ngo_id` has a default and nothing is owed to anybody yet.
+It comes first on purpose: it is the only question in the setup that is about the product rather than about the phone, it costs a tap and no system dialog, and somebody who has just chosen a Verein has a reason to say yes to the two that follow.
 
 **The ticket is not asked here.** It decides what a delay is worth, so it is asked where a delay is: the „Ticket wählen" row on the check-in step, and Einstellungen.
 
-**„Los geht's!"** asks nothing. Three lines — „Einchecken und Minuten sammeln", „Zusammen zählt jede Minute mehr", „Ab 60 Minuten zahlt die Bahn an deinen Verein" — and „Zum Bahnsteig", which is where onboarding is marked done.
+**Schritt 2 — Mitteilungen.** „Sollen wir uns melden?" The first of the two permission questions, because it is the one worth something whatever is decided about location: the arrival with its delay, the transfer question, „Post von der Bahn", „Verfällt bald", „Noch keine Antwort". „Mitteilungen erlauben" · „Ohne Mitteilungen weiter". The second is an answer, not a postponement — it is written down and nothing asks again.
+
+**Schritt 3 — Standort.** „Sollen wir dich am Bahnsteig erinnern?" One ask, nothing preselected. „Standort erlauben" · „Ich checke selbst ein". The copy says „Wir schauen nur, ob du an einem Bahnhof stehst. Kein Tracking, keine Historie. Während der Fahrt folgen wir dem Zug, nicht dir."; the sentence „Nichts verlässt dein Telefon" joins it only when the flag `stations_local` is on (docs/15).
+
+**Fast geschafft** — the second state of Schritt 3, not a step of its own, so it carries a back arrow and no counter. iOS offers „Einmal / Beim Verwenden / Nicht erlauben" on a cold ask and never „Immer"; this is where the upgrade is asked, once While-Using is in hand. „Auf „Immer" stellen" · „Reicht mir so". The second is a working outcome: the station is still confirmed at check-in, only the reminder is missing.
+
+---
+
+## 3. „Los geht's!"
+
+Asks nothing. Three lines — „Einchecken und Minuten sammeln", „Zusammen zählt jede Minute mehr", „Ab 60 Minuten zahlt die Bahn an deinen Verein" — and „Zum Bahnsteig", which is where onboarding is marked done.
 
 Personal details and the ticket number are **not** asked in the setup. They are asked the first time a claim is ready, together with the twelve recovery words.
 

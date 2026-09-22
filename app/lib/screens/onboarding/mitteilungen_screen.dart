@@ -8,10 +8,10 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import 'setup_step.dart';
 
-/// Schritt 1 von 4: may we tell you what happens to your rides and your claims? (#43)
+/// Schritt 2 von 3: may we tell you what happens to your rides and your claims? (#43)
 ///
-/// Asked first, and asked on its own, because it is the one question here whose answer is worth
-/// something whatever is decided about location. `push.rs` sends the arrival with its delay, the
+/// The first of the two permission questions, and asked on its own, because it is the one whose
+/// answer is worth something whatever is decided about location. `push.rs` sends the arrival with its delay, the
 /// transfer question, „Post von der Bahn", „Verfällt bald" and „Noch keine Antwort", and
 /// `push.rs:537` gates every one of them on this single flag. Somebody who never grants location
 /// and checks in by hand still wants to know the railway wrote back.
@@ -53,7 +53,7 @@ class _MitteilungenScreenState extends State<MitteilungenScreen> {
   @override
   Widget build(BuildContext context) {
     return SetupStep(
-      step: 1,
+      step: 2,
       asset: 'assets/onboarding/setup-mitteilungen.webp',
       title: 'Sollen wir uns melden?',
       busy: _busy,

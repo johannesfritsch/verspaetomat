@@ -9,12 +9,15 @@ import '../../widgets/kit.dart';
 import '../../widgets/ticket.dart' show NgoLogo;
 import 'setup_step.dart';
 
-/// Schritt 3 von 3: who the money goes to (#43).
+/// Schritt 1 von 3: who the money goes to (#43).
 ///
-/// The last question of the setup, and the only one left that is about the product rather than
-/// about the phone. The ticket used to be asked beside it and is not any more: it decides what a
-/// delay is worth, so it belongs where a delay is, and it is already asked on the check-in step
-/// („Ticket wählen", `welcher_zug_screen.dart`) and in Einstellungen.
+/// First, before either permission question. It is the one thing the setup asks that is about
+/// the product rather than about the phone, it costs a tap and no system dialog, and somebody who
+/// has just chosen a Verein has a reason to say yes to the two that follow.
+///
+/// The ticket used to be asked beside it and is not any more: it decides what a delay is worth,
+/// so it belongs where a delay is, and it is already asked on the check-in step („Ticket wählen",
+/// `welcher_zug_screen.dart`) and in Einstellungen.
 ///
 /// „Später entscheiden" is a real answer. `ngo_id` defaults to `bahnhofsmission` in migration
 /// 0002, nothing is owed to anybody yet, and the choice is asked again where it matters — on the
@@ -35,7 +38,7 @@ class _ZweckScreenState extends State<ZweckScreen> {
     final id = _picked;
     setState(() => _busy = true);
     if (id != null) await session.updateSettings(MePatch(ngoId: id));
-    if (mounted) context.go(Routes.fertig);
+    if (mounted) context.go(Routes.permissions);
   }
 
   @override
@@ -46,7 +49,7 @@ class _ZweckScreenState extends State<ZweckScreen> {
     // never a list in the bundle, so this screen has no opinion about how many there are.
     final selected = _picked ?? session.me?.settings.ngoId;
     return SetupStep(
-      step: 3,
+      step: 1,
       total: 3,
       asset: 'assets/onboarding/setup-zweck.webp',
       imageHeight: 170,
@@ -73,7 +76,7 @@ class _ZweckScreenState extends State<ZweckScreen> {
       primary: 'Weiter',
       onPrimary: _busy ? null : _next,
       secondary: 'Später entscheiden',
-      onSecondary: _busy ? null : () => context.go(Routes.fertig),
+      onSecondary: _busy ? null : () => context.go(Routes.permissions),
       footnote: 'Du kannst deinen Zweck später jederzeit ändern.',
     );
   }

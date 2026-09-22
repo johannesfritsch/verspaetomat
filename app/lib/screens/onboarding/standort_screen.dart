@@ -10,7 +10,7 @@ import '../../state/demo_state.dart' show LocationMode;
 import '../../router.dart';
 import 'setup_step.dart';
 
-/// Schritt 2 von 4: may your phone wake up at a station and remind you? (#43)
+/// Schritt 3 von 3: may your phone wake up at a station and remind you? (#43)
 ///
 /// One ask, not three cards. „Nur wenn die App offen ist" and „Später, ich checke selbst ein"
 /// produced nearly the same day, and the difference between them could not be told in one line —
@@ -59,7 +59,7 @@ class _StandortScreenState extends State<StandortScreen> {
     if (mounted) _onward();
   }
 
-  void _onward() => context.go(Routes.zweckWaehlen);
+  void _onward() => context.go(Routes.fertig);
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +70,7 @@ class _StandortScreenState extends State<StandortScreen> {
     // simply absent rather than written and wrong. It arrives the day the behaviour does (#41).
     final local = session.flags.on(Flag.stationsLocal);
     return SetupStep(
-      step: 2,
+      step: 3,
       asset: 'assets/onboarding/setup-standort.webp',
       title: 'Sollen wir dich am Bahnsteig erinnern?',
       busy: _busy,

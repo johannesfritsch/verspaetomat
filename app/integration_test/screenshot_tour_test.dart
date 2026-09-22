@@ -24,10 +24,10 @@ import 'package:verspaetomat/widgets/kit.dart' show VCard, VDropzone, VGhostButt
 // Welcher Zug? pages — are gone, and the flow's own shots (`einchecken-*`) cover what is left.
 const tour = <(String, String)>[
   ('showcase', Routes.showcase),
+  ('setup-zweck', Routes.zweckWaehlen),
   ('setup-mitteilungen', Routes.permissions),
   ('setup-standort', Routes.standort),
   ('setup-immer', Routes.standortImmer),
-  ('setup-zweck', Routes.zweckWaehlen),
   ('setup-fertig', Routes.fertig),
   ('bahnsteig', Routes.bahnsteig),
   ('unterwegs', Routes.unterwegs),
