@@ -117,10 +117,13 @@ class GeofenceSync with WidgetsBindingObserver {
 
     final patch = MePatch(
       notifications: settings.notifications && !status.notifications ? false : null,
-      // Only „always" is contradicted by a phone that grants less. „whileUsing" and „never" ask
-      // nothing of the OS that it can take away.
-      locationMode: settings.locationMode == LocationMode.always && status.permission != GeofencePermission.always
-          ? (status.permission == GeofencePermission.whileInUse ? LocationMode.whileUsing : LocationMode.never)
+      // Only a refusal contradicts „always". „whileInUse" does not: iOS grants the upgrade on
+      // its own schedule and reports the lesser state until it does, so writing the setting down
+      // on that basis would take the reminder away from somebody who had just asked for it — and
+      // `nudges_enabled` would then have the server report `enabled: false` and the layer would
+      // register nothing. The Bahnsteig card is what closes that gap, on a screen, by asking.
+      locationMode: settings.locationMode == LocationMode.always && status.permission == GeofencePermission.denied
+          ? LocationMode.never
           : null,
     );
     if (patch.notifications == null && patch.locationMode == null) return;

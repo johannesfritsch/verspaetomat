@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
-import '../../platform/geofence.dart';
 import '../../platform/geofence_sync.dart';
 import '../../repo/repo_scope.dart';
 import '../../state/demo_state.dart' show LocationMode;
@@ -32,14 +31,22 @@ class _StandortImmerScreenState extends State<StandortImmerScreen> {
   Future<void> _upgrade() async {
     final session = RepoScope.read(context);
     setState(() => _busy = true);
-    final granted = await GeofenceSync.requestFor(LocationMode.always);
+    // The setting is written BEFORE the dialog, and it is not corrected by the answer. Tapping
+    // this button is choosing the reminder; `loc_mode` records that choice, and the OS records
+    // what it currently permits — two different facts.
+    //
+    // Reading the answer instead was the bug that left the layer with nothing registered: iOS
+    // grants „Immer" on its own schedule, and `requestPermission` answers after three seconds
+    // with whatever `authStatus` says by then, which is usually still „whileInUse". So a person
+    // who tapped „Auf „Immer" stellen" and agreed was recorded as while-using — and
+    // `nudges_enabled` (handlers.rs) needs `always`, so the server replied `enabled: false` and
+    // `configure` registered zero regions. `location_nudge.dart` has always done it this way.
+    //
+    // If the phone really does grant less, the Bahnsteig card says so and offers the upgrade.
+    await session.updateSettings(const MePatch(locationMode: LocationMode.always));
+    await GeofenceSync.requestFor(LocationMode.always);
     if (!mounted) return;
     setState(() => _busy = false);
-    // Denied leaves While-Using standing, which is a working answer and not a failure: the
-    // station is still confirmed at check-in, only the reminder is missing.
-    await session.updateSettings(MePatch(
-      locationMode: granted == GeofencePermission.always ? LocationMode.always : LocationMode.whileUsing,
-    ));
     if (mounted) _onward();
   }
 
