@@ -141,9 +141,9 @@ const datenschutz = LegalDoc(
       'Die App enthält keine Werbung, keine Analyse-SDKs und keine Tracker. Wir messen nicht, wie du die App nutzt. Unser Server schreibt technische Protokolle: Zeitpunkt, angefragte Adresse, Fehler. Seit die Bahnhofsfrage auf dem Telefon beantwortet wird, steht in keiner dieser Adressen mehr eine Position. Wir werten diese Protokolle nicht aus und geben sie nicht weiter; sie liegen auf unserem Server in der Europäischen Union.',
     ]),
     LegalSection('Deine Rechte', [
-      'Auskunft und Übertragbarkeit: Einstellungen → Deine Daten → „Daten exportieren“ gibt dir alles, was wir über dich haben, als Datei.',
+      'Auskunft und Übertragbarkeit: Schreib an $legalEmail. Wir schicken dir alles, was wir über dich gespeichert haben, als Datei (JSON), spätestens innerhalb eines Monats.',
       'Löschung: Einstellungen → Deine Daten → „Alles löschen“ entfernt Konto, Fahrten, Anträge, Anhänge und deine Verspätomat-Adresse sofort und endgültig. Ein bereits abgeschickter Antrag liegt beim Eisenbahnunternehmen weiter; seine Antwort sehen wir dann nicht mehr.',
-      'Berichtigung: Name, Anschrift, E-Mail-Adresse und Ticketnummer änderst du unter Einstellungen → Anträge. Deinen Anzeigenamen unter Einstellungen → Konto.',
+      'Berichtigung: Name, Anschrift, E-Mail-Adresse und Ticketnummer änderst oder löschst du unter Einstellungen → Anträge. Deinen Anzeigenamen unter Einstellungen → Konto.',
       'Widerspruch, Beschwerde: schreib an $legalEmail. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, für uns ist das der Landesbeauftragte für den Datenschutz und die Informationsfreiheit Baden-Württemberg.',
     ]),
   ],

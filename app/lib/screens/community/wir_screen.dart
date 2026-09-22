@@ -14,12 +14,16 @@ import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
 import '../../widgets/ticket.dart';
 import '../share/share_lines.dart';
+import '../share/share_moments.dart';
 import '../share/share_sheet.dart';
 
 class _WirData {
-  const _WirData(this.community, this.standing, this.boards);
+  const _WirData(this.community, this.standing, this.boards, this.facts);
   final ApiCommunity community;
   final ApiStanding standing;
+
+  /// My own figures (#49): the button below the board shares these, not everybody's.
+  final ApiShareFacts facts;
 
   /// All three boards, loaded with the rest of Wir (docs/22 §2). A tab switch then only
   /// swaps rows that are already there: no loader, no height change, no scroll jump.
@@ -93,7 +97,8 @@ class _WirScreenState extends State<WirScreen> {
             boards[scope] = _BoardData(const [], shortError(e));
           }
         }
-        return _WirData(c, st, boards);
+        final facts = await repo.shareFacts().catchError((_) => ApiShareFacts.empty);
+        return _WirData(c, st, boards, facts);
       },
       builder: (context, data, refresh) {
         final c = data.community;
@@ -148,8 +153,9 @@ class _WirScreenState extends State<WirScreen> {
               ),
             ),
 
-            // docs/27 §2: the collective number, which nobody's own ego is in — which is exactly
-            // why it is the one people pass on.
+            // #49: nobody passes on everybody's total; they pass on their own. The button shares my
+            // minutes, with one line that puts them next to the total on this board. Before the
+            // first ride there is nothing of mine yet, and the total is all there is.
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -158,15 +164,17 @@ class _WirScreenState extends State<WirScreen> {
                   child: VTintButton(
                     label: 'Teilen',
                     icon: Icons.ios_share,
-                    onTap: () => showShareSheet(
-                      context,
-                      lines: ShareLines.wir(minutes: c.minutes),
-                      build: ({fahrgast, strecke, date, line}) => TicketData.wir(
-                        minutes: c.minutes,
-                        people: c.users,
-                        line: line,
-                      ),
-                    ),
+                    onTap: () => data.facts.minutesTotal > 0
+                        ? shareMine(context, data.facts, together: c.minutes)
+                        : showShareSheet(
+                            context,
+                            lines: ShareLines.wir(minutes: c.minutes),
+                            build: ({fahrgast, strecke, date, line}) => TicketData.wir(
+                              minutes: c.minutes,
+                              people: c.users,
+                              line: line,
+                            ),
+                          ),
                   ),
                 ),
                 const SizedBox(width: VSpace.s),

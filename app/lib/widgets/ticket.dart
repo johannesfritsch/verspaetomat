@@ -14,7 +14,7 @@ import 'kit.dart';
 ///
 /// It is a plain widget with no state and no I/O, so it renders in the screenshot tour like any
 /// screen and is captured for sharing through a `RepaintBoundary`.
-enum TicketFace { antrag, angekommen, puenktlich, abzeichen, wir }
+enum TicketFace { antrag, angekommen, puenktlich, abzeichen, wir, mine, rekord, linie, monat }
 
 /// Everything printed on one ticket. Built by [TicketData.antrag] and friends so the screens
 /// never assemble the fields by hand.
@@ -83,7 +83,8 @@ class TicketData {
         date: date,
         fields: [
           (cases == 1 ? 'FALL' : 'FÄLLE', '$cases'),
-          (paid ? 'BEZAHLT' : 'ZAHLT AN', ngoName),
+          // Before the railway has answered it pays nobody yet: the card says whom it is for (#49).
+          (paid ? 'BEZAHLT' : 'FÜR', ngoName),
           ('BETRAG', euro),
         ],
         ngoName: ngoName,
@@ -162,6 +163,59 @@ class TicketData {
         line: line,
       );
 
+  /// My own minutes (#49): the figure on Home's first board, and the one people actually pass on.
+  factory TicketData.mine({required int minutes, required int rides, String? confirmedEuro, String? fahrgast, DateTime? date, String? line}) => TicketData(
+        face: TicketFace.mine,
+        caption: 'GEWARTET',
+        number: minutes,
+        numberLabel: minutes == 1 ? 'MINUTE' : 'MINUTEN',
+        fahrgast: fahrgast,
+        date: date,
+        fields: [
+          (rides == 1 ? 'FAHRT' : 'FAHRTEN', '$rides'),
+          if (confirmedEuro != null) ('BESTÄTIGT', confirmedEuro),
+        ],
+        line: line,
+      );
+
+  /// The longest delay so far (#49).
+  factory TicketData.rekord({required int minutes, required String train, String? to, DateTime? date, String? fahrgast, String? line}) => TicketData(
+        face: TicketFace.rekord,
+        caption: 'LÄNGSTE VERSPÄTUNG',
+        number: minutes,
+        numberLabel: minutes == 1 ? 'MINUTE' : 'MINUTEN',
+        fahrgast: fahrgast,
+        date: date,
+        fields: [('ZUG', to == null ? train : '$train nach $to')],
+        line: line,
+      );
+
+  /// The line that cost the most this month (#49).
+  factory TicketData.linie({required String train, required int minutes, required int rides, required String month, String? fahrgast, String? line}) => TicketData(
+        face: TicketFace.linie,
+        caption: 'VERSPÄTUNG IM ${month.toUpperCase()}',
+        number: minutes,
+        numberLabel: minutes == 1 ? 'MINUTE' : 'MINUTEN',
+        fahrgast: fahrgast,
+        fields: [('LINIE', train), (rides == 1 ? 'FAHRT' : 'FAHRTEN', '$rides')],
+        line: line,
+      );
+
+  /// A finished month in one card (#49).
+  factory TicketData.monat({required String month, required int minutes, required int rides, required int worst, String? confirmedEuro, String? fahrgast, String? line}) => TicketData(
+        face: TicketFace.monat,
+        caption: month.toUpperCase(),
+        number: minutes,
+        numberLabel: minutes == 1 ? 'MINUTE GEWARTET' : 'MINUTEN GEWARTET',
+        fahrgast: fahrgast,
+        fields: [
+          (rides == 1 ? 'FAHRT' : 'FAHRTEN', '$rides'),
+          ('LÄNGSTE', '$worst Min.'),
+          if (confirmedEuro != null) ('BESTÄTIGT', confirmedEuro),
+        ],
+        line: line,
+      );
+
   bool get isPunctual => face == TicketFace.puenktlich;
 }
 
@@ -227,6 +281,10 @@ class Ticket extends StatelessWidget {
               TicketFace.antrag => 'FAHRGASTRECHTE',
               TicketFace.abzeichen => 'ABZEICHEN',
               TicketFace.wir => 'WIR ZUSAMMEN',
+              TicketFace.mine => 'MEINE WARTEZEIT',
+              TicketFace.rekord => 'REKORD',
+              TicketFace.linie => 'MEINE LINIE',
+              TicketFace.monat => 'RÜCKBLICK',
               _ => 'FAHRKARTE',
             },
             style: VText.eyebrow,
@@ -290,7 +348,7 @@ class Ticket extends StatelessWidget {
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      '${data.number}',
+                      _grouped(data.number!),
                       style: VText.display.copyWith(
                         fontSize: width * 0.34,
                         height: 0.95,
@@ -323,6 +381,17 @@ class Ticket extends StatelessWidget {
           border: Border.all(color: VColors.ink2, width: 2),
         ),
       );
+
+  /// 1298 → „1.298", as every other figure in the app is written.
+  static String _grouped(int v) {
+    final s = v.abs().toString();
+    final out = StringBuffer(v < 0 ? '-' : '');
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) out.write('.');
+      out.write(s[i]);
+    }
+    return out.toString();
+  }
 
   static String _date(DateTime d) {
     const days = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];

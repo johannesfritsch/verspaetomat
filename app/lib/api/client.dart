@@ -227,6 +227,7 @@ class ApiClient {
   Future<ApiGeofence> geofence() async => ApiGeofence.fromJson(_map(await _get('/v1/me/geofence')));
 
   Future<ApiCustomer> putPersonalData(ApiPersonalData d) async => ApiCustomer.fromJson(_map(await _put('/v1/me/personal-data', d.toJson())));
+  Future<ApiCustomer> deletePersonalData() async => ApiCustomer.fromJson(_map(await _delete('/v1/me/personal-data')));
 
   Future<void> deleteMe() async => _delete('/v1/me');
   Future<void> putPushToken({required String platform, required String token}) async => _put('/v1/me/push-token', {'platform': platform, 'token': token});
@@ -394,6 +395,7 @@ class ApiClient {
 
   Future<ApiCommunity> community() async => ApiCommunity.fromJson(_map(await _get('/v1/community')));
   Future<ApiStanding> standing() async => ApiStanding.fromJson(_map(await _get('/v1/me/standing')));
+  Future<ApiShareFacts> shareFacts() async => ApiShareFacts.fromJson(_map(await _get('/v1/me/share')));
 
   Future<List<ApiBoardEntry>> boards(String scope) async => _list(await _get('/v1/boards', {'scope': scope})).map(ApiBoardEntry.fromJson).toList();
 

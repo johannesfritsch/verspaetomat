@@ -126,6 +126,11 @@ class DemoState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearPersonalData() {
+    personalDataEntered = false;
+    notifyListeners();
+  }
+
   void completeOnboarding() {
     onboardingDone = true;
     notifyListeners();

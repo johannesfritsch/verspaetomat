@@ -3,13 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/events.dart';
-import '../../api/models.dart';
 import '../../mock/mock_data.dart' show Mock, IncidentStatus, TicketType;
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../../platform/geofence_sync.dart' show GeofenceSync;
+import '../../repo/app_repository.dart';
 import '../community/community_widgets.dart' show pickNgo;
+import '../share/share_moments.dart';
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
 
@@ -56,6 +58,21 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
   }
 
   GlobalKey _keyFor(String id) => _claimKeys.putIfAbsent(id, GlobalKey.new);
+
+  /// A push about railway mail lands here, so this is where a confirmation is first seen (#49).
+  /// Same rule as Home: once per claim on this device, never under automation.
+  Future<void> _maybeCelebrate(AppRepository repo) async {
+    if (GeofenceSync.automation) return;
+    final moments = ShareMoments(RepoScope.read(context).prefs);
+    try {
+      final c = moments.pendingConfirmed(await repo.shareFacts());
+      if (c == null || !mounted) return;
+      await moments.markConfirmed(c.claimId);
+      if (mounted) await showConfirmedSheet(context, c);
+    } catch (_) {
+      // A card is a nicety; the tab works without it.
+    }
+  }
 
   void _scrollToClaim() {
     final id = widget.claimId;
@@ -162,6 +179,7 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
         try {
           mails = await repo.mails();
         } catch (_) {}
+        if (claims.any((c) => c.status == ApiClaimStatus.accepted)) unawaited(_maybeCelebrate(repo));
         return _AntraegeData(ledger, claims, mails);
       },
       builder: (context, data, refresh) {

@@ -483,17 +483,47 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<void> deleteEverything() async {
+  /// Name, address, private e-mail and ticket number off the server. True when they are gone.
+  Future<bool> deletePersonalData() async {
+    try {
+      me = await repo.deletePersonalData();
+      error = null;
+      return true;
+    } catch (e) {
+      error = e.toString();
+      return false;
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  /// „Alles löschen". True only when the server has confirmed the account is gone: the screen
+  /// used to send the passenger to Willkommen whatever happened, so a failed delete looked done.
+  /// After it, this install is a stranger — the local choices that belonged to the old account
+  /// (onboarding, the nudge card, the sent push token) go too, and a fresh device is made.
+  Future<bool> deleteEverything() async {
     try {
       await repo.deleteMe();
-      if (isLocal) {
-        await _http.ensureDevice();
-      }
-      me = await repo.getMe();
     } catch (e) {
+      error = e.toString();
+      notifyListeners();
+      return false;
+    }
+    for (final k in prefs.getKeys().toList()) {
+      // Which backend this build talks to is the install's, not the account's.
+      if (k == _modeKey) continue;
+      await prefs.remove(k);
+    }
+    try {
+      if (isLocal) await _http.ensureDevice();
+      me = await repo.getMe();
+      error = null;
+    } catch (e) {
+      // The account is gone either way; a fresh one is made on the next start.
       error = e.toString();
     }
     notifyListeners();
+    return true;
   }
 
   @override

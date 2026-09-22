@@ -5,6 +5,7 @@
 // one copy of them is compiled rather than one per target.
 pub use verspaetomat_api::{clock, stations, train};
 
+mod account;
 mod admin;
 mod auth;
 mod classify;
@@ -23,6 +24,7 @@ mod redact;
 mod reply;
 mod rules;
 mod scanner;
+mod share;
 mod storage;
 
 use std::sync::Arc;
@@ -184,8 +186,9 @@ async fn main() -> anyhow::Result<()> {
         // customer
         .route("/v1/events", get(events::stream))
         .route("/v1/me", get(handlers::me).patch(handlers::patch_me).delete(handlers::delete_me))
+        .route("/v1/me/share", get(share::share_facts))
         .route("/v1/me/standing", get(handlers::standing))
-        .route("/v1/me/personal-data", put(handlers::put_personal_data))
+        .route("/v1/me/personal-data", put(handlers::put_personal_data).delete(handlers::delete_personal_data))
         .route("/v1/me/recovery-code", get(handlers::recovery_code))
         .route("/v1/me/export", get(handlers::export_me))
         .route("/v1/me/push-token", put(handlers::put_push_token).delete(handlers::delete_push_token))
@@ -238,6 +241,7 @@ async fn main() -> anyhow::Result<()> {
         // Stellwerk (admin)
         .route("/admin/customers", get(admin::customers))
         .route("/admin/customers/{key}", delete(admin::forget))
+        .route("/admin/customers/{key}/export", get(admin::export))
         .route("/admin/customers/{key}/ride", get(admin::ride))
         .route("/admin/customers/{key}/journey", get(admin::journey))
         .route("/admin/customers/{key}/confirm", post(admin::confirm))

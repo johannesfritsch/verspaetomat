@@ -83,6 +83,8 @@ class HttpRepository implements AppRepository {
   @override
   Future<ApiCustomer> putPersonalData(ApiPersonalData data) async => _noteFlags(await client.putPersonalData(data));
   @override
+  Future<ApiCustomer> deletePersonalData() async => _noteFlags(await client.deletePersonalData());
+  @override
   Future<String?> recoveryCode({bool rotate = false}) => client.recoveryCode(rotate: rotate);
   @override
   Future<void> putPushToken({required String platform, required String token}) => client.putPushToken(platform: platform, token: token);
@@ -276,6 +278,16 @@ class HttpRepository implements AppRepository {
 
   @override
   Future<ApiCommunity> community() => client.community();
+
+  @override
+  Future<ApiShareFacts> shareFacts() async {
+    try {
+      return await client.shareFacts();
+    } on ApiException catch (e) {
+      if (e.status == 404) return ApiShareFacts.empty;
+      rethrow;
+    }
+  }
 
   /// An older backend without the endpoint answers 404: nothing to show, no error.
   @override

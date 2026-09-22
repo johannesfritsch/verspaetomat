@@ -97,6 +97,7 @@ class Stellwerk {
       _post('/admin/customers/$id/backdate', {'from': from, 'to': to, 'days_ago': daysAgo, 'delay_minutes': delayMinutes});
   /// Confirms the proposed next leg of the customer's journey, as the phone would (docs/17).
   Future<dynamic> confirm(String id) => _post('/admin/customers/$id/confirm');
+  Future<dynamic> export(String id) => _get('/admin/customers/$id/export');
   Future<dynamic> journey(String id) => _get('/admin/customers/$id/journey');
 
   /// The customer that is riding `line` right now. Polls for up to [timeout].
@@ -742,4 +743,45 @@ void main() {
 
     b.dispose();
   }, timeout: const Timeout(Duration(minutes: 5)));
+
+  /// „Alles löschen", through the screen a passenger uses. A fresh install gets an account with a
+  /// ride and a case on it; the button must take all of it off the server, and a failure must not
+  /// look like success. Last in the file: deleting clears this install's preferences.
+  testWidgets('delete: Alles löschen takes the account off the server', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final demo = DemoState();
+    final session = Session(demo: demo, prefs: prefs, apiUrl: apiUrl, tokens: TokenStore(namespace: 'e2e3.'));
+    session.init();
+    await tester.pumpWidget(VerspaetomatApp(state: demo, session: session));
+    await settle(tester, 1500);
+    for (var i = 0; i < 40 && session.me == null; i++) {
+      await settle(tester, 250);
+    }
+    final id = session.me?.id;
+    expect(id, isNotNull, reason: 'the install has an account; error: ${session.error}');
+
+    final sw = Stellwerk(apiUrl);
+    await sw.backdate(id!, daysAgo: 2);
+    final before = await sw.export(id) as Map;
+    expect((before['rides'] as List).length, 1, reason: 'the account has something to lose');
+
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.settings);
+    await settle(tester, 800);
+    await tapText(tester, 'Alles löschen');
+    await tapText(tester, 'Löschen');
+    for (var i = 0; i < 40 && session.me?.id == id; i++) {
+      await settle(tester, 250);
+    }
+
+    var gone = false;
+    try {
+      await sw.export(id);
+    } on StateError catch (e) {
+      gone = e.message.contains('404');
+    }
+    expect(gone, isTrue, reason: 'the old customer must be unknown to the server');
+    expect((await sw.customers()).any((c) => c['id'] == id), isFalse);
+    expect(session.me?.id, isNot(id), reason: 'the install goes on as a new, empty account');
+    session.dispose();
+  }, timeout: const Timeout(Duration(minutes: 3)));
 }

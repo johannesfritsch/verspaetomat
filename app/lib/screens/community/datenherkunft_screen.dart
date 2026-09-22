@@ -33,7 +33,6 @@ const _rows = <_Row>[
   _Row('Community: Minuten', 'Summe aller endgültigen Verspätungen aller Fahrgäste; ein Ausfall zählt mit mindestens 60 Minuten.', fresh: 'Live'),
   _Row('Community: Euro „eingereicht“ und „bestätigt“', 'Summe der Kontostatus aller Fahrgäste.', fresh: 'Live für eingereicht, monatlich für bestätigt'),
   _Row('Bestätigt pro Verein', 'Summe aller bestätigten Anträge, die diesen Verein als Empfänger nennen.', fresh: 'Live; Vereinsmeldungen monatlich'),
-  _Row('Check-ins aus Träwelling', 'Wenn du Träwelling verbunden hast, erscheinen die Fahrten, die du dort eingecheckt hast, hier als Fahrten.', fresh: 'Innerhalb einer Minute', missing: 'Ohne Verbindung ändert sich nichts.'),
   _Row('Ranglisten', 'Nur verifizierte Fahrten (ein Standort-Fix am Bahnhof beim Check-in).', fresh: 'Live, sieben Tage', missing: 'Unverifizierte Fahrten bringen Punkte, aber keinen Platz.'),
   _Row('Abzeichen', 'Von der App aus den Fahrtdaten vergeben, bei Ursachen aus der Störungsmeldung des Betreibers.', fresh: 'Bei Ankunft'),
 ];

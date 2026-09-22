@@ -10,8 +10,9 @@ import '../theme/tokens.dart';
 /// out. Party confetti in twelve colours would be the first thing in this app to look like every
 /// other app; this is made of the right material — paper white, ink, and the one red.
 ///
-/// Once, on sending. Never on an arrival and never on a delay: nothing here is pleased that a
-/// train was late (docs/12), and the Antrag is the one moment that is the passenger's own doing.
+/// Once on sending, and once when the railway confirms the claim (#49). Never on an arrival and
+/// never on a delay: nothing here is pleased that a train was late (docs/12); the Antrag and its
+/// answer are the moments that are the passenger's own doing.
 /// No sound.
 class Konfetti extends StatefulWidget {
   const Konfetti({super.key, this.count = 44, this.duration = const Duration(milliseconds: 1500), this.onDone});

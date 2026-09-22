@@ -16,6 +16,9 @@ abstract class AppRepository {
   /// The stations the phone should watch in the background (docs/15). Empty when unsupported.
   Future<ApiGeofence> geofence();
   Future<ApiCustomer> putPersonalData(ApiPersonalData data);
+
+  /// Name, address, private e-mail and ticket number gone; the relay address stays.
+  Future<ApiCustomer> deletePersonalData();
   Future<String?> recoveryCode({bool rotate = false});
   Future<void> deleteMe();
   /// Stores the phone's push token on the device row; a no-op in Demo mode.
@@ -91,5 +94,7 @@ abstract class AppRepository {
   Future<ApiCommunity> community();
   /// Everything the Bahnsteig shows below the action block (docs/16), computed server-side.
   Future<ApiStanding> standing();
+  /// The share cards' figures (issue #49). Empty on a server that predates them.
+  Future<ApiShareFacts> shareFacts();
   Future<List<ApiBoardEntry>> boards(String scope);
 }

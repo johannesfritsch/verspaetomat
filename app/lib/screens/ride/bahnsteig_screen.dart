@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../../repo/app_repository.dart';
 import '../community/community_widgets.dart' show showMyMinutesSource;
 import '../../api/events.dart';
+import '../../platform/geofence_sync.dart' show GeofenceSync;
+import '../share/share_moments.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../state/nearby_monitor.dart';
@@ -33,6 +35,12 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
   /// the check-in and the away box (docs/24 §0). This screen no longer holds a fix.
   NearbyMonitor? _near;
   ApiStanding _standing = ApiStanding.empty;
+
+  /// The share cards' figures (#49). Empty until loaded, and on a server without the endpoint.
+  ApiShareFacts _facts = ApiShareFacts.empty;
+  late final ShareMoments _moments = ShareMoments(_session.prefs);
+  bool _recordNew = false;
+  bool _monthDue = false;
   bool _loading = true;
   String? _error;
   Timer? _ticker;
@@ -118,6 +126,31 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     } catch (_) {
       // keep the last numbers
     }
+    await _loadFacts();
+  }
+
+  /// The share facts, and the moments they bring (#49): a new record and last month as cards
+  /// on this screen, a confirmed claim as a sheet of its own — once each on this device.
+  Future<void> _loadFacts() async {
+    ApiShareFacts f;
+    try {
+      f = await _session.repo.shareFacts();
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _facts = f;
+      _recordNew = _moments.recordIsNew(f);
+      _monthDue = _moments.monthDue(f);
+    });
+    // No sheet under automation: the tour and the E2E drive this screen and must not find it
+    // covered by something they did not ask for.
+    final confirmed = _moments.pendingConfirmed(f);
+    if (confirmed != null && !GeofenceSync.automation) {
+      await _moments.markConfirmed(confirmed.claimId);
+      if (mounted) await showConfirmedSheet(context, confirmed);
+    }
   }
 
   Future<void> _load() async {
@@ -133,6 +166,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         _standing = st;
         _error = null;
       });
+      unawaited(_loadFacts());
     } catch (e) {
       if (mounted) setState(() => _error = shortError(e));
     } finally {
@@ -207,6 +241,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         // or not I am travelling right now. The action follows.
         _MyMinutesBlock(
           standing: st,
+          onShare: _facts.minutesTotal > 0 ? () => shareMine(context, _facts) : null,
           onTap: () => context.go(Routes.community),
         ),
 
@@ -245,6 +280,40 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
                 const VChevron(),
               ],
             ),
+          ),
+
+        // #49: a new longest delay, and last month once it is over. Each once; both live on Ich.
+        if (_recordNew && _facts.record != null)
+          _ShareMomentCard(
+            key: const Key('share-record'),
+            eyebrow: 'Neuer Rekord',
+            title: '${_facts.record!.minutes} Minuten',
+            body: _facts.record!.to == null ? _facts.record!.line : '${_facts.record!.line} nach ${_facts.record!.to}',
+            onShare: () {
+              _moments.markRecord(_facts);
+              setState(() => _recordNew = false);
+              shareRecord(context, _facts.record!);
+            },
+            onClose: () {
+              _moments.markRecord(_facts);
+              setState(() => _recordNew = false);
+            },
+          ),
+        if (_monthDue && _facts.lastMonth != null)
+          _ShareMomentCard(
+            key: const Key('share-month'),
+            eyebrow: 'Rückblick',
+            title: 'Dein ${monthName(_facts.lastMonth!.month)}',
+            body: '${_facts.lastMonth!.minutes} Minuten gewartet, in ${_facts.lastMonth!.rides == 1 ? 'einer Fahrt' : '${_facts.lastMonth!.rides} Fahrten'}.',
+            onShare: () {
+              _moments.markMonth(_facts);
+              setState(() => _monthDue = false);
+              shareMonth(context, _facts.lastMonth!);
+            },
+            onClose: () {
+              _moments.markMonth(_facts);
+              setState(() => _monthDue = false);
+            },
           ),
 
         _Momentum(standing: st, onTap: () => context.go(Routes.me)),
@@ -603,9 +672,12 @@ class _Momentum extends StatelessWidget {
 /// with my share as a bar under it, and a figure that big is nobody's own — it belongs on Wir,
 /// where it still is, and the board still leads there.
 class _MyMinutesBlock extends StatelessWidget {
-  const _MyMinutesBlock({required this.standing, required this.onTap});
+  const _MyMinutesBlock({required this.standing, required this.onTap, this.onShare});
   final ApiStanding standing;
   final VoidCallback onTap;
+
+  /// #49: the figure people actually pass on is their own. Null until there is one.
+  final VoidCallback? onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -635,9 +707,72 @@ class _MyMinutesBlock extends StatelessWidget {
           ),
           const VGap.s(),
           // `my_minutes` sums every arrived ride of this customer, so „seit" is the whole truth.
-          VBoardCaption(
-            c.myMinutes > 0 ? 'Seit deiner ersten Fahrt mit Verspätomat.' : 'Deine ersten Minuten kommen mit der ersten Fahrt.',
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: VBoardCaption(
+                  c.myMinutes > 0 ? 'Seit deiner ersten Fahrt mit Verspätomat.' : 'Deine ersten Minuten kommen mit der ersten Fahrt.',
+                ),
+              ),
+              if (onShare != null)
+                Semantics(
+                  button: true,
+                  label: 'Meine Minuten teilen',
+                  child: GestureDetector(
+                    key: const Key('share-mine'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onShare,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: VSpace.s, top: VSpace.xs),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.ios_share, size: 16, color: VColors.inkOnDark2),
+                          const SizedBox(width: 4),
+                          Text('Teilen', style: VText.bodySStrong.copyWith(color: VColors.inkOnDark2)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A moment worth a card (#49): small, on Home, with its own way out. It is not an achievement
+/// and does not look like one — an eyebrow, the fact, and two ways to answer it.
+class _ShareMomentCard extends StatelessWidget {
+  const _ShareMomentCard({super.key, required this.eyebrow, required this.title, required this.body, required this.onShare, required this.onClose});
+  final String eyebrow;
+  final String title;
+  final String body;
+  final VoidCallback onShare;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return VCard(
+      padding: const EdgeInsets.all(VSpace.cardTight),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(eyebrow.toUpperCase(), style: VText.eyebrow.copyWith(color: VColors.red)),
+                const SizedBox(height: 2),
+                Text(title, style: VText.title),
+                Text(body, style: VText.bodyS.copyWith(color: VColors.ink2)),
+              ],
+            ),
+          ),
+          VIconButton(icon: Icons.ios_share, onTap: onShare),
+          VIconButton(icon: Icons.close, color: VColors.ink2, onTap: onClose),
         ],
       ),
     );

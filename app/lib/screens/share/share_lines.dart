@@ -9,15 +9,83 @@ import '../claims/claims_widgets.dart' show fmtCents;
 /// None of them calls the payment a donation: the railway is paying because somebody made a
 /// claim, and „dazu gebracht … zu zahlen" is exactly what happened.
 class ShareLines {
+  /// At send time (#49). Nobody has paid yet, so no line says anyone has: the claim is in, and
+  /// the money is what it is for. [bestaetigt] says the rest once the railway has answered.
   static List<String> antrag({required int minutes, required int cases, required int cents, required String ngo}) {
-    final min = '$minutes ${minutes == 1 ? 'Minute' : 'Minuten'}';
+    final min = _min(minutes);
+    final euro = fmtCents(cents);
+    return [
+      '$min zu spät. Der Antrag ist raus, das Geld soll an $ngo gehen.',
+      'Eingereicht: $min Verspätung, $euro für $ngo.',
+      '$min gewartet. Jetzt ist die Bahn am Zug: $euro für $ngo.',
+      'Aus $min Warten sollen $euro für $ngo werden.',
+    ];
+  }
+
+  /// The railway has confirmed the claim (#49). Now „dazu gebracht … zu zahlen" is true.
+  static List<String> bestaetigt({required int minutes, required int cents, required String ngo}) {
+    final min = _min(minutes);
     final euro = fmtCents(cents);
     return [
       'Ich habe die Bahn dazu gebracht, an $ngo zu zahlen. Weil sie mich $min warten ließ.',
+      'Die Bahn zahlt $euro an $ngo. Wegen mir.',
+      'Aus $min Warten wurden $euro für $ngo.',
       '$min zu spät. Das Geld dafür bekommt $ngo.',
-      '$min meines Lebens. Immerhin zahlt die Bahn dafür an $ngo.',
-      'Aus $min Warten werden $euro für $ngo.',
     ];
+  }
+
+  /// My own minutes (#49). With [together], the one line that also names everybody's.
+  static List<String> mine({required int minutes, int? together}) {
+    final min = _min(minutes);
+    return [
+      'Ich habe schon $min auf Züge gewartet.',
+      if (together != null && together > minutes) 'Ich habe $min auf Züge gewartet. Zusammen sind wir bei ${_int(together)} Minuten.',
+      '$min Verspätung. Gesammelt, nicht vergessen.',
+      '$min meines Lebens am Bahnsteig. Verspätomat zählt mit.',
+    ];
+  }
+
+  /// A new longest delay (#49).
+  static List<String> rekord({required int minutes, String? to}) {
+    final min = _min(minutes);
+    final ziel = to == null ? '' : ' nach $to';
+    return [
+      'Neuer Rekord: $min zu spät$ziel.',
+      '$min. Länger habe ich noch nie auf einen Zug gewartet.',
+      'Mein Rekord steht jetzt bei $min$ziel.',
+    ];
+  }
+
+  /// The line that cost the most this month (#49). No article in front of the line: it is „der
+  /// RE 7" but „die S 12", and a sentence that guesses gets one of them wrong.
+  static List<String> linie({required String train, required int minutes, required int rides, required String month}) {
+    final dauer = duration(minutes);
+    return [
+      'Meine Linie im $month: $train, $dauer Verspätung.',
+      '$train, $month: $dauer gewartet, in ${rides == 1 ? 'einer Fahrt' : '$rides Fahrten'}.',
+      '$dauer Verspätung im $month. Linie: $train.',
+    ];
+  }
+
+  /// Last month in one card (#49).
+  static List<String> monat({required String month, required int minutes, required int rides, required int worst, int confirmedCents = 0}) {
+    final min = _min(minutes);
+    return [
+      'Mein $month: $min Verspätung in ${rides == 1 ? 'einer Fahrt' : '$rides Fahrten'}.',
+      '$month vorbei. $min gewartet, die längste Verspätung $worst Minuten.',
+      if (confirmedCents > 0) 'Im $month $min gewartet. Bestätigt: ${fmtCents(confirmedCents)} für den Verein.',
+    ];
+  }
+
+  static String _min(int minutes) => '${_int(minutes)} ${minutes == 1 ? 'Minute' : 'Minuten'}';
+
+  /// „3 Stunden 12 Minuten", „1 Stunde", „45 Minuten".
+  static String duration(int minutes) {
+    final h = minutes ~/ 60, m = minutes % 60;
+    final hs = h == 0 ? '' : '$h ${h == 1 ? 'Stunde' : 'Stunden'}';
+    final ms = m == 0 ? '' : '$m ${m == 1 ? 'Minute' : 'Minuten'}';
+    if (hs.isEmpty) return ms.isEmpty ? '0 Minuten' : ms;
+    return ms.isEmpty ? hs : '$hs $ms';
   }
 
   static List<String> angekommen({required int minutes, required String? to}) {

@@ -652,10 +652,16 @@ pub struct RotateQuery {
 }
 
 pub async fn export_me(State(s): State<AppState>, c: Customer) -> ApiResult {
-    let rides: Vec<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 order by checked_in_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
-    let incidents: Vec<IncidentRow> = sqlx::query_as("select * from incidents where customer_id = $1 order by ride_date desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
-    let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 order by created_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
-    let rows: Vec<MailRow> = sqlx::query_as("select * from mails where customer_id = $1 order by occurred_at desc").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
+    Ok(Json(export_json(&s.pool, &c.0).await.map_err(internal)?))
+}
+
+/// Everything we hold about one customer, as one document. The app's own export and
+/// `stellwerk export` (an access request by mail, legal.dart) both answer with this.
+pub async fn export_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value> {
+    let rides: Vec<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 order by checked_in_at desc").bind(c.id).fetch_all(pool).await?;
+    let incidents: Vec<IncidentRow> = sqlx::query_as("select * from incidents where customer_id = $1 order by ride_date desc").bind(c.id).fetch_all(pool).await?;
+    let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 order by created_at desc").bind(c.id).fetch_all(pool).await?;
+    let rows: Vec<MailRow> = sqlx::query_as("select * from mails where customer_id = $1 order by occurred_at desc").bind(c.id).fetch_all(pool).await?;
     // The export is the passenger's right to see what was done with their mail (Art. 15), so it
     // carries what the mail list leaves out: who read each answer, what a model was shown, and
     // what the receiving side verified about the sender.
@@ -670,12 +676,28 @@ pub async fn export_me(State(s): State<AppState>, c: Customer) -> ApiResult {
             v
         })
         .collect();
-    Ok(Json(json!({ "customer": c.0, "rides": rides, "incidents": incidents, "claims": claims, "mails": mails, "exported_at": crate::clock::now() })))
+    Ok(json!({ "customer": c, "rides": rides, "incidents": incidents, "claims": claims, "mails": mails, "exported_at": crate::clock::now() }))
 }
 
+/// „Alles löschen": the account and everything that hangs off it, files included (`account.rs`).
 pub async fn delete_me(State(s): State<AppState>, c: Customer) -> ApiResult {
-    sqlx::query("delete from devices where id = $1").bind(c.0.id).execute(&s.pool).await.map_err(internal)?;
-    Ok(Json(json!({ "deleted": true })))
+    let d = crate::account::delete_customer(&s.pool, c.0.id).await.map_err(internal)?;
+    tracing::info!(customer = %c.0.id, rides = d.rides, claims = d.claims, files = d.files, "account deleted by its owner");
+    Ok(Json(json!({ "deleted": true, "counts": d })))
+}
+
+/// `DELETE /v1/me/personal-data`: name, address, private e-mail and ticket number go. The relay
+/// address stays — it is on forms already sent, and the railway's answers still arrive there and
+/// show in the app; only the forwarding to a private address stops, because there is none.
+pub async fn delete_personal_data(State(s): State<AppState>, c: Customer) -> ApiResult {
+    let row: CustomerRow = sqlx::query_as(
+        "update customers set full_name = null, postal_address = null, email = null, ticket_number = null where id = $1 returning *",
+    )
+    .bind(c.0.id)
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    Ok(Json(customer_json(&s.pool, &s.flags(), &row).await.map_err(internal)?))
 }
 
 #[derive(Deserialize)]

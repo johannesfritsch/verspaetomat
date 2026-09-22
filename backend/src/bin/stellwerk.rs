@@ -517,7 +517,9 @@ enum Cmd {
         #[arg(long)]
         cancelled: bool,
     },
-    /// Delete a customer entirely (device, rides, incidents, claims, mails, uploads); --force when claims were already sent
+    /// Everything we hold about a customer, as JSON on stdout (an access request by mail)
+    Export { customer: String },
+    /// Delete a customer entirely (device, rides, incidents, claims, mails, uploads, their files and audit rows); --force when claims were already sent
     Forget {
         customer: String,
         #[arg(long)]
@@ -1244,6 +1246,10 @@ async fn main() -> anyhow::Result<()> {
                 let v = api.post(&format!("/admin/customers/{customer}/locate"), body).await?;
                 println!("{} steht jetzt bei {} ({}, {})", s(&v, "customer"), s(&v, "label"), s(&v, "lat"), s(&v, "lon"));
             }
+        }
+        Cmd::Export { customer } => {
+            let v = api.get(&format!("/admin/customers/{customer}/export")).await?;
+            println!("{}", serde_json::to_string_pretty(&v)?);
         }
         Cmd::Forget { customer, force } => {
             let path = format!("/admin/customers/{customer}{}", if force { "?force=true" } else { "" });

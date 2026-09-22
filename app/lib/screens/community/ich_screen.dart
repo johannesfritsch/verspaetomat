@@ -9,12 +9,14 @@ import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../../widgets/ticket.dart';
 import '../share/share_lines.dart';
+import '../share/share_moments.dart';
 import '../share/share_sheet.dart';
 import '../claims/claims_widgets.dart';
 import 'community_widgets.dart';
 
 class _IchData {
-  const _IchData(this.me, this.badges, this.rides, this.standing, this.ledger);
+  const _IchData(this.me, this.badges, this.rides, this.standing, this.ledger, this.facts);
+  final ApiShareFacts facts;
   final ApiCustomer me;
   final List<ApiBadge> badges;
   final List<ApiRide> rides;
@@ -51,7 +53,8 @@ class IchScreen extends StatelessWidget {
         try {
           ledger = await repo.incidents();
         } catch (_) {}
-        return _IchData(me, badges, rides, standing, ledger);
+        final facts = await repo.shareFacts().catchError((_) => ApiShareFacts.empty);
+        return _IchData(me, badges, rides, standing, ledger, facts);
       },
       builder: (context, data, refresh) {
         final me = data.me;
@@ -203,6 +206,43 @@ class IchScreen extends StatelessWidget {
               ),
             ),
 
+            // #49: every card this passenger can share, in one place. Home offers a record or a
+            // month once; here they stay.
+            if (data.facts.minutesTotal > 0) ...[
+              const VSectionHeader('Zum Teilen', heading: true, onCard: false),
+              VCard(
+                padding: const EdgeInsets.symmetric(horizontal: VSpace.cardTight),
+                child: Column(
+                  children: [
+                    _ShareRow(
+                      title: 'Meine Minuten',
+                      subtitle: '${fmtInt(data.facts.minutesTotal)} Minuten in ${data.facts.ridesTotal == 1 ? 'einer Fahrt' : '${fmtInt(data.facts.ridesTotal)} Fahrten'}',
+                      onTap: () => shareMine(context, data.facts),
+                    ),
+                    if (data.facts.record case final r?)
+                      _ShareRow(
+                        title: 'Längste Verspätung',
+                        subtitle: '${r.minutes} Minuten · ${r.to == null ? r.line : '${r.line} nach ${r.to}'}',
+                        onTap: () => shareRecord(context, r),
+                      ),
+                    if (data.facts.topLine case final l?)
+                      _ShareRow(
+                        title: 'Meine Linie im ${monthName(l.month)}',
+                        subtitle: '${l.line} · ${ShareLines.duration(l.minutes)}',
+                        onTap: () => shareLine(context, l),
+                      ),
+                    if (data.facts.lastMonth case final m?)
+                      _ShareRow(
+                        title: 'Dein ${monthName(m.month)}',
+                        subtitle: '${fmtInt(m.minutes)} Minuten · ${m.rides == 1 ? 'eine Fahrt' : '${m.rides} Fahrten'}',
+                        onTap: () => shareMonth(context, m),
+                        divider: false,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+
             // The mockup's menu names three screens that do not exist — Profil bearbeiten, Meine
             // Spenden, Statistiken. These are the three that do.
             VMenuCard(
@@ -316,4 +356,21 @@ class IchScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ShareRow extends StatelessWidget {
+  const _ShareRow({required this.title, required this.subtitle, required this.onTap, this.divider = true});
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool divider;
+
+  @override
+  Widget build(BuildContext context) => VListRow(
+        title: title,
+        subtitle: subtitle,
+        trailing: const Icon(Icons.ios_share, size: 20, color: VColors.ink2),
+        onTap: onTap,
+        divider: divider,
+      );
 }

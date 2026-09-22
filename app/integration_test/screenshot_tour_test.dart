@@ -3,6 +3,8 @@
 //
 //   flutter test integration_test/screenshot_tour_test.dart -d <sim> --dart-define=NO_LOCATION=1
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -16,7 +18,9 @@ import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/state/ride_monitor.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow;
 import 'package:verspaetomat/screens/claims/signature_board.dart';
-import 'package:verspaetomat/screens/community/community_widgets.dart' show BadgeIcon;
+import 'package:verspaetomat/screens/community/community_widgets.dart' show BadgeIcon, SwitchRow;
+import 'package:verspaetomat/screens/share/share_moments.dart' show showConfirmedSheet;
+import 'package:verspaetomat/widgets/ticket.dart' show Ticket;
 import 'package:verspaetomat/widgets/kit.dart' show VCard, VDropzone, VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
 
 // docs/29: there is one check-in and it is the sheets in `checkin_flow.dart`. The screens that
@@ -386,6 +390,27 @@ void main() {
     await wait(tester, 900);
     await tester.tap(find.widgetWithText(VGhostButton, 'Als Karte teilen').first, warnIfMissed: false);
     await shot('karte-abzeichen');
+    await dismissSheet(tester);
+    // #49: every card of mine, collected on Ich; one in portrait; and the railway's yes.
+    final teilen = find.text('Zum Teilen');
+    await tester.scrollUntilVisible(teilen, 300, scrollable: find.byType(Scrollable).first);
+    await wait(tester, 600);
+    await shot('ich-teilen');
+    await tester.tap(find.text('Meine Minuten'), warnIfMissed: false);
+    await wait(tester, 1200);
+    await tester.scrollUntilVisible(find.text('Hochformat'), 200, scrollable: find.byType(Scrollable).last);
+    await wait(tester, 400);
+    await tester.tap(find.descendant(of: find.widgetWithText(SwitchRow, 'Hochformat'), matching: find.byType(Switch)), warnIfMissed: false);
+    await wait(tester, 400);
+    await tester.scrollUntilVisible(find.byType(Ticket), -300, scrollable: find.byType(Scrollable).last);
+    await wait(tester, 800);
+    await shot('karte-hochformat');
+    await dismissSheet(tester);
+    final facts = await session.repo.shareFacts();
+    final ctxSheet = tester.element(find.byType(Scaffold).first);
+    if (ctxSheet.mounted) unawaited(showConfirmedSheet(ctxSheet, facts.confirmedClaims.first));
+    await wait(tester, 1800);
+    await shot('bestaetigt');
     await dismissSheet(tester);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await wait(tester, 600);

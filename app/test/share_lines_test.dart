@@ -17,28 +17,66 @@ void main() {
       expect(many.fields.first, ('FÄLLE', '3'));
     });
 
-    test('the ticket says who is being asked, and changes when the money has arrived', () {
+    test('the ticket says whom it is for, and says „bezahlt" only once the money has come', () {
       final asked = TicketData.antrag(minutes: 205, cases: 3, euro: '12,00 €', ngoName: 'Bahnhofsmission Köln');
-      expect(asked.fields[1], ('ZAHLT AN', 'Bahnhofsmission Köln'));
+      expect(asked.fields[1], ('FÜR', 'Bahnhofsmission Köln'));
 
       final paid = TicketData.antrag(minutes: 205, cases: 3, euro: '12,00 €', ngoName: 'Bahnhofsmission Köln', paid: true);
       expect(paid.fields[1], ('BEZAHLT', 'Bahnhofsmission Köln'));
     });
 
-    test('no line calls it a donation — the railway is paying a claim', () {
+    test('#49: at send time no line says the railway has paid', () {
       final lines = ShareLines.antrag(minutes: 205, cases: 3, cents: 1200, ngo: 'Bahnhofsmission Köln');
       expect(lines.length, 4);
+      for (final l in lines) {
+        expect(l, isNot(contains('dazu gebracht')), reason: l);
+        expect(l, isNot(contains('zahlt ')), reason: l);
+        expect(l, isNot(contains('bekommt')), reason: l);
+      }
       expect(lines.any((l) => l.contains('spenden') || l.contains('Spende')), isFalse);
-      expect(lines.first, contains('dazu gebracht'));
       expect(lines.first, contains('205 Minuten'));
-      // German money, everywhere.
       expect(lines.last, contains('12,00 €'));
     });
 
+    test('once confirmed, the line may say it', () {
+      final lines = ShareLines.bestaetigt(minutes: 205, cents: 1200, ngo: 'Bahnhofsmission Köln');
+      expect(lines.first, contains('dazu gebracht'));
+      expect(lines.first, contains('205 Minuten'));
+      expect(lines.any((l) => l.contains('12,00 €')), isTrue);
+      expect(lines.any((l) => l.contains('Spende')), isFalse);
+    });
+
     test('one minute is a Minute in the copy too', () {
-      final lines = ShareLines.antrag(minutes: 1, cases: 1, cents: 150, ngo: 'X');
+      final lines = ShareLines.bestaetigt(minutes: 1, cents: 150, ngo: 'X');
       expect(lines.first, contains('1 Minute '));
       expect(lines.first, isNot(contains('1 Minuten')));
+    });
+  });
+
+  group('#49: my own cards', () {
+    test('my minutes, with the total only when it says something', () {
+      expect(ShareLines.mine(minutes: 1298).first, 'Ich habe schon 1.298 Minuten auf Züge gewartet.');
+      expect(ShareLines.mine(minutes: 1298, together: 1208311).any((l) => l.contains('1.208.311')), isTrue);
+      expect(ShareLines.mine(minutes: 50, together: 50).any((l) => l.contains('Zusammen')), isFalse);
+    });
+
+    test('durations read like speech', () {
+      expect(ShareLines.duration(45), '45 Minuten');
+      expect(ShareLines.duration(60), '1 Stunde');
+      expect(ShareLines.duration(61), '1 Stunde 1 Minute');
+      expect(ShareLines.duration(192), '3 Stunden 12 Minuten');
+    });
+
+    test('a line gets no article: der RE 7, but die S 12', () {
+      for (final l in ShareLines.linie(train: 'S 12', minutes: 90, rides: 3, month: 'September')) {
+        expect(l, isNot(contains('der S 12')));
+        expect(l, isNot(contains('Der S 12')));
+      }
+    });
+
+    test('a month card mentions money only when some was confirmed', () {
+      expect(ShareLines.monat(month: 'August', minutes: 318, rides: 17, worst: 94).any((l) => l.contains('€')), isFalse);
+      expect(ShareLines.monat(month: 'August', minutes: 318, rides: 17, worst: 94, confirmedCents: 450).any((l) => l.contains('4,50 €')), isTrue);
     });
   });
 

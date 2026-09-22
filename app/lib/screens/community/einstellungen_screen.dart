@@ -38,7 +38,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     final locationMode = settings?.locationMode ?? state.locationMode;
     final keepCorrespondence = settings?.keepCorrespondence ?? state.keepCorrespondence;
     final showOnBoards = settings?.showOnBoards ?? state.showOnBoards;
-    final traewellingLinked = settings?.traewellingLinked ?? state.traewellingLinked;
     final personal = me?.personalData;
 
     return VScreen(
@@ -149,7 +148,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             value: keepCorrespondence,
             onChanged: (v) => session.updateSettings(MePatch(keepCorrespondence: v)),
           ),
-          VListRow(title: 'Alle Mails exportieren', subtitle: 'Gesendet und empfangen, als Archiv', chevron: true, onTap: () => showSnack(context, 'Archiv wird erstellt. Du bekommst einen Link per Mail.')),
           const VGap.xl(),
           const VSection('Konto'),
           VListRow(
@@ -164,16 +162,9 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             chevron: true,
             onTap: () => _recoveryCode(context, session),
           ),
-          VListRow(
-            title: 'Träwelling verbinden',
-            subtitle: traewellingLinked ? 'Verbunden' : 'Check-ins importieren, Punkte behalten',
-            chevron: true,
-            onTap: () => _traewelling(context, session),
-          ),
           SwitchRow(title: 'Mich in Ranglisten zeigen', subtitle: 'Ohne dich bleiben die Listen trotzdem da', value: showOnBoards, onChanged: (v) => session.updateSettings(MePatch(showOnBoards: v))),
           const VGap.xl(),
           const VSection('Deine Daten'),
-          VListRow(title: 'Daten exportieren', subtitle: 'Alles, was wir über dich haben', chevron: true, onTap: () => _export(context, session)),
           VListRow(title: 'Alles löschen', subtitle: 'Konto, Fahrten, Anträge, Adresse', chevron: true, onTap: () => _deleteAll(context, state, session)),
           VListRow(title: 'Woher kommen die Daten?', subtitle: 'Jede Zahl und ihre Quelle', chevron: true, onTap: () => context.push(Routes.dataSources)),
           const VGap.xl(),
@@ -267,44 +258,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     );
   }
 
-  void _traewelling(BuildContext context, Session session) {
-    showVSheet(
-      context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(VSpace.page, 0, VSpace.page, VSpace.l),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const VSheetHeader(title: 'Träwelling'),
-            Text(
-              'Träwelling ist der offene Check-in-Dienst für Bahnfahrten. Wenn du dort schon eincheckst, übernehmen wir deine Fahrten hier, und du musst nichts doppelt machen.',
-              style: VText.body,
-            ),
-            const VGap.m(),
-            Text('Wir lesen nur deine Check-ins. Nichts wird bei Träwelling verändert.', style: VText.body.copyWith(color: VColors.ink2)),
-            const VGap.l(),
-            VPrimaryButton(
-              label: 'Mit Träwelling anmelden',
-              onTap: () {
-                session.updateSettings(const MePatch(traewellingLinked: true));
-                Navigator.of(ctx).pop();
-                showSnack(context, 'Vorführung: Verbindung folgt.');
-              },
-            ),
-            const VGap.xs(),
-            VGhostButton(label: 'Nicht jetzt', onTap: () => Navigator.of(ctx).pop()),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Switching notifications on asks the phone; switching them off only writes the setting.
-  ///
-  /// If the phone says no the setting follows the phone rather than the switch — iOS shows its
-  /// dialog once and never again, so from then on the only way is the phone's own settings, and
-  /// a switch that sprang back with no word would be a puzzle.
   Future<void> _setNotifications(BuildContext context, Session session, bool on) async {
     if (!on) {
       await session.updateSettings(const MePatch(notifications: false));
@@ -459,7 +412,17 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
                     },
                   ),
                   const SizedBox(height: 4),
-                  VGhostButton(label: 'Daten löschen', color: VColors.red, onTap: () => Navigator.of(ctx).pop()),
+                  // It used to close the sheet and nothing else. Now it asks, then the server
+                  // forgets the four fields (DELETE /v1/me/personal-data).
+                  if (current != null)
+                    VGhostButton(
+                      label: 'Daten löschen',
+                      color: VColors.red,
+                      onTap: () async {
+                        Navigator.of(ctx).pop();
+                        await _deletePersonalData(context, session);
+                      },
+                    ),
                 ],
               ),
             ),
@@ -467,6 +430,30 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _deletePersonalData(BuildContext context, Session session) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: VColors.paper,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(4))),
+        title: Text('Persönliche Daten löschen?', style: VText.h2),
+        content: Text(
+          'Name, Anschrift, E-Mail-Adresse und Ticketnummer. Beim nächsten Antrag fragen wir wieder danach. '
+          'Antworten der Bahn auf gesendete Anträge siehst du weiter in der App, per Mail bekommst du sie nicht mehr.',
+          style: VText.bodyS,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text('Abbrechen', style: VText.bodyStrong)),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text('Löschen', style: VText.bodyStrong.copyWith(color: VColors.red))),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    final done = await session.deletePersonalData();
+    if (context.mounted) showSnack(context, done ? 'Gelöscht.' : 'Löschen hat nicht geklappt: ${session.error}');
   }
 
   Future<void> _deleteAll(BuildContext context, DemoState state, Session session) async {
@@ -485,7 +472,12 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
       ),
     );
     if (ok == true && context.mounted) {
-      await session.deleteEverything();
+      final done = await session.deleteEverything();
+      if (!done) {
+        // Nothing was deleted, so nothing may look deleted: stay here and say so.
+        if (context.mounted) showSnack(context, 'Löschen hat nicht geklappt. Dein Konto ist noch da. ${session.error ?? ''}'.trim());
+        return;
+      }
       if (!session.isLocal) state.reset();
       // docs/22 §3: a passenger who deleted everything starts over at Willkommen; only the
       // workshop build lands back in the Showcase.
@@ -562,14 +554,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     );
   }
 
-  Future<void> _export(BuildContext context, Session session) async {
-    try {
-      final json = await session.repo.exportMe();
-      if (context.mounted) showSnack(context, 'Export: ${json.length} Zeichen. Der Download folgt.');
-    } catch (e) {
-      if (context.mounted) showSnack(context, 'Export fehlgeschlagen: $e');
-    }
-  }
 }
 
 /// Debounced station search; pops with the chosen station.

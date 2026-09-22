@@ -813,6 +813,13 @@ pub struct ForgetQuery {
     pub force: bool,
 }
 
+/// `GET /admin/customers/{key}/export`: what `GET /v1/me/export` gives the customer, for an access
+/// request that arrives by mail (Art. 15; legal.dart says to write to the legal address).
+pub async fn export(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    Ok(Json(crate::handlers::export_json(&s.pool, &c).await.map_err(internal)?))
+}
+
 /// `DELETE /admin/customers/{key}`: forget a customer. The device row goes, everything cascades.
 /// A customer who already has a relay address and a sent claim is refused with 409 unless `?force=true`:
 /// a railway may still answer to that address.
@@ -830,8 +837,8 @@ pub async fn forget(State(s): State<AppState>, _a: Admin, Path(key): Path<String
         let _ = s.train.clear_override(&s.pool, t).await;
     }
     s.events.publish(c.id, "reset", json!({ "forgotten": true }));
-    sqlx::query("delete from devices where id = $1").bind(c.id).execute(&s.pool).await.map_err(internal)?;
-    Ok(Json(json!({ "forgotten": c.id, "nickname": c.nickname, "sent_claims": sent, "trip_overrides_cleared": trips.len() })))
+    let d = crate::account::delete_customer(&s.pool, c.id).await.map_err(internal)?;
+    Ok(Json(json!({ "forgotten": c.id, "nickname": c.nickname, "sent_claims": sent, "trip_overrides_cleared": trips.len(), "counts": d })))
 }
 
 #[derive(Deserialize)]

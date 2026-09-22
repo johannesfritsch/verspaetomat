@@ -1756,3 +1756,95 @@ class ApiDestinations {
         recent: _ml(j['recent']).map(ApiDestination.fromJson).toList(),
       );
 }
+
+/// `GET /v1/me/share` (issue #49): one passenger's own figures, for the share cards. Everything
+/// optional in the answer is null here rather than zero, so a card never shows a made-up nought.
+class ApiShareFacts {
+  const ApiShareFacts({
+    required this.minutesTotal,
+    required this.ridesTotal,
+    required this.confirmedCents,
+    this.record,
+    this.topLine,
+    this.lastMonth,
+    this.confirmedClaims = const [],
+  });
+  final int minutesTotal;
+  final int ridesTotal;
+  final int confirmedCents;
+  final ApiShareRecord? record;
+  final ApiShareLine? topLine;
+  final ApiShareMonth? lastMonth;
+  final List<ApiShareConfirmed> confirmedClaims;
+
+  static const empty = ApiShareFacts(minutesTotal: 0, ridesTotal: 0, confirmedCents: 0);
+
+  factory ApiShareFacts.fromJson(Map<String, dynamic> j) => ApiShareFacts(
+        minutesTotal: _i(j['minutes_total']),
+        ridesTotal: _i(j['rides_total']),
+        confirmedCents: _i(j['confirmed_cents']),
+        record: j['record'] is Map ? ApiShareRecord.fromJson((j['record'] as Map).cast()) : null,
+        topLine: j['top_line'] is Map ? ApiShareLine.fromJson((j['top_line'] as Map).cast()) : null,
+        lastMonth: j['last_month'] is Map ? ApiShareMonth.fromJson((j['last_month'] as Map).cast()) : null,
+        confirmedClaims: [
+          for (final c in (j['confirmed_claims'] as List? ?? const [])) ApiShareConfirmed.fromJson((c as Map).cast()),
+        ],
+      );
+}
+
+class ApiShareRecord {
+  const ApiShareRecord({required this.rideId, required this.line, required this.minutes, this.to, this.at});
+  final String rideId;
+  final String line;
+  final String? to;
+  final int minutes;
+  final DateTime? at;
+  factory ApiShareRecord.fromJson(Map<String, dynamic> j) =>
+      ApiShareRecord(rideId: _s(j['ride_id']), line: _s(j['line']), to: j['to']?.toString(), minutes: _i(j['minutes']), at: _dt(j['at']));
+}
+
+class ApiShareLine {
+  const ApiShareLine({required this.line, required this.minutes, required this.rides, required this.month});
+  final String line;
+  final int minutes;
+  final int rides;
+  final String month; // "2026-09"
+  factory ApiShareLine.fromJson(Map<String, dynamic> j) =>
+      ApiShareLine(line: _s(j['line']), minutes: _i(j['minutes']), rides: _i(j['rides']), month: _s(j['month']));
+}
+
+class ApiShareMonth {
+  const ApiShareMonth({required this.month, required this.minutes, required this.rides, required this.worstMinutes, required this.points, required this.confirmedCents});
+  final String month; // "2026-08"
+  final int minutes;
+  final int rides;
+  final int worstMinutes;
+  final int points;
+  final int confirmedCents;
+  factory ApiShareMonth.fromJson(Map<String, dynamic> j) => ApiShareMonth(
+        month: _s(j['month']),
+        minutes: _i(j['minutes']),
+        rides: _i(j['rides']),
+        worstMinutes: _i(j['worst_minutes']),
+        points: _i(j['points']),
+        confirmedCents: _i(j['confirmed_cents']),
+      );
+}
+
+class ApiShareConfirmed {
+  const ApiShareConfirmed({required this.claimId, required this.cents, required this.ngo, required this.cases, required this.minutes, this.confirmedAt});
+  final String claimId;
+  final int cents;
+  final String ngo;
+  final int cases;
+  final int minutes;
+  final DateTime? confirmedAt;
+  factory ApiShareConfirmed.fromJson(Map<String, dynamic> j) => ApiShareConfirmed(
+        claimId: _s(j['claim_id']),
+        cents: _i(j['cents']),
+        ngo: _s(j['ngo']),
+        cases: _i(j['cases']),
+        minutes: _i(j['minutes']),
+        confirmedAt: _dt(j['confirmed_at']),
+      );
+}

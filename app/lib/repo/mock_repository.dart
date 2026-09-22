@@ -625,6 +625,12 @@ class MockRepository implements AppRepository {
   }
 
   @override
+  Future<ApiCustomer> deletePersonalData() async {
+    state.clearPersonalData();
+    return getMe();
+  }
+
+  @override
   Future<String?> recoveryCode({bool rotate = false}) async => 'gleis sieben wartet ruhig am bahnsteig zwoelf uhr elf nach koeln';
 
   @override
@@ -967,6 +973,36 @@ class MockRepository implements AppRepository {
       confirmedCents: _cents(Mock.communityConfirmed + state.confirmedTotal - seededConfirmed),
       users: Mock.communityUsers,
       ngos: Mock.ngos.map((n) => ApiNgoTotal(id: n.id, name: n.name, confirmedCents: _cents(n.confirmedTotal), submittedCents: _cents(n.submittedTotal))).toList(),
+    );
+  }
+
+  /// Demo: invented, like everything in the Vorführung, but in the shape the server sends — and
+  /// the record and the line come from the demo's own rides, so Ich's statistics and its share
+  /// cards name the same figures.
+  @override
+  Future<ApiShareFacts> shareFacts() async {
+    final now = DateTime.now();
+    final prev = DateTime(now.year, now.month - 1);
+    String ym(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}';
+    final late = (await rides()).where((r) => (r.finalDelayMinutes ?? 0) > 0).toList()
+      ..sort((a, b) => (b.finalDelayMinutes ?? 0).compareTo(a.finalDelayMinutes ?? 0));
+    final top = late.firstOrNull;
+    final byLine = <String, (int, int)>{};
+    for (final r in late.where((r) => r.date.year == now.year && r.date.month == now.month)) {
+      final (m, n) = byLine[r.line] ?? (0, 0);
+      byLine[r.line] = (m + (r.finalDelayMinutes ?? 0), n + 1);
+    }
+    final line = byLine.entries.fold<MapEntry<String, (int, int)>?>(null, (m, e) => m == null || e.value.$1 > m.value.$1 ? e : m);
+    return ApiShareFacts(
+      minutesTotal: Mock.myMinutes + state.bonusPoints,
+      ridesTotal: 41,
+      confirmedCents: 1200,
+      record: top == null ? null : ApiShareRecord(rideId: top.id, line: top.line, to: top.exitStationName, minutes: top.finalDelayMinutes ?? 0, at: top.plannedArrival ?? top.date),
+      topLine: line == null ? null : ApiShareLine(line: line.key, minutes: line.value.$1, rides: line.value.$2, month: ym(now)),
+      lastMonth: ApiShareMonth(month: ym(prev), minutes: 318, rides: 17, worstMinutes: 94, points: 318, confirmedCents: 450),
+      confirmedClaims: [
+        ApiShareConfirmed(claimId: 'demo-claim', cents: 600, ngo: Mock.ngos.first.name, cases: 4, minutes: 281, confirmedAt: now.subtract(const Duration(days: 2))),
+      ],
     );
   }
 

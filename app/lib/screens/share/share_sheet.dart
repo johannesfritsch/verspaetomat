@@ -70,6 +70,9 @@ class _ShareSheetState extends State<_ShareSheet> {
   bool _withRoute = true;
   bool _busy = false;
 
+  /// 9:16 for a status or a story (#49): the same card on more paper, 1080 × 1920 when captured.
+  bool _story = false;
+
   TicketData get _data => widget.build(
         fahrgast: _withName ? widget.nickname : null,
         strecke: _withRoute ? widget.strecke : null,
@@ -123,10 +126,18 @@ class _ShareSheetState extends State<_ShareSheet> {
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
             children: [
+              // The preview is scaled to fit; the boundary itself keeps its size, so the capture is
+              // full resolution either way.
               Center(
-                child: RepaintBoundary(
-                  key: _boundary,
-                  child: Ticket(data: _data),
+                child: SizedBox(
+                  height: _story ? 480 : null,
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    child: RepaintBoundary(
+                      key: _boundary,
+                      child: _story ? _StoryFrame(child: Ticket(data: _data, width: 300)) : Ticket(data: _data),
+                    ),
+                  ),
                 ),
               ),
               const VGap.l(),
@@ -142,6 +153,12 @@ class _ShareSheetState extends State<_ShareSheet> {
                 const VGap.m(),
               ],
               const VSection('Auf der Karte'),
+              SwitchRow(
+                title: 'Hochformat',
+                subtitle: 'Für Status und Story',
+                value: _story,
+                onChanged: (v) => setState(() => _story = v),
+              ),
               if (widget.nickname != null)
                 SwitchRow(
                   title: 'Dein Name',
@@ -214,6 +231,31 @@ class _LineOption extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The portrait frame: the card in the middle of a 9:16 sheet of the app's paper, the address
+/// under it. Nothing else — the card is the picture.
+class _StoryFrame extends StatelessWidget {
+  const _StoryFrame({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 360,
+      height: 640,
+      color: VColors.paper,
+      child: Column(
+        children: [
+          const Spacer(),
+          child,
+          const SizedBox(height: 28),
+          Text('verspaetomat.de', style: VText.eyebrow.copyWith(color: VColors.ink2)),
+          const Spacer(),
+        ],
       ),
     );
   }
