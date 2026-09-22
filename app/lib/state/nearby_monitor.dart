@@ -136,7 +136,7 @@ class NearbyMonitor extends ChangeNotifier with WidgetsBindingObserver {
     if (!value) refresh();
   }
 
-  void _listenToPosition() {
+  Future<void> _listenToPosition() async {
     final wanted = _foreground && !_riding && !_disposed && !_noLocation;
     if (!wanted) {
       _positions?.cancel();
@@ -144,6 +144,16 @@ class NearbyMonitor extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     if (_positions != null) return;
+    // `getPositionStream` raises the system permission dialog by itself when nothing has been
+    // granted yet — and this runs as soon as the Bahnsteig appears, so that dialog arrived at
+    // launch with no screen behind it and no sentence explaining it (#43). `checkPermission`
+    // only reads, so this listens to what is already allowed and never asks for more. The
+    // setup screens ask; so does the card on the Bahnsteig, which says what it is for.
+    final granted = await Geolocator.checkPermission();
+    if (granted != LocationPermission.whileInUse && granted != LocationPermission.always) return;
+    // Another call may have started the stream, or the monitor may have gone away, while the
+    // platform was answering.
+    if (_disposed || _positions != null || !_foreground || _riding) return;
     try {
       _positions = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.low, distanceFilter: 500),

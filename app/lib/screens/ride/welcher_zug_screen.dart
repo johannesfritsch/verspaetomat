@@ -94,7 +94,7 @@ class _WelcherZugListState extends State<WelcherZugList> {
         if (mounted) widget.onStarted();
         return;
       }
-      final loc = await currentPosition(timeout: const Duration(seconds: 2));
+      final loc = await currentPosition(timeout: const Duration(seconds: 2), ask: true);
       await session.repo.startJourney(StartJourneyRequest(
         fromStationId: widget.fromStationId,
         fromStationName: widget.fromStationName,

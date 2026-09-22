@@ -87,14 +87,22 @@ Future<void> openLocationSettings() async {
 /// One-shot position, always a fresh fix — never a cached one, so the card can never fill in
 /// with where the phone was an hour ago (docs/23 §1). Null when the platform, the permission
 /// or the time budget says no.
-Future<ApiLocation?> currentPosition({Duration timeout = const Duration(seconds: 4)}) async {
+/// [ask] decides whether a phone that has never been asked is asked now, and it defaults to no.
+///
+/// The Bahnsteig's nearby monitor resolves a fix as soon as the app opens, and with [ask] on by
+/// default that raised the system location dialog at launch over whatever was drawn — a second
+/// prompt with no screen behind it, from a different location client than the geofence layer
+/// (#43). Asking belongs to the setup screens and to the card on the Bahnsteig that explains it.
+/// Check-in passes `ask: true`, because there somebody has just tapped „Einchecken" and a position
+/// is what confirms the station they are standing at.
+Future<ApiLocation?> currentPosition({Duration timeout = const Duration(seconds: 4), bool ask = false}) async {
   // `--dart-define=NO_LOCATION=1` keeps the OS permission dialog out of demos and screenshots.
   const noLocation = String.fromEnvironment('NO_LOCATION', defaultValue: '');
   if (noLocation == '1' || noLocation == 'true') return null;
   try {
     if (!await Geolocator.isLocationServiceEnabled()) return null;
     var p = await Geolocator.checkPermission();
-    if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
+    if (p == LocationPermission.denied && ask) p = await Geolocator.requestPermission();
     if (p == LocationPermission.denied || p == LocationPermission.deniedForever) return null;
     final pos = await Geolocator.getCurrentPosition(locationSettings: LocationSettings(accuracy: LocationAccuracy.high, timeLimit: timeout));
     return ApiLocation(lat: pos.latitude, lon: pos.longitude, accuracyM: pos.accuracy);
