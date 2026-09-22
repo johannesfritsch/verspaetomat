@@ -292,7 +292,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             onShare: () {
               _moments.markRecord(_facts);
               setState(() => _recordNew = false);
-              shareRecord(context, _facts.record!);
+              showRecordSheet(context, _facts.record!);
             },
             onClose: () {
               _moments.markRecord(_facts);
@@ -308,7 +308,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             onShare: () {
               _moments.markMonth(_facts);
               setState(() => _monthDue = false);
-              shareMonth(context, _facts.lastMonth!);
+              showMonthSheet(context, _facts.lastMonth!);
             },
             onClose: () {
               _moments.markMonth(_facts);

@@ -126,70 +126,246 @@ Future<void> shareConfirmed(BuildContext context, ApiShareConfirmed c) => showSh
       TicketData.antrag(minutes: c.minutes, cases: c.cases, euro: fmtCents(c.cents), ngoName: c.ngo, paid: true, fahrgast: fahrgast, date: date, line: line),
 );
 
-/// The railway said yes (#49): the one moment in the app that is good news all the way through,
-/// so it gets the punch's confetti and the card that can finally say „zahlt".
-Future<void> showConfirmedSheet(BuildContext context, ApiShareConfirmed c) {
+/// The railway said yes (#49, drawn in #53): the one moment in the app that is good news all the
+/// way through, so it gets the punch's confetti and the card that can finally say „zahlt".
+Future<void> showConfirmedSheet(BuildContext context, ApiShareConfirmed c) => _showMomentSheet(
+      context,
+      picture: const _Picture.asset('assets/sheet/bestaetigt.webp'),
+      eyebrow: 'Antwort der Bahn',
+      title: 'Bestätigt.',
+      red: fmtCents(c.cents),
+      rest: ' gehen an ${c.ngo}.',
+      body: '${c.cases == 1 ? 'Ein Fall' : '${c.cases} Fälle'} · ${ShareLines.duration(c.minutes)} gewartet. Die Bahn zahlt direkt an den Verein.',
+      facts: [
+        (Icons.receipt_long_outlined, '${c.cases}', c.cases == 1 ? 'Fall' : 'Fälle'),
+        (Icons.schedule, shortDuration(c.minutes), 'gewartet'),
+        (Icons.favorite, null, 'Direkt an den Verein'),
+      ],
+      konfetti: true,
+      onShare: () => shareConfirmed(context, c),
+    );
+
+/// A new longest delay (#49), in the sheet #53 drew for the confirmation.
+Future<void> showRecordSheet(BuildContext context, ApiShareRecord r) => _showMomentSheet(
+      context,
+      picture: const _Picture.scene(VSheetSceneArt.clock),
+      eyebrow: 'Neuer Rekord',
+      title: 'So lange noch nie.',
+      red: '${r.minutes} Minuten',
+      rest: r.to == null ? ' zu spät.' : ' zu spät nach ${r.to}.',
+      body: 'Deine längste Verspätung, seit du mit Verspätomat fährst.',
+      facts: [
+        (Icons.train_outlined, r.line, r.to == null ? 'Zug' : 'nach ${r.to}'),
+        (Icons.schedule, shortDuration(r.minutes), 'Verspätung'),
+        if (r.at != null) (Icons.event_outlined, _day(r.at!.toLocal()), 'am'),
+      ],
+      onShare: () => shareRecord(context, r),
+    );
+
+/// Last month, once it is over (#49), in the same sheet.
+Future<void> showMonthSheet(BuildContext context, ApiShareMonth m) => _showMomentSheet(
+      context,
+      picture: const _Picture.scene(VSheetSceneArt.platform),
+      eyebrow: 'Rückblick',
+      title: 'Dein ${monthName(m.month)}.',
+      red: '${m.minutes} Minuten',
+      rest: ' gewartet.',
+      body: m.confirmedCents > 0
+          ? '${m.rides == 1 ? 'Eine Fahrt' : '${m.rides} Fahrten'} im ${monthName(m.month)}. Bestätigt: ${fmtCents(m.confirmedCents)} für den Verein.'
+          : '${m.rides == 1 ? 'Eine Fahrt' : '${m.rides} Fahrten'} im ${monthName(m.month)}.',
+      facts: [
+        (Icons.train_outlined, '${m.rides}', m.rides == 1 ? 'Fahrt' : 'Fahrten'),
+        (Icons.schedule, shortDuration(m.minutes), 'gewartet'),
+        (Icons.timer_outlined, '${m.worstMinutes} Min', 'die längste'),
+      ],
+      onShare: () => shareMonth(context, m),
+    );
+
+/// „4 Std 41 Min", „45 Min", „2 Std": the short form for a fact strip.
+String shortDuration(int minutes) {
+  final h = minutes ~/ 60, m = minutes % 60;
+  if (h == 0) return '$m Min';
+  return m == 0 ? '$h Std' : '$h Std $m Min';
+}
+
+String _day(DateTime d) {
+  const m = ['Jan.', 'Feb.', 'März', 'Apr.', 'Mai', 'Juni', 'Juli', 'Aug.', 'Sep.', 'Okt.', 'Nov.', 'Dez.'];
+  return '${d.day}. ${m[d.month - 1]}';
+}
+
+/// What stands at the top of a moment sheet: a drawing of its own, or one of the sheet scenes.
+class _Picture {
+  const _Picture.asset(String this.asset) : scene = null;
+  const _Picture.scene(VSheetSceneArt this.scene) : asset = null;
+  final String? asset;
+  final VSheetSceneArt? scene;
+}
+
+/// The moment sheet (#53): a picture, the eyebrow, a big title, one sentence with its figure in
+/// red, a line of detail, three facts on a strip, and the two answers. Teilen opens the preview
+/// with the card; Schließen is grey, because leaving is not the thing this sheet is for.
+Future<void> _showMomentSheet(
+  BuildContext context, {
+  required _Picture picture,
+  required String eyebrow,
+  required String title,
+  required String red,
+  required String rest,
+  required String body,
+  required List<(IconData, String?, String)> facts,
+  required VoidCallback onShare,
+  bool konfetti = false,
+}) {
   return showVSheet<void>(
     context,
-    builder: (ctx) => _ConfirmedSheet(claim: c, outer: context),
+    builder: (ctx) => _MomentSheet(
+      picture: picture,
+      eyebrow: eyebrow,
+      title: title,
+      red: red,
+      rest: rest,
+      body: body,
+      facts: facts,
+      konfetti: konfetti,
+      onShare: () {
+        Navigator.of(ctx).pop();
+        if (context.mounted) onShare();
+      },
+    ),
   );
 }
 
-class _ConfirmedSheet extends StatefulWidget {
-  const _ConfirmedSheet({required this.claim, required this.outer});
-  final ApiShareConfirmed claim;
-  final BuildContext outer;
+class _MomentSheet extends StatefulWidget {
+  const _MomentSheet({
+    required this.picture,
+    required this.eyebrow,
+    required this.title,
+    required this.red,
+    required this.rest,
+    required this.body,
+    required this.facts,
+    required this.konfetti,
+    required this.onShare,
+  });
+  final _Picture picture;
+  final String eyebrow;
+  final String title;
+  final String red;
+  final String rest;
+  final String body;
+  final List<(IconData, String?, String)> facts;
+  final bool konfetti;
+  final VoidCallback onShare;
 
   @override
-  State<_ConfirmedSheet> createState() => _ConfirmedSheetState();
+  State<_MomentSheet> createState() => _MomentSheetState();
 }
 
-class _ConfirmedSheetState extends State<_ConfirmedSheet> {
-  bool _konfetti = true;
+class _MomentSheetState extends State<_MomentSheet> {
+  late bool _konfetti = widget.konfetti;
+
+  Widget _picture() {
+    final asset = widget.picture.asset;
+    if (asset == null) {
+      return SizedBox(height: 190, child: ClipRect(child: VSheetScene(art: widget.picture.scene!, height: 190)));
+    }
+    // The drawing is on white; multiplied with the sheet's paper it takes the paper's tone, and
+    // its lower edge fades into the text instead of ending on a line.
+    return ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback: (rect) => const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Colors.black, Colors.black, Colors.transparent],
+        stops: [0, 0.82, 1],
+      ).createShader(rect),
+      child: Image.asset(asset, fit: BoxFit.fitWidth, width: double.infinity, color: VColors.paper, colorBlendMode: BlendMode.multiply),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final c = widget.claim;
     return Stack(
       children: [
         Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const VSheetHeader(eyebrow: 'Antwort der Bahn', title: 'Bestätigt.'),
+            Stack(
+              children: [
+                _picture(),
+                // The grabber, over the picture: the sheet still closes by a pull from the top.
+                const Positioned(left: 0, right: 0, top: 0, child: VSheetHeader()),
+              ],
+            ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(VSpace.sheet, 0, VSpace.sheet, VSpace.l),
+              padding: const EdgeInsets.fromLTRB(VSpace.sheet, VSpace.s, VSpace.sheet, VSpace.l),
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${fmtCents(c.cents)} gehen an ${c.ngo}.', style: VText.h2),
-                  const VGap.s(),
-                  Text(
-                    '${c.cases == 1 ? 'Ein Fall' : '${c.cases} Fälle'}, ${ShareLines.duration(c.minutes)} gewartet. Das Geld zahlt die Bahn direkt an den Verein.',
-                    style: VText.body.copyWith(color: VColors.ink2),
-                  ),
-                  const VGap.l(),
-                  VPrimaryButton(
-                    label: 'Teilen',
-                    icon: Icons.ios_share,
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      if (widget.outer.mounted) shareConfirmed(widget.outer, c);
-                    },
-                  ),
+                  Text(widget.eyebrow.toUpperCase(), style: VText.eyebrow),
                   const VGap.xs(),
-                  VGhostButton(label: 'Schließen', onTap: () => Navigator.of(context).pop()),
+                  Text(widget.title, style: VText.h1),
+                  const VGap.s(),
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: widget.red, style: const TextStyle(color: VColors.red)),
+                      TextSpan(text: widget.rest),
+                    ]),
+                    style: VText.h2,
+                  ),
+                  const VGap.s(),
+                  Text(widget.body, style: VText.body.copyWith(color: VColors.ink2)),
+                  const VGap.m(),
+                  _FactStrip(facts: widget.facts),
+                  const VGap.l(),
+                  VPrimaryButton(label: 'Teilen', icon: Icons.ios_share, onTap: widget.onShare),
+                  const VGap.s(),
+                  VTintButton(label: 'Schließen', tone: VTintTone.neutral, onTap: () => Navigator.of(context).pop()),
                 ],
               ),
             ),
           ],
         ),
-        if (_konfetti)
-          Positioned.fill(
-            child: IgnorePointer(child: Konfetti(onDone: () => setState(() => _konfetti = false))),
-          ),
+        if (_konfetti) Positioned.fill(child: IgnorePointer(child: Konfetti(onDone: () => setState(() => _konfetti = false)))),
       ],
+    );
+  }
+}
+
+/// Three facts side by side, each a red-tinted mark and two short lines, rules between them.
+class _FactStrip extends StatelessWidget {
+  const _FactStrip({required this.facts});
+  final List<(IconData, String?, String)> facts;
+
+  @override
+  Widget build(BuildContext context) {
+    return VCard(
+      tone: VCardTone.sunken,
+      padding: const EdgeInsets.symmetric(horizontal: VSpace.s, vertical: VSpace.md),
+      child: IntrinsicHeight(
+        child: Row(
+          children: [
+            for (var i = 0; i < facts.length; i++) ...[
+              if (i > 0) const VerticalDivider(width: VSpace.m, thickness: 1, color: VColors.rule),
+              // Mark above the two lines: the mockup sets them side by side on a wider phone, and at
+              // a third of this width that cut „4 Std 41 Min" to „4 Std 4…".
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    VIconBadge(icon: facts[i].$1, tone: VBadgeTone.red, size: VControl.badgeSmall),
+                    const SizedBox(height: VSpace.s),
+                    if (facts[i].$2 != null)
+                      FittedBox(fit: BoxFit.scaleDown, child: Text(facts[i].$2!, style: VText.bodySStrong, maxLines: 1)),
+                    Text(facts[i].$3, style: VText.caption, maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

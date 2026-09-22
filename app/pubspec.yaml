@@ -79,6 +79,7 @@ flutter:
     - assets/beispiel-antrag.pdf
     - assets/achievements/
     - assets/header/
+    - assets/sheet/
     - assets/brand/
     # The five Willkommen illustrations (#43). Cropped to the artwork band: the title,
     # the subtitle and the bottom bar are drawn in Archivo, not baked into the picture.
