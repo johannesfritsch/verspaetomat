@@ -759,8 +759,15 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     // lands there would be no umbrella at all, and the umbrella is the one trigger that brings
     // the layer back to life: without it nothing fires however far the phone travels. Put it
     // back now around the last place we knew, and let the fix re-centre it.
-    if let centre = discCentre {
+    // `manager.location` is CoreLocation's own last fix, free and instant. Without it a first
+    // run has no `discCentre` yet, so the umbrella was skipped here and left entirely to the
+    // `requestLocation` below — and if that fix never came (indoors, a tunnel, a simulator with
+    // no location set) the umbrella was never registered at all, on this launch or the next,
+    // because the next launch starts from the same empty `discCentre`. The umbrella is the one
+    // trigger every other one hangs off, so it must not depend on a fix arriving.
+    if let centre = discCentre ?? manager.location {
       registerUmbrella(at: centre, c)
+      if discCentre == nil { discCentre = centre }
     }
     // `n` is what got registered, not what Dart sent — those differ whenever the nearby list is
     // carrying the set, and reading it as "Dart sent one station" sent me down the wrong path.
@@ -768,7 +775,20 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       + "enabled=\(c.enabled), riding=\(c.riding), auth=\(Self.permissionString(authStatus))"
     configureReply = reply
     registerNudgeCategory()
-    beginMode(.configureFix, timeout: 10) { [weak self] in self?.configureReply?(["registered": n]); self?.configureReply = nil }
+    beginMode(.configureFix, timeout: 10) { [weak self] in
+      guard let self = self else { return }
+      // The fix never came. Take whatever CoreLocation has rather than end with no umbrella:
+      // an umbrella around a slightly stale position still fires when the phone leaves it, and
+      // no umbrella fires never.
+      if !self.hasUmbrella, let fallback = self.manager.location ?? self.discCentre {
+        self.registerUmbrella(at: fallback, c)
+        self.discCentre = fallback
+        self.registerStations(c)
+        self.lastEvent = "no fix in 10 s; umbrella put up around the last known position"
+      }
+      self.configureReply?(["registered": self.manager.monitoredRegions.count])
+      self.configureReply = nil
+    }
     manager.requestLocation()
   }
 
@@ -998,7 +1018,24 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     }
   }
 
+  var hasUmbrella: Bool { manager.monitoredRegions.contains { $0.identifier == Self.umbrellaId } }
+
   func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
+    // The moment the permission arrives, arm the layer. `configure` may well have run already —
+    // during the setup it runs before the Standort screen is even reached — and it registered
+    // nothing, because at that point there was nothing to register with. Waiting for the next
+    // `configure` means waiting for Dart to happen to sync again, which on a first run is
+    // precisely when the umbrella is still missing.
+    if authStatus == .authorizedAlways || authStatus == .authorizedWhenInUse, let c = config, c.enabled, !hasUmbrella {
+      lastEvent = "permission granted (\(Self.permissionString(authStatus))); arming the layer"
+      if let here = discCentre ?? manager.location {
+        registerUmbrella(at: here, c)
+        discCentre = here
+        registerStations(c)
+      }
+      beginMode(.configureFix, timeout: 10) { [weak self] in self?.endMode() }
+      manager.requestLocation()
+    }
     guard let reply = permissionReply, authStatus != .notDetermined else { return }
     if authStatus == .authorizedWhenInUse && wantAlways {
       // iOS shows the Always upgrade later on its own schedule; ask once, answer Dart now.
