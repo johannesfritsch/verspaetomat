@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
 import '../../mock/mock_data.dart';
+import '../../platform/geofence.dart';
 import '../../platform/geofence_sync.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
@@ -62,6 +63,19 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           ),
           const VGap.xl(),
           const VSection('Bahnsteig-Hinweis'),
+          // The only way back into notifications from inside the app (#43). It matters because
+          // `GeofenceSync._repairPermissions` now writes this setting false when the phone has
+          // taken the permission away — a reinstall does exactly that, since the Keychain keeps
+          // the account while the OS forgets what it allowed. Without a switch here, the account
+          // would be stuck at „aus" with nothing to tap.
+          SwitchRow(
+            title: 'Mitteilungen',
+            subtitle: (settings?.notifications ?? state.notificationsGranted)
+                ? 'Ankunft, Anschluss, Post von der Bahn, Fristen'
+                : 'Aus — die App meldet sich nicht',
+            value: settings?.notifications ?? state.notificationsGranted,
+            onChanged: (v) => _setNotifications(context, session, v),
+          ),
           SwitchRow(
             title: 'Hinweis am Bahnhof',
             subtitle: locationMode == LocationMode.always ? 'Nach etwa einer Minute an einem deiner Bahnhöfe' : 'Nur solange die App offen ist',
@@ -284,6 +298,23 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
         ),
       ),
     );
+  }
+
+  /// Switching notifications on asks the phone; switching them off only writes the setting.
+  ///
+  /// If the phone says no the setting follows the phone rather than the switch — iOS shows its
+  /// dialog once and never again, so from then on the only way is the phone's own settings, and
+  /// a switch that sprang back with no word would be a puzzle.
+  Future<void> _setNotifications(BuildContext context, Session session, bool on) async {
+    if (!on) {
+      await session.updateSettings(const MePatch(notifications: false));
+      return;
+    }
+    final granted = GeofenceSync.automation ? true : await Geofence.instance.registerPush();
+    await session.updateSettings(MePatch(notifications: granted));
+    if (!granted && context.mounted) {
+      showSnack(context, 'Dein Telefon lässt keine Mitteilungen zu. Du kannst sie in den Systemeinstellungen erlauben.');
+    }
   }
 
   void _pickTicket(BuildContext context, Session session, TicketType current) {

@@ -84,31 +84,47 @@ class GeofenceSync with WidgetsBindingObserver {
     }
   }
 
-  /// Once per launch: an account that said yes to notifications or background location
-  /// while the OS was never asked (an older build skipped the prompt) gets asked now.
+  /// Once per launch: make the account's settings agree with what the phone actually allows.
+  ///
+  /// It used to do the opposite — see a setting saying yes, see the OS saying no, and ask the OS
+  /// to catch up. That fired system dialogs at launch, with no screen behind them and no sentence
+  /// explaining them, and it could fire two in a row.
+  ///
+  /// **A fresh install is not a fresh account.** `FlutterSecureStorage` keeps the device token in
+  /// the iOS Keychain, and Keychain items survive deleting the app. So reinstalling comes back as
+  /// the same customer, carrying `notifications = true` and maybe `loc_mode = always` — while the
+  /// OS permissions were wiped with the app and are back to notDetermined. Both conditions true,
+  /// both dialogs up, before anything was drawn. That is the bug reported against builds 70 and
+  /// 71, and „sometimes" was simply whether that account had ever said yes.
+  ///
+  /// So the repair runs the other way now. The phone is the authority on what the phone allows;
+  /// a setting that claims more than the OS grants is wrong, and writing it down false has two
+  /// good effects on its own: the server stops sending push nobody can receive, and the Bahnsteig
+  /// notices the missing permission and offers it back on a card somebody taps
+  /// (`location_nudge.dart`), which is a screen with a reason on it.
+  ///
+  /// Nothing here ever opens a system dialog.
   Future<void> _repairPermissions(GeofenceStatus status) async {
     if (automation) return;
-    // Never while the setup is still running (#43). This runs once per launch as soon as the
-    // session has loaded, which during onboarding is somewhere on the Willkommen cards — and it
-    // cannot tell a fresh account from an old one that really did say yes, because `notifications`
-    // defaults to TRUE on the server (migration 0002) and the OS has never been asked. So on every
-    // first launch it fired the notification dialog over whatever card happened to be showing,
-    // before the screen whose job it is had said a word.
-    //
-    // The setup screens ask for themselves, one question per screen, and they finish by setting
-    // `onboarding_done`. Until then there is nothing to repair: nobody has answered anything yet.
     for (var i = 0; i < 20 && session.me == null; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
     final settings = session.me?.settings;
     if (settings == null || !session.isLocal) return;
+    // Not while the setup is still running: those screens are in the middle of asking, and a
+    // correction written from under them would race their own answers.
     if (!settings.onboardingDone) return;
-    if (settings.notifications && !status.notifications) {
-      await _geofence.registerPush();
-    }
-    if (settings.locationMode == LocationMode.always && status.permission == GeofencePermission.notDetermined) {
-      await requestFor(LocationMode.always);
-    }
+
+    final patch = MePatch(
+      notifications: settings.notifications && !status.notifications ? false : null,
+      // Only „always" is contradicted by a phone that grants less. „whileUsing" and „never" ask
+      // nothing of the OS that it can take away.
+      locationMode: settings.locationMode == LocationMode.always && status.permission != GeofencePermission.always
+          ? (status.permission == GeofencePermission.whileInUse ? LocationMode.whileUsing : LocationMode.never)
+          : null,
+    );
+    if (patch.notifications == null && patch.locationMode == null) return;
+    await session.updateSettings(patch);
   }
 
   /// Sends the push token to the server once per account and token. Waits for the
