@@ -30,7 +30,7 @@ The customer picks the Verein in setup, so every claim already has one; it was j
 ## 5. Wir loses "Dein Teil"; Ich owns the level
 
 - Wir: remove the whole `Dein Teil` section (the two figures, the level bar, `Eingereicht, unterwegs`, the `Zweck` row). Wir is: the big community number, the Vereine, the Ranglisten with the customer's own rank line on top (`Platz 5 auf der RE 7 …` stays here, it is relative to the others).
-- Ich: under the Geduldspunkte figure and the red rule, the level bar with `Bahnsteigkante · 90 bis „Wartehäuschen“` (from `standing.level`, the same line Home uses), then the pair `Bestätigt, durch dich` (euros, tap → Anträge) and `Eingereicht, unterwegs` (euros), then the existing pair `Diese Woche` / `Fahrten, letzte 14 Tage`. Under `Mehr`: a row `Dein Zweck · <Verein>` (chevron, tap → `/zweck?id=`). Ich loads `standing` and the ledger summary next to `me`, `badges`, `rides`.
+- Ich: under the Geduldspunkte figure and the red rule, the level bar with `Bahnsteigkante · 90 bis „Wartehäuschen“` (from `standing.level`, the same line Home uses), then the pair `Bestätigt, durch dich` (euros, tap → Anträge) and `Eingereicht, unterwegs` (euros), then the existing pair `Diese Woche` / `Fahrten, letzte 14 Tage`. Under `Mehr`: a row `Dein Zweck · <Verein>` (chevron, tap → `/cause?id=`). Ich loads `standing` and the ledger summary next to `me`, `badges`, `rides`.
 
 ## Tests
 

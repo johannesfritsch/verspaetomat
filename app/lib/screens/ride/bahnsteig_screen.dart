@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../repo/app_repository.dart';
-import '../community/community_widgets.dart' show showMinutesSource;
+import '../community/community_widgets.dart' show showMyMinutesSource;
 import '../../api/events.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
@@ -161,7 +161,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
           // The masthead carries the app's own name and the gear. Home is the one tab that wears
           // it: the other three are places inside the app, and this is the front door.
           VAppMasthead(
-            onSettings: () => context.push(Routes.einstellungen).then((_) => _load()),
+            onSettings: () => context.push(Routes.settings).then((_) => _load()),
             caption: _nearby.simulated ? 'Standort: Stellwerk · ${_nearby.label ?? ''}' : null,
           ),
           const VGap.l(),
@@ -203,11 +203,11 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             ),
           ),
 
-        // Wir first (docs/30): the collective minutes are the thing this app is for, and they are
-        // true whether or not anybody is travelling right now. The action follows.
-        _WirBlock(
+        // My minutes first (#47; until then the collective ones stood here, docs/30): true whether
+        // or not I am travelling right now. The action follows.
+        _MyMinutesBlock(
           standing: st,
-          onTap: () => context.go(Routes.wir),
+          onTap: () => context.go(Routes.community),
         ),
 
         // 1 · Action, sized by the moment. Under way, the ride card (docs/20 §2) opens the sheet;
@@ -229,14 +229,14 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         if (_nudge.visible)
           LocationNudgeCard(
             onOpen: () => showLocationNudgeSheet(context, _nudge),
-            onDismiss: _nudge.dismiss,
+            onDismiss: _nudge.remindLater,
           ),
 
         // Under the card: yesterday's forgotten check-in, only for people who ride most days.
         if (st.next?.kind == 'nachtrag')
           VCard(
             padding: const EdgeInsets.all(VSpace.cardTight),
-            onTap: () => context.push(Routes.nachtrag),
+            onTap: () => context.push(Routes.addRide),
             child: Row(
               children: [
                 Expanded(
@@ -247,7 +247,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             ),
           ),
 
-        _Momentum(standing: st, onTap: () => context.go(Routes.ich)),
+        _Momentum(standing: st, onTap: () => context.go(Routes.me)),
 
         // What the minutes are for. The mockup puts it at the foot of Home, and it is the one
         // line on this screen that is about somebody other than you.
@@ -257,7 +257,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             title: 'Deine Minuten helfen.',
             body: 'Gemeinsam spenden wir an nachhaltige und soziale Projekte.',
             chevron: true,
-            onTap: () => context.go(Routes.wir),
+            onTap: () => context.go(Routes.community),
           ),
         ),
       ],
@@ -480,7 +480,7 @@ class _ArrivedBlock extends StatelessWidget {
               Expanded(
                 child: VOutlineButton(
                   label: 'Ansehen',
-                  onTap: () => context.push(Routes.angekommen),
+                  onTap: () => context.push(Routes.arrived),
                 ),
               ),
               const SizedBox(width: 10),
@@ -596,11 +596,14 @@ class _Momentum extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 3 · Wir: the community's minutes, big and ticking, with the customer's share as a bar
+// 3 · My minutes: what this passenger has waited, big, on the dark board
 // ---------------------------------------------------------------------------
 
-class _WirBlock extends StatelessWidget {
-  const _WirBlock({required this.standing, required this.onTap});
+/// The first block on Home: the minutes *I* have waited (#47). It used to be everybody's total
+/// with my share as a bar under it, and a figure that big is nobody's own — it belongs on Wir,
+/// where it still is, and the board still leads there.
+class _MyMinutesBlock extends StatelessWidget {
+  const _MyMinutesBlock({required this.standing, required this.onTap});
   final ApiStanding standing;
   final VoidCallback onTap;
 
@@ -610,37 +613,30 @@ class _WirBlock extends StatelessWidget {
     if (c == null) {
       return VBoard(
         onTap: onTap,
-        child: const VBoardCaption('Wir haben zusammen gewartet. Zahlen folgen.'),
+        child: const VBoardCaption('Deine gewarteten Minuten. Zahlen folgen.'),
       );
     }
-    final total = c.minutesTotal <= 0 ? 1 : c.minutesTotal;
     return VBoard(
       onTap: onTap,
       // The board itself goes to Wir, so the figure's own answer needs a target of its own (#20).
-      onExplain: () => showMinutesSource(context),
+      onExplain: () => showMyMinutesSource(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const VBoardLabel('Minuten haben wir gewartet', icon: Icons.schedule),
+          const VBoardLabel('Minuten hast du gewartet', icon: Icons.schedule),
           const VGap.s(),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(
-              fmtInt(c.minutesTotal),
+              fmtInt(c.myMinutes),
               style: VText.number.copyWith(color: VColors.inkOnDark),
             ),
           ),
-          const VGap.md(),
-          VProgressBar(
-            value: (c.myMinutes / total).clamp(0.0, 1.0),
-            ground: VProgressGround.dark,
-          ),
           const VGap.s(),
+          // `my_minutes` sums every arrived ride of this customer, so „seit" is the whole truth.
           VBoardCaption(
-            c.myMinutes > 0
-                ? '${fmtInt(c.myMinutes)} davon deine'
-                : 'Deine ersten Minuten kommen mit der ersten Fahrt.',
+            c.myMinutes > 0 ? 'Seit deiner ersten Fahrt mit Verspätomat.' : 'Deine ersten Minuten kommen mit der ersten Fahrt.',
           ),
         ],
       ),

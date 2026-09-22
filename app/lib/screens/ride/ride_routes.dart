@@ -20,28 +20,28 @@ import 'nachtrag_screen.dart';
 //   /wohin?station=<from id>&name=<from name>[&departure=<trip id>&line=]   (destination first, docs/17)
 //   /welcher-zug?from=&fromName=&to=&toName=[&departure=]
 //   /checkin/exit?departure=<trip id>&station=<from id>&name=<from name>   (legacy)
-//   /angekommen?variant=68|14|59|ausfall|nodata   (demo mode) or `extra: ApiArrivalResult`
+//   /arrived?variant=68|14|59|cancelled|nodata   (demo mode) or `extra: ApiArrivalResult`
 
 GoRouterWidgetBuilder bahnsteigBuilder = (_, __) => const BahnsteigScreen();
 
 final rideRoutes = <RouteBase>[
   GoRoute(path: Routes.welcome, builder: (_, __) => const WelcomeScreen()),
   GoRoute(path: Routes.permissions, builder: (_, __) => const MitteilungenScreen()),
-  GoRoute(path: Routes.standort, builder: (_, __) => const StandortScreen()),
-  GoRoute(path: Routes.standortImmer, builder: (_, __) => const StandortImmerScreen()),
-  GoRoute(path: Routes.zweckWaehlen, builder: (_, __) => const ZweckScreen()),
-  GoRoute(path: Routes.fertig, builder: (_, __) => const FertigScreen()),
+  GoRoute(path: Routes.location, builder: (_, __) => const StandortScreen()),
+  GoRoute(path: Routes.locationAlways, builder: (_, __) => const StandortImmerScreen()),
+  GoRoute(path: Routes.chooseCause, builder: (_, __) => const ZweckScreen()),
+  GoRoute(path: Routes.ready, builder: (_, __) => const FertigScreen()),
   // The ride lives in the sheet over Home (docs/19); the route stays for pushes and deep links.
   GoRoute(
-    path: Routes.unterwegs,
+    path: Routes.ride,
     redirect: (_, __) {
       requestRideSheet();
-      return Routes.bahnsteigWithSheet;
+      return Routes.homeWithRide;
     },
   ),
   GoRoute(
-    path: Routes.angekommen,
+    path: Routes.arrived,
     builder: (_, s) => AngekommenScreen(variant: s.uri.queryParameters['variant'], result: s.extra is ApiArrivalResult ? s.extra as ApiArrivalResult : null),
   ),
-  GoRoute(path: Routes.nachtrag, builder: (_, __) => const NachtragScreen()),
+  GoRoute(path: Routes.addRide, builder: (_, __) => const NachtragScreen()),
 ];

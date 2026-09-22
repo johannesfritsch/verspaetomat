@@ -128,7 +128,7 @@ class _AntwortScreenState extends State<AntwortScreen> {
                 ),
               const VGap.m(),
               Text(
-                'Jede Mail geht von deiner Verspätomat-Adresse raus und kommt dort an. Du bekommst jede in Kopie in dein privates Postfach.',
+                'Jede Mail geht von deiner Verspätomat-Adresse raus und kommt dort an. Du bekommst jede in Kopie an deine private E-Mail-Adresse.',
                 style: VText.caption,
               ),
               const VGap.xl(),
@@ -157,7 +157,7 @@ class _ZumKonto extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return VGhostButton(label: 'Zu den Anträgen', icon: Icons.receipt_long_outlined, onTap: () => (context.canPop() ? context.pop() : context.go(Routes.antraege)));
+    return VGhostButton(label: 'Zu den Anträgen', icon: Icons.receipt_long_outlined, onTap: () => (context.canPop() ? context.pop() : context.go(Routes.claims)));
   }
 }
 
@@ -192,7 +192,7 @@ class _NothingYet extends StatelessWidget {
         const VGap.m(),
         Text('Noch keine Antwort.', style: VText.h2),
         const VGap.s(),
-        Text('Die Bahn antwortet meist innerhalb eines Monats. Die Antwort landet hier und in deinem Postfach.', style: VText.body.copyWith(color: VColors.ink2)),
+        Text('Die Bahn antwortet meist innerhalb eines Monats. Die Antwort landet hier und kommt per Mail an deine private E-Mail-Adresse.', style: VText.body.copyWith(color: VColors.ink2)),
         const VGap.l(),
         const _PostalPath(),
       ],
@@ -360,7 +360,7 @@ class _ReplyComposerState extends State<_ReplyComposer> {
       await session.repo.replyToMail(widget.mail.id, _c.text, attachTicket: _attachTicket, uploadIds: _uploadIds);
       if (!mounted) return;
       Navigator.of(context).pop(true);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Abgeschickt. Kopie in deinem Postfach.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Abgeschickt. Eine Kopie ging an deine private E-Mail-Adresse.')));
     } catch (e) {
       if (!mounted) return;
       setState(() => _sending = false);

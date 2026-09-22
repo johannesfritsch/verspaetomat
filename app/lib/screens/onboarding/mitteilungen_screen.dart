@@ -48,7 +48,7 @@ class _MitteilungenScreenState extends State<MitteilungenScreen> {
     if (mounted) _onward();
   }
 
-  void _onward() => context.go(Routes.standort);
+  void _onward() => context.go(Routes.location);
 
   @override
   Widget build(BuildContext context) {

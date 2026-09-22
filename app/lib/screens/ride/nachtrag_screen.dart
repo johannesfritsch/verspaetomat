@@ -108,7 +108,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
       final d = result.ride.finalDelayMinutes ?? 0;
       final delayText = result.ride.cancelled ? 'Ausfall' : (d > 0 ? '+$d am ${exit.name}' : 'pünktlich am ${exit.name}');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nachgetragen: ${t.line}, $delayText · 1 Geduldspunkt.')));
-      context.go(Routes.bahnsteig);
+      context.go(Routes.home);
     } catch (e) {
       if (mounted) {
         setState(() => _sending = false);

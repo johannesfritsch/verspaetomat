@@ -74,7 +74,7 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
     try {
       final draft = await session.repo.draftClaim(desk: desk);
       if (!context.mounted) return;
-      await context.push('${Routes.antrag}?id=${draft.claim.id}&desk=${Uri.encodeComponent(desk)}', extra: draft);
+      await context.push('${Routes.claim}?id=${draft.claim.id}&desk=${Uri.encodeComponent(desk)}', extra: draft);
       _loader.refresh();
     } catch (e) {
       if (!context.mounted) return;
@@ -149,7 +149,7 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
       controller: _loader,
       placeholder: (context) => VTabScaffold(
         art: VHeaderSceneArt.landscapeAntraege,
-        header: VTabHeader(title: 'Anträge', narrow: true, onSettings: () => context.push(Routes.einstellungen)),
+        header: VTabHeader(title: 'Anträge', narrow: true, onSettings: () => context.push(Routes.settings)),
         children: const [VSkeletonCard(trailing: true), VSkeletonList()],
       ),
       load: (repo) async {
@@ -241,7 +241,7 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
             title: 'Anträge',
             subtitle: caption,
             narrow: true,
-            onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
+            onSettings: () => context.push(Routes.settings).then((_) => refresh()),
           ),
           children: [
             ...cards,
@@ -311,7 +311,7 @@ class _ClaimCard extends StatelessWidget {
     };
     void openThread(String mailId) {
       onOpenThread();
-      context.push('${Routes.antwort}?mail=$mailId').then((_) => onChanged());
+      context.push('${Routes.reply}?mail=$mailId').then((_) => onChanged());
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.m),
@@ -638,7 +638,7 @@ class EmptyAntraege extends StatelessWidget {
             VGhostButton(
               label: 'Vorführung ansehen',
               icon: Icons.play_circle_outline,
-              onTap: () => context.push(Routes.vorfuehrung),
+              onTap: () => context.push(Routes.demoClaim),
             ),
           ],
         ),

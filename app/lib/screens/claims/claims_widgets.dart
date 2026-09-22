@@ -621,7 +621,7 @@ Future<void> showNgoSheet(BuildContext context, ApiNgo ngo, {Future<void> Functi
             icon: Icons.open_in_new,
             onTap: () {
               Navigator.of(ctx).pop();
-              context.push('${Routes.zweck}?id=${Uri.encodeComponent(ngo.id)}');
+              context.push('${Routes.cause}?id=${Uri.encodeComponent(ngo.id)}');
             },
           ),
         ],
@@ -695,7 +695,7 @@ class MailView extends StatelessWidget {
   /// the same attachments are not named twice.
   final bool showAttachments;
 
-  /// Overrides the BCC header line (e.g. "… (dein Postfach)").
+  /// Overrides the BCC header line (e.g. "… (deine private E-Mail-Adresse)").
   final String? bcc;
 
   @override

@@ -35,7 +35,7 @@ class IchScreen extends StatelessWidget {
           title: RepoScope.read(context).me?.nickname ?? 'Ich',
           subtitle: 'Gemeinsam für pünktlichere Züge',
           narrow: true,
-          onSettings: () => context.push(Routes.einstellungen),
+          onSettings: () => context.push(Routes.settings),
         ),
         children: const [VSkeletonBoard(look: VBoardLook.red), VSkeletonCard(), VSkeletonList()],
       ),
@@ -89,7 +89,7 @@ class IchScreen extends StatelessWidget {
             // and the gear it read as a stray mark rather than as a sign-off.
             subtitle: 'Gemeinsam für pünktlichere Züge',
             narrow: true,
-            onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
+            onSettings: () => context.push(Routes.settings).then((_) => refresh()),
           ),
           children: [
             // The red board, like Wir: the two screens that are about people take it, and Home
@@ -215,12 +215,12 @@ class IchScreen extends StatelessWidget {
                 VMenuRow(
                   icon: Icons.route_outlined,
                   label: 'Alle Fahrten',
-                  onTap: () => context.push(Routes.historie),
+                  onTap: () => context.push(Routes.history),
                 ),
                 VMenuRow(
                   icon: Icons.settings_outlined,
                   label: 'Einstellungen',
-                  onTap: () => context.push(Routes.einstellungen).then((_) => refresh()),
+                  onTap: () => context.push(Routes.settings).then((_) => refresh()),
                 ),
               ],
             ),

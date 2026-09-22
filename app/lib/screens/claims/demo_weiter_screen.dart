@@ -26,7 +26,7 @@ class DemoWeiterScreen extends StatelessWidget {
       art: VHeaderSceneArt.antragSenden,
       bottom: VGhostButton(
         label: 'Vorführung beenden',
-        onTap: () => context.canPop() ? context.pop() : context.go(Routes.antraege),
+        onTap: () => context.canPop() ? context.pop() : context.go(Routes.claims),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -36,7 +36,7 @@ class DemoWeiterScreen extends StatelessWidget {
           const VGap.s(),
           Text(
             'Das Eisenbahnunternehmen hat einen Monat Zeit, in der Praxis werden es vier bis sechs '
-            'Wochen. Die Antwort landet in deinem Postfach und gleichzeitig hier in der App. Du '
+            'Wochen. Die Antwort kommt per Mail an deine private E-Mail-Adresse und gleichzeitig hier in der App. Du '
             'musst nichts nachhalten und nichts erinnern.',
             style: VText.caption,
           ),
@@ -49,7 +49,7 @@ class DemoWeiterScreen extends StatelessWidget {
             title: 'Die Bahn zahlt',
             text: 'Das Geld geht direkt an den Verein, nie über uns. In der App siehst du den Betrag '
                 'und dass er angekommen ist.',
-            onTap: () => context.push('${Routes.antwort}?demo=accepted'),
+            onTap: () => context.push('${Routes.reply}?demo=accepted'),
           ),
           const VGap.s(),
           _Outcome(
@@ -58,7 +58,7 @@ class DemoWeiterScreen extends StatelessWidget {
             title: 'Die Bahn fragt nach',
             text: 'Meistens fehlt eine Ticketkopie oder eine Zugnummer. Die App hat Vorlagen; du '
                 'antwortest mit zwei Tipps, von deiner eigenen Adresse.',
-            onTap: () => context.push('${Routes.antwort}?demo=question'),
+            onTap: () => context.push('${Routes.reply}?demo=question'),
           ),
           const VGap.s(),
           _Outcome(
@@ -67,7 +67,7 @@ class DemoWeiterScreen extends StatelessWidget {
             title: 'Die Bahn lehnt ab',
             text: 'Du siehst die Begründung im Klartext. Hältst du sie für falsch, ist die '
                 'Schlichtungsstelle söp kostenlos zuständig — zwischen dir und der Bahn, ohne uns.',
-            onTap: () => context.push('${Routes.antwort}?demo=rejected'),
+            onTap: () => context.push('${Routes.reply}?demo=rejected'),
           ),
           const VGap.l(),
           const VDivider(strong: true),

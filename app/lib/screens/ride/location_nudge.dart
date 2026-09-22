@@ -18,9 +18,14 @@ import 'ride_widgets.dart' show openLocationSettings;
 ///
 /// So Home carries a small card while the phone has not granted „Immer", whatever the passenger
 /// chose in the app — „Nie" included, because that choice was made before anybody explained what
-/// it switches off. The card opens a sheet that explains. Its × is final: dismissed, the card never
-/// comes back on this device. The permission is read again every time the app comes to the
-/// foreground, so granting it in the system settings makes the card go away by itself.
+/// it switches off. The card opens a sheet that explains. The permission is read again every time
+/// the app comes to the foreground, so granting it in the system settings makes the card go away
+/// by itself.
+///
+/// #48: it came back too often and had no way to say no for good. The sheet now ends in the three
+/// answers there are, in these words: „Immer aktivieren", „Nächstes Mal erinnern" (the card rests
+/// for [snooze]) and „Nicht mehr fragen" (the card never comes back on this device). The card's ×
+/// is the middle one — a stray tap on a small cross is not a decision for ever.
 class LocationNudge extends ChangeNotifier with WidgetsBindingObserver {
   LocationNudge(this.session) {
     WidgetsBinding.instance.addObserver(this);
@@ -29,6 +34,10 @@ class LocationNudge extends ChangeNotifier with WidgetsBindingObserver {
 
   final Session session;
   static const _dismissedKey = 'location_nudge_dismissed';
+  static const _snoozedUntilKey = 'location_nudge_snoozed_until';
+
+  /// How long „Nächstes Mal erinnern" keeps the card away.
+  static const snooze = Duration(days: 7);
 
   GeofencePermission? _permission;
   bool _disposed = false;
@@ -38,9 +47,17 @@ class LocationNudge extends ChangeNotifier with WidgetsBindingObserver {
 
   bool get dismissed => session.prefs.getBool(_dismissedKey) ?? false;
 
+  /// Until when „Nächstes Mal erinnern" keeps the card away; null when it does not.
+  DateTime? get snoozedUntil {
+    final raw = session.prefs.getString(_snoozedUntilKey);
+    final t = raw == null ? null : DateTime.tryParse(raw);
+    return t != null && t.isAfter(DateTime.now()) ? t : null;
+  }
+
   /// The card shows while the phone has not granted „Immer" and nobody has closed it. Never under
   /// automation: the tour and the end-to-end tests run on simulators that never have it.
-  bool get visible => !GeofenceSync.automation && !dismissed && _permission != null && _permission != GeofencePermission.always;
+  bool get visible =>
+      !GeofenceSync.automation && !dismissed && snoozedUntil == null && _permission != null && _permission != GeofencePermission.always;
 
   Future<void> check() async {
     final status = await Geofence.instance.status();
@@ -51,9 +68,15 @@ class LocationNudge extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// The ×: gone for good on this device.
+  /// „Nicht mehr fragen": gone for good on this device.
   Future<void> dismiss() async {
     await session.prefs.setBool(_dismissedKey, true);
+    notifyListeners();
+  }
+
+  /// „Nächstes Mal erinnern", and the card's ×: back after [snooze].
+  Future<void> remindLater({DateTime? now}) async {
+    await session.prefs.setString(_snoozedUntilKey, (now ?? DateTime.now()).add(snooze).toIso8601String());
     notifyListeners();
   }
 
@@ -250,9 +273,25 @@ class _LocationNudgeSheetState extends State<_LocationNudgeSheet> {
                   const VGap.m(),
                   VPrimaryButton(label: 'Zu den Einstellungen', trailingIcon: Icons.open_in_new, onTap: openLocationSettings),
                 ] else
-                  VPrimaryButton(label: '„Immer" erlauben', trailingIcon: Icons.near_me, onTap: _busy ? null : _allow),
+                  VPrimaryButton(label: 'Immer aktivieren', trailingIcon: Icons.near_me, onTap: _busy ? null : _allow),
                 const VGap.s(),
-                VGhostButton(label: 'Nicht jetzt', onTap: () => Navigator.of(context).pop()),
+                VGhostButton(
+                  key: const Key('location-nudge-later'),
+                  label: 'Nächstes Mal erinnern',
+                  onTap: () {
+                    widget.nudge.remindLater();
+                    Navigator.of(context).pop();
+                  },
+                ),
+                VGhostButton(
+                  key: const Key('location-nudge-never'),
+                  label: 'Nicht mehr fragen',
+                  color: VColors.ink2,
+                  onTap: () {
+                    widget.nudge.dismiss();
+                    Navigator.of(context).pop();
+                  },
+                ),
               ],
             ),
           ),

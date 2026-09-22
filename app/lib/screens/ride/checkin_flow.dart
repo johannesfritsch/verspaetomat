@@ -676,7 +676,7 @@ class _WelcherZugSheet extends StatelessWidget {
               countedMinutes: countedMinutes,
               onStarted: () {
                 Navigator.of(context).pop(const StepResult<void>.value(null));
-                context.go(Routes.unterwegs);
+                context.go(Routes.ride);
               },
             ),
           ),

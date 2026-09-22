@@ -122,7 +122,7 @@ class _WiederherstellenScreenState extends State<WiederherstellenScreen> {
       await session.recoverAccount(_words.join(' '));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Konto zurückgeholt.')));
-      context.go(Routes.bahnsteig);
+      context.go(Routes.home);
     } catch (e) {
       if (!mounted) return;
       final unknown = e.toString().contains('unknown recovery code') || e.toString().contains('404');

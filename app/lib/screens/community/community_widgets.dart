@@ -45,7 +45,7 @@ class TabHeader extends StatelessWidget {
           ),
         ),
         if (trailing != null) ...[trailing!, const SizedBox(width: 4)],
-        VIconButton(icon: Icons.settings_outlined, onTap: onSettings ?? () => context.push(Routes.einstellungen)),
+        VIconButton(icon: Icons.settings_outlined, onTap: onSettings ?? () => context.push(Routes.settings)),
       ],
     );
   }
@@ -320,6 +320,17 @@ void showMinutesSource(BuildContext context) => showSourceSheet(
           'zählt mit mindestens 60 Minuten.',
       update: 'Die Zahl wächst laufend: jede Fahrt kommt dazu, sobald sie vorbei und ihre '
           'Verspätung endgültig ist.',
+    );
+
+/// Home's figure (#47): the same count as [showMinutesSource], narrowed to one passenger.
+void showMyMinutesSource(BuildContext context) => showSourceSheet(
+      context,
+      title: 'Minuten, die du gewartet hast',
+      origin: 'Die Summe der endgültigen Verspätungen deiner Fahrten, Minute für Minute. Gezählt '
+          'wird die Verspätung an dem Halt, an dem du ausgestiegen bist: geplante Ankunft aus dem '
+          'Fahrplan, tatsächliche aus den Live-Daten. Wo es keine Live-Daten gab, zählt die Zeit, '
+          'die du selbst eingetragen hast, und ein ausgefallener Zug zählt mit mindestens 60 Minuten.',
+      update: 'Eine Fahrt kommt dazu, sobald sie vorbei und ihre Verspätung endgültig ist.',
     );
 
 /// A badge: a circle in the station-clock spirit, name below.

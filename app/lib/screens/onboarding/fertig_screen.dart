@@ -30,7 +30,7 @@ class _FertigScreenState extends State<FertigScreen> {
     final session = RepoScope.read(context);
     setState(() => _busy = true);
     await session.completeOnboarding();
-    if (mounted) context.go(Routes.bahnsteig);
+    if (mounted) context.go(Routes.home);
   }
 
   @override

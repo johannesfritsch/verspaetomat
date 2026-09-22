@@ -113,7 +113,7 @@ class RideSheetBody extends StatelessWidget {
       if (!context.mounted) return;
       if (result != null) {
         monitor.closeSheet();
-        context.push(Routes.angekommen, extra: result);
+        context.push(Routes.arrived, extra: result);
       }
     } catch (e) {
       if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));

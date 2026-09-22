@@ -41,7 +41,7 @@ class RechtlichesScreen extends StatelessWidget {
           ],
           const VGap.m(),
           const VSection('Auch lesen'),
-          for (final d in others) VListRow(title: d.title, chevron: true, onTap: () => context.push(Routes.rechtliches(d.id))),
+          for (final d in others) VListRow(title: d.title, chevron: true, onTap: () => context.push(Routes.legal(d.id))),
           const VGap.xl(),
         ],
       ),

@@ -61,18 +61,18 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
           // docs/29: a nudge opens the same check-in as every other entry, at "Wohin?" — it
           // already knows the station. It used to open the train-first board from before
           // docs/17, which is why a nudge and the Einchecken square disagreed about the trains.
-          router.go(Routes.bahnsteig);
+          router.go(Routes.home);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             final ctx = router.routerDelegate.navigatorKey.currentContext;
             if (ctx != null) runCheckinFlow(ctx, from: ApiStation(id: n.stationId, name: n.stationName));
           });
         } else if (n.isJourney) {
-          router.go(n.journeyArrived ? Routes.angekommen : Routes.unterwegs);
+          router.go(n.journeyArrived ? Routes.arrived : Routes.ride);
         } else if (n.kind == 'mail') {
           // Railway mail lands on Anträge, scrolled to its claim (docs/11 §10).
-          router.go(n.claimId == null ? Routes.antraege : '${Routes.antraege}?claim=${Uri.encodeComponent(n.claimId!)}');
+          router.go(n.claimId == null ? Routes.claims : '${Routes.claims}?claim=${Uri.encodeComponent(n.claimId!)}');
         } else if (n.kind != 'station') {
-          router.go(Routes.antraege);
+          router.go(Routes.claims);
         }
       },
     )..start();

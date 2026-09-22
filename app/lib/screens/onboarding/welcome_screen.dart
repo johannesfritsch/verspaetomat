@@ -102,7 +102,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   /// Both the button on the last card and „Überspringen" end here: the cards explain, they never
   /// gate, so skipping them costs nothing but the explanation.
-  void _done() => context.go(Routes.zweckWaehlen);
+  void _done() => context.go(Routes.chooseCause);
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +124,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           // because it is the one the old screen asked and it reads as an aside rather than as a
           // second instruction competing with the button.
           _last
-              ? VGhostButton(label: 'Schon dabei?', color: VColors.ink2, onTap: () => context.push(Routes.wiederherstellen))
+              ? VGhostButton(label: 'Schon dabei?', color: VColors.ink2, onTap: () => context.push(Routes.restore))
               : VGhostButton(label: 'Überspringen', color: VColors.ink2, onTap: _done),
           const Spacer(),
           for (var i = 0; i < _cards.length; i++)

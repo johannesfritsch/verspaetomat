@@ -13,7 +13,7 @@ GoRouterWidgetBuilder antraegeBuilder = (_, s) => AntraegeScreen(claimId: s.uri.
 
 final claimsRoutes = <RouteBase>[
   GoRoute(
-    path: Routes.antrag,
+    path: Routes.claim,
     builder: (_, s) => AntragScreen(
       desk: s.uri.queryParameters['desk'] ?? 'Servicecenter Fahrgastrechte',
       claimId: s.uri.queryParameters['id'],
@@ -21,11 +21,11 @@ final claimsRoutes = <RouteBase>[
     ),
   ),
   GoRoute(
-    path: Routes.antwort,
+    path: Routes.reply,
     builder: (_, s) => AntwortScreen(mailId: s.uri.queryParameters['mail'], demo: s.uri.queryParameters['demo']),
   ),
   GoRoute(
-    path: Routes.zweck,
+    path: Routes.cause,
     builder: (_, s) => ZweckScreen(ngoId: s.uri.queryParameters['id'] ?? 'bahnhofsmission'),
   ),
 ];

@@ -61,6 +61,7 @@ class _ShareSheet extends StatefulWidget {
 
 class _ShareSheetState extends State<_ShareSheet> {
   final _boundary = GlobalKey();
+  final _button = GlobalKey();
   int _line = 0;
 
   // The switches from docs/27 §5. The name is on by default; the rest is the ride's own facts.
@@ -90,7 +91,12 @@ class _ShareSheetState extends State<_ShareSheet> {
       final file = await _write(dir.path, bytes);
       if (!mounted) return;
       final text = widget.lines.isEmpty ? 'verspaetomat.de' : '${widget.lines[_line]} www.verspaetomat.de';
-      await SharePlus.instance.share(ShareParams(text: text, files: [XFile(file)]));
+      // #50: a phone showed a black, empty share sheet here. iOS 26 expects to be told where the
+      // sheet comes from (plus_plugins #3685), and that was the one input this call left out; the
+      // simulator never showed the fault, so this is the likely cause, not a proven one.
+      final box = _button.currentContext?.findRenderObject() as RenderBox?;
+      final origin = box != null && box.hasSize ? box.localToGlobal(Offset.zero) & box.size : null;
+      await SharePlus.instance.share(ShareParams(text: text, files: [XFile(file, mimeType: 'image/png')], sharePositionOrigin: origin));
       if (mounted) Navigator.of(context).maybePop();
     } catch (e) {
       if (mounted) {
@@ -170,7 +176,7 @@ class _ShareSheetState extends State<_ShareSheet> {
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, VSpace.m),
-            child: VPrimaryButton(label: _busy ? '…' : 'Teilen', icon: Icons.ios_share, onTap: _busy ? null : _share),
+            child: VPrimaryButton(key: _button, label: _busy ? '…' : 'Teilen', icon: Icons.ios_share, onTap: _busy ? null : _share),
           ),
         ),
       ],

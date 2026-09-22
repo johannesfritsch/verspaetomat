@@ -21,59 +21,61 @@ import 'widgets/kit.dart';
 
 /// Route names. Screens are declared in docs/11-screens.md.
 /// Query parameters are documented next to each route.
+///
+/// Paths and query values are English (#44), whatever the screen is called in German: a path is
+/// an address that outlives the copy — in a shared link, a test, `INITIAL_ROUTE` — and the app is
+/// meant to be international one day. The constants are English for the same reason.
 class Routes {
   Routes._();
   static const welcome = '/welcome';
-  // The setup, in the order it is asked (#43). `permissions` keeps its path so an older link and
-  // INITIAL_ROUTE still land on the first question.
+  // The setup, in the order it is asked (#43).
   static const permissions = '/permissions'; // Schritt 1: Mitteilungen
-  static const standort = '/standort'; // Schritt 2
-  static const standortImmer = '/standort/immer'; // the rest of Schritt 2, not a step of its own
-  static const zweckWaehlen = '/zweck-waehlen'; // Schritt 3: der Verein (Routes.zweck ist die Vereinsseite)
-  static const fertig = '/fertig'; // „Los geht's!", and the end of onboarding
+  static const location = '/location'; // Schritt 2
+  static const locationAlways = '/location/always'; // the rest of Schritt 2, not a step of its own
+  static const chooseCause = '/choose-cause'; // Schritt 3: der Verein (Routes.cause ist die Vereinsseite)
+  static const ready = '/ready'; // „Los geht's!", and the end of onboarding
 
-  static const bahnsteig = '/bahnsteig'; // "Home" in the nav
-  static const antraege = '/antraege'; // ?claim=<claim id> scrolls to that claim
-  static const konto = '/konto'; // alias of antraege (older links, pushes)
-  static const wir = '/wir';
-  static const ich = '/ich';
+  static const home = '/home'; // "Home" in the nav
+  static const claims = '/claims'; // ?claim=<claim id> scrolls to that claim
+  static const community = '/community';
+  static const me = '/me';
 
-  static const unterwegs = '/unterwegs'; // redirects to Home with the ride sheet open (docs/19)
-  static const bahnsteigWithSheet = '/bahnsteig?ride=1';
-  static const angekommen = '/angekommen'; // ?variant=68|14|59|ausfall|nodata (absent = use DemoState)
-  static const nachtrag = '/nachtrag';
+  static const ride = '/ride'; // redirects to Home with the ride sheet open (docs/19)
+  static const homeWithRide = '/home?ride=1';
+  static const arrived = '/arrived'; // ?variant=68|14|59|cancelled|nodata (absent = use DemoState)
+  static const addRide = '/add-ride';
 
-  static const antrag = '/antrag'; // ?desk=Servicecenter%20Fahrgastrechte | NordWestBahn | Unbekannt
-  static const antwort = '/antwort'; // ?mail=<mail id>  or  ?demo=question|rejected
-  static const zweck = '/zweck'; // ?id=bahnhofsmission
-  static const historie = '/historie';
-  static const einstellungen = '/einstellungen';
-  static const datenherkunft = '/einstellungen/daten';
+  static const claim = '/claim'; // ?desk=Servicecenter%20Fahrgastrechte | NordWestBahn | Unbekannt
+  static const reply = '/reply'; // ?mail=<mail id>  or  ?demo=question|rejected
+  static const cause = '/cause'; // ?id=bahnhofsmission
+  static const history = '/history';
+  static const settings = '/settings';
+  static const dataSources = '/settings/data-sources';
 
   /// docs/25 §5: the debug page. In every build, release included (issue #29).
-  static const entwicklung = '/einstellungen/entwicklung';
-  static const rechtlichesBase = '/rechtliches'; // /rechtliches/:id  (impressum | datenschutz | bote)
-  static String rechtliches(String id) => '$rechtlichesBase/$id';
+  static const developer = '/settings/developer';
+  static const legalBase = '/legal'; // /legal/:id — the ids are the website's slugs (impressum | datenschutz | bote)
+  static String legal(String id) => '$legalBase/$id';
   /// The Antrag walked through with example data, from the empty Anträge tab. Reachable in a
   /// release build on purpose: it is how a new passenger — and an App Store reviewer — finds out
   /// what the tab is for before a train is ever an hour late.
-  static const vorfuehrung = '/vorfuehrung';
+  static const demoClaim = '/demo-claim';
 
   /// The rest of the story, after the five steps: what the railway answers and what happens then.
-  static const vorfuehrungWeiter = '/vorfuehrung/weiter';
+  static const demoClaimNext = '/demo-claim/next';
 
   /// Typing the twelve words back in, on a phone that is not the one they were written on.
-  static const wiederherstellen = '/wiederherstellen';
+  static const restore = '/restore';
 
   static const showcase = '/showcase';
 
   /// The „nicht erreichbar" page on its own (#28). A real outage cannot be arranged on demand, so
   /// the Showcase and the screenshot tour reach it by route instead of by breaking the server.
-  static const stoerung = '/showcase/stoerung';
+  static const outage = '/showcase/outage';
 
   /// docs/25 §5: the fence drawing on its own, with an invented set, so it can be looked at
   /// without standing at a station (issue #29). The page itself draws only what the phone says.
-  static const zaunkarte = '/showcase/zaunkarte';
+  static const fenceMap = '/showcase/fence-map';
 }
 
 /// Where the app opens. `INITIAL_ROUTE` wins (tests, showcase runs). Otherwise a release
@@ -83,7 +85,7 @@ String initialLocationFor({required bool onboardingDone}) {
   const forced = String.fromEnvironment('INITIAL_ROUTE', defaultValue: '');
   if (forced.isNotEmpty) return forced;
   if (!kReleaseMode) return Routes.showcase;
-  return onboardingDone ? Routes.bahnsteig : Routes.welcome;
+  return onboardingDone ? Routes.home : Routes.welcome;
 }
 
 /// The Navigator that renders the four tabs, below the bottom bar (issue #12).
@@ -98,23 +100,22 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
     initialLocation: initialLocation,
     routes: [
       GoRoute(path: '/', redirect: (_, __) => Routes.showcase),
-      GoRoute(path: Routes.stoerung, builder: (context, __) => ServerDownScreen(onRetry: () => context.pop())),
-      GoRoute(path: Routes.zaunkarte, builder: (_, __) => const GeofenceMapShowcase()),
+      GoRoute(path: Routes.outage, builder: (context, __) => ServerDownScreen(onRetry: () => context.pop())),
+      GoRoute(path: Routes.fenceMap, builder: (_, __) => const GeofenceMapShowcase()),
       GoRoute(path: Routes.showcase, builder: (_, __) => const ShowcaseScreen()),
-      GoRoute(path: Routes.vorfuehrung, builder: (_, __) => const DemoAntragScreen()),
-      GoRoute(path: Routes.vorfuehrungWeiter, builder: (_, __) => const DemoWeiterScreen()),
-      GoRoute(path: Routes.wiederherstellen, builder: (_, __) => const WiederherstellenScreen()),
+      GoRoute(path: Routes.demoClaim, builder: (_, __) => const DemoAntragScreen()),
+      GoRoute(path: Routes.demoClaimNext, builder: (_, __) => const DemoWeiterScreen()),
+      GoRoute(path: Routes.restore, builder: (_, __) => const WiederherstellenScreen()),
 
       // The four tabs live in a shell with the bottom navigation; the Einchecken square in the middle is not a tab.
       ShellRoute(
         navigatorKey: shellNavigatorKey,
         builder: (context, routerState, child) => _TabShell(location: routerState.uri.toString(), child: child),
         routes: [
-          GoRoute(path: Routes.bahnsteig, builder: (c, s) => bahnsteigBuilder(c, s)),
-          GoRoute(path: Routes.antraege, builder: (c, s) => antraegeBuilder(c, s)),
-          GoRoute(path: Routes.konto, builder: (c, s) => antraegeBuilder(c, s)),
-          GoRoute(path: Routes.wir, builder: (c, s) => wirBuilder(c, s)),
-          GoRoute(path: Routes.ich, builder: (c, s) => ichBuilder(c, s)),
+          GoRoute(path: Routes.home, builder: (c, s) => bahnsteigBuilder(c, s)),
+          GoRoute(path: Routes.claims, builder: (c, s) => antraegeBuilder(c, s)),
+          GoRoute(path: Routes.community, builder: (c, s) => wirBuilder(c, s)),
+          GoRoute(path: Routes.me, builder: (c, s) => ichBuilder(c, s)),
         ],
       ),
 
@@ -134,7 +135,7 @@ class _TabShell extends StatefulWidget {
   final String location;
   final Widget child;
 
-  static const _tabs = [Routes.bahnsteig, Routes.antraege, Routes.wir, Routes.ich];
+  static const _tabs = [Routes.home, Routes.claims, Routes.community, Routes.me];
 
   @override
   State<_TabShell> createState() => _TabShellState();
@@ -185,7 +186,7 @@ class _TabShellState extends State<_TabShell> {
     }
   }
 
-  /// `/bahnsteig?ride=1` (the old /unterwegs, pushes, a finished check-in) opens the sheet once.
+  /// `/home?ride=1` (the `/ride` redirect, pushes, a finished check-in) opens the sheet once.
   void _consumeSheetRequest() {
     final loc = widget.location;
     if (!loc.contains('ride=1') || _consumedLocation == loc) return;
@@ -228,7 +229,6 @@ class _TabShellState extends State<_TabShell> {
   Widget build(BuildContext context) {
     final location = widget.location;
     var index = _TabShell._tabs.indexWhere((t) => location.startsWith(t));
-    if (location.startsWith(Routes.konto)) index = 1;
     final session = RepoScope.of(context);
     final monitor = _monitor!;
     final nearby = _nearby!;

@@ -36,7 +36,7 @@ Everything the showcase app reads from `Mock` or from `DemoState`, turned into w
 
 ### Ride
 
-`state.trip`, `liveDelay`, `passedStops`, `liveCause`, `finalDelay`, `finalCancelled`, `finalSelfEntered`, `Mock.rides` / `state.rides` (date, line, from, to, delay, cancelled, verified). Backend: ride id, customer, trip id, operator, line, from station, exit stop, ticket type at check-in, checked-in at, location fix (lat/lon/accuracy, optional), status (`riding`, `arrived`, `abandoned`), planned and actual arrival, final delay, cancelled, self-entered, cause, source and timestamp of the delay evidence, points earned, verified flag, Nachtrag flag, Träwelling import id. `POST /v1/rides`, `GET /v1/rides/current`, `PATCH /v1/rides/{id}` (change train), `POST /v1/rides/{id}/arrival` (manual time), `POST /v1/rides/nachtrag`, `GET /v1/rides`.
+`state.trip`, `liveDelay`, `passedStops`, `liveCause`, `finalDelay`, `finalCancelled`, `finalSelfEntered`, `Mock.rides` / `state.rides` (date, line, from, to, delay, cancelled, verified). Backend: ride id, customer, trip id, operator, line, from station, exit stop, ticket type at check-in, checked-in at, location fix (lat/lon/accuracy, optional), status (`riding`, `arrived`, `abandoned`), planned and actual arrival, final delay, cancelled, self-entered, cause, source and timestamp of the delay evidence, points earned, verified flag, Nachtrag flag, Träwelling import id. `POST /v1/rides`, `GET /v1/rides/current`, `PATCH /v1/rides/{id}` (change train), `POST /v1/rides/{id}/arrival` (manual time), `POST /v1/rides/retroactive` (since #44; `/v1/rides/nachtrag` stays for older builds), `GET /v1/rides`.
 
 ### Journey (destination first, docs/17)
 

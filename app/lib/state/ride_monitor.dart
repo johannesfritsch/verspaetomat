@@ -226,7 +226,7 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
   }
 }
 
-/// Bumped by whoever asks for the ride sheet (the `/unterwegs` redirect: a finished check-in,
+/// Bumped by whoever asks for the ride sheet (the `/ride` redirect: a finished check-in,
 /// a push, the nudge). The shell listens and opens the sheet, however the location reads.
 final ValueNotifier<int> rideSheetRequests = ValueNotifier<int>(0);
 

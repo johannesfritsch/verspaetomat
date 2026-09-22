@@ -251,7 +251,7 @@ class ApiClient {
 
   Future<void> dismissRide() async => _post('/v1/rides/current/dismiss');
 
-  Future<ApiArrivalResult> nachtrag(NachtragRequest n) async => ApiArrivalResult.fromJson(_map(await _post('/v1/rides/nachtrag', n.toJson())));
+  Future<ApiArrivalResult> nachtrag(NachtragRequest n) async => ApiArrivalResult.fromJson(_map(await _post('/v1/rides/retroactive', n.toJson())));
 
   // -- journeys (docs/17) ---------------------------------------------------
 

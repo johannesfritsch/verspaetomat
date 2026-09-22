@@ -106,7 +106,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
             title: 'Entwicklung',
             subtitle: 'Was der Hintergrund-Scan gerade tut',
             chevron: true,
-            onTap: () => context.push(Routes.entwicklung),
+            onTap: () => context.push(Routes.developer),
           ),
           VListRow(
             title: 'Stumme Bahnhöfe',
@@ -175,7 +175,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           const VSection('Deine Daten'),
           VListRow(title: 'Daten exportieren', subtitle: 'Alles, was wir über dich haben', chevron: true, onTap: () => _export(context, session)),
           VListRow(title: 'Alles löschen', subtitle: 'Konto, Fahrten, Anträge, Adresse', chevron: true, onTap: () => _deleteAll(context, state, session)),
-          VListRow(title: 'Woher kommen die Daten?', subtitle: 'Jede Zahl und ihre Quelle', chevron: true, onTap: () => context.push(Routes.datenherkunft)),
+          VListRow(title: 'Woher kommen die Daten?', subtitle: 'Jede Zahl und ihre Quelle', chevron: true, onTap: () => context.push(Routes.dataSources)),
           const VGap.xl(),
           const VSection('Rechtliches'),
           for (final d in legalDocs)
@@ -183,7 +183,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
               title: d.title,
               subtitle: switch (d.id) { 'impressum' => 'Wer hinter der App steht', 'datenschutz' => 'Was wir speichern und wie lange', _ => 'Bote, nicht Vertreter' },
               chevron: true,
-              onTap: () => context.push(Routes.rechtliches(d.id)),
+              onTap: () => context.push(Routes.legal(d.id)),
             ),
           // docs/22 §3: backend switching, the demo toys and the "alles erfunden" footer are
           // workshop tools. They stay in a debug build, where the tour and the local loop need
@@ -441,7 +441,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
                   const VGap.s(),
                   TextField(controller: address, maxLines: 2, decoration: const InputDecoration(labelText: 'Anschrift'), style: VText.body),
                   const VGap.s(),
-                  TextField(controller: email, decoration: const InputDecoration(labelText: 'Privates Postfach'), style: VText.body),
+                  TextField(controller: email, decoration: const InputDecoration(labelText: 'Private E-Mail-Adresse'), style: VText.body),
                   const VGap.s(),
                   TextField(controller: ticketNo, decoration: const InputDecoration(labelText: 'Deutschlandticket-Nummer'), style: VText.mono),
                   const VGap.m(),
@@ -512,9 +512,14 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           children: [
             const VSheetHeader(title: 'Wiederherstellungscode', subtitle: 'Statt eines Kontos'),
             Text(
+              // Which words count is said on every path (#46): testers held two different sets and
+              // could not tell which one was the real one. The server keeps one hash per device, so
+              // the newest set is the only one that works.
               code == null
-                  ? 'Du hast schon zwölf Wörter. Wir bewahren sie nicht auf — nur einen Abdruck davon — also können wir sie dir nicht noch einmal zeigen. Wenn du sie nicht mehr hast, lass dir neue geben.'
-                  : 'Verspätomat hat kein Konto. Diese zwölf Wörter holen dein Konto, deine Fahrten und deine Verspätomat-Adresse auf ein neues Gerät.',
+                  ? 'Du hast schon zwölf Wörter. Wir bewahren sie nicht auf — nur einen Abdruck davon — also können wir sie dir nicht noch einmal zeigen. Wenn du sie nicht mehr hast, lass dir neue geben. Dann gelten nur noch die neuen.'
+                  : rotate
+                      ? 'Das sind deine neuen zwölf Wörter. Die alten gelten ab jetzt nicht mehr. Diese holen dein Konto, deine Fahrten und deine Verspätomat-Adresse auf ein neues Gerät.'
+                      : 'Verspätomat hat kein Konto. Diese zwölf Wörter holen dein Konto, deine Fahrten und deine Verspätomat-Adresse auf ein neues Gerät.',
               style: VText.body,
             ),
             if (code != null) ...[

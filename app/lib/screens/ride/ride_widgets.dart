@@ -798,7 +798,7 @@ Future<void> demoCheckIn(BuildContext context) async {
   final repo = RepoScope.read(context).repo;
   try {
     await demoStartJourney(repo);
-    if (context.mounted) context.go(Routes.unterwegs);
+    if (context.mounted) context.go(Routes.ride);
   } catch (e) {
     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Check-in nicht möglich: ${shortError(e)}')));
   }

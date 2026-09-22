@@ -748,7 +748,7 @@ class Mock {
 
   static const pointsTotal = 1372;
 
-  /// Minutes this passenger waited — the share under Home's „Minuten haben wir gewartet".
+  /// Minutes this passenger waited — the figure on Home's first board (#47).
   /// Not the same number as [pointsTotal] and never larger: a ride given up earns its
   /// points but has no final delay to add (docs/22).
   static const myMinutes = 1298;

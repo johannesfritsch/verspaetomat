@@ -24,34 +24,34 @@ import 'package:verspaetomat/widgets/kit.dart' show VCard, VDropzone, VGhostButt
 // Welcher Zug? pages — are gone, and the flow's own shots (`einchecken-*`) cover what is left.
 const tour = <(String, String)>[
   ('showcase', Routes.showcase),
-  ('setup-zweck', Routes.zweckWaehlen),
+  ('setup-zweck', Routes.chooseCause),
   ('setup-mitteilungen', Routes.permissions),
-  ('setup-standort', Routes.standort),
-  ('setup-immer', Routes.standortImmer),
-  ('setup-fertig', Routes.fertig),
-  ('bahnsteig', Routes.bahnsteig),
-  ('unterwegs', Routes.unterwegs),
-  ('angekommen-68', '${Routes.angekommen}?variant=68'),
-  ('angekommen-14', '${Routes.angekommen}?variant=14'),
-  ('angekommen-ausfall', '${Routes.angekommen}?variant=ausfall'),
-  ('angekommen-nodata', '${Routes.angekommen}?variant=nodata'),
-  ('antraege', Routes.antraege),
-  ('antrag', '${Routes.antrag}?desk=Servicecenter%20Fahrgastrechte'),
-  ('antrag-unbekannt', '${Routes.antrag}?desk=Unbekannt'),
-  ('antwort-ok', '${Routes.antwort}?mail=m-0718-in'),
-  ('antwort-frage', '${Routes.antwort}?demo=question'),
-  ('antwort-nein', '${Routes.antwort}?demo=rejected'),
-  ('nachtrag', Routes.nachtrag),
-  ('wir', Routes.wir),
-  ('zweck', '${Routes.zweck}?id=bahnhofsmission'),
-  ('ich', Routes.ich),
-  ('historie', Routes.historie),
-  ('einstellungen', Routes.einstellungen),
-  ('daten', Routes.datenherkunft),
-  ('stoerung', Routes.stoerung),
-  ('impressum', '/rechtliches/impressum'),
-  ('datenschutz', '/rechtliches/datenschutz'),
-  ('bote', '/rechtliches/bote'),
+  ('setup-standort', Routes.location),
+  ('setup-immer', Routes.locationAlways),
+  ('setup-fertig', Routes.ready),
+  ('bahnsteig', Routes.home),
+  ('unterwegs', Routes.ride),
+  ('angekommen-68', '${Routes.arrived}?variant=68'),
+  ('angekommen-14', '${Routes.arrived}?variant=14'),
+  ('angekommen-ausfall', '${Routes.arrived}?variant=cancelled'),
+  ('angekommen-nodata', '${Routes.arrived}?variant=nodata'),
+  ('antraege', Routes.claims),
+  ('antrag', '${Routes.claim}?desk=Servicecenter%20Fahrgastrechte'),
+  ('antrag-unbekannt', '${Routes.claim}?desk=Unbekannt'),
+  ('antwort-ok', '${Routes.reply}?mail=m-0718-in'),
+  ('antwort-frage', '${Routes.reply}?demo=question'),
+  ('antwort-nein', '${Routes.reply}?demo=rejected'),
+  ('nachtrag', Routes.addRide),
+  ('wir', Routes.community),
+  ('zweck', '${Routes.cause}?id=bahnhofsmission'),
+  ('ich', Routes.me),
+  ('historie', Routes.history),
+  ('einstellungen', Routes.settings),
+  ('daten', Routes.dataSources),
+  ('stoerung', Routes.outage),
+  ('impressum', '/legal/impressum'),
+  ('datenschutz', '/legal/datenschutz'),
+  ('bote', '/legal/bote'),
 ];
 
 Future<void> wait(WidgetTester tester, int ms) async {
@@ -113,14 +113,14 @@ void main() {
 
     // The boards on Wir are below the fold, so the route's own shot never showed them and the
     // ranks went unphotographed through their redesign (#24). Scroll to them.
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.community);
     await wait(tester, 1500);
     await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -900));
     await shot('wir-ranglisten');
 
     // docs/39: behind the pre-step, the first step lists every open case of the desk with its
     // own tick. The route above stops at „So läuft das", so the tour walks one step further.
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go('${Routes.antrag}?desk=Servicecenter%20Fahrgastrechte');
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go('${Routes.claim}?desk=Servicecenter%20Fahrgastrechte');
     await wait(tester, 1800);
     await tester.tap(find.text('Los geht\'s'));
     await shot('antrag-pruefen');
@@ -154,16 +154,12 @@ void main() {
       await tester.enterText(fields.at(2), 'johannes@example.org');
       await wait(tester, 400);
     }
-    // One button: Weiter checks the details, saves them and, the first time, shows the twelve
-    // words. The sheet cannot be swiped away, so it has to be answered.
+    // One button: Weiter checks the details, saves them and moves on. The twelve words used to
+    // interrupt here; they live in Einstellungen only since #45.
     await weiter();
     await wait(tester, 1500);
-    final notiert = find.widgetWithText(VPrimaryButton, 'Ich habe sie notiert');
-    if (notiert.evaluate().isNotEmpty) {
-      await shot('wiederherstellungscode');
-      await tester.tap(notiert.first);
-      await wait(tester, 1200);
-    }
+    // #52: what to upload, and why one picture per month.
+    await shot('antrag-ticket');
     // This claim spans two months, and every month is its own ticket, so the step holds until
     // each one has a picture on it.
     final anhaengen = find.widgetWithText(VDropzone, 'Ticket anhängen');
@@ -223,24 +219,24 @@ void main() {
     }
 
     RideMonitor monitor() => RideScope.read(tester.element(find.byType(Scaffold).first))!;
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.community);
     await wait(tester, 600);
     demo.reset(); // an arrival left over from the Angekommen routes would hide the idle state
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await shot('bahnsteig-einchecken');
     final dep = Mock.departuresKoelnHbf.firstWhere((d) => !d.cancelled);
     demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.community);
     await wait(tester, 600);
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     // The ride under way (docs/19, docs/20): the ride card and the bar on Home, the bar and
     // the disabled square on another tab, the sheet full and half.
     await shot('bar-home');
     await shot('home-riding-card');
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.antraege);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.claims);
     await shot('bar-antraege');
     await shot('nav-disabled');
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await wait(tester, 600);
     monitor().openSheet();
     await shot('sheet-riding');
@@ -275,15 +271,15 @@ void main() {
     demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
     await wait(tester, 800);
     demo.simulateArrival(minutes: 68);
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.community);
     await wait(tester, 600);
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await shot('bahnsteig-arrived');
     demo.reset();
     Future<void> home(String name) async {
-      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.community);
       await wait(tester, 600);
-      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
       await shot(name);
     }
     // docs/30: Home is the same square of paper wherever the phone thinks it is — no station,
@@ -316,7 +312,7 @@ void main() {
     await dismissSheet(tester);
     demo.reset();
     // docs/24 §3: the pause, and the one line on Home that says it is running.
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.einstellungen);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.settings);
     await shot('einstellungen-pausieren');
     await tester.tap(find.byKey(const Key('pausieren')));
     await wait(tester, 900);
@@ -329,9 +325,9 @@ void main() {
     demo.reset();
     // docs/25 §5: the debug page, which exists so "why no nudge at Memmingen?" can be answered
     // from the phone. Since issue #29 the Entwicklung row is in every build, release included.
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.einstellungen);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.settings);
     await shot('einstellungen-entwicklung');
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.entwicklung);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.developer);
     await shot('debug-status');
     // Which flags this phone is on (#41). Its own segment since it stopped being a footnote under
     // „Zustand": it is the one thing here somebody changes from a laptop and then reads back on a
@@ -353,7 +349,7 @@ void main() {
     await shot('debug-log');
     // issue #29: the drawing itself. On a simulator the phone monitors nothing, so the real page
     // has nothing to draw — the Showcase entry carries an invented set so the picture can be seen.
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.zaunkarte);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.fenceMap);
     await shot('zaunkarte');
     await tester.dragUntilVisible(
       find.byKey(const Key('zaunkarte-nah')),
@@ -361,7 +357,7 @@ void main() {
       const Offset(0, -220),
     );
     await shot('zaunkarte-nah');
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await wait(tester, 600);
     // docs/27: the shareable Fahrkarte. The arrival card, the punctual one (which is a
     // different face, not the same card with a zero in it), and a badge.
@@ -369,7 +365,7 @@ void main() {
     demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
     await wait(tester, 600);
     demo.simulateArrival(minutes: 68);
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.angekommen);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.arrived);
     await wait(tester, 1000);
     await tester.tap(find.widgetWithText(VGhostButton, 'Teilen').first, warnIfMissed: false);
     await shot('karte-angekommen');
@@ -378,20 +374,20 @@ void main() {
     demo.checkIn(departure: dep, exitStop: dep.stops.last, fromStation: 'Köln Hbf');
     await wait(tester, 600);
     demo.simulateArrival(minutes: 0);
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.angekommen);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.arrived);
     await wait(tester, 1000);
     await tester.tap(find.widgetWithText(VGhostButton, 'Teilen').first, warnIfMissed: false);
     await shot('karte-puenktlich');
     await dismissSheet(tester);
     demo.reset();
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.ich);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.me);
     await wait(tester, 900);
     await tester.tap(find.byType(BadgeIcon).first, warnIfMissed: false);
     await wait(tester, 900);
     await tester.tap(find.widgetWithText(VGhostButton, 'Als Karte teilen').first, warnIfMissed: false);
     await shot('karte-abzeichen');
     await dismissSheet(tester);
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await wait(tester, 600);
     // "Ich fahre weiter" (docs/21 §2): the passenger gives up on this train at Hagen and
     // picks the next one onward; only the delay up to that earliest train counts.
@@ -403,7 +399,7 @@ void main() {
     await wait(tester, 600);
     demo.liveDelay = 74;
     demo.replanJourney();
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.bahnsteig);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await wait(tester, 600);
     monitor().openSheet();
     await shot('weiterfahrt-sheet');
@@ -412,26 +408,26 @@ void main() {
     demo.reset();
     // Anträge (docs/18): the cards. Collecting only, then sent + question + accepted.
     Future<void> tab(String route, String name) async {
-      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.community);
       await wait(tester, 600);
       GoRouter.of(tester.element(find.byType(Scaffold).first)).go(route);
       await shot(name);
     }
     demo.incidents.removeWhere((i) => i.status == IncidentStatus.eingereicht);
     demo.mails.clear();
-    await tab(Routes.antraege, 'antraege-collecting');
+    await tab(Routes.claims, 'antraege-collecting');
     demo.reset();
     demo.receiveReply(outcome: MailOutcome.question);
     demo.receiveReply(outcome: MailOutcome.accepted);
-    await tab(Routes.antraege, 'antraege-mixed');
+    await tab(Routes.claims, 'antraege-mixed');
     demo.incidents.removeWhere((i) => i.isOpen); // only the claim cards, so they sit above the fold
-    await tab(Routes.antraege, 'antraege-claims-only');
+    await tab(Routes.claims, 'antraege-claims-only');
     demo.reset();
     // A case taken out of the bundle, shown in the list (docs/21 §4).
     demo.incidents.removeWhere((i) => i.status == IncidentStatus.eingereicht);
     demo.mails.clear();
     demo.discardIncident(demo.openIncidents.first.id, 'nicht_gefahren');
-    await tab(Routes.antraege, 'antraege-discarded');
+    await tab(Routes.claims, 'antraege-discarded');
     // The row's own sheet: "Doch einreichen" and, beside it, "Fahrt löschen" (docs/23 §2).
     await tester.tap(find.text('anzeigen').first);
     await wait(tester, 800);
@@ -449,11 +445,11 @@ void main() {
     // Nothing at all: the explainer instead of an empty box (docs/21 §5).
     demo.incidents.clear();
     demo.mails.clear();
-    await tab(Routes.antraege, 'antraege-empty');
+    await tab(Routes.claims, 'antraege-empty');
     demo.reset();
     // "Wohin?" without any journey history: the line that says so, and the search (docs/18).
     demo.noHistory = true;
-    await tab(Routes.bahnsteig, 'bahnsteig-idle');
+    await tab(Routes.home, 'bahnsteig-idle');
     await tester.tap(find.byKey(const Key('einchecken-cta')));
     await wait(tester, 1000);
     await tester.tap(find.byKey(const Key('von-detected')));
@@ -464,7 +460,7 @@ void main() {
     demo.reset();
     // The reply composer (docs/18): Ticketkopie toggle, Foto hinzufügen, chips.
     final question = demo.receiveReply(outcome: MailOutcome.question)!;
-    await tab('${Routes.antwort}?mail=${question.id}', 'antwort-rueckfrage');
+    await tab('${Routes.reply}?mail=${question.id}', 'antwort-rueckfrage');
     await tester.tap(find.widgetWithText(VPrimaryButton, 'Antworten').first);
     await shot('antwort-composer');
     Navigator.of(tester.element(find.byType(Scaffold).last)).pop();
@@ -478,31 +474,31 @@ void main() {
       return DemoLeg(departure: d, from: from, exit: d.stops.firstWhere((s) => s.name == to));
     }
     demo.startJourney(origin: 'Köln Hbf', destination: 'Lüdenscheid', legs: [leg('re7-0747', 'Köln Hbf', 'Hagen Hbf'), leg('rb52-0855', 'Hagen Hbf', 'Lüdenscheid')]);
-    go(Routes.unterwegs);
+    go(Routes.ride);
     await shot('unterwegs-journey');
     demo.simulateArrival(minutes: 5); // in time for the RB 52
-    go(Routes.wir);
+    go(Routes.community);
     await wait(tester, 600);
-    go(Routes.unterwegs);
+    go(Routes.ride);
     await shot('unterwegs-transfer');
     monitor().closeSheet();
     await shot('bar-transfer');
-    go(Routes.bahnsteig);
+    go(Routes.home);
     await shot('home-transfer-card');
     demo.confirmLeg(Mock.allDepartures.firstWhere((x) => x.id == 'rb52-0855'));
     demo.simulateArrival(minutes: 12);
-    go(Routes.angekommen);
+    go(Routes.arrived);
     await shot('angekommen-journey');
     demo.reset();
     demo.startJourney(origin: 'Köln Hbf', destination: 'Lüdenscheid', legs: [leg('re7-0747', 'Köln Hbf', 'Hagen Hbf'), leg('rb52-0855', 'Hagen Hbf', 'Lüdenscheid')]);
     demo.simulateArrival(minutes: 68); // the RB 52 is gone: missed connection, next one proposed
-    go(Routes.unterwegs);
+    go(Routes.ride);
     await shot('unterwegs-verpasst');
     demo.confirmLeg(Mock.allDepartures.firstWhere((x) => x.id == 'rb52-0955'));
     demo.simulateArrival(minutes: 0);
-    go(Routes.angekommen);
+    go(Routes.arrived);
     await shot('angekommen-verpasst');
-    go(Routes.historie);
+    go(Routes.history);
     await shot('historie-journeys');
     // Every row opens the ride in full, with "Fahrt löschen" at the bottom (docs/23 §2).
     await tester.tap(find.byWidgetPredicate((w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('journey-row-')).first);
@@ -513,15 +509,15 @@ void main() {
     // docs/23 §3: a journey nobody closed. The bar stops reporting and asks.
     demo.startJourney(origin: 'Köln Hbf', destination: 'Rheine', legs: [leg('re7-0747', 'Köln Hbf', 'Rheine')]);
     demo.staleRide = true;
-    go(Routes.antraege);
+    go(Routes.claims);
     await shot('bar-stale');
     demo.staleRide = false;
     demo.reset();
 
     // One pushed sub-screen, so the header with the back arrow is in the set too.
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.wir);
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.community);
     await wait(tester, 800);
-    GoRouter.of(tester.element(find.byType(Scaffold).first)).push('${Routes.zweck}?id=bahnhofsmission');
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).push('${Routes.cause}?id=bahnhofsmission');
     await wait(tester, 1800);
     // ignore: avoid_print
     print('SHOT zweck-pushed');

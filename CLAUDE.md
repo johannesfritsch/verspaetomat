@@ -30,11 +30,11 @@ backend/target/debug/stellwerk stations                  # count, feed version, 
 backend/target/debug/stellwerk backdate <who> --delay 70 --days 3 --count 3   # rides that already happened, with their cases
 
 # app on the iOS simulator, local mode
-cd app && flutter run -d <simulator udid> --dart-define=API_URL=http://127.0.0.1:8080 --dart-define=BACKEND=local --dart-define=INITIAL_ROUTE=/bahnsteig
+cd app && flutter run -d <simulator udid> --dart-define=API_URL=http://127.0.0.1:8080 --dart-define=BACKEND=local --dart-define=INITIAL_ROUTE=/home
 flutter analyze                                              # must be clean
 
 # workflow E2E (uses its own keychain slot and customer; drives the world through Stellwerk)
-flutter test integration_test/workflow_test.dart -d <udid> --dart-define=API_URL=http://127.0.0.1:8080 --dart-define=BACKEND=local --dart-define=NO_LOCATION=1 --dart-define=E2E=true --dart-define=ADMIN_TOKEN=stellwerk --dart-define=INITIAL_ROUTE=/bahnsteig
+flutter test integration_test/workflow_test.dart -d <udid> --dart-define=API_URL=http://127.0.0.1:8080 --dart-define=BACKEND=local --dart-define=NO_LOCATION=1 --dart-define=E2E=true --dart-define=ADMIN_TOKEN=stellwerk --dart-define=INITIAL_ROUTE=/home
 
 # one screenshot per screen (Demo mode) for visual passes
 app/tools/tour.sh

@@ -1035,7 +1035,7 @@ class ApiClaimDraft {
   final String? claimReplyAddress;
 
 
-  /// What the address is called in the routing table — „Auffanglinie", „Testpostfach (noch nicht
+  /// What the address is called in the routing table — „Auffanglinie", „Testadresse (noch nicht
   /// die Bahn)". It is the only thing that can tell a passenger that the address above is not the
   /// railway's own desk, and the app must not guess that from the address itself.
   final String? routeLabel;

@@ -65,7 +65,7 @@ Under the card, only when the person rides most days and skipped yesterday: the 
 
 **2 · Deine Woche.** "+96" in board type, "Geduldspunkte diese Woche · letzte Woche 41", the level bar underneath with "Gleis 7 · 128 bis „Bahnhofsmission“". A quiet week reads "Diese Woche noch keine Fahrt", never a zero. Tap for Ich.
 
-**3 · Wir.** A block on elevated paper with a hairline border: the community's minutes as a large ticking figure in the display style ("1.208.316", caption "Minuten haben wir gewartet"), beneath it a thin bar whose filled part is this customer's share (drawn at least 6 px wide, so it is visible) with the caption "1.372 davon deine". The whole block taps through to Wir.
+**3 · Deine Minuten** (#47; until then the community total stood here). The dark board: the minutes this customer has waited, as a large figure in the display style (caption "Minuten hast du gewartet"), under it "Seit deiner ersten Fahrt mit Verspätomat." The community total lives on Wir only. The whole block taps through to Wir; the ⓘ explains how the figure is counted.
 
 Gone since docs/18: the standing line (now above the boards on Wir), the "next thing" card (railway mail shows as a red count on the Anträge tab icon; deadlines live on Anträge; new badges on Ich), the community euro line. Gone since docs/19: the claim cycle strip (it lives on Anträge; the tab badge carries the news).
 
@@ -132,7 +132,7 @@ Replaced by 5a/5b on 10 September 2026 (docs/17): the exit stop of every leg fol
 
 ## 8. Unterwegs (the ride sheet)
 
-Since docs/19 not a screen but a draggable bottom sheet over the active tab, like the player in a music app: it opens at 0.92 of the screen, snaps at 0.92 and 0.5, and closes when dragged below 0.3 (the bar above the nav then carries the ride; tapping the bar opens the sheet again). A grab handle at the top, then the header pattern ("Unterwegs" caption, "RE 7 nach Rheine" title, a chevron to close) and the body below. It opens on a tap on the bar, when a check-in completes (Welcher Zug? → Home with the sheet), and for the `/unterwegs` route (pushes, the geofence nudge: the route opens Home with the sheet, so deep links keep working). Pulling it down returns to whatever tab was active. Same paper as everywhere; designed to be glanced at, not read. Shows the journey (docs/17), not just the train.
+Since docs/19 not a screen but a draggable bottom sheet over the active tab, like the player in a music app: it opens at 0.92 of the screen, snaps at 0.92 and 0.5, and closes when dragged below 0.3 (the bar above the nav then carries the ride; tapping the bar opens the sheet again). A grab handle at the top, then the header pattern ("Unterwegs" caption, "RE 7 nach Rheine" title, a chevron to close) and the body below. It opens on a tap on the bar, when a check-in completes (Welcher Zug? → Home with the sheet), and for the `/ride` route (pushes, the geofence nudge: the route opens Home with the sheet, so deep links keep working). Pulling it down returns to whatever tab was active. Same paper as everywhere; designed to be glanced at, not read. Shows the journey (docs/17), not just the train.
 
 - **Top:** line and headsign of the current leg, then "National Express · Leg 1 von 2 · Ziel Lüdenscheid".
 - **Centre:** the delay in very large digits, "+14", or "pünktlich" in green. Under it: "Umstieg Hagen Hbf 09:06 statt 08:38" on a leg with a transfer ahead, "Ankunft Lüdenscheid …" on the last one.
@@ -186,7 +186,7 @@ One card per Antrag, status in words, never dots (docs/18):
 - A sent claim carries the line "Eingereicht — Änderungen nur noch über eine Antwort an das Unternehmen."; taking a case out is refused once the Antrag is out (docs/21 §4).
 - **Nicht eingereicht**: cases taken out while nothing is collecting keep their own card, so they are never lost.
 - **Verfallen**: expired incidents in one card with the line "Frist um, bevor 4 € zusammenkamen. Die Minuten und Punkte bleiben."
-- A push for railway mail opens this tab scrolled to the claim (`/antraege?claim=<id>`). Tapping an incident shows the evidence sheet as before.
+- A push for railway mail opens this tab scrolled to the claim (`/claims?claim=<id>`). Tapping an incident shows the evidence sheet as before.
 
 Ordinary-ticket incidents appear under Sammeln too, each with its own "Einreichen". They take the same five steps with one incident instead of a bundle: step 1 shows the fare and the booking number instead of the D-Ticket number, step 2 asks for the ticket itself (the booking PDF or a photo of the paper ticket), and the amount is 25 % or 50 % of the fare.
 
@@ -196,15 +196,15 @@ Ordinary-ticket incidents appear under Sammeln too, each with its own "Einreiche
 
 Step indicator at the top: "1 Prüfen · 2 Ticket · 3 Zweck · 4 Unterschrift · 5 Senden".
 
-**11.1 Prüfen.** The incidents in this bundle, each with its details, editable. The desk it goes to. First time only: name, address, private e-mail, D-Ticket number, asked here. The app then shows the customer's new sender address: "Deine Anträge gehen von fahrgast-4711@users.verspaetomat.de raus. Antworten der Bahn landen dort und sofort auch in deinem Postfach." One line: "Diese Daten stehen nur auf dem Formular."
+**11.1 Prüfen.** The incidents in this bundle, each with its details, editable. The desk it goes to. First time only: name, address, private e-mail, D-Ticket number, asked here. The app then shows the customer's new sender address: "Deine Anträge gehen von fahrgast-4711@users.verspaetomat.de raus. Antworten der Bahn landen dort und sofort auch bei deiner privaten E-Mail-Adresse." One line: "Diese Daten stehen nur auf dem Formular."
 
-**11.2 Ticket.** "Füge einen Screenshot deines Tickets mit Barcode an." Buttons: "Aus Fotos", "Aus Ticket-App" (share-in). When the bundle spans months, the app asks for one screenshot per month covered ("August und September") because each month is technically a new ticket. The images are shown, with: "Werden nur diesem Antrag beigefügt und nach Abschluss gelöscht."
+**11.2 Ticket.** "Ein Bild deines Tickets." (several months: "Ein Bild deines Tickets für jeden Monat.", with the months named and why: the desk wants the ticket that was valid on the day). A sunken card "Ein Screenshot reicht." says what the picture must show, per ticket kind on the form: Deutschlandticket (one calendar month each, also in the subscription), other Zeitkarte incl. Fernverkehr (same picture for every month it covers), Einzelfahrkarte (the ticket of that ride, with its Auftragsnummer) (#52). Buttons: "Aus Fotos", "Aus Ticket-App" (share-in). When the bundle spans months, the app asks for one screenshot per month covered ("August und September") because each month is technically a new ticket. The images are shown, with: "Werden nur diesem Antrag beigefügt und nach Abschluss gelöscht."
 
 **11.3 Zweck.** The NGO card, large, with account holder name and IBAN shown in full: "Die Entschädigung geht direkt an: Bahnhofsmission Köln e.V., DE12 …". A switch: "Anderen Zweck für diesen Antrag wählen".
 
 **11.4 Unterschrift.** The filled form is shown as the real PDF the server generated, first page inline with a full-screen zoomable view, exactly what will be attached. Under it a signature field with the customer's name typed already; drawing is optional for the EU form, required for the paper route. The declaration text from the form is repeated in plain German: "Ich bestätige, dass die Angaben stimmen und ich Inhaber:in des Tickets bin."
 
-**11.5 Senden.** The mail as it will go, with the signed PDF shown under "Anhang": from the customer's Verspätomat address with their name, to the claims desk, subject, the short body (which states that the mail is transmitted via Verspätomat and names the claimant), the two attachments, and "Kopie an: dein privates Postfach". One button: "Absenden". A quiet full-screen "Abgeschickt. 9. September 2026." follows, the incidents turn "eingereicht", and the copy is in the customer's inbox before they close the screen.
+**11.5 Senden.** The mail as it will go, with the signed PDF shown under "Anhang": from the customer's Verspätomat address with their name, to the claims desk, subject, the short body (which states that the mail is transmitted via Verspätomat and names the claimant), the two attachments, and "Kopie an: deine private E-Mail-Adresse". One button: "Absenden". A quiet full-screen "Abgeschickt. 9. September 2026." follows, the incidents turn "eingereicht", and the copy is in the customer's inbox before they close the screen.
 
 Paper route alternative on 11.5: "Als PDF zum Drucken" with the postal address shown. Bounces (wrong or dead operator address) come back within minutes as a ledger note: "Nicht zustellbar. Wir prüfen die Adresse."
 
@@ -267,7 +267,7 @@ The thread behind a claim card on Anträge (screen 10), reached with "Alle Nachr
 
 ## 17. Rechtliches (Impressum · Datenschutz · Wie wir Anträge weiterleiten)
 
-Plain reading pages under `/rechtliches/:id`. Eyebrow "Rechtliches", the title, a two-line lead, then sections with a hairline above each heading; text is selectable. Each page ends with links to the other two. The Datenschutz page is the wording the store privacy labels are derived from (docs/40-store-listing.md). Placeholders in square brackets (operator name and address) are filled in before the first store build.
+Plain reading pages under `/legal/:id`. Eyebrow "Rechtliches", the title, a two-line lead, then sections with a hairline above each heading; text is selectable. Each page ends with links to the other two. The Datenschutz page is the wording the store privacy labels are derived from (docs/40-store-listing.md). Placeholders in square brackets (operator name and address) are filled in before the first store build.
 
 ---
 

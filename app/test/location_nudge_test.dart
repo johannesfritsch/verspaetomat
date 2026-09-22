@@ -4,7 +4,8 @@ import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/ride/location_nudge.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 
-/// #18: the card asks while the phone has not granted „Immer", and a closed card stays closed.
+/// #18: the card asks while the phone has not granted „Immer". #48: „Nicht mehr fragen" is for
+/// good, „Nächstes Mal erinnern" (and the ×) rests it for a week.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -25,7 +26,7 @@ void main() {
     session.dispose();
   });
 
-  test('closing it is final, also for the next start', () async {
+  test('„Nicht mehr fragen" is final, also for the next start', () async {
     final (session, nudge) = await nudgeWith({});
     await nudge.dismiss();
     expect(nudge.visible, isFalse);
@@ -36,5 +37,27 @@ void main() {
     expect(again.visible, isFalse);
     again.dispose();
     session2.dispose();
+  });
+
+  test('„Nächstes Mal erinnern" rests the card for a week, then it is back', () async {
+    final (session, nudge) = await nudgeWith({});
+    await nudge.remindLater();
+    expect(nudge.visible, isFalse);
+    nudge.dispose();
+    session.dispose();
+
+    // Still inside the week on the next start.
+    final soon = DateTime.now().add(const Duration(days: 6)).toIso8601String();
+    final (session2, resting) = await nudgeWith({'location_nudge_snoozed_until': soon});
+    expect(resting.visible, isFalse);
+    resting.dispose();
+    session2.dispose();
+
+    // The week is over.
+    final past = DateTime.now().subtract(const Duration(minutes: 1)).toIso8601String();
+    final (session3, back) = await nudgeWith({'location_nudge_snoozed_until': past});
+    expect(back.visible, isTrue);
+    back.dispose();
+    session3.dispose();
   });
 }

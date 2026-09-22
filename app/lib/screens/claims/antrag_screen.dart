@@ -7,7 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/client.dart' show ApiException;
 import '../../api/models.dart';
-import '../../mock/mock_data.dart' show Mock;
+import '../../mock/mock_data.dart' show Mock, TicketType;
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
@@ -408,7 +408,7 @@ class _AntragScreenState extends State<AntragScreen> {
         routeViaDefault: _draft?.routeViaDefault ?? false,
       );
 
-  void _leave() => context.canPop() ? context.pop() : context.go(Routes.antraege);
+  void _leave() => context.canPop() ? context.pop() : context.go(Routes.claims);
 
   /// The X, and the swipe back, which is the same gesture with a different finger.
   ///
@@ -541,6 +541,7 @@ class _AntragScreenState extends State<AntragScreen> {
         ),
       1 => _Ticket(
           months: _months,
+          tickets: {for (final i in _incidents) i.ticket},
           uploads: _uploads,
           previews: _previews,
           demo: !RepoScope.read(context).isLocal || TicketPhoto.automation,
@@ -673,7 +674,7 @@ class _AntragScreenState extends State<AntragScreen> {
         if (_showPersonal && !looksLikeEmail(_pEmail.text)) PersonalField.email,
       ];
 
-  /// Weiter on „Prüfen": check what the form needs, save it, show the twelve words, move on.
+  /// Weiter on „Prüfen": check what the form needs, save it, move on.
   ///
   /// Something missing: mark every missing row, scroll to the first and put the cursor in it. A
   /// message about a field the passenger cannot see is a riddle, not a hint.
@@ -714,72 +715,12 @@ class _AntragScreenState extends State<AntragScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Speichern fehlgeschlagen: ${session.error}')));
         return;
       }
+      // The twelve words used to be shown here, on the first save (#45): one more thing to
+      // understand in the middle of the one flow that must stay simple. They live in
+      // Einstellungen → Konto and nowhere else, so there is one set of words and one place to see them.
       setState(() => _showPersonal = false);
-      // The first time somebody gives us their name is the moment the account starts to matter,
-      // so this is where the twelve words are shown, on the way forward.
-      await _maybeShowRecoveryCode();
-      if (!mounted) return;
     }
     _goToStep(1);
-  }
-
-  Future<void> _maybeShowRecoveryCode() async {
-    final session = RepoScope.read(context);
-    final code = await session.recoveryCode();
-    if (code == null || !mounted) return;
-    await showVSheet(
-      context,
-      // Not swipeable: *these* words cannot be shown again — the server keeps only a hash — so the
-      // sheet waits for an answer instead of vanishing under a stray drag. It does not follow that
-      // this is somebody's only chance at a code, and it used to say so (#21).
-      dismissible: false,
-      builder: (ctx) => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const VSheetHeader(title: 'Deine zwölf Wörter', subtitle: 'Schreib sie auf oder mach einen Screenshot.', dismissible: false),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(VSpace.sheet, 0, VSpace.sheet, VSpace.l),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Verspätomat hat kein Konto und kein Passwort. Mit diesen Wörtern holst du dein Konto, deine '
-                  'Fahrten und deine Anträge auf ein neues Telefon.',
-                  style: VText.body,
-                ),
-                const VGap.s(),
-                Text(
-                  'Genau diese Wörter können wir dir später nicht noch einmal zeigen — wir bewahren nur einen '
-                  'Abdruck davon auf. Verlegt? Unter Einstellungen → Konto bekommst du jederzeit neue.',
-                  style: VText.bodyS.copyWith(color: VColors.ink2),
-                ),
-                const VGap.m(),
-                VCard(child: SelectableText(code, style: VText.mono.copyWith(fontSize: 18, height: 1.5))),
-                const VGap.s(),
-                VGhostButton(
-                  label: 'Kopieren',
-                  icon: Icons.content_copy_outlined,
-                  color: VColors.ink2,
-                  onTap: () {
-                    Clipboard.setData(ClipboardData(text: code));
-                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Kopiert. Leg sie irgendwo hin, wo du sie wiederfindest.')));
-                  },
-                ),
-                const VGap.xs(),
-                const VNoteBanner(
-                  icon: Icons.lock_outline,
-                  text: 'Wer diese Wörter hat, hat dein Konto. Aufschreiben ja, verschicken nein.',
-                ),
-                const VGap.l(),
-                VPrimaryButton(label: 'Ich habe sie notiert', onTap: () => Navigator.of(ctx).pop()),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -801,7 +742,7 @@ class _Ueberblick extends StatelessWidget {
     'Ein Bild deines Tickets. Das will die Bahn sehen, mehr Nachweis braucht es nicht.',
     'Wohin die Entschädigung überwiesen wird. Der Verein steht auf dem Formular, nicht wir.',
     'Das ausgefüllte EU-Formular lesen und mit deinem Namen bestätigen.',
-    'Abschicken. Von deiner Verspätomat-Adresse, mit Kopie in dein Postfach.',
+    'Abschicken. Von deiner Verspätomat-Adresse, mit Kopie an deine private E-Mail-Adresse.',
   ];
 
   /// One glyph per step, and each names the step's object rather than its verb: the form, the
@@ -827,7 +768,7 @@ class _Ueberblick extends StatelessWidget {
         children: [
           VPrimaryButton(label: 'Los geht\'s', trailingIcon: Icons.arrow_forward, onTap: onStart),
           const VGap.xs(),
-          VGhostButton(label: 'Später', onTap: () => context.canPop() ? context.pop() : context.go(Routes.antraege)),
+          VGhostButton(label: 'Später', onTap: () => context.canPop() ? context.pop() : context.go(Routes.claims)),
         ],
       ),
       child: Column(
@@ -1007,7 +948,7 @@ class _Pruefen extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Deine E-Mail-Adresse sieht die Bahn nie. Der Antrag geht über eine Adresse von uns raus; '
-                  'was zurückkommt, leiten wir sofort in dein Postfach weiter.',
+                  'was zurückkommt, leiten wir sofort an deine private E-Mail-Adresse weiter.',
                   style: VText.caption,
                 ),
               ),
@@ -1301,9 +1242,72 @@ class _Field extends StatelessWidget {
 // 11.2 Ticket
 // ---------------------------------------------------------------------------
 
+/// „August und September 2026": the months of a form as one phrase.
+String _months(List<String> months) {
+  final labels = months.map(monthLabel).toList();
+  if (labels.length < 2) return labels.join();
+  return '${labels.take(labels.length - 1).join(', ')} und ${labels.last}';
+}
+
+/// What a good picture is, for the tickets on this form (#52). A screenshot is enough — the
+/// desk takes a copy of the ticket (docs/03: „for the D-Ticket: a screenshot with the barcode"),
+/// and the upload takes PNG, JPG or HEIC, so a screenshot is also the simplest thing to hand in.
+class _WhatToUpload extends StatelessWidget {
+  const _WhatToUpload({required this.tickets, required this.several});
+  final Set<TicketType> tickets;
+  final bool several;
+
+  @override
+  Widget build(BuildContext context) {
+    // No cases known yet (a draft still loading): say what holds for the commonest ticket.
+    final kinds = tickets.isEmpty ? const {TicketType.deutschlandticket} : tickets;
+    return VCard(
+      tone: VCardTone.sunken,
+      padding: const EdgeInsets.all(VSpace.cardTight),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Ein Screenshot reicht.', style: VText.bodyStrong),
+          const SizedBox(height: 2),
+          Text('Wichtig ist nur, dass das Ticket, seine Gültigkeit und der QR-Code darauf zu lesen sind.', style: VText.bodyS.copyWith(color: VColors.ink2)),
+          if (kinds.contains(TicketType.deutschlandticket)) ...[
+            const VGap.s(),
+            Text('Deutschlandticket', style: VText.bodySStrong),
+            Text(
+              several
+                  ? 'Das Ticket aus der App, in der du es hast. Es gilt immer einen Kalendermonat, auch im Abo – für jeden Monat also das Ticket dieses Monats.'
+                  : 'Das Ticket aus der App, in der du es hast, für den Monat der Fahrt. Es gilt immer einen Kalendermonat, auch im Abo.',
+              style: VText.bodyS.copyWith(color: VColors.ink2),
+            ),
+          ],
+          if (kinds.contains(TicketType.zeitkarte)) ...[
+            const VGap.s(),
+            Text('Andere Zeitkarte, auch im Fernverkehr', style: VText.bodySStrong),
+            Text(
+              several
+                  ? 'Die Karte mit ihrem Geltungszeitraum. Gilt eine Karte für mehrere dieser Monate, häng dasselbe Bild bei jedem Monat an.'
+                  : 'Die Karte mit ihrem Geltungszeitraum.',
+              style: VText.bodyS.copyWith(color: VColors.ink2),
+            ),
+          ],
+          if (kinds.contains(TicketType.einzelfahrkarte)) ...[
+            const VGap.s(),
+            Text('Einzelfahrkarte, etwa im ICE oder IC', style: VText.bodySStrong),
+            Text(
+              'Die Fahrkarte der verspäteten Fahrt: ein Screenshot aus dem DB Navigator oder ein Foto der Papierfahrkarte, mit der Auftragsnummer.',
+              style: VText.bodyS.copyWith(color: VColors.ink2),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _Ticket extends StatelessWidget {
   const _Ticket({
     required this.months,
+    required this.tickets,
     required this.uploads,
     required this.previews,
     required this.demo,
@@ -1311,6 +1315,10 @@ class _Ticket extends StatelessWidget {
     required this.onAttach,
   });
   final List<String> months;
+
+  /// The ticket kinds of the cases on this form, so the step can say what to photograph (#52).
+  final Set<TicketType> tickets;
+
   final Map<String, String> uploads;
 
   /// The bytes of what was attached this session, so the step can show it back.
@@ -1329,14 +1337,19 @@ class _Ticket extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(several ? 'Füge einen Screenshot pro Monat an.' : 'Füge einen Screenshot deines Tickets mit Barcode an.', style: VText.h2),
+        Text(several ? 'Ein Bild deines Tickets für jeden Monat.' : 'Ein Bild deines Tickets.', style: VText.h2),
         const VGap.s(),
+        // #52: people did not see why one Antrag asks for two pictures. The reason is the form's,
+        // not ours: the slots are the calendar months of the cases (`ticket_months`, handlers.rs),
+        // and a month ticket is a new ticket every month.
         Text(
           several
-              ? 'Jeder Monat ist rechtlich ein eigenes Ticket. Die Bahn will jedes sehen: ${months.map(monthLabel).join(' und ')}.'
-              : 'Die Bahn will das Ticket sehen. Mehr Nachweis braucht es nicht.',
-          style: VText.caption,
+              ? 'Deine Verspätungen liegen in ${_months(months)}. Die Bahn will für jede Fahrt das Ticket sehen, das an dem Tag galt – deshalb ein Bild pro Monat.'
+              : 'Die Bahn will das Ticket sehen, das an dem Tag galt. Mehr Nachweis braucht es nicht.',
+          style: VText.body.copyWith(color: VColors.ink2),
         ),
+        const VGap.m(),
+        _WhatToUpload(tickets: tickets, several: several),
         const VGap.l(),
         for (final m in months) ...[
           if (several) ...[
@@ -1658,7 +1671,7 @@ class _Senden extends StatelessWidget {
       // The desk by name where there is no address to show: the walkthrough has no route, and an
       // invented one was exactly what read as a made-up destination (#22).
       to: draft.deskEmail ?? (demo ? 'Fahrgastrechte-Stelle' : '–'),
-      bcc: pd?.email != null ? '${pd!.email} (dein Postfach)' : null,
+      bcc: pd?.email != null ? '${pd!.email} (deine private E-Mail-Adresse)' : null,
       subject: 'Fahrgastrechte: EU-Antragsformular',
       body: draftMailBody(accountHolder: draft.claim.accountHolder, claimantName: name, incidents: incidents),
       date: DateTime.now().toUtc(),
@@ -1670,7 +1683,7 @@ class _Senden extends StatelessWidget {
         Text(paperOnly ? 'Diese Stelle nimmt keine E-Mail.' : 'Wir haben alles vorbereitet. Du schickst es ab.', style: VText.h2),
         const VGap.s(),
         Text(
-          paperOnly ? 'Der Antrag geht per Post. Wir erzeugen das PDF, du druckst und schickst es.' : 'Von deiner Verspätomat-Adresse, mit Kopie an dein Postfach.',
+          paperOnly ? 'Der Antrag geht per Post. Wir erzeugen das PDF, du druckst und schickst es.' : 'Von deiner Verspätomat-Adresse, mit Kopie an deine private E-Mail-Adresse.',
           style: VText.caption,
         ),
         const VGap.m(),
@@ -1766,7 +1779,7 @@ class _Senden extends StatelessWidget {
         const VRule(),
         VKeyValue('Empfänger', draft.claim.accountHolder),
         const VGap.s(),
-        Text('Nach dem Absenden steht alles auf „eingereicht“. Die Antwort der Bahn landet in der App und in deinem Postfach.', style: VText.caption),
+        Text('Nach dem Absenden steht alles auf „eingereicht“. Die Antwort der Bahn landet in der App und kommt per Mail an deine private E-Mail-Adresse.', style: VText.caption),
         const VGap.s(),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1774,7 +1787,7 @@ class _Senden extends StatelessWidget {
             Expanded(child: Text('Das ist dein Antrag, in deinem Namen. Wir überbringen ihn nur und schreiben der Bahn nie von uns aus.', style: VText.caption)),
             const SizedBox(width: VSpace.s),
             InkWell(
-              onTap: () => context.push(Routes.rechtliches('bote')),
+              onTap: () => context.push(Routes.legal('bote')),
               borderRadius: BorderRadius.circular(4),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -1812,10 +1825,10 @@ class _SentState extends State<_Sent> {
   /// interesting part is what the railway answers — so it goes on instead of stopping.
   void _leave(BuildContext context) {
     if (widget.demo) {
-      context.push(Routes.vorfuehrungWeiter);
+      context.push(Routes.demoClaimNext);
       return;
     }
-    context.canPop() ? context.pop() : context.go(Routes.antraege);
+    context.canPop() ? context.pop() : context.go(Routes.claims);
   }
 
   @override
@@ -1849,7 +1862,7 @@ class _SentState extends State<_Sent> {
                   Text(
                     widget.demo
                         ? 'An ${widget.mail.to}, von deiner Adresse — in der Vorführung.'
-                        : 'An ${widget.mail.to}, von deiner Adresse. Die Kopie ist in deinem Postfach.',
+                        : 'An ${widget.mail.to}, von deiner Adresse. Eine Kopie ging an deine private E-Mail-Adresse.',
                     style: VText.body.copyWith(color: VColors.ink2),
                   ),
                   // The walkthrough goes the whole way and stops at the letterbox: the claim stands

@@ -42,7 +42,7 @@ class _StandortScreenState extends State<StandortScreen> {
       // While-using in hand: „Immer" is the one thing still missing, and now iOS will offer it.
       case GeofencePermission.whileInUse:
         await session.updateSettings(const MePatch(locationMode: LocationMode.whileUsing));
-        if (mounted) context.go(Routes.standortImmer);
+        if (mounted) context.go(Routes.locationAlways);
       // Already Always (a reinstall, or Android granting both at once): nothing left to ask.
       case GeofencePermission.always:
         await session.updateSettings(const MePatch(locationMode: LocationMode.always));
@@ -59,7 +59,7 @@ class _StandortScreenState extends State<StandortScreen> {
     if (mounted) _onward();
   }
 
-  void _onward() => context.go(Routes.fertig);
+  void _onward() => context.go(Routes.ready);
 
   @override
   Widget build(BuildContext context) {

@@ -121,8 +121,8 @@
         {
           "heading": "Deine Verspätomat-Adresse",
           "paragraphs": [
-            "Für Anträge bekommst du eine persönliche E-Mail-Adresse auf unserer Domain, zum Beispiel fahrgast-a1b2c3d4@users.verspaetomat.de. Jeder einzelne Antrag bekommt zusätzlich eine eigene Adresse, zum Beispiel antrag-9c31af02@users.verspaetomat.de: von ihr geht dieser Antrag an das Eisenbahnunternehmen, in Kopie an dein privates Postfach, und sie steht auch als Kontaktadresse im Formular. Antworten des Unternehmens kommen dort an, werden sofort und unverändert an dein privates Postfach weitergeleitet und in der App unter „Antwort“ angezeigt.",
-            "Wir behandeln dieses Postfach als deins. Das Fernmeldegeheimnis (§ 3 TDDDG) gilt. Eine Software liest jede eingehende Mail nur, um drei Dinge zu erkennen: welche Fahrten das Unternehmen bezahlt oder ablehnt, den Betrag, den es dafür nennt, und ob es eine Rückfrage stellt. Dafür lesen Sprachmodelle von OpenAI den Text der Antwort; bezahlt oder abgelehnt ist eine Fahrt nur, wenn zwei von ihnen dasselbe lesen. Vorher entfernen wir deinen Namen, deine Anschrift, E-Mail-Adressen, Ticketnummer, IBAN und Telefonnummern, soweit eine Software sie erkennen kann, und den zitierten Verlauf (siehe Dienstleister). Mehr wird nicht ausgewertet, nichts wird zu anderen Zwecken verwendet, niemand bei uns liest mit. Antworten auf Rückfragen schreibst du selbst in der App; wir schicken nichts, was du nicht abgeschickt hast.",
+            "Für Anträge bekommst du eine persönliche E-Mail-Adresse auf unserer Domain, zum Beispiel fahrgast-a1b2c3d4@users.verspaetomat.de. Jeder einzelne Antrag bekommt zusätzlich eine eigene Adresse, zum Beispiel antrag-9c31af02@users.verspaetomat.de: von ihr geht dieser Antrag an das Eisenbahnunternehmen, in Kopie an deine private E-Mail-Adresse, und sie steht auch als Kontaktadresse im Formular. Antworten des Unternehmens kommen dort an, werden sofort und unverändert an deine private E-Mail-Adresse weitergeleitet und in der App unter „Antwort“ angezeigt.",
+            "Wir behandeln diese Adressen als deine. Das Fernmeldegeheimnis (§ 3 TDDDG) gilt. Eine Software liest jede eingehende Mail nur, um drei Dinge zu erkennen: welche Fahrten das Unternehmen bezahlt oder ablehnt, den Betrag, den es dafür nennt, und ob es eine Rückfrage stellt. Dafür lesen Sprachmodelle von OpenAI den Text der Antwort; bezahlt oder abgelehnt ist eine Fahrt nur, wenn zwei von ihnen dasselbe lesen. Vorher entfernen wir deinen Namen, deine Anschrift, E-Mail-Adressen, Ticketnummer, IBAN und Telefonnummern, soweit eine Software sie erkennen kann, und den zitierten Verlauf (siehe Dienstleister). Mehr wird nicht ausgewertet, nichts wird zu anderen Zwecken verwendet, niemand bei uns liest mit. Antworten auf Rückfragen schreibst du selbst in der App; wir schicken nichts, was du nicht abgeschickt hast.",
             "Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO; für die Adresse und die Auswertung deine Einwilligung beim ersten Antrag (Art. 6 Abs. 1 lit. a DSGVO)."
           ]
         },
@@ -169,7 +169,7 @@
           "paragraphs": [
             "Auskunft und Übertragbarkeit: Einstellungen → Deine Daten → „Daten exportieren“ gibt dir alles, was wir über dich haben, als Datei.",
             "Löschung: Einstellungen → Deine Daten → „Alles löschen“ entfernt Konto, Fahrten, Anträge, Anhänge und deine Verspätomat-Adresse sofort und endgültig. Ein bereits abgeschickter Antrag liegt beim Eisenbahnunternehmen weiter; seine Antwort sehen wir dann nicht mehr.",
-            "Berichtigung: Name, Anschrift, Postfach und Ticketnummer änderst du unter Einstellungen → Anträge. Deinen Anzeigenamen unter Einstellungen → Konto.",
+            "Berichtigung: Name, Anschrift, E-Mail-Adresse und Ticketnummer änderst du unter Einstellungen → Anträge. Deinen Anzeigenamen unter Einstellungen → Konto.",
             "Widerspruch, Beschwerde: schreib an info@zoom7.de. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, für uns ist das der Landesbeauftragte für den Datenschutz und die Informationsfreiheit Baden-Württemberg."
           ]
         }
@@ -203,8 +203,8 @@
         {
           "heading": "Jede Antwort ganz",
           "paragraphs": [
-            "Alles, was an deine Verspätomat-Adresse kommt, leiten wir vollständig und unverändert an dein privates Postfach weiter. In der App zeigen wir dieselbe Mail. Eine Software erkennt darin nur, welche Fahrten bezahlt oder abgelehnt sind, den genannten Betrag und ob eine Rückfrage kommt, damit dein Konto stimmt. Ist sie sich nicht sicher, zählt nichts, bis die Antwort eindeutig ist.",
-            "Antworten auf Rückfragen schreibst du selbst, in der App oder aus deinem Postfach. Wir bieten Textvorschläge an, abgeschickt wird nur, was du abschickst."
+            "Alles, was an deine Verspätomat-Adresse kommt, leiten wir vollständig und unverändert an deine private E-Mail-Adresse weiter. In der App zeigen wir dieselbe Mail. Eine Software erkennt darin nur, welche Fahrten bezahlt oder abgelehnt sind, den genannten Betrag und ob eine Rückfrage kommt, damit dein Konto stimmt. Ist sie sich nicht sicher, zählt nichts, bis die Antwort eindeutig ist.",
+            "Antworten auf Rückfragen schreibst du selbst, in der App oder aus deinem E-Mail-Programm. Wir bieten Textvorschläge an, abgeschickt wird nur, was du abschickst."
           ]
         },
         {

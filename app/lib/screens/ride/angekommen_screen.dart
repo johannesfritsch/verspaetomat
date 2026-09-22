@@ -16,7 +16,7 @@ import 'ride_widgets.dart';
 /// The reveal. The only screen allowed to feel like a reward.
 ///
 /// Fed by an [ApiArrivalResult] (from Unterwegs or the E1 flow), or by the
-/// last arrival the repository knows. `variant` = 68 | 14 | 59 | ausfall | nodata
+/// last arrival the repository knows. `variant` = 68 | 14 | 59 | cancelled | nodata
 /// drives the showcase in demo mode.
 class AngekommenScreen extends StatefulWidget {
   const AngekommenScreen({super.key, this.variant, this.result, this.embedded = false, this.onDone});
@@ -100,7 +100,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       '68' => repo.arrival(const ArrivalRequest(delayMinutes: 68)),
       '14' => repo.arrival(const ArrivalRequest(delayMinutes: 14)),
       '59' => repo.arrival(const ArrivalRequest(delayMinutes: 59)),
-      'ausfall' => repo.arrival(const ArrivalRequest(delayMinutes: 60, cancelled: true)),
+      'cancelled' => repo.arrival(const ArrivalRequest(delayMinutes: 60, cancelled: true)),
       'nodata' => repo.arrival(ArrivalRequest(delayMinutes: _enteredDelay ?? 0, selfEntered: true)),
       _ => repo.arrival(const ArrivalRequest()),
     };
@@ -114,7 +114,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     try {
       await RepoScope.read(context).repo.dismissRide();
     } catch (_) {}
-    if (mounted) context.go(Routes.bahnsteig);
+    if (mounted) context.go(Routes.home);
   }
 
   @override
@@ -143,7 +143,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
             const VGap.s(),
             Text('Check ein, fahr los, komm an. Dann steht hier die Zahl.', style: VText.body.copyWith(color: VColors.ink2)),
             const VGap.l(),
-            VGhostButton(label: 'Zum Bahnsteig', onTap: () => context.go(Routes.bahnsteig)),
+            VGhostButton(label: 'Zum Bahnsteig', onTap: () => context.go(Routes.home)),
           ],
         ],
       );
@@ -181,7 +181,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     final actions = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (canFile) VPrimaryButton(label: 'Jetzt einreichen', onTap: () => context.push('${Routes.antrag}?desk=${Uri.encodeComponent(desk)}')),
+        if (canFile) VPrimaryButton(label: 'Jetzt einreichen', onTap: () => context.push('${Routes.claim}?desk=${Uri.encodeComponent(desk)}')),
         Row(
           children: [
             Expanded(

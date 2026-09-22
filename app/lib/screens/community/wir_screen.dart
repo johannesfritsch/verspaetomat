@@ -79,7 +79,7 @@ class _WirScreenState extends State<WirScreen> {
       controller: _loader,
       placeholder: (context) => VTabScaffold(
         art: VHeaderSceneArt.landscapeWir,
-        header: VTabHeader(title: 'Wir', tagline: 'Gemeinsam mehr bewegen.', narrow: true, onSettings: () => context.push(Routes.einstellungen)),
+        header: VTabHeader(title: 'Wir', tagline: 'Gemeinsam mehr bewegen.', narrow: true, onSettings: () => context.push(Routes.settings)),
         children: const [VSkeletonBoard(look: VBoardLook.red), VSkeletonList()],
       ),
       load: (repo) async {
@@ -106,7 +106,7 @@ class _WirScreenState extends State<WirScreen> {
             subtitle: '${fmtInt(c.users)} Fahrgäste',
             tagline: 'Gemeinsam mehr bewegen.',
             narrow: true,
-            onSettings: () => context.push(Routes.einstellungen).then((_) => refresh()),
+            onSettings: () => context.push(Routes.settings).then((_) => refresh()),
           ),
           children: [
             // The community's big number first (docs/18); no community euro totals here. Wir takes
@@ -309,7 +309,7 @@ class _NgoCard extends StatelessWidget {
       title: ngo.name,
       subtitle: 'Geschichte und Zweck',
       trailing: Text(fmtEuroWhole(ngo.confirmedCents / 100), style: VText.numberS),
-      onTap: () => context.push('${Routes.zweck}?id=${ngo.id}'),
+      onTap: () => context.push('${Routes.cause}?id=${ngo.id}'),
     );
   }
 }

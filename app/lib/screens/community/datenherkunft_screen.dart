@@ -25,7 +25,7 @@ const _rows = <_Row>[
   _Row('„Älteste Verspätung verfällt in 3 Wochen“', 'Drei Monate nach dem Fahrtdatum, die gesetzliche Frist.', fresh: 'Täglich'),
   _Row('Name, Anschrift, Ticketnummer auf dem Antrag', 'Von dir eingetippt, beim ersten Antrag. Gespeichert auf deinem Telefon.', missing: 'Wird beim Antrag abgefragt.'),
   _Row('Ticket-Screenshot auf dem Antrag', 'Von dir angehängt, aus deiner Ticket-App oder den Fotos. Verschlüsselt aufbewahrt, nur solange der Antrag offen ist, falls die Bahn nachfragt.', missing: 'Ohne Screenshot geht kein Antrag raus.'),
-  _Row('Deine Verspätomat-Adresse', 'Von uns angelegt, bei deinem ersten Antrag. Dein Name ist der Absendername. Jede Mail raus bekommt eine Kopie in dein privates Postfach; jede Mail rein wird komplett dorthin weitergeleitet.'),
+  _Row('Deine Verspätomat-Adresse', 'Von uns angelegt, bei deinem ersten Antrag. Dein Name ist der Absendername. Jede Mail raus geht in Kopie an deine private E-Mail-Adresse; jede Mail rein wird komplett dorthin weitergeleitet.'),
   _Row('Name und Konto des Vereins auf dem Antrag', 'Vom Verein schriftlich an uns gegeben. Auf der Vereinsseite vollständig sichtbar.', fresh: 'Wenn der Verein uns etwas Neues sagt'),
   _Row('Das Antragsformular selbst', 'Das offizielle EU-Fahrgastrechteformular, oder das DB-Formular für den Postweg, von der App ausgefüllt.', fresh: 'Formularversion steht auf der Vorschau'),
   _Row('Wohin der Antrag geht', 'Unser Betreiberverzeichnis: das gemeinsame Servicecenter für rund 40 Bahnen, eine eigene Adresse für die übrigen.', fresh: 'Monatlich geprüft', missing: 'Die App zeigt die Fahrgastrechte-Seite des Betreibers und lässt dich die Adresse eintragen.'),

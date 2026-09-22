@@ -23,7 +23,7 @@ fn random_token() -> String {
     hex::encode(b)
 }
 
-/// Twelve short words, easy to screenshot, hard to guess (~ 2^66).
+/// Twelve short words out of 64, easy to screenshot, hard to guess (64^12 = 2^72).
 pub fn recovery_code() -> String {
     const WORDS: [&str; 64] = [
         "gleis", "bahnsteig", "signal", "weiche", "uhr", "minute", "ampel", "tunnel", "brücke", "kurve", "halt", "ziel",
@@ -58,16 +58,22 @@ pub struct Recover {
     pub recovery_code: String,
 }
 
+/// What a typed or pasted code is compared as: lower case, single spaces, nothing around it. The
+/// words are minted in exactly this form, so a code copied out of the app hashes to what is stored.
+fn normalize_recovery_code(raw: &str) -> String {
+    raw.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// `POST /v1/devices/recover` → a fresh token for the same customer.
 pub async fn recover_device(State(s): State<AppState>, Json(r): Json<Recover>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let code = r.recovery_code.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
+    let code = normalize_recovery_code(&r.recovery_code);
     let id: Option<Uuid> = sqlx::query_scalar("select id from devices where recovery_hash = $1")
         .bind(sha256(&code))
         .fetch_optional(&s.pool)
         .await
         .map_err(internal)?;
     let Some(id) = id else {
-        // Twelve words out of a 2048-word list is 2^132, so blind guessing is hopeless — but a
+        // Twelve words out of 64 is 2^72, so blind guessing is hopeless — but a
         // wrong answer should still cost something, and a burst of them should be visible rather
         // than silent. The sleep is short enough that a person who mistyped one word does not
         // notice and long enough that a script cannot run flat out.
@@ -121,4 +127,41 @@ impl FromRequestParts<AppState> for Customer {
 pub fn internal<E: std::fmt::Display>(e: E) -> (StatusCode, Json<Value>) {
     tracing::error!("internal: {e}");
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal" })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Issue #46: the words shown are the words that work. Whatever the app shows is the minted
+    /// string itself, so what matters is that it survives the trip back — typed with capitals, with
+    /// a line break from the notes app, with spaces around it — and still hashes to what is stored.
+    #[test]
+    fn a_minted_code_survives_being_typed_back() {
+        for _ in 0..200 {
+            let code = recovery_code();
+            let words: Vec<_> = code.split(' ').collect();
+            assert_eq!(words.len(), 12, "{code}");
+            assert!(words.iter().all(|w| !w.is_empty() && w.chars().all(|c| c.is_lowercase())), "{code}");
+            assert_eq!(normalize_recovery_code(&code), code, "minted form is the compared form");
+            let sloppy = format!("  {}\n", code.to_uppercase().replacen(' ', "\n", 3).replacen(' ', "   ", 2));
+            assert_eq!(sha256(&normalize_recovery_code(&sloppy)), sha256(&code), "{sloppy:?}");
+        }
+    }
+
+    /// The app's word boxes accept `a-z äöüß` and nothing else (`wiederherstellen_screen.dart`), so a
+    /// minted word with any other letter could be shown but never typed back in.
+    #[test]
+    fn every_word_can_be_typed_into_the_restore_screen() {
+        for _ in 0..200 {
+            for w in recovery_code().split(' ') {
+                assert!(w.chars().all(|c| c.is_ascii_lowercase() || "äöüß".contains(c)), "{w}");
+            }
+        }
+    }
+
+    #[test]
+    fn two_codes_differ() {
+        assert_ne!(recovery_code(), recovery_code());
+    }
 }

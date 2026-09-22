@@ -50,12 +50,12 @@ class _StandortImmerScreenState extends State<StandortImmerScreen> {
     if (mounted) _onward();
   }
 
-  void _onward() => context.go(Routes.fertig);
+  void _onward() => context.go(Routes.ready);
 
   @override
   Widget build(BuildContext context) {
     return SetupStep(
-      onBack: () => context.go(Routes.standort),
+      onBack: () => context.go(Routes.location),
       asset: 'assets/onboarding/setup-immer.webp',
       title: 'Fast geschafft.',
       busy: _busy,

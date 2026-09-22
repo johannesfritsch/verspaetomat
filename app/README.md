@@ -13,7 +13,7 @@ flutter run -d "iPhone 15 Pro"      # or any simulator / device / chrome / macos
 Open a specific screen directly (handy for screenshots):
 
 ```bash
-flutter run -d "iPhone 15 Pro" --dart-define=INITIAL_ROUTE=/angekommen?variant=68
+flutter run -d "iPhone 15 Pro" --dart-define=INITIAL_ROUTE=/arrived?variant=68
 ```
 
 Route names live in `lib/router.dart`.

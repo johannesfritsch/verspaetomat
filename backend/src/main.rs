@@ -205,6 +205,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/rides/current", get(handlers::current_ride))
         .route("/v1/rides/current/arrival", post(handlers::arrival))
         .route("/v1/rides/current/dismiss", post(handlers::dismiss))
+        // A ride entered after the fact. English path since #44; the German one stays for every build
+        // that still calls it.
+        .route("/v1/rides/retroactive", post(handlers::nachtrag))
         .route("/v1/rides/nachtrag", post(handlers::nachtrag))
         .route("/v1/rides/{id}", delete(journeys::delete_ride))
         // ledger and claims

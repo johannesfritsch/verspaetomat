@@ -6,7 +6,7 @@
 //
 // flutter test integration_test/workflow_test.dart -d <simulator udid> \
 //   --dart-define=API_URL=http://127.0.0.1:8081 --dart-define=BACKEND=local \
-//   --dart-define=NO_LOCATION=1 --dart-define=E2E=true --dart-define=INITIAL_ROUTE=/bahnsteig \
+//   --dart-define=NO_LOCATION=1 --dart-define=E2E=true --dart-define=INITIAL_ROUTE=/home \
 //   --dart-define=ADMIN_TOKEN=stellwerk
 //
 // Needs real departures at Köln Hbf, so it only passes while trains run.
@@ -15,6 +15,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,6 +24,7 @@ import 'package:verspaetomat/main.dart';
 import 'package:verspaetomat/mock/mock_data.dart' show Mock;
 import 'package:verspaetomat/api/token_store.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
+import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart';
 import 'package:verspaetomat/screens/claims/signature_board.dart';
 import 'package:verspaetomat/widgets/kit.dart' show VCheckbox, VSelectCard;
@@ -361,14 +363,6 @@ Future<void> tapTick(WidgetTester tester, Finder tick) async {
 }
 
 /// The twelve words appear once, after the first save. Answer the sheet if it is there.
-Future<void> answerWordsSheet(WidgetTester tester) async {
-  try {
-    await tapText(tester, 'Ich habe sie notiert', timeout: const Duration(seconds: 15));
-  } on TestFailure {
-    // no words this time: the customer already has a code
-  }
-}
-
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -410,7 +404,7 @@ void main() {
       await pumpUntilFound(tester, find.text('Los geht\'s'), timeout: const Duration(seconds: 40));
       await tapText(tester, 'Los geht\'s');
 
-      // Step 1: personal data and the recovery code appear on the first claim only.
+      // Step 1: personal data appear on the first claim only; the twelve words stay out of the Antrag (#45).
       await pumpUntilFound(tester, find.text('DEINE ANGABEN'), timeout: const Duration(seconds: 40));
       if (find.byType(TextField).evaluate().length >= 4) {
         final fields = find.byType(TextField);
@@ -420,9 +414,9 @@ void main() {
         await tester.enterText(fields.at(3), 'D-2026-0904-771-2201');
         await tester.pump(const Duration(milliseconds: 200));
       }
-      // One button: Weiter checks the form, saves it and, the first time, shows the twelve words.
+      // One button: Weiter checks the form, saves it and moves on — no sheet of words in between (#45).
+      expect(find.text('Ich habe sie notiert'), findsNothing);
       await tapText(tester, 'Weiter');
-      await answerWordsSheet(tester);
 
       // Step 2: one ticket image per month covered.
       await pumpUntilFound(tester, find.text('Ticket anhängen'), timeout: const Duration(seconds: 20));
@@ -594,7 +588,7 @@ void main() {
       }
       await tapText(tester, 'Los geht\'s');
 
-      // Personal data and the recovery code: on the first claim of a fresh customer only. Wait on the
+      // Personal data: on the first claim of a fresh customer only. Wait on the
       // section itself — it is there whether the form or the saved details are shown, and the relay
       // address it used to wait for only exists after the first save.
       await pumpUntilFound(tester, find.text('DEINE ANGABEN'), timeout: const Duration(seconds: 40));
@@ -626,7 +620,6 @@ void main() {
 
       // Step 2: a ticket for every month the three cases cover.
       await tapText(tester, 'Weiter');
-      await answerWordsSheet(tester);
       await pumpUntilFound(tester, find.text('Ticket anhängen'), timeout: const Duration(seconds: 20));
       while (find.text('Ticket anhängen').evaluate().isNotEmpty) {
         await tapText(tester, 'Ticket anhängen');
@@ -683,10 +676,29 @@ void main() {
     final idA = a.me?.id;
     expect(idA, isNotNull, reason: 'device A should have an account after booting');
 
-    // The twelve words. Rotate, so the test does not depend on whether this slot had one already.
-    final code = await a.recoveryCode(rotate: true);
-    expect(code, isNotNull, reason: 'the server should mint a code when asked to rotate');
+    // The twelve words, read off the screen a passenger reads them from (#46): Einstellungen →
+    // Wiederherstellungscode. Testers reported two different sets; the only set a passenger can
+    // see now comes from here, so this is the set that has to move the account.
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.settings);
+    await settle(tester, 800);
+    await tapText(tester, 'Wiederherstellungscode');
+    // A slot from an earlier run already has words the server cannot show again: replace them.
+    if (find.text('Neue zwölf Wörter').evaluate().isNotEmpty) {
+      await tapText(tester, 'Neue zwölf Wörter');
+      await pumpUntilFound(tester, find.textContaining('Die alten gelten ab jetzt nicht mehr'), timeout: const Duration(seconds: 15));
+    }
+    final shown = find.byType(SelectableText);
+    await pumpUntilFound(tester, shown, timeout: const Duration(seconds: 15));
+    final code = tester.widget<SelectableText>(shown.first).data;
+    expect(code, isNotNull, reason: 'the sheet shows the words as text');
     expect(code!.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length, 12, reason: 'twelve words');
+    await tapText(tester, 'Verstanden');
+
+    // Looking again shows no words — the server has only a hash — and does not replace them.
+    await tapText(tester, 'Wiederherstellungscode');
+    await pumpUntilFound(tester, find.textContaining('Du hast schon zwölf Wörter'), timeout: const Duration(seconds: 15));
+    expect(find.byType(SelectableText), findsNothing);
+    await tapText(tester, 'Verstanden');
 
     // Asking again without rotating must NOT mint a new one: the words on the paper have to keep
     // working. This is the bug that made the whole feature useless.
