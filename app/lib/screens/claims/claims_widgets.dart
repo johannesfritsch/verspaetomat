@@ -376,17 +376,9 @@ Future<void> showEvidenceSheet(BuildContext context, ApiIncident i,
                 ],
                 const VRule(),
                 VKeyValue('Frist (gesetzlich)', Mock.longDate(i.legalDeadline)),
-                const VGap.m(),
-                VOutlineButton(
-                  label: 'Als Nachweis exportieren',
-                  icon: Icons.ios_share,
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nachweis als PDF exportiert.')));
-                  },
-                ),
+                // „Als Nachweis exportieren" stood here and only showed „exportiert" (#55).
                 if (onRestore != null) ...[
-                  const VGap.xs(),
+                  const VGap.m(),
                   VGhostButton(
                     label: 'Doch einreichen',
                     icon: Icons.undo,
