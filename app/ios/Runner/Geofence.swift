@@ -734,9 +734,21 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       cancelAllNudges(reason: c.riding ? "riding" : "off")
     }
     stopAllRegions()
-    guard c.enabled, CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else {
+    // Nothing below works without authorisation — and starting location services without it is
+    // what raised the system dialog at launch with no screen behind it (#43). CoreLocation puts
+    // the prompt up itself the moment monitoring begins on a phone that has never been asked, so
+    // `startCoarseLayer` and `requestLocation` two lines down were asking on their own account.
+    //
+    // It won the race against Dart, too: `configure` runs on the first sync with whatever the
+    // server last knew, so a returning account whose stored setting still said „always" armed the
+    // layer before the app had finished working out that the phone no longer allows it.
+    //
+    // Asking is the setup screens' job. This only arms what somebody already granted.
+    let authorised = authStatus == .authorizedAlways || authStatus == .authorizedWhenInUse
+    guard c.enabled, authorised, CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else {
       manager.stopMonitoringSignificantLocationChanges()
       discCentre = nil
+      lastEvent = "configure: nothing registered (enabled=\(c.enabled), auth=\(Self.permissionString(authStatus)))"
       reply(["registered": 0])
       return
     }
