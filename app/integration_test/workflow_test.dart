@@ -57,7 +57,12 @@ class Stellwerk {
     var reset = false;
     for (var attempt = 1; attempt <= 3; attempt++) {
       try {
-        r = await http.post(Uri.parse('$base$path'), headers: _h, body: jsonEncode(body ?? {}));
+        // No body when there is nothing to say. `ff` and `poll` read none, and a body the handler
+        // never consumes is what the kernel answers with a reset once the server closes the
+        // connection — the „applied, but the answer never came" pattern this loop retries around.
+        r = body == null
+            ? await http.post(Uri.parse('$base$path'), headers: {'x-admin-token': adminToken})
+            : await http.post(Uri.parse('$base$path'), headers: _h, body: jsonEncode(body));
         break;
       } on http.ClientException catch (e) {
         reset = true;
