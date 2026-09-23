@@ -18,6 +18,8 @@ Gamified train check-in app for Germany. Delays earn Geduldspunkte; delays of 60
 # backend on 127.0.0.1:8080 (Homebrew postgresql@17, DB "verspaetomat", ADMIN_TOKEN=stellwerk)
 cd backend && ./dev.sh
 cargo build --bins && cargo test && cargo clippy --bins      # must be warning-free
+# cargo test includes the API tests (src/api_tests.rs): a throwaway database per test on the
+# Postgres dev.sh starts, so Postgres must be running. DATABASE_URL (default in .cargo/config.toml) names it.
 
 # admin CLI against the local backend
 backend/target/debug/stellwerk customers | locate <who> "Köln Hbf" | delay <who> 68 | ff <who> | reply <who> accepted | reset <who> | forget <who> | push <who> | scan

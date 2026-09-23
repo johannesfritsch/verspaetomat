@@ -1,0 +1,4 @@
+# The API tests (src/api_tests.rs) create a throwaway database per test on this server.
+# A DATABASE_URL in the environment wins.
+[env]
+DATABASE_URL = { value = "postgres://localhost/verspaetomat", force = false }

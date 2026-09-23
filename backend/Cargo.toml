@@ -47,3 +47,7 @@ csv = "1.4.0"
 # so naming them here adds nothing to Cargo.lock.
 crc32fast = "1"
 flate2 = "1"
+
+[dev-dependencies]
+# `#[sqlx::test]` for the API tests: a fresh database per test (src/api_tests.rs).
+sqlx = { version = "0.8.6", features = ["macros"] }

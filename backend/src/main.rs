@@ -6,6 +6,8 @@
 pub use verspaetomat_api::{clock, stations, train};
 
 mod account;
+#[cfg(test)]
+mod api_tests;
 mod admin;
 mod auth;
 mod classify;
@@ -165,7 +167,26 @@ async fn main() -> anyhow::Result<()> {
     // Deadlines, reply nudges, retention: hourly on the simulated clock.
     scanner::spawn(state.clone());
 
-    let app = Router::new()
+    let app = router(state);
+
+    // Fail here rather than on the first passenger's ticket if the volume is not mounted.
+    let uploads = storage::init()?;
+    tracing::info!("uploads in {}", uploads.display());
+
+    let addr = std::env::var("BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    if std::env::var("ADMIN_TOKEN").map(|t| t == "stellwerk").unwrap_or(true) && !addr.starts_with("127.0.0.1") && !addr.starts_with("localhost") {
+        tracing::warn!("ADMIN_TOKEN is the dev default while listening on {addr}: set a long random ADMIN_TOKEN before exposing /admin");
+    }
+    tracing::info!("verspaetomat-api listening on http://{addr}");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+/// Every route the API answers, with its state. `main` serves it; the API tests (`api_tests.rs`)
+/// drive the very same table, so a route that exists in production exists under test.
+pub fn router(state: AppState) -> Router {
+    Router::new()
         .route("/health", get(handlers::health))
         // identity
         .route("/v1/devices", post(auth::create_device))
@@ -280,18 +301,5 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/stations/import", post(admin::stations_import).layer(DefaultBodyLimit::max(32 * 1024 * 1024)))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
-        .with_state(state);
-
-    // Fail here rather than on the first passenger's ticket if the volume is not mounted.
-    let uploads = storage::init()?;
-    tracing::info!("uploads in {}", uploads.display());
-
-    let addr = std::env::var("BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    if std::env::var("ADMIN_TOKEN").map(|t| t == "stellwerk").unwrap_or(true) && !addr.starts_with("127.0.0.1") && !addr.starts_with("localhost") {
-        tracing::warn!("ADMIN_TOKEN is the dev default while listening on {addr}: set a long random ADMIN_TOKEN before exposing /admin");
-    }
-    tracing::info!("verspaetomat-api listening on http://{addr}");
-    axum::serve(listener, app).await?;
-    Ok(())
+        .with_state(state)
 }
