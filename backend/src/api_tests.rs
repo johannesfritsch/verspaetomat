@@ -393,3 +393,208 @@ async fn a_draft_needs_four_euros_and_is_picked_up_again(pool: PgPool) {
     assert_eq!(count(&pool, "select count(*) from claims where customer_id = $1 and status = 'draft'", me).await, 1);
     let _ = c;
 }
+
+// ---------------------------------------------------------------------------
+// Sending a claim, and the railway's answer
+// ---------------------------------------------------------------------------
+//
+// Nothing leaves: without POSTMARK_TOKEN or SMTP_URL every send is a recorded dry run
+// (`mail.rs`). The answer comes in through the same `process_inbound` the Postmark webhook uses —
+// either planted by the Stellwerk (`/admin/customers/{id}/reply`, which plays the desk and is
+// trusted) or as a raw message on `/internal/inbound-mail/raw`, which is not.
+
+async fn admin(app: &Router, method: &str, path: &str, body: Value) -> (StatusCode, Value) {
+    let req = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("x-admin-token", std::env::var("ADMIN_TOKEN").unwrap_or_else(|_| "stellwerk".into()))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.expect("response");
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+/// A raw RFC 822 message on the inbound webhook, as the relay would hand it over.
+async fn raw_mail(app: &Router, from: &str, to: &str, subject: &str, body: &str) -> (StatusCode, Value) {
+    let msg = format!(
+        "From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nMessage-ID: <{}@test.invalid>\r\nDate: Wed, 24 Sep 2026 10:00:00 +0200\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n",
+        Uuid::new_v4()
+    );
+    let res = app.clone().oneshot(Request::builder().method("POST").uri("/internal/inbound-mail/raw").body(Body::from(msg)).unwrap()).await.unwrap();
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+struct Sent {
+    customer: Uuid,
+    token: String,
+    claim: Uuid,
+    /// The address the claim went out from; the desk answers to it.
+    reply_to: String,
+    email: String,
+}
+
+/// A customer with three cases at the Servicecenter, the route to the rehearsal address, and the
+/// claim drafted, signed and sent — through the API, the way the app does it.
+async fn sent_claim(app: &Router, pool: &PgPool) -> Sent {
+    let (s, v) = admin(app, "PUT", "/admin/routes", json!({"desk": "Servicecenter Fahrgastrechte", "to_address": "probelauf@verspaetomat.de", "label": "Test"})).await;
+    assert_eq!(s, StatusCode::OK, "route: {v}");
+    let (customer, token) = device(app).await;
+    let email = format!("fahrgast-{}@example.org", &customer.simple().to_string()[..6]);
+    let (s, _) = call(app, "PUT", "/v1/me/personal-data", Some(&token), Some(json!({"name": "Test Fahrgast", "address": "Weg 1, 50667 Köln", "email": email}))).await;
+    assert_eq!(s, StatusCode::OK);
+    for _ in 0..3 {
+        incident(pool, customer, None, 150, "gesammelt").await;
+    }
+    let (s, v) = call(app, "POST", "/v1/claims/draft", Some(&token), Some(json!({"desk": "Servicecenter Fahrgastrechte"}))).await;
+    assert_eq!(s, StatusCode::OK, "draft: {v}");
+    let claim: Uuid = v["claim"]["id"].as_str().or(v["id"].as_str()).unwrap().parse().unwrap();
+
+    let (s, _) = call(app, "POST", &format!("/v1/claims/{claim}/send"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::PRECONDITION_FAILED, "nothing leaves without a signature");
+
+    let (s, _) = call(app, "POST", &format!("/v1/claims/{claim}/sign"), Some(&token), Some(json!({"typed_name": "Test Fahrgast"}))).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, v) = call(app, "POST", &format!("/v1/claims/{claim}/send"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "send: {v}");
+    let reply_to: String = sqlx::query_scalar("select reply_address from claims where id = $1").bind(claim).fetch_one(pool).await.unwrap();
+    Sent { customer, token, claim, reply_to, email }
+}
+
+async fn claim_status(pool: &PgPool, claim: Uuid) -> String {
+    sqlx::query_scalar("select status::text from claims where id = $1").bind(claim).fetch_one(pool).await.unwrap()
+}
+
+async fn incident_statuses(pool: &PgPool, claim: Uuid) -> Vec<String> {
+    sqlx::query_scalar("select distinct i.status::text from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1 order by 1")
+        .bind(claim)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn sending_records_one_mail_to_the_route_from_the_claims_own_address(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let sent = sent_claim(&app, &pool).await;
+
+    assert_eq!(claim_status(&pool, sent.claim).await, "sent");
+    assert_eq!(incident_statuses(&pool, sent.claim).await, vec!["eingereicht"]);
+    let (to, from, bcc, dry_run, direction): (String, String, Option<String>, bool, String) =
+        sqlx::query_as("select to_addr, from_addr, bcc_addr, dry_run, direction::text from mails where claim_id = $1").bind(sent.claim).fetch_one(&pool).await.unwrap();
+    assert_eq!(direction, "out");
+    assert_eq!(to, "probelauf@verspaetomat.de", "the route's address and nothing else");
+    assert!(from.contains(&sent.reply_to), "from the claim's own address: {from}");
+    assert_eq!(bcc.as_deref(), Some(sent.email.as_str()), "a copy to the passenger");
+    assert!(dry_run, "no mail credentials in a test: recorded, not sent");
+
+    let (s, _) = call(&app, "POST", &format!("/v1/claims/{}/send", sent.claim), Some(&sent.token), None).await;
+    assert_eq!(s, StatusCode::CONFLICT, "a claim goes out once");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn an_accepted_answer_confirms_the_money_and_shows_in_the_share_figures(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let sent = sent_claim(&app, &pool).await;
+
+    let (s, v) = admin(&app, "POST", &format!("/admin/customers/{}/reply", sent.customer), json!({"outcome": "accepted"})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(claim_status(&pool, sent.claim).await, "accepted");
+    assert_eq!(incident_statuses(&pool, sent.claim).await, vec!["bestaetigt"]);
+    let confirmed: Option<i64> = sqlx::query_scalar("select amount_confirmed_cents from claims where id = $1").bind(sent.claim).fetch_one(&pool).await.unwrap();
+    assert_eq!(confirmed, Some(450), "the amount the answer names");
+
+    // #49: the moment worth a card.
+    let (_, share) = call(&app, "GET", "/v1/me/share", Some(&sent.token), None).await;
+    assert_eq!(share["confirmed_cents"], 450);
+    assert_eq!(share["confirmed_claims"][0]["claim_id"], sent.claim.to_string());
+    assert_eq!(share["confirmed_claims"][0]["cents"], 450);
+    assert_eq!(share["confirmed_claims"][0]["cases"], 3);
+
+    // The inbound mail is on the claim, and it was forwarded (dry run) to the passenger.
+    let inbound: i64 = sqlx::query_scalar("select count(*) from mails where claim_id = $1 and direction = 'inbound'").bind(sent.claim).fetch_one(&pool).await.unwrap();
+    assert_eq!(inbound, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_question_asks_and_a_refusal_refuses(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let sent = sent_claim(&app, &pool).await;
+    let (s, _) = admin(&app, "POST", &format!("/admin/customers/{}/reply", sent.customer), json!({"outcome": "question"})).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(claim_status(&pool, sent.claim).await, "question");
+    assert_eq!(incident_statuses(&pool, sent.claim).await, vec!["eingereicht"], "a question decides nothing");
+
+    let (s, _) = admin(&app, "POST", &format!("/admin/customers/{}/reply", sent.customer), json!({"outcome": "rejected"})).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(claim_status(&pool, sent.claim).await, "rejected");
+    assert_eq!(incident_statuses(&pool, sent.claim).await, vec!["abgelehnt"]);
+    let (_, share) = call(&app, "GET", "/v1/me/share", Some(&sent.token), None).await;
+    assert_eq!(share["confirmed_cents"], 0, "a refusal pays nobody");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn only_the_desk_can_confirm_money(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let sent = sent_claim(&app, &pool).await;
+    let paid = "Sehr geehrte Damen und Herren,\n\nwir haben Ihren Antrag geprüft und eine Entschädigung von insgesamt 4,50 EUR festgestellt. Der Betrag wird überwiesen.\n\nMit freundlichen Grüßen\nIhr Servicecenter Fahrgastrechte";
+
+    // The passenger holds the reply address — they get a copy of every claim — and could write
+    // this themselves. The reading has its own rule for that („sent from the passenger's own
+    // address"), ahead of the sender check.
+    let (s, v) = raw_mail(&app, &format!("Test Fahrgast <{}>", sent.email), &sent.reply_to, "Re: Fahrgastrechte: EU-Antragsformular", paid).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(claim_status(&pool, sent.claim).await, "sent", "the passenger cannot pay themselves");
+
+    // Anybody else who learnt the address: not one of the route's answer domains (`guard_sender`).
+    let (s, _) = raw_mail(&app, "Servicecenter Fahrgastrechte <service@fahrgastrechte-erstattung.example>", &sent.reply_to, "Ihr Antrag", paid).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(claim_status(&pool, sent.claim).await, "sent", "not the desk's domain: nothing moves");
+
+    // From the desk's domain, but nothing on the receiving side verified it (no DKIM or SPF verdict
+    // the server may trust): still nothing.
+    let (s, _) = raw_mail(&app, "Servicecenter <antwort@verspaetomat.de>", &sent.reply_to, "Ihr Antrag", paid).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(claim_status(&pool, sent.claim).await, "sent", "an unverified sender moves nothing");
+    assert_eq!(incident_statuses(&pool, sent.claim).await, vec!["eingereicht"]);
+
+    // All three are kept, read, and on the claim — only without consequence.
+    let inbound: i64 = sqlx::query_scalar("select count(*) from mails where claim_id = $1 and direction = 'inbound'").bind(sent.claim).fetch_one(&pool).await.unwrap();
+    assert_eq!(inbound, 3);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn an_acknowledgement_and_an_absence_note_decide_nothing(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let sent = sent_claim(&app, &pool).await;
+    for (subject, body) in [
+        ("Eingangsbestätigung Ihres Antrags", "Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Nachricht. Ihr Antrag ist bei uns eingegangen und wird bearbeitet. Bitte sehen Sie von Rückfragen ab.\n\nIhr Servicecenter Fahrgastrechte"),
+        ("Abwesenheitsnotiz", "Ich bin bis zum 30.09. nicht im Büro und habe keinen Zugriff auf meine E-Mails. In dringenden Fällen wenden Sie sich bitte an das Servicecenter."),
+    ] {
+        let (s, v) = raw_mail(&app, "Servicecenter <antwort@verspaetomat.de>", &sent.reply_to, subject, body).await;
+        assert_eq!(s, StatusCode::OK, "{subject}: {v}");
+        assert_eq!(claim_status(&pool, sent.claim).await, "sent", "{subject}");
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_bounce_marks_the_claim_whoever_sends_it(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let sent = sent_claim(&app, &pool).await;
+    let (s, v) = raw_mail(
+        &app,
+        "Mail Delivery System <MAILER-DAEMON@mx.example.net>",
+        &sent.reply_to,
+        "Undelivered Mail Returned to Sender",
+        "This is the mail system at host mx.example.net.\n\nI'm sorry to have to inform you that your message could not be delivered to one or more recipients.\n\n<probelauf@verspaetomat.de>: host mx.example.net said: 550 5.1.1 User unknown",
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    // Bounces come from mail servers, not the desk, so the sender check does not apply to them
+    // (`guard_sender`): the claim did not arrive, and the passenger has to hear that.
+    assert_eq!(claim_status(&pool, sent.claim).await, "bounced");
+}
