@@ -62,7 +62,14 @@ class HttpRepository implements AppRepository {
   String get label => 'Lokal (${client.baseUrl})';
 
   /// Creates the device on first launch. Returns true when a token exists afterwards.
-  Future<bool> ensureDevice() async {
+  /// A device for this install, made only when the keychain has answered „none". One at a
+  /// time: the session, the 401 handler and the geofence sync used to ask in the same second,
+  /// and each made an account of its own — four in seven seconds on 23 September 2026.
+  /// A locked keychain throws [KeychainUnavailable] through to the caller.
+  Future<bool> ensureDevice() => _ensuring ??= _ensureDevice().whenComplete(() => _ensuring = null);
+  Future<bool>? _ensuring;
+
+  Future<bool> _ensureDevice() async {
     if (await tokens.token() != null) return true;
     final auth = await client.createDevice();
     await tokens.save(deviceId: auth.deviceId, token: auth.token);

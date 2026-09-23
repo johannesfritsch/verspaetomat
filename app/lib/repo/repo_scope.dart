@@ -42,6 +42,16 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
     _http.onFlags = _flags.setPersonal;
     _http.client.awaitDevice = () => _deviceReady.future;
     _http.client.onUnauthorized = () async {
+      // Only a token the server has refused is thrown away. With nothing readable to send (a
+      // locked keychain) the 401 says nothing about the account, and replacing it here is how
+      // a passenger lost a ride on 23 September 2026.
+      final String? sent;
+      try {
+        sent = await this.tokens.token();
+      } on KeychainUnavailable {
+        return;
+      }
+      if (sent == null) return;
       await this.tokens.clear();
       await _http.ensureDevice();
     };
@@ -195,7 +205,12 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) unawaited(flagsUpdateCheck());
+    if (state == AppLifecycleState.resumed) {
+      unawaited(flagsUpdateCheck());
+      // A start with the phone locked could not read the keychain and stopped short; the
+      // passenger opening the app is the moment it can.
+      if (isLocal && me == null && !busy) unawaited(_bootstrap());
+    }
   }
 
   /// The check for a newer flag document (issue #41). A no-op in Demo, which has no server to
