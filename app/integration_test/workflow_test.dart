@@ -561,6 +561,82 @@ void main() {
   /// The Antrag's own workings, with backdated rides instead of real ones: the pre-step, taking
   /// a case out of the form (and the 4 € floor that refuses to let it go), and a draft that is
   /// still there — with its ticket — when the passenger comes back to it.
+  /// #57: the other two answers at a change. „Leider verpasst" asks the server for the next way
+  /// on — for real, from Transitous — and the sheet turns into „Anschluss verpasst." with it;
+  /// „Fahrt hier abbrechen" then ends the journey at the change, with the delay up to there.
+  testWidgets('journey with a connection: missed, next train, end at the change', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final demo = DemoState();
+    final session = Session(demo: demo, prefs: prefs, apiUrl: apiUrl, tokens: TokenStore(namespace: 'e2e.'));
+    session.init();
+    await tester.pumpWidget(VerspaetomatApp(state: demo, session: session));
+    await settle(tester, 1500);
+
+    final sw = Stellwerk(apiUrl);
+    String? customer;
+    try {
+      await pumpUntilFound(tester, homeOrRide, timeout: const Duration(seconds: 40));
+      customer = (await sw.customers()).first['id'] as String;
+      await sw.reset(customer);
+      await pumpUntilFound(tester, homeIdle, timeout: const Duration(seconds: 20));
+      await sw.locate(customer, 'Köln Hbf');
+      await sw.clearOverrides();
+
+      final picked = await chooseJourney(tester, 'Arnsberg', match: 'Arnsberg, Bahnhof', connecting: true);
+      if (picked == null) {
+        // ignore: avoid_print
+        print('no connecting itinerary offered right now; missed-connection scenario skipped');
+        return;
+      }
+      await pumpUntilFound(tester, rideSheet, timeout: const Duration(seconds: 40));
+      await tapIcon(tester, Icons.expand_more);
+      await pumpUntilFound(tester, rideBar, timeout: const Duration(seconds: 20));
+
+      // Leg 1 ends; open the sheet on the change.
+      await sw.fastForward(customer);
+      await pumpUntilFound(tester, find.text('Ich bin drin'), timeout: const Duration(seconds: 60));
+      final planned = await sw.journey(customer);
+      final plannedNext = (planned['journey'] ?? planned)['next_leg']?['trip_id'];
+      await tester.tap(rideBar);
+      final missedAnswer = find.byKey(const Key('transfer-missed'));
+      await pumpUntilFound(tester, missedAnswer, timeout: const Duration(seconds: 30));
+
+      // „Leider verpasst": the next way on, from the server.
+      await tester.ensureVisible(missedAnswer);
+      await tester.tap(missedAnswer);
+      await pumpUntilFound(tester, find.text('Anschluss verpasst.'), timeout: const Duration(seconds: 60));
+      expect(find.text('NÄCHSTE MÖGLICHKEIT'), findsOneWidget, reason: 'the card says what it now shows');
+      final after = await sw.journey(customer);
+      final j = after['journey'] ?? after;
+      expect(j['status'], 'transfer', reason: 'still at the change, with another train to take');
+      expect(j['missed_connection'], true);
+      expect(j['next_leg']?['trip_id'], isNot(plannedNext), reason: 'not the train that left');
+
+      // „Fahrt hier abbrechen": the journey ends here.
+      final endAnswer = find.byKey(const Key('transfer-end'));
+      await tester.ensureVisible(endAnswer);
+      await tester.tap(endAnswer);
+      await settle(tester, 1500);
+      for (var i = 0; i < 40; i++) {
+        final st = await sw.journey(customer).catchError((_) => <String, dynamic>{});
+        final status = (st['journey'] ?? st)['status'];
+        if (status != 'transfer') {
+          expect(status, anyOf('arrived', 'abandoned'), reason: 'ended at the change');
+          break;
+        }
+        await settle(tester, 500);
+      }
+      final ended = await sw.journey(customer).catchError((_) => <String, dynamic>{});
+      expect((ended['journey'] ?? ended)['status'], isNot('transfer'), reason: '„Fahrt hier abbrechen" ends the journey');
+    } finally {
+      if (customer != null) {
+        try {
+          await sw.reset(customer);
+        } catch (_) {}
+      }
+    }
+  }, timeout: const Timeout(Duration(minutes: 15)));
+
   testWidgets('Antrag: Überblick, abgewählte Fälle, ein Entwurf der liegen bleibt', (tester) async {
     final prefs = await SharedPreferences.getInstance();
     final demo = DemoState();
