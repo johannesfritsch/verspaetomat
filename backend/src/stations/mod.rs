@@ -316,6 +316,25 @@ pub async fn load(pool: &PgPool) -> anyhow::Result<Index> {
     Ok(index)
 }
 
+impl Index {
+    /// The index a build would produce, before it is written: for asking a candidate set the
+    /// questions a passenger will ask of the table (`gtfs::check_findable`). The ids are positions,
+    /// not ours — nothing may hand them out.
+    pub fn from_candidates(set: &[Candidate]) -> Index {
+        let mut index = Index::default();
+        for (at, c) in set.iter().enumerate() {
+            let id = at as i32 + 1;
+            for s in &c.sources {
+                index.by_source.insert(s.clone(), at);
+            }
+            index.by_id.insert(id, at);
+            let (plain, normal) = (c.name.to_lowercase(), normalise_station_name(&c.name));
+            index.all.push(Station { id, name: c.name.clone(), lat: c.lat, lon: c.lon, rank: c.rank, sources: c.sources.clone(), plain, normal });
+        }
+        index
+    }
+}
+
 /// What an import is allowed to do before somebody has to look at it.
 ///
 /// Every one of these is a failure a prototype actually produced while this was being designed, so

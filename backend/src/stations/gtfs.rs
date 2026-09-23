@@ -240,9 +240,87 @@ pub async fn build(opts: BuildOptions) -> Result<CandidateSet> {
     // #60: „Hauptbahnhof (oben)" becomes „Stuttgart, Hauptbahnhof (oben)".
     let named = super::cities::qualify_names(&mut stations);
     opts.say(format!("{named} Namen um ihre Stadt ergänzt"));
+    check_findable(&stations)?;
+    opts.say(format!("Suche geprüft: {} Hauptbahnhöfe unter ihrem Stadtnamen gefunden", FINDABLE.len()));
 
     opts.say(format!("fertig in {} s", started.elapsed().as_secs()));
     Ok(CandidateSet { generated: Utc::now(), feed_version, stations })
+}
+
+/// Main stations a passenger must find by typing the city's name, in the first page of results.
+///
+/// #60 shipped a table in which „Stuttgart" found nothing: VVS names its stops without the city,
+/// and every other check here passed, because a table can be complete, well folded and free of
+/// duplicates and still not answer the question passengers ask. This asks it. The list is the
+/// biggest cities plus the ones whose feed names have caught us out; a miss refuses the build.
+const FINDABLE: &[(&str, &str)] = &[
+    ("Berlin", "Berlin Hbf"),
+    ("Hamburg", "Hamburg Hbf"),
+    ("München", "München Hbf"),
+    ("Köln", "Köln Hbf"),
+    ("Frankfurt", "Frankfurt (Main) Hbf"),
+    ("Stuttgart", "Stuttgart Hbf"),
+    ("Düsseldorf", "Düsseldorf Hbf"),
+    ("Leipzig", "Leipzig Hbf"),
+    ("Dortmund", "Dortmund Hbf"),
+    ("Essen", "Essen Hbf"),
+    ("Bremen", "Bremen Hbf"),
+    ("Dresden", "Dresden Hbf"),
+    ("Hannover", "Hannover Hbf"),
+    ("Nürnberg", "Nürnberg Hbf"),
+    ("Duisburg", "Duisburg Hbf"),
+    ("Bochum", "Bochum Hbf"),
+    ("Wuppertal", "Wuppertal Hbf"),
+    ("Bielefeld", "Bielefeld Hbf"),
+    ("Bonn", "Bonn Hbf"),
+    ("Münster", "Münster Hbf"),
+    ("Karlsruhe", "Karlsruhe Hbf"),
+    ("Mannheim", "Mannheim Hbf"),
+    ("Augsburg", "Augsburg Hbf"),
+    ("Wiesbaden", "Wiesbaden Hbf"),
+    ("Kiel", "Kiel Hbf"),
+    ("Freiburg", "Freiburg Hbf"),
+    ("Mainz", "Mainz Hbf"),
+    ("Kassel", "Kassel Hbf"),
+    ("Rostock", "Rostock Hbf"),
+    ("Erfurt", "Erfurt Hbf"),
+    ("Magdeburg", "Magdeburg Hbf"),
+    ("Saarbrücken", "Saarbrücken Hbf"),
+    ("Ulm", "Ulm Hbf"),
+    ("Regensburg", "Regensburg Hbf"),
+    ("Würzburg", "Würzburg Hbf"),
+];
+
+/// How far down the results the station may be. The app shows this many without scrolling.
+const FINDABLE_WITHIN: usize = 10;
+
+/// Every [`FINDABLE`] station on the first page of a search for its city — the same search the
+/// server and the phone run (`Index::search`, `station_index.dart`), on the set about to be written.
+/// Names are compared through the search's own fold, so „Frankfurt (Main) Hauptbahnhof" and
+/// „Mannheim, Hauptbahnhof" count as what they are.
+pub fn check_findable(set: &[Candidate]) -> Result<()> {
+    check_findable_in(set, FINDABLE)
+}
+
+fn check_findable_in(set: &[Candidate], list: &[(&str, &str)]) -> Result<()> {
+    let index = super::Index::from_candidates(set);
+    let mut missing = Vec::new();
+    for (query, station) in list {
+        let want = normalise_station_name(station);
+        let hits = index.search(query, FINDABLE_WITHIN);
+        if !hits.iter().any(|h| normalise_station_name(&h.name) == want) {
+            let seen: Vec<&str> = hits.iter().take(3).map(|h| h.name.as_str()).collect();
+            missing.push(format!("„{query}\" findet {station} nicht (sondern {seen:?})"));
+        }
+    }
+    if !missing.is_empty() {
+        bail!(
+            "{} Hauptbahnhof/-höfe sind unter ihrem Stadtnamen nicht zu finden — so ginge die Tabelle nicht raus: {}",
+            missing.len(),
+            missing.join("; ")
+        );
+    }
+    Ok(())
 }
 
 /// The rank histogram of a built set, for the human about to commit it.
@@ -1028,5 +1106,49 @@ mod tests {
         let south = record(0, "Aulendorf", 47.9520, 9.6380, REGIONAL_RAIL, "de-DELFI_b");
         assert_eq!(near_pairs(&[north.clone(), south.clone()]).len(), 1);
         assert_eq!(near_pairs(&[south, north]).len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod findable_tests {
+    use super::*;
+
+    fn c(name: &str, rank: i16, source: &str) -> Candidate {
+        Candidate { name: name.into(), lat: 48.78, lon: 9.18, rank, modes: vec![], sources: vec![source.into()] }
+    }
+
+    fn set(stuttgart_hbf: &str) -> Vec<Candidate> {
+        let mut v = vec![c(stuttgart_hbf, 3, "de-DELFI_de:08111:6115")];
+        // Plenty of other „Stuttgart…" stations, so the Hbf has to earn its place on the first page.
+        for i in 0..20 {
+            v.push(c(&format!("Stuttgart, Halt {i}"), 1, &format!("de-DELFI_de:08111:{i}")));
+        }
+        v.push(c("Frankfurt (Main) Hauptbahnhof", 3, "de-DELFI_de:06412:10"));
+        v.push(c("Mannheim, Hauptbahnhof", 3, "de-DELFI_de:08222:1"));
+        v
+    }
+
+    const LIST: &[(&str, &str)] = &[("Stuttgart", "Stuttgart Hbf"), ("Frankfurt", "Frankfurt (Main) Hbf"), ("Mannheim", "Mannheim Hbf")];
+
+    #[test]
+    fn the_table_before_60_is_refused() {
+        let e = check_findable_in(&set("Hauptbahnhof (oben)"), LIST).unwrap_err().to_string();
+        assert!(e.contains("Stuttgart"), "{e}");
+        assert!(!e.contains("Frankfurt"), "Frankfurt was always findable: {e}");
+    }
+
+    #[test]
+    fn the_qualified_table_passes_and_spellings_fold() {
+        let mut v = set("Hauptbahnhof (oben)");
+        crate::stations::cities::qualify_names(&mut v);
+        check_findable_in(&v, LIST).expect("Stuttgart, Hauptbahnhof (oben) is Stuttgart Hbf to a search");
+    }
+
+    #[test]
+    fn the_whole_list_names_each_city_once() {
+        let mut seen = std::collections::HashSet::new();
+        for (q, _) in FINDABLE {
+            assert!(seen.insert(*q), "{q} twice");
+        }
     }
 }
