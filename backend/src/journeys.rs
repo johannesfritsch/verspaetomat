@@ -118,7 +118,7 @@ pub fn leg_json(l: &PlanLeg) -> Value {
         "to_station_id": l.to_station_id, "to_station_name": l.to_station_name,
         "planned_departure": l.planned_departure, "planned_arrival": l.planned_arrival,
         "live_departure": l.live_departure, "live_arrival": l.live_arrival,
-        "platform": l.platform, "cancelled": l.cancelled, "delay_min": l.delay_min,
+        "platform": l.platform, "arrival_platform": l.arrival_platform, "cancelled": l.cancelled, "delay_min": l.delay_min,
     })
 }
 
@@ -335,7 +335,8 @@ fn leg_from_trip(t: &TripInfo, ops: &[OperatorRow], ix: &crate::stations::Index,
         planned_arrival,
         live_departure: from.live_departure,
         live_arrival,
-        platform: None,
+        platform: from.track.clone(),
+        arrival_platform: to.track.clone(),
         cancelled: t.cancelled || to.cancelled || from.cancelled,
         realtime: t.realtime,
         delay_min: live_arrival.map(|a| (a - planned_arrival).num_minutes()).unwrap_or(0),
@@ -1167,6 +1168,59 @@ pub async fn replan(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
     Ok(Json(current_payload(&s, &updated, false).await.map_err(internal)?))
 }
 
+/// `POST /v1/journeys/{id}/missed` — „Leider verpasst" at a change (#57).
+///
+/// The passenger stood at the transfer and the connection left without them. The follower
+/// already does this on its own when the arrival was later than the departure; here the
+/// passenger says it. The next way on from the transfer station becomes the proposed leg, the
+/// plan is cut there and continued with it, and the earliest onward arrival caps what counts
+/// (docs/21 §2) — so a missed train is recorded, and the wait for a later one of the
+/// passenger's choosing is still not billed to the railway.
+pub async fn missed(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
+    let j = journey_of(&s.pool, c.0.id, id).await?;
+    if j.status != JourneyStatus::Transfer {
+        return Err(err(StatusCode::CONFLICT, "journey is not at a transfer"));
+    }
+    let Some(next) = next_leg_of(&j) else { return Err(err(StatusCode::CONFLICT, "no connection to miss")) };
+    let now = crate::clock::now();
+    let its = s
+        .train
+        .plan(&s.stations().upstream_id(&next.from_station_id), &s.stations().upstream_id(&j.destination_station_id), now + Duration::minutes(1), 3)
+        .await
+        .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("keine Verbindung gefunden: {e}")))?;
+    // The next option must not be the train just missed.
+    let Some(it) = its.iter().find(|it| it.legs.first().is_some_and(|l| l.trip_id != next.trip_id)) else {
+        return Err(err(StatusCode::NOT_FOUND, "keine weitere Verbindung ab hier"));
+    };
+    let proposal = it.legs[0].clone();
+    let mut new_plan = plan_legs(&j);
+    let cut = new_plan.iter().position(|l| l.trip_id == next.trip_id).unwrap_or(new_plan.len());
+    new_plan.truncate(cut);
+    new_plan.extend(it.legs.iter().cloned());
+    note_earliest_onward(&s.pool, j.id, it.live_arrival.unwrap_or(it.planned_arrival)).await.map_err(internal)?;
+    let mut next_json = leg_json(&proposal);
+    next_json["replanned"] = json!(true);
+    next_json["reason"] = json!("verpasst");
+    let deadline = proposal.live_arrival.unwrap_or(proposal.planned_arrival).max(now) + TRANSFER_TIMEOUT;
+    let updated: JourneyRow = sqlx::query_as(
+        "update journeys set next_leg = $2, transfer_deadline = $3, missed_connection = true, plan = $4 where id = $1 returning *",
+    )
+    .bind(j.id)
+    .bind(&next_json)
+    .bind(deadline)
+    .bind(json!(new_plan))
+    .fetch_one(&s.pool)
+    .await
+    .map_err(internal)?;
+    rules::audit(&s.pool, "journey", j.id, Some("transfer"), "transfer", "passenger missed the connection").await.map_err(internal)?;
+    s.events.publish(
+        c.0.id,
+        "journey",
+        json!({ "journey_id": j.id, "status": "transfer", "transfer": true, "arrived": false, "finished": false, "missed_connection": true, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": next_json }),
+    );
+    Ok(Json(current_payload(&s, &updated, false).await.map_err(internal)?))
+}
+
 // ---------------------------------------------------------------------------
 // Transitions driven by the follower
 // ---------------------------------------------------------------------------
@@ -1584,13 +1638,14 @@ mod tests {
             trip_id: "t".into(), line: "RE 10".into(), train_number: None, headsign: "Kleve".into(), agency_name: "NWB".into(), operator: "NordWestBahn".into(),
             category: crate::train::TrainCategory::Re, mode: "REGIONAL_RAIL".into(), from_station_id: "a".into(), from_station_name: "Düsseldorf Hbf".into(),
             to_station_id: "b".into(), to_station_name: "Kleve".into(), planned_departure: t("2026-09-10T16:38:00Z"), planned_arrival: t("2026-09-10T18:05:00Z"),
-            live_departure: None, live_arrival: None, platform: Some("3".into()), cancelled: false, realtime: false, delay_min: 0,
+            live_departure: None, live_arrival: None, platform: Some("3".into()), arrival_platform: Some("5".into()), cancelled: false, realtime: false, delay_min: 0,
         };
         let mut v = leg_json(&l);
         v["replanned"] = json!(true);
         let back: PlanLeg = serde_json::from_value(v).expect("the API leg shape reads back as a PlanLeg");
         assert_eq!(back.trip_id, "t");
         assert_eq!(back.platform.as_deref(), Some("3"));
+        assert_eq!(back.arrival_platform.as_deref(), Some("5"), "#56: the arrival track travels too");
     }
 
     #[test]

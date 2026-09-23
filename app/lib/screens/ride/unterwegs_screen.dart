@@ -79,6 +79,7 @@ class RideSheetBody extends StatelessWidget {
               live: m.journey!,
               busy: m.busy,
               onConfirm: (leg) => _confirm(context, leg),
+              onMissed: () => _missed(context),
               onArrived: () => _finish(context, arrived: true),
               onAbort: () => showAbortSheet(context, m),
               onPickTrain: () => _pickOwnTrain(context, m.journey!.journey),
@@ -101,6 +102,14 @@ class RideSheetBody extends StatelessWidget {
   Future<void> _confirm(BuildContext context, ApiLeg leg) async {
     try {
       await monitor.confirmLeg(leg);
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));
+    }
+  }
+
+  Future<void> _missed(BuildContext context) async {
+    try {
+      await monitor.missed();
     } catch (e) {
       if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));
     }
@@ -175,6 +184,93 @@ class RideSheetBody extends StatelessWidget {
     );
   }
 
+}
+
+/// The drawn header of the change (#57), or null where the plain header stays: riding, arrived,
+/// a Weiterfahrt still choosing its train, a transfer with nothing to take.
+({String eyebrow, String title, String subtitle, String? track})? transferHero(RideMonitor m) {
+  if (m.arrived || !m.transfer) return null;
+  final j = m.journey!.journey;
+  final next = m.journey!.nextLeg ?? j.nextLeg;
+  if (next == null || j.waitingForOwnTrain) return null;
+  final where = j.transferStationName ?? next.fromStationName;
+  final dep = next.liveDeparture ?? next.plannedDeparture;
+  final inMin = dep?.difference(DateTime.now()).inMinutes;
+  final missed = j.missedConnection || next.replanned;
+  final track = next.platform == null || next.platform!.isEmpty ? null : next.platform;
+  if (missed) {
+    return (eyebrow: 'Umstieg · $where', title: 'Anschluss verpasst.', subtitle: 'Das ist die nächste Möglichkeit ab hier.', track: track);
+  }
+  if (inMin != null && inMin < -1) {
+    // Gone by the clock, and nobody has said yet whether they are on it.
+    return (eyebrow: 'Umstieg · $where', title: 'Bist du im Zug?', subtitle: 'Dein Anschluss ist abgefahren. Sag uns, ob du drin sitzt.', track: track);
+  }
+  if (inMin != null && inMin <= 5) {
+    return (eyebrow: 'Umstieg · $where', title: 'Dein Anschluss fährt jetzt.', subtitle: 'Bist du im richtigen Zug? Sag uns kurz Bescheid.', track: track);
+  }
+  return (eyebrow: 'Umstieg · $where', title: 'Zeit zum Umsteigen.', subtitle: 'Sag uns Bescheid, sobald du im Zug sitzt.', track: track);
+}
+
+/// The platform drawing of #57 with the connection's own track on the sign. The sign in the
+/// picture is blank; its place is measured in the image (341 × 440), so the number sits on it
+/// at any width.
+class TransferArt extends StatelessWidget {
+  const TransferArt({super.key, required this.width, this.track});
+  final double width;
+  final String? track;
+
+  @override
+  Widget build(BuildContext context) {
+    final h = width * 440 / 341;
+    double x(double v) => width * v / 341;
+    double y(double v) => h * v / 440;
+    return SizedBox(
+      width: width,
+      height: h,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: ShaderMask(
+              blendMode: BlendMode.dstIn,
+              shaderCallback: (rect) => const LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [Colors.transparent, Colors.black],
+                stops: [0, 0.35],
+              ).createShader(rect),
+              child: ShaderMask(
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (rect) => const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black, Colors.black, Colors.transparent],
+                  stops: [0, 0.75, 1],
+                ).createShader(rect),
+                child: Image.asset('assets/sheet/umstieg.webp', fit: BoxFit.cover),
+              ),
+            ),
+          ),
+          if (track != null)
+            Positioned(
+              left: x(136),
+              top: y(55),
+              width: x(122),
+              height: y(141),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Gleis', style: VText.bodyS.copyWith(color: VColors.inkOnDark2)),
+                    Text(track!, style: VText.number.copyWith(color: VColors.inkOnDark, height: 1.0)),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 /// The sheet's title line: caption + h2, per state.
@@ -263,6 +359,8 @@ class _NextLegStopsState extends State<_NextLegStops> {
     );
   }
 }
+
+String? _track(String? t) => t == null || t.trim().isEmpty ? null : t.trim();
 
 /// The current leg, live. With a journey: the transfer ahead and the destination underneath.
 /// The line and headsign are the sheet's header, so the body starts with the context line.
@@ -400,6 +498,24 @@ class _RidingView extends StatelessWidget {
                   subtitle: 'ab ${nextLeg.fromStationName} ${fmtLocal(nextLeg.liveDeparture ?? nextLeg.plannedDeparture)}'
                       '${nextLeg.platform != null && nextLeg.platform!.isNotEmpty ? ' · Gl. ${nextLeg.platform}' : ''}',
                 ),
+                // #56: where you get off and where you get on, side by side — the one thing a
+                // change is about. Only what the feed knows; a missing track is not guessed.
+                if (_track(j?.currentLegInfo?.arrivalPlatform) != null || _track(nextLeg.platform) != null) ...[
+                  const VGap.s(),
+                  Row(
+                    key: const Key('transfer-tracks'),
+                    children: [
+                      const Icon(Icons.swap_horiz, size: 18, color: VColors.ink2),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'In ${nextLeg.fromStationName}: an Gleis ${_track(j?.currentLegInfo?.arrivalPlatform) ?? '–'}, ab Gleis ${_track(nextLeg.platform) ?? '–'}',
+                          style: VText.bodySStrong,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 if (nextLeg.cancelled || connectionAtRisk || nextLeg.delayMin > 0) ...[
                   const VGap.s(),
                   Row(
@@ -464,10 +580,276 @@ class _RidingView extends StatelessWidget {
   }
 }
 
+/// Between two legs. With a connection to take (#57): the train on a card — line, destination,
+/// how soon, both ends, the track — and the three answers there are, each with what it does.
+/// A Weiterfahrt still waiting for a train, and a transfer with no connection at all, keep the
+/// plain view below.
+class _TransferView extends StatelessWidget {
+  const _TransferView({required this.live, required this.busy, required this.onConfirm, required this.onMissed, required this.onArrived, required this.onAbort, required this.onPickTrain});
+  final ApiJourneyLive live;
+  final bool busy;
+  final ValueChanged<ApiLeg> onConfirm;
+  final VoidCallback onMissed;
+  final VoidCallback onArrived;
+  final VoidCallback onAbort;
+  final VoidCallback onPickTrain;
+
+  @override
+  Widget build(BuildContext context) {
+    final j = live.journey;
+    final next = live.nextLeg ?? j.nextLeg;
+    if (next == null || j.waitingForOwnTrain) {
+      return _TransferViewPlain(live: live, busy: busy, onConfirm: onConfirm, onArrived: onArrived, onAbort: onAbort, onPickTrain: onPickTrain);
+    }
+    final missed = j.missedConnection || next.replanned;
+    final done = live.ride;
+    final where = j.transferStationName ?? next.fromStationName;
+    final legDelay = done?.finalDelayMinutes ?? 0;
+    // #56: the track you got off on, next to the one you get on at.
+    final arrivedOn = j.currentLegInfo?.arrivalPlatform;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (done != null) ...[
+          Text(
+            '${done.line} war ${legDelay > 0 ? '+$legDelay' : 'pünktlich'}${missed ? ' · der geplante Anschluss ist weg' : ''}. Weiter nach ${j.destinationStationName}.',
+            style: VText.bodyS.copyWith(color: VColors.ink2),
+          ),
+          const VGap.m(),
+        ],
+        ConnectionCard(leg: next, arrivedOn: arrivedOn, missed: missed),
+        const VGap.m(),
+        _Answer(
+          key: const Key('transfer-in-train'),
+          icon: Icons.train,
+          tone: _AnswerTone.red,
+          title: 'Ich bin im Zug',
+          body: 'Super! Wir zählen ab jetzt weiter für diese Fahrt.',
+          onTap: busy ? null : () => onConfirm(next),
+        ),
+        const VGap.s(),
+        _Answer(
+          key: const Key('transfer-missed'),
+          icon: Icons.directions_run,
+          tone: _AnswerTone.grey,
+          title: 'Leider verpasst',
+          body: 'Ich war am Gleis, habe es aber nicht geschafft. Wir suchen die nächste Verbindung ab $where.',
+          onTap: busy ? null : onMissed,
+        ),
+        const VGap.s(),
+        _Answer(
+          key: const Key('transfer-end'),
+          icon: Icons.close,
+          tone: _AnswerTone.grey,
+          title: 'Fahrt hier abbrechen',
+          body: 'Ich beende die Fahrt in $where. Die Verspätung bis hier zählt.',
+          onTap: busy ? null : onArrived,
+        ),
+        const VGap.m(),
+        if (missed) ...[
+          Text('Die Verspätung zählt am Ziel, nicht pro Zug. Ein verpasster Anschluss ist ein gültiger Antragsgrund.', style: VText.caption),
+          const VGap.s(),
+        ],
+        Center(child: VGhostButton(label: 'Anders beenden …', color: VColors.ink2, onTap: busy ? null : onAbort)),
+      ],
+    );
+  }
+}
+
+/// The connection on a card (#57): line and destination, how soon, both ends on a line, then
+/// the track, the time left and the kind of train. Also used where the next train is shown
+/// while still riding.
+class ConnectionCard extends StatelessWidget {
+  const ConnectionCard({super.key, required this.leg, this.arrivedOn, this.missed = false});
+  final ApiLeg leg;
+
+  /// The track the passenger arrives on at the change (#56), when known.
+  final String? arrivedOn;
+  final bool missed;
+
+  static String kindOf(ApiCategory c) => switch (c) {
+        ApiCategory.s => 'S-Bahn',
+        ApiCategory.rb => 'Regionalbahn',
+        ApiCategory.re => 'Regional-Express',
+        ApiCategory.fern => 'Fernverkehr',
+        ApiCategory.bus => 'Bus',
+        ApiCategory.other => 'Zug',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final dep = leg.liveDeparture ?? leg.plannedDeparture;
+    final arr = leg.liveArrival ?? leg.plannedArrival;
+    final inMin = dep?.difference(DateTime.now()).inMinutes;
+    final track = leg.platform == null || leg.platform!.isEmpty ? '–' : leg.platform!;
+    final Widget status = leg.cancelled
+        ? const VPill('Ausfall', tone: VPillTone.red)
+        : leg.delayMin > 0
+            ? VDelayPill(leg.delayMin)
+            : inMin == null
+                ? const SizedBox.shrink()
+                : inMin > 0
+                    ? VPill('in $inMin ${inMin == 1 ? 'Minute' : 'Minuten'}', tone: VPillTone.green)
+                    : inMin >= -1
+                        ? const VPill('jetzt', tone: VPillTone.green)
+                        : const VPill('abgefahren', tone: VPillTone.neutral);
+    return VCard(
+      padding: const EdgeInsets.all(VSpace.cardTight),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (missed) ...[
+            Text('NÄCHSTE MÖGLICHKEIT', style: VText.eyebrow.copyWith(color: VColors.red)),
+            const VGap.s(),
+          ],
+          Row(
+            children: [
+              LineBadge(leg.line, large: true, cancelled: leg.cancelled),
+              const SizedBox(width: VSpace.s),
+              Expanded(
+                child: Text('nach ${leg.headsign.isNotEmpty ? leg.headsign : leg.toStationName}', style: VText.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: VSpace.s),
+              status,
+            ],
+          ),
+          const VGap.m(),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 5,
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(fmtLocal(dep), style: VText.numberS),
+                  Text(leg.fromStationName, style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                ]),
+              ),
+              const Expanded(flex: 4, child: Padding(padding: EdgeInsets.only(top: 10), child: _RunLine())),
+              Expanded(
+                flex: 5,
+                child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text(fmtLocal(arr), style: VText.numberS),
+                  Text(leg.toStationName, style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right),
+                ]),
+              ),
+            ],
+          ),
+          const VGap.m(),
+          const VRule(),
+          const VGap.m(),
+          IntrinsicHeight(
+            child: Row(
+              children: [
+                Expanded(child: _Fact(label: 'Gleis', value: track, sub: arrivedOn == null || arrivedOn!.isEmpty ? null : 'Ankunft auf $arrivedOn')),
+                const VerticalDivider(width: VSpace.m, thickness: 1, color: VColors.rule),
+                Expanded(
+                  child: _Fact(
+                    label: 'Abfahrt in',
+                    value: inMin == null || inMin < -1 ? '–' : (inMin <= 0 ? 'jetzt' : '$inMin Min'),
+                    sub: fmtLocal(dep),
+                  ),
+                ),
+                const VerticalDivider(width: VSpace.m, thickness: 1, color: VColors.rule),
+                Expanded(child: _Fact(label: 'Zugtyp', value: leg.line, sub: kindOf(leg.category))),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The small train on its way from one end to the other.
+class _RunLine extends StatelessWidget {
+  const _RunLine();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.train, size: 16, color: VColors.red),
+        const SizedBox(width: 4),
+        Expanded(child: Container(height: 2, color: VColors.rule)),
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: VColors.ink3, width: 1.5)),
+        ),
+      ],
+    );
+  }
+}
+
+class _Fact extends StatelessWidget {
+  const _Fact({required this.label, required this.value, this.sub});
+  final String label;
+  final String value;
+  final String? sub;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: VText.caption),
+        const SizedBox(height: 2),
+        FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: VText.title)),
+        if (sub != null) Text(sub!, style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ],
+    );
+  }
+}
+
+enum _AnswerTone { red, grey }
+
+/// One answer at the change: a mark, what it is, what it does, and the chevron that says so.
+class _Answer extends StatelessWidget {
+  const _Answer({super.key, required this.icon, required this.tone, required this.title, required this.body, required this.onTap});
+  final IconData icon;
+  final _AnswerTone tone;
+  final String title;
+  final String body;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final red = tone == _AnswerTone.red;
+    return Material(
+      color: red ? VColors.redTintSoft : VColors.greyFill,
+      borderRadius: BorderRadius.circular(VRadius.lg),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(VRadius.lg),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(VSpace.cardTight),
+          child: Row(
+            children: [
+              VIconBadge(icon: icon, tone: red ? VBadgeTone.red : VBadgeTone.neutral, size: VControl.badgeSmall, iconColor: red ? null : VColors.ink2),
+              const SizedBox(width: VSpace.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: VText.bodyStrong.copyWith(color: red ? VColors.red : VColors.ink)),
+                    const SizedBox(height: 2),
+                    Text(body, style: VText.bodyS.copyWith(color: VColors.ink2)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: red ? VColors.red : VColors.ink2),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Between two legs: confirm the connection with one tap, or the alternative after a miss.
 /// The station is the sheet's header; the body starts with the context line.
-class _TransferView extends StatelessWidget {
-  const _TransferView({required this.live, required this.busy, required this.onConfirm, required this.onArrived, required this.onAbort, required this.onPickTrain});
+class _TransferViewPlain extends StatelessWidget {
+  const _TransferViewPlain({required this.live, required this.busy, required this.onConfirm, required this.onArrived, required this.onAbort, required this.onPickTrain});
   final ApiJourneyLive live;
   final bool busy;
   final ValueChanged<ApiLeg> onConfirm;

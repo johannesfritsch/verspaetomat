@@ -53,6 +53,8 @@ abstract class AppRepository {
   /// "Ich bin da" (arrived: true) or the abort with its reason (docs/21 §1).
   Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason});
   /// "Ich fahre später weiter": the leg ends here, the journey waits for the next train (docs/21 §2).
+  /// „Leider verpasst" at a change (#57).
+  Future<ApiJourneyLive> missedConnection(String journeyId);
   Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName});
 
   /// "Zug wechseln" (docs/24 §2): another train to the same destination, from wherever the

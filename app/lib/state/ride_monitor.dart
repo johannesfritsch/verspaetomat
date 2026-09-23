@@ -188,6 +188,21 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// „Leider verpasst" (#57): the connection left without the passenger; the next one is proposed.
+  Future<void> missed() async {
+    final j = journey;
+    if (j == null || busy) return;
+    busy = true;
+    notifyListeners();
+    try {
+      await session.repo.missedConnection(j.journey.id);
+      await refresh(quiet: true);
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
   /// "Ich fahre später weiter" (docs/21 §2): this leg ends, the journey waits for a train
   /// the passenger picks. The destination and its planned arrival stay, so the delay counts.
   Future<void> replan() async {

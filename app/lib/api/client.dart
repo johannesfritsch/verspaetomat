@@ -290,6 +290,10 @@ class ApiClient {
       _map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/finish', {'arrived': arrived, if (reason != null) 'reason': reason})));
 
   /// "Ich fahre später weiter" (docs/21 §2): the leg ends, the journey waits for the next train.
+  /// „Leider verpasst" at a change (#57): the next way on becomes the proposed leg.
+  Future<ApiJourneyLive> missedConnection(String journeyId) async =>
+      ApiJourneyLive.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/missed')));
+
   Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName}) async =>
       ApiJourneyLive.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/replan', {
         if (fromStationId != null) 'from_station_id': fromStationId,

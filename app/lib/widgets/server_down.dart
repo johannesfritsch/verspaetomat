@@ -40,7 +40,10 @@ class ServerDownScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // #58: the whole screen, and one thing on it to press. No back arrow: there is nothing to go
+    // back to that would work.
     return VScreen(
+      showBack: false,
       eyebrow: 'Störung',
       title: 'Gerade nicht erreichbar',
       bottom: VPrimaryButton(label: 'Erneut versuchen', icon: Icons.refresh, onTap: onRetry),
@@ -94,6 +97,46 @@ class ServerDownScreen extends StatelessWidget {
     );
   }
 }
+
+/// The outage page over everything, bottom navigation included (#58).
+///
+/// A tab that could not load used to draw the page inside the tab, under a navigation bar that
+/// led to four other tabs that could not load either. Now the first screen to notice pushes the
+/// page on the root navigator; while it stands, every other screen that notices only waits for
+/// it. „Erneut versuchen" closes it and reloads what sent it — which, if the house is still shut,
+/// is simply the page again.
+Future<void> showServerDown(BuildContext context, VoidCallback onRetry) async {
+  // A second screen noticing while the page stands waits for the same „Erneut versuchen" —
+  // and is reloaded by it, or it would sit on its placeholder until something else rebuilt it.
+  if (_serverDownShowing) {
+    _pendingRetries.add(onRetry);
+    return;
+  }
+  _serverDownShowing = true;
+  try {
+    await Navigator.of(context, rootNavigator: true).push(
+      PageRouteBuilder<void>(
+        fullscreenDialog: true,
+        pageBuilder: (ctx, _, __) => PopScope(
+          canPop: false,
+          child: ServerDownScreen(onRetry: () => Navigator.of(ctx).pop()),
+        ),
+        transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
+      ),
+    );
+  } finally {
+    _serverDownShowing = false;
+  }
+  final waiting = [..._pendingRetries];
+  _pendingRetries.clear();
+  onRetry();
+  for (final r in waiting) {
+    r();
+  }
+}
+
+bool _serverDownShowing = false;
+final List<VoidCallback> _pendingRetries = [];
 
 /// One of the three columns: the glyph in its tinted circle, a bold line, a quiet one.
 class _Reassurance extends StatelessWidget {

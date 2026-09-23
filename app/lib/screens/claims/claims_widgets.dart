@@ -116,7 +116,13 @@ class _LoaderState<T> extends State<Loader<T>> {
         // 404, a conflict, a refused precondition — is one request being wrong and stays the
         // ordinary inline error, where the rest of the screen is still worth seeing.
         if (snap.hasError) {
-          if (isBackendUnreachable(snap.error)) return ServerDownScreen(onRetry: _reload);
+          if (isBackendUnreachable(snap.error)) {
+            // #58: over everything, not inside the tab. The page under it keeps its shape.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) showServerDown(context, _reload);
+            });
+            return widget.placeholder?.call(context) ?? const PagePlaceholder();
+          }
           return LoadError(error: snap.error, onRetry: _reload);
         }
         if (!snap.hasData) return widget.placeholder?.call(context) ?? const PagePlaceholder();

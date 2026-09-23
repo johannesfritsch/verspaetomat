@@ -82,6 +82,10 @@ pub struct TripStop {
     pub scheduled_departure: Option<DateTime<Utc>>,
     pub live_departure: Option<DateTime<Utc>>,
     pub cancelled: bool,
+    /// The track at this stop, live where the feed has it (#56). Snapshots written before this
+    /// field read back as None.
+    #[serde(default)]
+    pub track: Option<String>,
 }
 
 /// One rail leg of a planned itinerary (docs/17 "Leg").
@@ -106,8 +110,13 @@ pub struct PlanLeg {
     pub planned_arrival: DateTime<Utc>,
     pub live_departure: Option<DateTime<Utc>>,
     pub live_arrival: Option<DateTime<Utc>>,
+    /// Where the leg leaves from.
     #[serde(default)]
     pub platform: Option<String>,
+    /// Where it arrives (#56): at a change, the track you get off on, next to the one you get on
+    /// at. Plans stored before this field read back as None.
+    #[serde(default)]
+    pub arrival_platform: Option<String>,
     #[serde(default)]
     pub cancelled: bool,
     #[serde(default)]

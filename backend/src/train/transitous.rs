@@ -572,6 +572,7 @@ fn itinerary_from(it: PlanItinerary) -> Option<Itinerary> {
             live_departure,
             live_arrival,
             platform: l.from.track.clone().or(l.from.scheduled_track.clone()),
+            arrival_platform: l.to.track.clone().or(l.to.scheduled_track.clone()),
             cancelled,
             realtime,
             delay_min: live_arrival.map(|a| (a - planned_arrival).num_minutes()).unwrap_or(0),
@@ -598,6 +599,7 @@ fn trip_stop_from(p: &TripPlace) -> TripStop {
         live_arrival: p.arrival,
         scheduled_departure: p.scheduled_departure,
         live_departure: p.departure,
+        track: p.track.clone().or(p.scheduled_track.clone()),
         cancelled: p.cancelled.unwrap_or(false),
     }
 }

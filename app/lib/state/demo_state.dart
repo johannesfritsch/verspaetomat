@@ -414,6 +414,22 @@ class DemoState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Demo: „Leider verpasst" at a change (#57) — the next train of the same line becomes the
+  /// proposal, as the server does with the next way on.
+  void missConnection() {
+    final j = journey;
+    if (j == null || j.phase != JourneyPhase.transfer) return;
+    final planned = j.proposal ?? j.next?.departure;
+    if (planned == null) return;
+    j.missedConnection = true;
+    j.replanned = false;
+    j.proposal = Mock.allDepartures
+            .where((d) => d.line == planned.line && d.id != planned.id && d.planned.hour * 60 + d.planned.minute > planned.planned.hour * 60 + planned.planned.minute)
+            .firstOrNull ??
+        j.proposal;
+    notifyListeners();
+  }
+
   /// Demo: jump to arrival with a chosen delay. 60+ creates a claim.
   void simulateArrival({int? minutes, bool cancelled = false, bool selfEntered = false}) {
     final j = journey;

@@ -226,7 +226,7 @@ pub async fn build(opts: BuildOptions) -> Result<CandidateSet> {
 
     check(&records, &opts)?;
 
-    let stations: Vec<Candidate> = records
+    let mut stations: Vec<Candidate> = records
         .into_iter()
         .map(|r| Candidate {
             name: r.name,
@@ -237,6 +237,9 @@ pub async fn build(opts: BuildOptions) -> Result<CandidateSet> {
             sources: r.sources,
         })
         .collect();
+    // #60: „Hauptbahnhof (oben)" becomes „Stuttgart, Hauptbahnhof (oben)".
+    let named = super::cities::qualify_names(&mut stations);
+    opts.say(format!("{named} Namen um ihre Stadt ergänzt"));
 
     opts.say(format!("fertig in {} s", started.elapsed().as_secs()));
     Ok(CandidateSet { generated: Utc::now(), feed_version, stations })

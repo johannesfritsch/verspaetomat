@@ -195,6 +195,9 @@ class _VonSheetState extends State<_VonSheet> {
   /// Until the frequent stations are in, their section is a placeholder rather than missing.
   bool _frequentLoaded = false;
 
+  /// The search is showing in place of the lists (#59).
+  bool _searching = false;
+
   @override
   void initState() {
     super.initState();
@@ -229,7 +232,23 @@ class _VonSheetState extends State<_VonSheet> {
     // whatever was known at the moment of the tap.
     return AnimatedBuilder(
       animation: widget.near ?? const AlwaysStoppedAnimation(0),
-      builder: (context, _) => _body(context, widget.current ?? widget.near?.station),
+      // #59: the search turns this sheet into itself and grows, rather than stacking a second one.
+      builder: (context, _) => AnimatedSize(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: _searching
+            ? InlineStationSearch(
+                eyebrow: 'Check-in · Schritt 1 von 3',
+                onBack: () => setState(() => _searching = false),
+                onPick: (st) {
+                  // A station chosen by hand is where the passenger is, for everything else too.
+                  widget.near?.pick(st);
+                  _pick(st);
+                },
+              )
+            : _body(context, widget.current ?? widget.near?.station),
+      ),
     );
   }
 
@@ -281,14 +300,7 @@ class _VonSheetState extends State<_VonSheet> {
                       child: VSearchField(
                         hint: 'Bahnhof suchen …',
                         readOnly: true,
-                        onTap: () async {
-                          final st = await showStationSearch(context);
-                          if (st == null || !context.mounted) return;
-                          // A station chosen by hand is where the passenger is, for everything
-                          // else too.
-                          near?.pick(st);
-                          if (context.mounted) _pick(st);
-                        },
+                        onTap: () => setState(() => _searching = true),
                       ),
                     ),
                     const SizedBox(width: VSpace.s),
@@ -401,12 +413,7 @@ class _VonSheetState extends State<_VonSheet> {
                   ),
                   title: 'Anderen Bahnhof suchen',
                   divider: false,
-                  onTap: () async {
-                    final st = await showStationSearch(context);
-                    if (st == null || !context.mounted) return;
-                    near?.pick(st);
-                    if (context.mounted) _pick(st);
-                  },
+                  onTap: () => setState(() => _searching = true),
                 ),
 
                 // Only when the phone is the missing piece: with a fix the lists above answer it.
@@ -458,6 +465,9 @@ class _WohinSheetState extends State<_WohinSheet> {
   bool _loading = true;
   String? _error;
 
+  /// The search is showing in place of the destinations (#59).
+  bool _searching = false;
+
   @override
   void initState() {
     super.initState();
@@ -482,7 +492,16 @@ class _WohinSheetState extends State<_WohinSheet> {
   void _pick(ApiStation s) => Navigator.of(context).pop(StepResult<ApiStation>.value(s));
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedSize(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: _searching
+            ? InlineStationSearch(eyebrow: 'Check-in · Schritt 2 von 3', onBack: () => setState(() => _searching = false), onPick: _pick)
+            : _list(context),
+      );
+
+  Widget _list(BuildContext context) {
     final predicted = _dest.predicted.where((d) => d.stationId != widget.from.id).toList();
     final recent = _dest.recent
         .where((d) => d.stationId != widget.from.id && !predicted.any((p) => p.stationId == d.stationId))
@@ -520,10 +539,7 @@ class _WohinSheetState extends State<_WohinSheet> {
                 VSearchField(
                   hint: 'Bahnhof suchen …',
                   readOnly: true,
-                  onTap: () async {
-                    final st = await showStationSearch(context);
-                    if (st != null && context.mounted) _pick(st);
-                  },
+                  onTap: () => setState(() => _searching = true),
                 ),
 
                 if (_loading) ...[

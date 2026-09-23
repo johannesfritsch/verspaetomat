@@ -678,6 +678,118 @@ Future<void> showTicketSheet(BuildContext context) {
 }
 
 /// Station search as a sheet; returns the picked station.
+/// The station search inside the sheet that asked for it (#59). It used to be a second sheet
+/// over the first, with no way back but a swipe; now the same sheet turns into the search and
+/// grows to hold the results, and the arrow turns it back.
+class InlineStationSearch extends StatefulWidget {
+  const InlineStationSearch({super.key, required this.eyebrow, required this.onPick, required this.onBack});
+  final String eyebrow;
+  final ValueChanged<ApiStation> onPick;
+  final VoidCallback onBack;
+
+  @override
+  State<InlineStationSearch> createState() => _InlineStationSearchState();
+}
+
+class _InlineStationSearchState extends State<InlineStationSearch> {
+  final _ctl = TextEditingController();
+  Timer? _debounce;
+  List<ApiStation> _results = const [];
+  bool _loading = false;
+  bool _searched = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String v) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () => _search(v));
+  }
+
+  Future<void> _search(String q) async {
+    if (q.trim().length < 2) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final r = await RepoScope.read(context).repo.searchStations(q.trim());
+      if (mounted) setState(() => _results = r);
+    } catch (e) {
+      if (mounted) setState(() => _error = shortError(e));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _searched = true;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      // Tall enough for a page of results from the first letter, so the sheet grows once and
+      // does not bounce with every keystroke.
+      constraints: BoxConstraints(minHeight: MediaQuery.sizeOf(context).height * 0.6),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(VSpace.sheet, VSpace.s, VSpace.sheet, VSpace.l),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                VIconButton(key: const Key('station-search-back'), icon: Icons.arrow_back, onTap: widget.onBack),
+                const SizedBox(width: VSpace.xs),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(widget.eyebrow.toUpperCase(), style: VText.eyebrow),
+                      Text('Bahnhof suchen', style: VText.h2),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const VGap.m(),
+            TextField(
+              controller: _ctl,
+              autofocus: true,
+              onChanged: _onChanged,
+              onSubmitted: _search,
+              textInputAction: TextInputAction.search,
+              decoration: const InputDecoration(hintText: 'Köln Hbf, Münster …', prefixIcon: Icon(Icons.search, size: 20, color: VColors.ink2)),
+            ),
+            const VGap.s(),
+            if (_loading && _results.isEmpty) const VSkeletonList(rows: 4, trailing: false),
+            if (_error != null) ErrorLine(message: _error!, onRetry: () => _search(_ctl.text)),
+            if (_searched && !_loading && _error == null && _results.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: VSpace.m),
+                child: Text('Kein Bahnhof mit diesem Namen.', style: VText.bodyS.copyWith(color: VColors.ink2)),
+              ),
+            for (final s in _results)
+              VListRow(
+                title: s.name,
+                subtitle: s.distanceM != null ? '${s.distanceM} m' : null,
+                chevron: true,
+                onTap: () => widget.onPick(s),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 Future<ApiStation?> showStationSearch(BuildContext context) {
   return showVSheet<ApiStation>(context, expand: true, builder: (ctx) => const _StationSearchSheet());
 }

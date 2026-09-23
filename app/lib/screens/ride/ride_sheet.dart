@@ -241,6 +241,33 @@ class _RideSheetLayerState extends State<RideSheetLayer> {
                         ),
                       ),
                       const SizedBox(height: 14),
+                      if (transferHero(m) case final hero?)
+                        // #57: at a change the header is the question itself, over the platform.
+                        LayoutBuilder(
+                          builder: (context, c) => Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              // Below the close button, and no taller than the header beside it: the
+                              // sign must stay readable and the drawing must not run into the body.
+                              Positioned(right: -VSpace.sheet, top: 30, child: TransferArt(width: c.maxWidth * 0.42, track: hero.track)),
+                              Padding(
+                                padding: EdgeInsets.only(right: c.maxWidth * 0.36, bottom: VSpace.l),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(hero.eyebrow.toUpperCase(), style: VText.eyebrow, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    const SizedBox(height: 6),
+                                    Text(hero.title, style: VText.h1),
+                                    const SizedBox(height: 6),
+                                    Text(hero.subtitle, style: VText.body.copyWith(color: VColors.ink2)),
+                                  ],
+                                ),
+                              ),
+                              Positioned(right: 0, top: 0, child: VCircleIconButton(icon: Icons.expand_more, onTap: m.closeSheet)),
+                            ],
+                          ),
+                        )
+                      else
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [

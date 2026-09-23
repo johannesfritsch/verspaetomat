@@ -1378,6 +1378,7 @@ class ApiLeg {
     this.liveDeparture,
     this.liveArrival,
     this.platform,
+    this.arrivalPlatform,
     this.cancelled = false,
     this.delayMin = 0,
     this.legNo,
@@ -1401,7 +1402,12 @@ class ApiLeg {
   final DateTime? plannedArrival;
   final DateTime? liveDeparture;
   final DateTime? liveArrival;
+  /// The track it leaves from.
   final String? platform;
+
+  /// The track it arrives on (#56): at a change, the one you get off on. Null from a server
+  /// before build 78's, and wherever the feed has no track.
+  final String? arrivalPlatform;
   final bool cancelled;
   final int delayMin;
   final int? legNo;
@@ -1442,6 +1448,7 @@ class ApiLeg {
         liveDeparture: _dt(j['live_departure']),
         liveArrival: _dt(j['live_arrival']),
         platform: _sn(j['platform']),
+        arrivalPlatform: _sn(j['arrival_platform']),
         cancelled: _b(j['cancelled']),
         delayMin: _i(j['delay_min'] ?? j['delay_minutes']),
         legNo: _in(j['leg_no']),

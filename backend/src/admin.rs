@@ -1043,6 +1043,7 @@ pub async fn backdate(State(s): State<AppState>, _a: Admin, Path(key): Path<Stri
         live_departure: Some(planned_departure),
         live_arrival: Some(actual_arrival),
         platform: None,
+        arrival_platform: None,
         cancelled: b.cancelled,
         realtime: false,
         delay_min: delay,

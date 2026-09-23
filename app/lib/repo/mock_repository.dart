@@ -90,6 +90,8 @@ class MockRepository implements AppRepository {
       liveDeparture: d.delay > 0 ? _at(fromStop.planned).add(Duration(minutes: d.delay)) : null,
       liveArrival: d.delay > 0 ? _at(toStop.planned).add(Duration(minutes: d.delay)) : null,
       platform: d.platform,
+      // Invented like the rest of the Vorführung, but steady: the same stop, the same track.
+      arrivalPlatform: '${toStop.name.codeUnits.fold(0, (a, b) => a + b) % 9 + 1}',
       cancelled: d.cancelled,
       delayMin: d.delay,
       legNo: legNo,
@@ -321,6 +323,13 @@ class MockRepository implements AppRepository {
     if (j == null) throw StateError('no journey');
     state.finishJourney(arrived: arrived, reason: reason);
     return _journey(j);
+  }
+
+  @override
+  Future<ApiJourneyLive> missedConnection(String journeyId) async {
+    if (state.journey == null) throw StateError('no journey');
+    state.missConnection();
+    return (await currentJourney())!;
   }
 
   @override
