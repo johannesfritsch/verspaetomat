@@ -247,6 +247,21 @@ final ValueNotifier<int> rideSheetRequests = ValueNotifier<int>(0);
 
 void requestRideSheet() => rideSheetRequests.value++;
 
+/// What the arrival sheet (#63) is asked to show: a demo variant, a result in hand (a legacy
+/// ride's arrival), or neither — the arrival the repository knows.
+class ArrivalSheetRequest {
+  const ArrivalSheetRequest({this.variant, this.result});
+  final String? variant;
+  final ApiArrivalResult? result;
+}
+
+/// Set by whoever asks for the arrival (the `/arrived` redirect, a push, the Bahnsteig card).
+/// The shell listens, opens the sheet over the active tab and clears it.
+final ValueNotifier<ArrivalSheetRequest?> arrivalSheetRequests = ValueNotifier<ArrivalSheetRequest?>(null);
+
+void requestArrivalSheet({String? variant, ApiArrivalResult? result}) =>
+    arrivalSheetRequests.value = ArrivalSheetRequest(variant: variant, result: result);
+
 /// Hands the shell's [RideMonitor] to the tabs and the sheet.
 class RideScope extends InheritedNotifier<RideMonitor> {
   const RideScope({super.key, required RideMonitor monitor, required super.child}) : super(notifier: monitor);

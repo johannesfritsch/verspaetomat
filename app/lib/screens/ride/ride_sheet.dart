@@ -241,7 +241,10 @@ class _RideSheetLayerState extends State<RideSheetLayer> {
                         ),
                       ),
                       const SizedBox(height: 14),
-                      if (transferHero(m) ?? ridingHero(m) case final hero?)
+                      // #63: the arrival draws its own header, the station over the platform.
+                      if (m.arrived)
+                        const SizedBox.shrink()
+                      else if (transferHero(m) ?? ridingHero(m) case final hero?)
                         // #57, #62: the header is the moment itself — the change, the boarding, the arrival —
                         // over the platform.
                         LayoutBuilder(

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'screens/claims/claims_routes.dart';
 import 'screens/community/community_routes.dart';
+import 'screens/ride/angekommen_screen.dart' show showArrivalSheet;
 import 'screens/ride/checkin_launcher.dart';
 import 'screens/ride/ride_routes.dart';
 import 'screens/ride/ride_sheet.dart';
@@ -150,6 +151,36 @@ class _TabShellState extends State<_TabShell> {
   void initState() {
     super.initState();
     rideSheetRequests.addListener(_onSheetRequest);
+    arrivalSheetRequests.addListener(_onArrivalRequest);
+    // A request made before this shell existed (a push from outside it, a cold start).
+    if (arrivalSheetRequests.value != null) _onArrivalRequest();
+  }
+
+  /// The one arrival sheet this shell has open, so a second request replaces it instead of
+  /// stacking on top.
+  Route<void>? _arrivalRoute;
+
+  /// `/arrived` (#63): the arrival as a sheet. The one the ride sheet already shows when the
+  /// journey arrived; otherwise its own sheet over the active tab, with the same content.
+  void _onArrivalRequest() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final req = arrivalSheetRequests.value;
+      if (!mounted || req == null) return;
+      arrivalSheetRequests.value = null;
+      final m = _monitor;
+      if (req.variant == null && req.result == null && m != null && m.arrived) {
+        m.openSheet();
+        return;
+      }
+      final nav = shellNavigatorKey.currentState;
+      final ctx = nav?.overlay?.context;
+      if (nav == null || ctx == null) return;
+      final open = _arrivalRoute;
+      if (open != null && open.isActive) nav.removeRoute(open);
+      _arrivalRoute = null;
+      await showArrivalSheet(ctx, variant: req.variant, result: req.result, onRoute: (r) => _arrivalRoute = r);
+      await m?.refresh(quiet: true);
+    });
   }
 
   @override
@@ -219,6 +250,7 @@ class _TabShellState extends State<_TabShell> {
   @override
   void dispose() {
     rideSheetRequests.removeListener(_onSheetRequest);
+    arrivalSheetRequests.removeListener(_onArrivalRequest);
     _monitor?.removeListener(_syncRiding);
     _monitor?.dispose();
     _nearby?.dispose();

@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../mock/mock_data.dart' show TicketType;
 import '../../repo/app_repository.dart';
 import '../../repo/repo_scope.dart';
-import '../../router.dart';
 import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
@@ -35,7 +33,7 @@ class RideSheetBody extends StatelessWidget {
 
     if (m.arrived) {
       // The journey ended while the sheet was open: the reveal, in place.
-      return AngekommenScreen(embedded: true, onDone: () => m.dismiss());
+      return AngekommenScreen(onDone: () => m.dismiss());
     }
     if (!m.active) {
       return Padding(
@@ -122,7 +120,7 @@ class RideSheetBody extends StatelessWidget {
       if (!context.mounted) return;
       if (result != null) {
         monitor.closeSheet();
-        context.push(Routes.arrived, extra: result);
+        requestArrivalSheet(result: result);
       }
     } catch (e) {
       if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Das ging nicht: ${shortError(e)}')));

@@ -371,7 +371,7 @@ void main() {
     demo.simulateArrival(minutes: 68);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.arrived);
     await wait(tester, 1000);
-    await tester.tap(find.widgetWithText(VGhostButton, 'Teilen').first, warnIfMissed: false);
+    await tester.tap(find.widgetWithText(VOutlineButton, 'Teilen').first, warnIfMissed: false);
     await shot('karte-angekommen');
     await dismissSheet(tester);
     demo.reset();
@@ -380,7 +380,7 @@ void main() {
     demo.simulateArrival(minutes: 0);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.arrived);
     await wait(tester, 1000);
-    await tester.tap(find.widgetWithText(VGhostButton, 'Teilen').first, warnIfMissed: false);
+    await tester.tap(find.widgetWithText(VOutlineButton, 'Teilen').first, warnIfMissed: false);
     await shot('karte-puenktlich');
     await dismissSheet(tester);
     demo.reset();

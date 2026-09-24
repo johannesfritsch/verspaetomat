@@ -549,7 +549,7 @@ class _ArrivedBlock extends StatelessWidget {
               Expanded(
                 child: VOutlineButton(
                   label: 'Ansehen',
-                  onTap: () => context.push(Routes.arrived),
+                  onTap: () => context.go(Routes.arrived),
                 ),
               ),
               const SizedBox(width: 10),

@@ -9,7 +9,6 @@ import '../onboarding/standort_immer_screen.dart';
 import '../onboarding/standort_screen.dart';
 import '../onboarding/zweck_screen.dart';
 import '../onboarding/welcome_screen.dart';
-import 'angekommen_screen.dart';
 import 'bahnsteig_screen.dart';
 import 'nachtrag_screen.dart';
 
@@ -39,9 +38,14 @@ final rideRoutes = <RouteBase>[
       return Routes.homeWithRide;
     },
   ),
+  // The arrival is a sheet over Home too (#63); the route stays for pushes, deep links and
+  // the showcase.
   GoRoute(
     path: Routes.arrived,
-    builder: (_, s) => AngekommenScreen(variant: s.uri.queryParameters['variant'], result: s.extra is ApiArrivalResult ? s.extra as ApiArrivalResult : null),
+    redirect: (_, s) {
+      requestArrivalSheet(variant: s.uri.queryParameters['variant'], result: s.extra is ApiArrivalResult ? s.extra as ApiArrivalResult : null);
+      return Routes.home;
+    },
   ),
   GoRoute(path: Routes.addRide, builder: (_, __) => const NachtragScreen()),
 ];
