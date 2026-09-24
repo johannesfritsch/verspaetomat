@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
-import '../../content/legal.dart' show appVersion;
+import '../../content/legal.dart' show appStage, appVersion;
 import '../../flags/flags.dart';
 import '../../platform/diagnose_log.dart';
 import '../../platform/geofence.dart';
@@ -188,7 +188,7 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
     final session = RepoScope.read(context);
     String when(DateTime? d) => d == null ? '–' : d.toUtc().toIso8601String();
     return [
-      '# Verspätomat $appVersion · ${session.isLocal ? session.apiUrl : 'Vorführung'}',
+      '# Verspätomat $appVersion${appStage.isEmpty ? '' : ' · $appStage'} · ${session.isLocal ? session.apiUrl : 'Vorführung'}',
       '# Fenster: $_window · Quelle: $_filter · ${lines.length} Zeilen'
           '${lines.isEmpty ? '' : ' · ${when(lines.first.at)} … ${when(lines.last.at)}'}',
       // #41: „auf welchen Flaggen war dieses Telefon?" in the paste, so the answer does not cost

@@ -44,12 +44,21 @@ app/tools/tour.sh
 
 Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (string compare), `E2E=true`, `ADMIN_TOKEN`, `NO_ANIM=1` (the Tafel stops flapping; the tour sets it so stills are stills). Release builds default to local mode and start at Willkommen/Bahnsteig; debug builds default to Demo and the Showcase.
 
+## Staging and production (docs/46)
+
+- Two servers. **Staging** (`ssh verspaetomat-staging`, `https://api.staging.verspaetomat.de`, site `staging.verspaetomat.de`) follows `main`. **Production** (`ssh verspaetomat`, `https://api.verspaetomat.de`) follows the branch `production`, which only ever fast-forwards to a commit staging has run.
+- Staging release: push `main`, `ssh verspaetomat-staging /opt/verspaetomat/deploy/deploy.sh`, `STAGE=staging app/tools/release.sh` (the staging app „Verspätomat β", `de.verspaetomat.verspaetomat.staging`, internal TestFlight).
+- Production release: `deploy/promote.sh` (checks staging runs the commit, runs `deploy/compat.sh` — the last production app build's E2E against staging — moves `production`, deploys, checks `/health`), then the production app from the same commit with `app/tools/release.sh`. Never deploy production any other way.
+- `ENVIRONMENT` (required in `deploy/.env`): production refuses the Stellwerk calls that simulate the world (delay, ff, reply, locate, backdate, reset, confirm, clock); staging sends mail only to `MAIL_ALLOW`. `/health` reports stage and commit.
+- Station ids are made only in production: `stellwerk --prod stations import`, then `deploy/stations-to-staging.sh`. Never import on staging.
+- Staging holds only made-up data; `deploy/reset-staging.sh` wipes it. Never copy production data there.
+
 ## Production
 
 - API: `https://api.verspaetomat.de` (Caddy with Let's Encrypt in front of the container). `/admin/*` is reachable and guarded by the long random `ADMIN_TOKEN`.
-- Deploy: push to `main`, then `ssh verspaetomat /opt/verspaetomat/deploy/deploy.sh` (pull, rebuild only the API, reload Caddy, print status). The server builds the image from source; nothing is transferred. Migrations run on start.
-- Stellwerk against production: `stellwerk --prod …` after a one-time `stellwerk config init --ssh verspaetomat`. `--dev` is the default. NGOs are managed data: `stellwerk --prod ngo list|set|import|remove`; the fixture only seeds an empty table.
-- iOS release: `app/tools/release.sh` (App Store Connect API key in `~/.config/verspaetomat/release.env`, key file in `~/.appstoreconnect/private_keys/`), build number = last uploaded build + 1 (git tags ios-<version>-<build>).
+- Deploy: through `deploy/promote.sh` only (above). It ends in `ssh verspaetomat /opt/verspaetomat/deploy/deploy.sh` (pull `production`, rebuild only the API, reload Caddy, print status). The server builds the image from source; nothing is transferred. Migrations run on start.
+- Stellwerk against production: `stellwerk --prod …` after a one-time `stellwerk config init --ssh verspaetomat`; against staging `stellwerk --staging …` (`config init --ssh verspaetomat-staging --name staging`). `--dev` is the default. NGOs are managed data: `stellwerk --prod ngo list|set|import|remove`; the fixture only seeds an empty table.
+- iOS release: `app/tools/release.sh` (App Store Connect API key in `~/.config/verspaetomat/release.env`, key file in `~/.appstoreconnect/private_keys/`), build number = last uploaded build + 1 (git tags ios-<version>-<build>; the staging app counts its own, ios-staging-<version>-<build>).
 - Checks: `curl https://api.verspaetomat.de/health`; `stellwerk --prod customers`; `ssh verspaetomat 'cd /opt/verspaetomat/deploy && docker compose logs --tail 50 api'`.
 - Secrets live only in `deploy/.env` and `deploy/secrets/` on the server. Mail (Postmark) and push (APNs, FCM) are switched on by uncommenting the lines there; see `deploy/README.md` and `docs/42-runbook-vps-testflight.md`.
 - Never `docker compose down -v` (drops the database). Backups: nightly `pg_dump` in `/var/backups` on the server.
@@ -67,8 +76,9 @@ Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (stri
 - **Old app versions must keep working against the new backend.** Anything on the wire is
   additive: new fields are optional, existing fields keep their meaning, nothing is renamed or
   removed while an older build is still in TestFlight or the store.
-- **Shipping order: website, backend, then TestFlight.** The server is up before the build that
-  expects it.
+- **Shipping order: everything on staging first; then production website and backend
+  (`deploy/promote.sh`), then the production TestFlight build.** The server is up before the build
+  that expects it.
 
 ## Rules that are easy to break
 

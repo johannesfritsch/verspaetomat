@@ -217,7 +217,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           Text('Verspätomat 0.1 · Vorführung · Alle Daten erfunden', style: VText.caption),
           ] else ...[
             const VGap.xl(),
-            Text('Verspätomat $appVersion', style: VText.caption),
+            Text(appStage.isEmpty ? 'Verspätomat $appVersion' : 'Verspätomat $appVersion · ${appStage.toUpperCase()}', style: VText.caption),
           ],
         ],
       ),

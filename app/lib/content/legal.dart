@@ -185,3 +185,7 @@ LegalDoc legalDocById(String id) => legalDocs.firstWhere((d) => d.id == id, orEl
 /// The version shown in Einstellungen on a release build (docs/22 §3). `tools/release.sh`
 /// passes the real `1.0.0 (13)`; a plain `flutter run` falls back to the pubspec's version.
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '1.0.0');
+
+/// `staging` on a build of the staging app (`tools/release.sh` with `STAGE=staging`), empty
+/// otherwise. Said next to the version, so a screenshot never leaves it open which server it is.
+const appStage = String.fromEnvironment('STAGE');
