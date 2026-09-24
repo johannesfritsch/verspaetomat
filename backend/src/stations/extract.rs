@@ -662,7 +662,16 @@ mod tests {
             .connect(&url)
             .await
             .expect("connect to postgres");
-        let ix = crate::stations::load(&pool).await.expect("load the table");
+        // PROBE_EXTRACT=<path to a .vst>: answer for that file instead of the local table. The
+        // fixture has to match the extract the app bundles, and that one is rendered from
+        // production (`stellwerk --prod stations extract --asset`).
+        let ix = match std::env::var("PROBE_EXTRACT") {
+            Ok(path) => {
+                let bytes = std::fs::read(&path).expect("read PROBE_EXTRACT");
+                crate::stations::Index::from_extract(&parse(&bytes).expect("parse PROBE_EXTRACT"))
+            }
+            Err(_) => crate::stations::load(&pool).await.expect("load the table"),
+        };
 
         // The header ties the answers to one extract. Both numbers are a pure function of the
         // table: the CRC covers [header_len, EOF), so neither moves when the import serial or the

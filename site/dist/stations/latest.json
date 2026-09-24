@@ -1,10 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "format": 1,
-  "count": 7604,
-  "bytes": 280244,
-  "crc32": 2957696257,
-  "generated": "2026-09-20T17:07:39Z",
-  "feed_version": "2026-09-12T15:06:17",
-  "url": "/stations/stations-1.vst"
+  "count": 7632,
+  "bytes": 283697,
+  "crc32": 3552757627,
+  "generated": "2026-09-24T06:09:06Z",
+  "feed_version": "2026-09-19T14:49:01",
+  "url": "/stations/stations-2.vst"
 }

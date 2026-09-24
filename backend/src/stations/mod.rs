@@ -317,6 +317,22 @@ pub async fn load(pool: &PgPool) -> anyhow::Result<Index> {
 }
 
 impl Index {
+    /// The index an extract describes: what the phones hold. For the probe fixture, which must be
+    /// generated from the very file the app bundles — a laptop's table can differ from
+    /// production's in ids while agreeing on every name, and the fixture is keyed to the file.
+    pub fn from_extract(p: &extract::Parsed) -> Index {
+        let mut index = Index::default();
+        for (at, s) in p.stations.iter().enumerate() {
+            let id = s.id as i32;
+            let source = format!("vs:{id}");
+            index.by_source.insert(source.clone(), at);
+            index.by_id.insert(id, at);
+            let (plain, normal) = (s.name.to_lowercase(), normalise_station_name(&s.name));
+            index.all.push(Station { id, name: s.name.clone(), lat: s.lat, lon: s.lon, rank: s.rank as i16, sources: vec![source], plain, normal });
+        }
+        index
+    }
+
     /// The index a build would produce, before it is written: for asking a candidate set the
     /// questions a passenger will ask of the table (`gtfs::check_findable`). The ids are positions,
     /// not ours — nothing may hand them out.
