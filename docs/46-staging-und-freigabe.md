@@ -28,9 +28,14 @@ auf dem einen Server begegnet dem anderen nie.
 - **Produktion lehnt die Stellwerk-Aufrufe ab, die die Welt simulieren:** `delay`, `cancel`, `ff`,
   `reply`, `reset`, `locate`, `backdate`, `confirm` und das Setzen der Uhr. Dort wären sie Lügen über
   echte Fahrten. Stationen, Vereine, Routen, Push, Flags und Kunden bleiben erreichbar.
-- **Staging schickt Mail nur an Domains aus `MAIL_ALLOW`** (und an die eigene `RELAY_DOMAIN`),
-  geprüft für Empfänger und Bcc, bevor irgendetwas rausgeht. Ohne `MAIL_ALLOW` geht nichts raus.
-  Selbst eine Route, die auf einen echten Schalter der Bahn zeigt, kommt dort nicht an.
+- **Staging schickt Mail nur an Domains aus `MAIL_ALLOW`** (und an die eigene `RELAY_DOMAIN`).
+  Ein Empfänger außerhalb lässt das Senden scheitern: Selbst eine Route, die auf einen echten
+  Schalter der Bahn zeigt, kommt dort nicht an. Die Bcc-Kopie an die private Adresse des
+  Fahrgasts entfällt dann nur, mit einer Zeile im Log — auf Staging ist sie eine Testadresse (die
+  des E2E ist `johannes@example.de`, eine echte Domain). Ohne Postmark-Token ist alles Probelauf,
+  und dann wird nichts geprüft, weil nichts rausgeht. Ohne `MAIL_ALLOW` geht nichts raus.
+- Die Routen von Staging zeigen alle auf `probelauf@verspaetomat.de` (Antworten zählen von
+  `verspaetomat.de`), wie in der Entwicklung; `reset-staging.sh` setzt sie neu.
 - `/health` nennt Stage und Commit. Daran prüft die Freigabe, dass Staging läuft, was sie ausliefert.
 - Die Variable ist Pflicht: Fehlt sie in `deploy/.env`, startet der Stack nicht, statt still als
   „development" zu laufen.

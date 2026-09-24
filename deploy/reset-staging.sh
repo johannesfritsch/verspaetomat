@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Staging only: throw the database and the uploads away and start empty (fixtures seed again).
 #   ssh verspaetomat-staging /opt/verspaetomat/deploy/reset-staging.sh
-# Afterwards, from the Mac: `stellwerk --staging stations import` — a fresh database has no stations.
+# Afterwards, from the Mac: `deploy/stations-to-staging.sh` — a fresh database has no stations.
 #
 # Staging holds only made-up data, so this is the answer to anything that went wrong there: a
 # migration edited after it ran, a world simulated into a corner. It refuses to run on a box whose
@@ -23,7 +23,11 @@ main() {
   GIT_SHA="$(git -C .. rev-parse --short=12 HEAD)" docker compose up -d
   sleep 5
   docker compose ps --format '{{.Name}} {{.Status}}'
-  echo "== empty. Next, on the Mac: stellwerk --staging stations import"
+  # The routes table went with the database. Every desk goes to the test inbox, as on dev.
+  for i in $(seq 1 20); do docker compose exec -T api curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1 && break; sleep 2; done
+  docker compose exec -T api stellwerk route default probelauf@verspaetomat.de >/dev/null
+  docker compose exec -T api stellwerk route set "Servicecenter Fahrgastrechte" probelauf@verspaetomat.de >/dev/null
+  echo "== empty, routes to probelauf@verspaetomat.de. Next, on the Mac: deploy/stations-to-staging.sh"
 }
 
 main "$@"

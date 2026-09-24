@@ -92,12 +92,21 @@ fn transport() -> anyhow::Result<AsyncSmtpTransport<Tokio1Executor>> {
     Ok(builder.build())
 }
 
-pub async fn send(mail: OutgoingMail<'_>) -> anyhow::Result<SendResult> {
-    // Staging sends only where it is told it may (`MAIL_ALLOW`), before anything else: a claim
-    // routed to a railway desk must fail loudly there, not arrive.
-    for to in std::iter::once(mail.to).chain(mail.bcc) {
-        if !crate::stage::mail_allowed(to) {
-            anyhow::bail!("staging: {to} is not on MAIL_ALLOW, nothing sent");
+pub async fn send(mut mail: OutgoingMail<'_>) -> anyhow::Result<SendResult> {
+    // Staging sends only where it is told it may (`MAIL_ALLOW`). Only when something would really
+    // leave: a dry run sends nothing, so there is nothing to guard.
+    if configured() {
+        // The recipient is the one that matters — a claim routed to a railway desk must fail
+        // loudly, not arrive.
+        if !crate::stage::mail_allowed(mail.to) {
+            anyhow::bail!("staging: {} is not on MAIL_ALLOW, nothing sent", mail.to);
+        }
+        // The Bcc is the passenger's own copy, and on staging an address somebody typed into a
+        // test account (the E2E's is johannes@example.de, a real domain). The claim still goes to
+        // its desk; the copy is dropped.
+        if let Some(bcc) = mail.bcc.filter(|b| !crate::stage::mail_allowed(b)) {
+            tracing::warn!(bcc = %bcc, "staging: copy not sent, not on MAIL_ALLOW");
+            mail.bcc = None;
         }
     }
     if !configured() {

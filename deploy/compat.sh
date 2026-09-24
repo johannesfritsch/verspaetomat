@@ -15,6 +15,7 @@ TAG="${1:-$(git tag -l 'ios-[0-9]*' | sort -t- -k3,3n | tail -1)}"
 SIM="${SIM:-3490B4AD-6C37-4C5C-89A8-DCD31452B681}"
 API="${API:-https://api.staging.verspaetomat.de}"
 WT="$(mktemp -d)/compat-$TAG"
+LOG="${TMPDIR:-/tmp}/compat-$TAG.log"
 
 main() {
   git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || { echo "no tag $TAG" >&2; exit 1; }
@@ -28,8 +29,9 @@ main() {
     flutter pub get >/dev/null
     flutter test integration_test/workflow_test.dart -d "$SIM" \
       --dart-define=API_URL="$API" --dart-define=BACKEND=local --dart-define=NO_LOCATION=1 \
-      --dart-define=E2E=true --dart-define=ADMIN_TOKEN="$token" --dart-define=INITIAL_ROUTE=/home 2>&1 \
-      | grep -E "passed|failed|Exception|Expected|Actual|Timed out" | tail -15
+      --dart-define=E2E=true --dart-define=ADMIN_TOKEN="$token" --dart-define=INITIAL_ROUTE=/home >"$LOG" 2>&1 || true
+    grep -E "^[0-9:]+ \+[0-9]+.*(passed|failed)|EXCEPTION|Expected|Actual|Timed out|══" "$LOG" | tail -20
+    echo "== full log: $LOG"
   )
 }
 
