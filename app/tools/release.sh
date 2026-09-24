@@ -8,8 +8,9 @@
 #   DRY=1 app/tools/release.sh      # everything except the upload
 #   STAGE=staging app/tools/release.sh   # the staging app: its own bundle id, name, icon, server
 #
-# Two apps in App Store Connect: „Verspätomat" (de.verspaetomat.verspaetomat, production) and
-# „Verspätomat Staging" (…verspaetomat.staging, internal TestFlight only). They install side by side
+# Two apps in App Store Connect, team S4NEUU3775 since 24 September 2026: „Verspätomat"
+# (de.verspaetomat.app, production) and „Verspätomat Staging" (de.verspaetomat.staging.app,
+# internal TestFlight only). They install side by side
 # and keep separate keychains, so an account on one server never meets the other. Each has its own
 # build numbers and tags: ios-<version>-<build> and ios-staging-<version>-<build>.
 #
@@ -40,7 +41,7 @@ case "$STAGE" in
     TAG_PREFIX="ios-staging-"
     # Only the app target reads these three (project.pbxproj); overriding PRODUCT_BUNDLE_IDENTIFIER
     # itself would rename every embedded framework too, which App Store Connect rejects.
-    APP_SETTINGS=(VERSPAETOMAT_BUNDLE_ID=de.verspaetomat.verspaetomat.staging "VERSPAETOMAT_DISPLAY_NAME=Verspätomat β" VERSPAETOMAT_APPICON=AppIconStaging) ;;
+    APP_SETTINGS=(VERSPAETOMAT_BUNDLE_ID=de.verspaetomat.staging.app "VERSPAETOMAT_DISPLAY_NAME=Verspätomat β" VERSPAETOMAT_APPICON=AppIconStaging) ;;
   *) echo "STAGE=$STAGE: production or staging"; exit 1 ;;
 esac
 VERSION="$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' pubspec.yaml)"

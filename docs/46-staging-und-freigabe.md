@@ -13,12 +13,12 @@ Produktion bekommt nur noch, was vorher auf Staging lief.
 | Website | `https://verspaetomat.de` | `https://staging.verspaetomat.de` (`noindex, nofollow`) |
 | Git | Branch `production`, nur vorgespult | Branch `main` |
 | `ENVIRONMENT` | `production` | `staging` |
-| App | „Verspätomat", `de.verspaetomat.verspaetomat` | „Verspätomat β", `…verspaetomat.staging`, Symbol mit STAGING-Band |
+| App | „Verspätomat", `de.verspaetomat.app` | „Verspätomat β", `de.verspaetomat.staging.app`, Symbol mit STAGING-Band |
 | TestFlight | App „Verspätomat", Tags `ios-1.0.0-<build>` | App „Verspätomat Staging", nur intern, Tags `ios-staging-1.0.0-<build>` |
 | Stellwerk | `stellwerk --prod …` | `stellwerk --staging …` |
 | Daten | echte Fahrgäste, nächtliches Backup | nur erfundene, wegwerfbar |
 | Mail-Relay | `users.verspaetomat.de` | `users.staging.verspaetomat.de`, raus nur an `MAIL_ALLOW` |
-| Push | APNs-Schlüssel M2SJ43K28U, Topic der App | derselbe Schlüssel, Topic der Staging-App |
+| Push | APNs-Schlüssel C4JKP6QHKA (Team S4NEUU3775), Topic der App | derselbe Schlüssel, Topic der Staging-App |
 
 Beide Apps lassen sich nebeneinander installieren und haben getrennte Schlüsselbunde: ein Konto
 auf dem einen Server begegnet dem anderen nie.
@@ -117,7 +117,10 @@ Vereine sind auf beiden Servern dieselben aus `backend/fixtures/ngos.json`.
 - `stellwerk config init --ssh verspaetomat-staging --name staging`.
 - Produktion: Branch `production` am damals laufenden Commit 81d5380, der Server folgt ihm;
   `ENVIRONMENT=production` in `deploy/.env` ergänzt (die alte Datei liegt als `.env.bak-2026-09-24`).
-- Apple: App-Id `de.verspaetomat.verspaetomat.staging` mit Push, App „Verspätomat Staging" in
-  App Store Connect, interne Testgruppe `Staging`.
+- Apple: beide Apps ziehen ins Team S4NEUU3775 um, mit neuen Bundle-Ids `de.verspaetomat.app` und
+  `de.verspaetomat.staging.app` (Push an), je ein App-Store-Connect-Eintrag mit interner Testgruppe.
+  Neuer API-Schlüssel TZ7F36WN22 (App Manager), neuer APNs-Schlüssel C4JKP6QHKA. Die alten Apps im
+  Team PNC6S4SMVN bekommen keine Builds mehr; ihre Konten ziehen nicht mit (anderes Team, anderer
+  Schlüsselbund).
 - Postmark: eigener Server „Verspätomat Staging", Domain `users.staging.verspaetomat.de` (DKIM,
   Return-Path, SPF), MX dorthin; Token als `POSTMARK_TOKEN` in der `.env` von Staging.

@@ -47,7 +47,7 @@ Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (stri
 ## Staging and production (docs/46)
 
 - Two servers. **Staging** (`ssh verspaetomat-staging`, `https://api.staging.verspaetomat.de`, site `staging.verspaetomat.de`) follows `main`. **Production** (`ssh verspaetomat`, `https://api.verspaetomat.de`) follows the branch `production`, which only ever fast-forwards to a commit staging has run.
-- Staging release: push `main`, `ssh verspaetomat-staging /opt/verspaetomat/deploy/deploy.sh`, `STAGE=staging app/tools/release.sh` (the staging app „Verspätomat β", `de.verspaetomat.verspaetomat.staging`, internal TestFlight).
+- Staging release: push `main`, `ssh verspaetomat-staging /opt/verspaetomat/deploy/deploy.sh`, `STAGE=staging app/tools/release.sh` (the staging app „Verspätomat β", `de.verspaetomat.staging.app`, internal TestFlight).
 - Production release: `deploy/promote.sh` (checks staging runs the commit, runs `deploy/compat.sh` — the last production app build's E2E against staging — moves `production`, deploys, checks `/health`), then the production app from the same commit with `app/tools/release.sh`. Never deploy production any other way.
 - `ENVIRONMENT` (required in `deploy/.env`): production refuses the Stellwerk calls that simulate the world (delay, ff, reply, locate, backdate, reset, confirm, clock); staging sends mail only to `MAIL_ALLOW`. `/health` reports stage and commit.
 - Station ids are made only in production: `stellwerk --prod stations import`, then `deploy/stations-to-staging.sh`. Never import on staging.
