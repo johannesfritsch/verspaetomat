@@ -62,12 +62,12 @@ final class GeofenceStationsTests: XCTestCase {
     XCTAssertEqual(t.format, 1)
     XCTAssertEqual(t.headerLen, 32)
     XCTAssertEqual(t.recordLen, 20)
-    XCTAssertEqual(t.count, 7604)
-    XCTAssertEqual(t.blobLen, 128_132)
-    XCTAssertEqual(t.data.count, 280_244)
-    XCTAssertEqual(t.crc32, 0xb04a_dd01)
-    XCTAssertEqual(t.blobAt, 32 + 20 * 7604)
-    XCTAssertEqual(t.tableVersion, 1, "production's newest import")
+    XCTAssertEqual(t.count, 7632)
+    XCTAssertEqual(t.blobLen, 131_025)
+    XCTAssertEqual(t.data.count, 283_697)
+    XCTAssertEqual(t.crc32, 0xd3c2_c77b)
+    XCTAssertEqual(t.blobAt, 32 + 20 * 7632)
+    XCTAssertEqual(t.tableVersion, 2, "production's newest import")
   }
 
   /// `header_len` is read from the header and never assumed to be 32. A format-1 file may grow a
@@ -79,7 +79,7 @@ final class GeofenceStationsTests: XCTestCase {
     let grown = try StationExtract(data: bytes)
     XCTAssertEqual(grown.headerLen, 40)
     XCTAssertEqual(grown.count, t.count)
-    XCTAssertEqual(grown.data.count, 40 + 20 * 7604 + 128_132)
+    XCTAssertEqual(grown.data.count, 40 + 20 * 7632 + 131_025)
 
     // The eight added header bytes are 0xA5, not zero, and they are outside the checked span — so
     // the checksum is the live file's, unchanged, and a reader that started at a literal 32 would
@@ -98,8 +98,8 @@ final class GeofenceStationsTests: XCTestCase {
     let t = try live()
     let grown = try StationExtract(data: Extracts.respin(Self.liveBytes, recordLen: 24))
     XCTAssertEqual(grown.recordLen, 24)
-    XCTAssertEqual(grown.data.count, 32 + 24 * 7604 + 128_132)
-    XCTAssertEqual(grown.blobAt, 32 + 24 * 7604)
+    XCTAssertEqual(grown.data.count, 32 + 24 * 7632 + 131_025)
+    XCTAssertEqual(grown.blobAt, 32 + 24 * 7632)
     assertAnswersMatch(t, grown, probes: Extracts.sampleProbes(t, every: 211))
   }
 
@@ -134,8 +134,8 @@ final class GeofenceStationsTests: XCTestCase {
     b = [UInt8](Self.liveBytes); Extracts.put32(&b, 12, 19)
     refuses(Data(b), .recordLen(19), "a record shorter than the fields it must carry")
 
-    b = [UInt8](Self.liveBytes); Extracts.put32(&b, 16, 128_133)
-    refuses(Data(b), .length(want: 280_245, is: 280_244), "the file says one length and is another")
+    b = [UInt8](Self.liveBytes); Extracts.put32(&b, 16, 131_026)
+    refuses(Data(b), .length(want: 283_698, is: 283_697), "the file says one length and is another")
 
     b = [UInt8](Self.liveBytes); b[b.count - 1] ^= 0x01
     refuses(Data(b), .checksum, "a damaged file")
@@ -146,7 +146,7 @@ final class GeofenceStationsTests: XCTestCase {
     Extracts.recrc(&b)
     refuses(Data(b), .name(record: 0), "a record with no name")
 
-    b = [UInt8](Self.liveBytes); Extracts.put32(&b, 32 + 16, 128_132)
+    b = [UInt8](Self.liveBytes); Extracts.put32(&b, 32 + 16, 131_025)
     Extracts.recrc(&b)
     refuses(Data(b), .name(record: 0), "a name that starts at the end of the blob")
   }
@@ -219,10 +219,10 @@ final class GeofenceStationsTests: XCTestCase {
     let check = Data("123456789".utf8)
     XCTAssertEqual(check.withUnsafeBytes { CRC32.over($0, from: 0) }, 0xCBF4_3926)
     let t = try live()
-    XCTAssertEqual(Self.liveBytes.withUnsafeBytes { CRC32.over($0, from: t.headerLen) }, 0xb04a_dd01)
+    XCTAssertEqual(Self.liveBytes.withUnsafeBytes { CRC32.over($0, from: t.headerLen) }, 0xd3c2_c77b)
     // Not over the whole file: the header is outside the checked span, which is what lets the
     // renderer write the CRC into it.
-    XCTAssertNotEqual(Self.liveBytes.withUnsafeBytes { CRC32.over($0, from: 0) }, 0xb04a_dd01)
+    XCTAssertNotEqual(Self.liveBytes.withUnsafeBytes { CRC32.over($0, from: 0) }, 0xd3c2_c77b)
   }
 
   // MARK: - 2. Ordering and parity
@@ -290,7 +290,7 @@ final class GeofenceStationsTests: XCTestCase {
       XCTAssertEqual(t.looksLikeStation(at: i), byName, "record \(i), „\(t.name(at: i))\"")
       if t.looksLikeStation(at: i) { flagged += 1 }
     }
-    XCTAssertEqual(flagged, 2732, "how many of the live table's names say „Bahnhof\"")
+    XCTAssertEqual(flagged, 2738, "how many of the live table's names say „Bahnhof\"")
   }
 
   /// `train::transitous::looks_like_station`: every trailing `)` goes first, then both ends are
@@ -528,7 +528,7 @@ final class GeofenceStationsTests: XCTestCase {
     XCTAssertEqual(answer.stations.first?.name, "Köln Hbf")
     XCTAssertTrue(answer.complete)
     XCTAssertEqual(good.lastSource, "downloaded")
-    XCTAssertEqual(good.lastCount, 7604)
+    XCTAssertEqual(good.lastCount, 7632)
   }
 
   /// The downloaded copy is the newer table whenever it exists; the mirrored asset is what a fresh
@@ -558,7 +558,7 @@ final class GeofenceStationsTests: XCTestCase {
     let fallback = StationTable(directory: dir)
     XCTAssertNotNil(fallback.answer(lat: 50.9413, lon: 6.9583, limit: 25))
     XCTAssertEqual(fallback.lastSource, "bundled")
-    XCTAssertEqual(fallback.lastVersion, 1)
+    XCTAssertEqual(fallback.lastVersion, 2)
     XCTAssertTrue(FileManager.default.fileExists(atPath: downloaded.path))
     XCTAssertTrue(FileManager.default.fileExists(atPath: bundled.path))
   }
@@ -671,8 +671,8 @@ final class GeofenceStationsTests: XCTestCase {
     }
 
     // And the comparator faults, against the Kotlin reader's independently measured counts.
-    for (fault, want) in [(Ordering.Fault.none, 0), (.band250, 201), (.rankInverted, 257),
-                          (.nameFlagIgnored, 166), (.tieBreakReversed, 56)] {
+    for (fault, want) in [(Ordering.Fault.none, 0), (.band250, 210), (.rankInverted, 260),
+                          (.nameFlagIgnored, 169), (.tieBreakReversed, 48)] {
       let bad = rows.reduce(into: 0) { total, row in
         let got = Ordering.answer(t, fault, lat: row.lat, lon: row.lon, limit: row.limit)
         if got.ids != row.ids || got.radius != row.radius || got.complete != row.complete { total += 1 }
@@ -832,7 +832,7 @@ enum Extracts {
 ///
 ///     # ... prose ...
 ///     #   lat  lon  limit  search_radius_m  complete  ids  label
-///     # crc32=0xb04add01 count=7604
+///     # crc32=0xd3c2c77b count=7632
 ///     48.140200<TAB>11.560000<TAB>3<TAB>881<TAB>1<TAB>4543,4541,4572<TAB>München Hbf entrance
 ///
 /// **Parsed by column name, never by position.** The generator is allowed to append columns, and
@@ -978,7 +978,7 @@ enum Probes {
     return tokens
   }
 
-  /// `# crc32=0xb04add01 count=7604`. The radix comes from the prefix, so either spelling parses
+  /// `# crc32=0xd3c2c77b count=7632`. The radix comes from the prefix, so either spelling parses
   /// and the assertion is on the value — `stellwerk` prints hex for a human and `latest.json`
   /// carries decimal for a program, and this file has been written both ways.
   private static func extractLine(_ line: String) -> (UInt32, Int)? {
