@@ -25,6 +25,9 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      args:
+        # deploy.sh sets it; /health reports it, and a promotion checks it.
+        GIT_SHA: ${GIT_SHA:-}
     image: verspaetomat-api
     restart: unless-stopped
     depends_on:
@@ -32,6 +35,9 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
+      # staging or production, said out loud: production refuses the Stellwerk calls that
+      # simulate the world, staging sends mail only to MAIL_ALLOW (backend/src/stage.rs).
+      ENVIRONMENT: ${ENVIRONMENT:?set ENVIRONMENT in .env (staging or production)}
       DATABASE_URL: postgres://verspaetomat:${POSTGRES_PASSWORD}@db/verspaetomat
       BIND: 0.0.0.0:8080
       STELLWERK_URL: http://127.0.0.1:8080
@@ -65,6 +71,8 @@ services:
       API_DOMAIN: ${API_DOMAIN:-api.verspaetomat.de}
       SITE_DOMAIN: ${SITE_DOMAIN:-verspaetomat.de}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      # Staging sets "noindex, nofollow"; "all" is what a search engine assumes anyway.
+      SITE_ROBOTS: ${SITE_ROBOTS:-all}
     ports:
       - "80:80"
       - "443:443"

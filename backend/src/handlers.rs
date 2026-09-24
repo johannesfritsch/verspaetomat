@@ -44,7 +44,8 @@ fn today() -> NaiveDate {
 
 pub async fn health(State(s): State<AppState>) -> Json<Value> {
     let db_ok = sqlx::query_scalar::<_, i32>("select 1").fetch_one(&s.pool).await.is_ok();
-    Json(json!({ "ok": db_ok, "service": "verspaetomat-api", "db": db_ok }))
+    // The stage and the commit, so a promotion can check that staging runs what it is about to ship.
+    Json(json!({ "ok": db_ok, "service": "verspaetomat-api", "db": db_ok, "stage": crate::stage::current().name(), "commit": crate::stage::commit() }))
 }
 
 // ---------------------------------------------------------------------------

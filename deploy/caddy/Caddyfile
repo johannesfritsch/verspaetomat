@@ -4,6 +4,7 @@
 
 {$API_DOMAIN} {
 	encode zstd gzip
+	header X-Robots-Tag "{$SITE_ROBOTS}"
 	# /admin/* is reachable: guarded by x-admin-token (ADMIN_TOKEN, long and random),
 	# compared in constant time. Stellwerk on a laptop uses it with `--prod`.
 	reverse_proxy api:8080 {
@@ -20,6 +21,8 @@
 # dem Laptop, nicht hier — der Server braucht dafür kein Rust und keinen Node.
 {$SITE_DOMAIN:verspaetomat.de} {
 	encode zstd gzip
+	# Staging: "noindex, nofollow", so its copy of the site never competes with the real one.
+	header X-Robots-Tag "{$SITE_ROBOTS}"
 	root * /srv/site
 	file_server {
 		# `encode` komprimiert nur die Content-Types aus seiner eingebauten Liste (text/*,

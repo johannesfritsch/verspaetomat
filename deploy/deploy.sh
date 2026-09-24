@@ -12,6 +12,9 @@ cd "$(dirname "$0")"
 main() {
   git -C .. pull -q --ff-only
   git -C .. log --oneline -1
+  # Baked into the image; /health reports it (backend/src/stage.rs).
+  GIT_SHA="$(git -C .. rev-parse --short=12 HEAD)"
+  export GIT_SHA
 
   docker compose up -d --build api 2>&1 | grep -E "Built|Started|Running|error" || true
   # Recreate Caddy when its mounts or domains changed (the website hangs in as

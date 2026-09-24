@@ -15,6 +15,10 @@ RUN mkdir -p src/bin && echo 'fn main() {}' > src/main.rs && echo 'fn main() {}'
     && rm -rf src
 
 COPY . .
+# The commit, for /health (`stage::commit`). After the dependency layer, so a new commit rebuilds
+# only our own code.
+ARG GIT_SHA=
+ENV GIT_SHA=$GIT_SHA
 # Touch the sources so cargo notices them after the dummy build.
 RUN find src -name '*.rs' -exec touch {} + && cargo build --release --bins
 

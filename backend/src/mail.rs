@@ -93,6 +93,13 @@ fn transport() -> anyhow::Result<AsyncSmtpTransport<Tokio1Executor>> {
 }
 
 pub async fn send(mail: OutgoingMail<'_>) -> anyhow::Result<SendResult> {
+    // Staging sends only where it is told it may (`MAIL_ALLOW`), before anything else: a claim
+    // routed to a railway desk must fail loudly there, not arrive.
+    for to in std::iter::once(mail.to).chain(mail.bcc) {
+        if !crate::stage::mail_allowed(to) {
+            anyhow::bail!("staging: {to} is not on MAIL_ALLOW, nothing sent");
+        }
+    }
     if !configured() {
         let names: Vec<String> = mail.attachments.iter().map(|(n, _, b)| format!("{n} ({} B)", b.len())).collect();
         tracing::info!(from = %mail.from, to = %mail.to, subject = %mail.subject, attachments = %names.join(", "), "mail (dry-run): no POSTMARK_TOKEN/SMTP_URL, nothing sent");

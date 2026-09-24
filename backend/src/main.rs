@@ -27,6 +27,7 @@ mod reply;
 mod rules;
 mod scanner;
 mod share;
+mod stage;
 mod storage;
 
 use std::sync::Arc;
@@ -93,6 +94,9 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,tower_http=info,sqlx=warn".into()))
         .init();
+
+    let stage = stage::check()?;
+    tracing::info!(stage = stage.name(), commit = stage::commit(), "stage");
 
     let pool = db::connect().await?;
     db::seed(&pool).await?;

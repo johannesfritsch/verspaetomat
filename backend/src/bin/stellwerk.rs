@@ -24,8 +24,8 @@
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
 //!   stellwerk scan
 //!
-//! Targets: `--dev` (default) talks to http://127.0.0.1:8080 with token `stellwerk`; `--prod`
-//! (or `--target NAME`) reads ~/.config/verspaetomat/stellwerk.toml: a URL and the admin token
+//! Targets: `--dev` (default) talks to http://127.0.0.1:8080 with token `stellwerk`; `--prod`,
+//! `--staging` (or `--target NAME`) read ~/.config/verspaetomat/stellwerk.toml: a URL and the admin token
 //! per target. `stellwerk config init --ssh verspaetomat` writes that file and fetches the
 //! server's ADMIN_TOKEN over SSH once.
 //!
@@ -45,8 +45,11 @@ use verspaetomat_api::stations::{extract, gtfs};
 #[command(name = "stellwerk", about = "Verspätomat Stellwerk: simulate delays, arrivals, replies and time for one customer.")]
 struct Cli {
     /// Use the "prod" target from the config file
-    #[arg(long, global = true, conflicts_with_all = ["dev", "target"])]
+    #[arg(long, global = true, conflicts_with_all = ["dev", "target", "staging"])]
     prod: bool,
+    /// Use the "staging" target from the config file
+    #[arg(long, global = true, conflicts_with_all = ["dev", "target"])]
+    staging: bool,
     /// Use the "dev" target (the default: local backend on 8080)
     #[arg(long, global = true, conflicts_with = "target")]
     dev: bool,
@@ -145,6 +148,8 @@ fn builtin_dev() -> Target {
 fn resolve(cli: &Cli, cfg: &ConfigFile) -> anyhow::Result<(String, Target)> {
     let name = if cli.prod {
         "prod".to_string()
+    } else if cli.staging {
+        "staging".to_string()
     } else if cli.dev {
         "dev".to_string()
     } else if let Some(t) = &cli.target {
@@ -342,9 +347,10 @@ struct ConfigInit {
     /// Target name to write
     #[arg(long, default_value = "prod")]
     name: String,
-    /// Public URL of the API; the target talks to /admin there with the token
-    #[arg(long, default_value = "https://api.verspaetomat.de")]
-    url: String,
+    /// Public URL of the API; the target talks to /admin there with the token. Default: the
+    /// production API, or https://api.staging.verspaetomat.de for --name staging
+    #[arg(long)]
+    url: Option<String>,
     /// Admin token (default: read from the SSH host's /opt/verspaetomat/deploy/.env)
     #[arg(long)]
     token: Option<String>,
@@ -372,7 +378,10 @@ fn config_command(c: ConfigCmd) -> anyhow::Result<()> {
         }
         ConfigCmd::Init(i) => {
             let mut cfg = load_config()?;
-            let mut t = Target { url: Some(i.url.trim_end_matches('/').to_string()), token: None };
+            let url = i.url.clone().unwrap_or_else(|| {
+                if i.name == "staging" { "https://api.staging.verspaetomat.de" } else { "https://api.verspaetomat.de" }.to_string()
+            });
+            let mut t = Target { url: Some(url.trim_end_matches('/').to_string()), token: None };
             t.token = match (i.token, &i.ssh) {
                 (Some(tok), _) => Some(tok),
                 (None, Some(h)) => {

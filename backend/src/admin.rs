@@ -1,5 +1,6 @@
 //! Stellwerk admin API. Guarded by `x-admin-token` = `ADMIN_TOKEN` (default "stellwerk" in dev).
-//! Dev and staging only: it changes the world the customers see.
+//! The calls that change the world the customers see — a delay, a fast-forward, a railway answer,
+//! a position, the clock — take [`Simulation`] and are refused in production (`stage.rs`).
 
 use axum::{
     extract::{FromRequestParts, Path, Query, State},
@@ -17,6 +18,7 @@ use crate::clock;
 use crate::flags;
 use crate::db::rows::*;
 use crate::handlers::{self, InboundMail};
+use crate::stage::Simulation;
 use crate::train::sim::TripOverride;
 use crate::AppState;
 
@@ -111,7 +113,7 @@ pub struct DelayBody {
     pub minutes: i32,
 }
 
-pub async fn delay(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<DelayBody>) -> ApiResult {
+pub async fn delay(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>, Json(b): Json<DelayBody>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     let Some(r) = current_ride(&s, c.id).await? else { return Err(err(StatusCode::CONFLICT, "customer is not riding")) };
     let mut o = s.train.get_override(&r.trip_id).unwrap_or(TripOverride { trip_id: r.trip_id.clone(), ..Default::default() });
@@ -123,7 +125,7 @@ pub async fn delay(State(s): State<AppState>, _a: Admin, Path(key): Path<String>
     Ok(Json(json!({ "override": o, "ride": r })))
 }
 
-pub async fn cancel(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
+pub async fn cancel(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     let Some(r) = current_ride(&s, c.id).await? else { return Err(err(StatusCode::CONFLICT, "customer is not riding")) };
     let mut o = s.train.get_override(&r.trip_id).unwrap_or(TripOverride { trip_id: r.trip_id.clone(), ..Default::default() });
@@ -137,7 +139,7 @@ pub async fn cancel(State(s): State<AppState>, _a: Admin, Path(key): Path<String
 }
 
 /// Fast-forward: shift the trip so the exit stop lies in the past, then poll. The follower does the rest.
-pub async fn fast_forward(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
+pub async fn fast_forward(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     let Some(r) = current_ride(&s, c.id).await? else { return Err(err(StatusCode::CONFLICT, "customer is not riding")) };
     let t = s.train.trip(&r.trip_id).await.map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("trip: {e}")))?;
@@ -182,7 +184,7 @@ pub struct ReplyBody {
     pub amount_cents: Option<i64>,
 }
 
-pub async fn reply(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<ReplyBody>) -> ApiResult {
+pub async fn reply(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>, Json(b): Json<ReplyBody>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     let claim: Option<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and status in ('sent','question') order by sent_at desc limit 1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let Some(claim) = claim else { return Err(err(StatusCode::CONFLICT, "no sent claim to answer")) };
@@ -350,7 +352,7 @@ pub async fn get_clock(State(_s): State<AppState>, _a: Admin) -> ApiResult {
     Ok(Json(json!({ "now": clock::now(), "real_now": chrono::Utc::now(), "offset_secs": clock::offset_secs() })))
 }
 
-pub async fn set_clock(State(s): State<AppState>, _a: Admin, Json(b): Json<ClockBody>) -> ApiResult {
+pub async fn set_clock(State(s): State<AppState>, _a: Admin, _sim: Simulation, Json(b): Json<ClockBody>) -> ApiResult {
     let secs = match (b.offset_secs, b.shift.as_deref()) {
         (Some(o), _) => o,
         (None, Some(sh)) => clock::offset_secs() + clock::parse_shift(sh).ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad shift, e.g. +100d, -2h, 90m"))?,
@@ -734,7 +736,7 @@ pub async fn customer_flag_clear(
     })))
 }
 
-pub async fn reset(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
+pub async fn reset(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     let trips: Vec<String> = sqlx::query_scalar("select distinct trip_id from rides where customer_id = $1").bind(c.id).fetch_all(&s.pool).await.map_err(internal)?;
     for t in &trips {
@@ -768,7 +770,7 @@ pub struct LocateBody {
 }
 
 /// Put a customer somewhere. Overrides the phone's GPS for nearby stations until cleared.
-pub async fn locate(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<LocateBody>) -> ApiResult {
+pub async fn locate(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>, Json(b): Json<LocateBody>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     let (lat, lon, label) = match (b.lat, b.lon, b.station) {
         (Some(lat), Some(lon), station) => (lat, lon, station.unwrap_or_default()),
@@ -800,7 +802,7 @@ pub async fn locate(State(s): State<AppState>, _a: Admin, Path(key): Path<String
     Ok(Json(json!({ "customer": c.nickname, "lat": lat, "lon": lon, "label": label })))
 }
 
-pub async fn clear_location(State(s): State<AppState>, _a: Admin, Path(key): Path<String>) -> ApiResult {
+pub async fn clear_location(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     sqlx::query("delete from sim_customer_location where customer_id = $1").bind(c.id).execute(&s.pool).await.map_err(internal)?;
     s.events.publish(c.id, "location", json!({ "source": "gps" }));
@@ -987,7 +989,7 @@ fn backdate_times(
 /// `POST /admin/customers/{key}/backdate`: a ride that already happened, with the delay it had.
 /// It writes what an arrival writes — journey, leg, case — so bundles, the monthly cap, deadlines
 /// and the claim form see ordinary rows, and the case carries the Stellwerk in its evidence.
-pub async fn backdate(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, Json(b): Json<BackdateBody>) -> ApiResult {
+pub async fn backdate(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>, Json(b): Json<BackdateBody>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     if b.days_ago < 0 {
         return Err(err(StatusCode::BAD_REQUEST, "days_ago must not be negative: the Stellwerk invents the past, not the future"));
@@ -1224,7 +1226,7 @@ pub struct ConfirmBody {
 }
 
 /// `POST /admin/customers/{key}/confirm`: confirms the proposed next leg (or a given trip) as the phone would.
-pub async fn confirm(State(s): State<AppState>, _a: Admin, Path(key): Path<String>, body: Option<Json<ConfirmBody>>) -> ApiResult {
+pub async fn confirm(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>, body: Option<Json<ConfirmBody>>) -> ApiResult {
     let c = resolve(&s, &key).await?;
     let j: Option<JourneyRow> = sqlx::query_as("select * from journeys where customer_id = $1 and status = 'transfer' order by created_at desc limit 1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let Some(j) = j else { return Err(err(StatusCode::CONFLICT, "customer is not waiting at a transfer")) };
