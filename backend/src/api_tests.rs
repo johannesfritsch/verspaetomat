@@ -243,6 +243,21 @@ async fn an_empty_account_has_no_record_and_no_month(pool: PgPool) {
     assert_eq!(v["last_month"], Value::Null, "an empty month gets no card");
 }
 
+#[sqlx::test(migrations = "./migrations")]
+async fn badges_come_in_the_order_of_the_fixture(pool: PgPool) {
+    // #61: by id, "minuten-16000" sorted before "minuten-2000".
+    let app = app(pool.clone(), None).await;
+    let (_, token) = device(&app).await;
+    let (s, v) = call(&app, "GET", "/v1/badges", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK);
+    let ids: Vec<&str> = v.as_array().unwrap().iter().map(|b| b["id"].as_str().unwrap()).collect();
+    let fixture: Vec<Value> = serde_json::from_str(include_str!("../fixtures/badges.json")).unwrap();
+    let expected: Vec<&str> = fixture.iter().map(|b| b["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, expected);
+    let minutes: Vec<&str> = ids.into_iter().filter(|i| i.starts_with("minuten-")).collect();
+    assert_eq!(minutes, ["minuten-1000", "minuten-2000", "minuten-4000", "minuten-8000", "minuten-16000", "minuten-32000", "minuten-64000"]);
+}
+
 // ---------------------------------------------------------------------------
 // POST /v1/journeys/{id}/missed (#57)
 // ---------------------------------------------------------------------------

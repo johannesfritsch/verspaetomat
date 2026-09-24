@@ -111,10 +111,10 @@ height = 1387
 
 [[bilder.schuss]]
 src = "shots/unterwegs.webp"
-alt = "Eine laufende Fahrt: RE 7 nach Rheine, drei Minuten Verspätung, daneben die neue Ankunftszeit, darunter jeder Halt von Köln Hbf bis Rheine."
-caption = "Unterwegs, Halt für Halt"
+alt = "Eine laufende Fahrt mit Umstieg: oben „+3 Minuten“ und die neue Umstiegszeit in Hagen Hbf, darunter der RE 7 von Köln Hbf bis Hagen Hbf und der RB 52 weiter nach Lüdenscheid, je mit Zeit und Gleis, dazwischen 14 Minuten zum Umsteigen."
+caption = "Unterwegs, mit Umstieg"
 width = 640
-height = 1387
+height = 1388
 
 [[bilder.schuss]]
 src = "shots/antraege.webp"

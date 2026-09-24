@@ -70,11 +70,12 @@ pub async fn seed(pool: &PgPool) -> anyhow::Result<()> {
         .await?;
     }
 
-    for b in &f.badges {
-        sqlx::query("insert into badges (id, name, rule) values ($1, $2, $3) on conflict (id) do update set name = excluded.name, rule = excluded.rule")
+    for (position, b) in f.badges.iter().enumerate() {
+        sqlx::query("insert into badges (id, name, rule, position) values ($1, $2, $3, $4) on conflict (id) do update set name = excluded.name, rule = excluded.rule, position = excluded.position")
             .bind(&b.id)
             .bind(&b.name)
             .bind(&b.rule)
+            .bind(position as i32)
             .execute(pool)
             .await?;
     }

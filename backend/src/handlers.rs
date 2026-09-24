@@ -196,7 +196,7 @@ async fn ngo_totals(pool: &PgPool) -> anyhow::Result<Vec<Value>> {
 
 pub async fn badges(State(s): State<AppState>, c: Customer) -> ApiResult {
     let rows: Vec<(String, String, String, Option<DateTime<Utc>>)> = sqlx::query_as(
-        "select b.id, b.name, b.rule, a.awarded_at from badges b left join badge_awards a on a.badge_id = b.id and a.customer_id = $1 order by b.id",
+        "select b.id, b.name, b.rule, a.awarded_at from badges b left join badge_awards a on a.badge_id = b.id and a.customer_id = $1 order by b.position, b.id",
     )
     .bind(c.0.id)
     .fetch_all(&s.pool)

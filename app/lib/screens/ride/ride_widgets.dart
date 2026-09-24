@@ -933,6 +933,7 @@ List<VStop> vStopsOf(
   int? boldIndex,
   Set<int> halos = const {},
   String? operatorName,
+  Map<int, String?> tracks = const {},
 }) {
   if (stops.isEmpty) return const [];
   final first = from.clamp(0, stops.length - 1);
@@ -958,6 +959,7 @@ List<VStop> vStopsOf(
         mark: operatorName != null && operatorName.isNotEmpty && (i == first || i == last)
             ? VOperatorTag(operatorName)
             : null,
+        track: tracks[i] == null || tracks[i]!.trim().isEmpty ? null : tracks[i]!.trim(),
       ),
     );
   }

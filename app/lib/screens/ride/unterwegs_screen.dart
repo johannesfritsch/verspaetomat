@@ -294,76 +294,115 @@ class TransferArt extends StatelessWidget {
   return ('Unterwegs', r == null ? '' : '${r.line} nach $headsign');
 }
 
-/// The stops of the train after the change (docs/26 §4).
-///
-/// `ApiLeg` carries only its endpoints, so the stops come from the trip itself. While that is
-/// in flight — or when the feed has nothing — the endpoints alone still say where the passenger
-/// gets on and off, which is the part that matters.
-class _NextLegStops extends StatefulWidget {
-  const _NextLegStops({required this.leg});
-  final ApiLeg leg;
-
-  @override
-  State<_NextLegStops> createState() => _NextLegStopsState();
-}
-
-class _NextLegStopsState extends State<_NextLegStops> {
-  List<ApiStop> _stops = const [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-  }
-
-  @override
-  void didUpdateWidget(covariant _NextLegStops old) {
-    super.didUpdateWidget(old);
-    if (old.leg.tripId != widget.leg.tripId) _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final trip = await RepoScope.read(context).repo.trip(widget.leg.tripId);
-      if (mounted) setState(() => _stops = trip.stops);
-    } catch (_) {
-      // The endpoints below are enough; a missing feed is not worth an error here.
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l = widget.leg;
-    if (_stops.isEmpty) {
-      if (_loading) return const VSkeletonStops();
-      return Text('Halte folgen, sobald der Zug im Feed ist.', style: VText.caption);
-    }
-    final from = fromIndex(_stops, l.fromStationId, l.fromStationName);
-    final to = fromIndex(_stops, l.toStationId, l.toStationName);
-    return VStopTimeline(
-      // The quiet tone: this train has not been boarded yet, so its line is ink rather than red.
-      // Red here would put two live journeys on one screen.
-      tone: VTimelineTone.quiet,
-      stops: vStopsOf(
-        _stops,
-        from: from,
-        to: to,
-        // Nothing of this train has been ridden yet, so no stop is behind us.
-        passed: from - 1,
-        labels: {from: 'Umstieg', to: 'Ziel'},
-        operatorName: l.operator,
-      ),
-    );
-  }
-}
-
 String? _track(String? t) => t == null || t.trim().isEmpty ? null : t.trim();
 
-/// The current leg, live. With a journey: the transfer ahead and the destination underneath.
-/// The line and headsign are the sheet's header, so the body starts with the context line.
+String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
+
+/// The drawn header while riding (#62): what the moment is about, in one line. Just boarded, a
+/// change coming up, a connection at risk, the destination close, a delay that has become a
+/// claim — or, with nothing to say, the delay itself. Null where the plain header stays.
+///
+/// Every sentence is made from what the feed says about this ride; nothing here is predicted.
+({String eyebrow, String title, String subtitle, String? track})? ridingHero(RideMonitor m) {
+  if (m.arrived || m.transfer || m.overdue) return null;
+  final live = m.rideLive;
+  if (live == null) return null;
+  final r = live.ride;
+  final stops = live.stops;
+  final j = m.journey?.journey;
+  final now = DateTime.now();
+  final exitIndex = stops.isEmpty ? -1 : fromIndex(stops, r.exitStationId, r.exitStationName);
+  final boarded = stops.isEmpty ? -1 : fromIndex(stops, r.fromStationId, r.fromStationName);
+  final planned = r.plannedArrival ?? (exitIndex >= 0 ? plannedAt(stops[exitIndex]) : null);
+  final eta = live.eta ?? planned?.add(Duration(minutes: r.liveDelayMinutes));
+  final delay = j?.cappedDelay(r.liveDelayMinutes) ?? r.liveDelayMinutes;
+  final next = _legsAhead(j).firstOrNull;
+  final exit = r.exitStationName;
+  // Past the forecast and not yet arrived says nothing about how soon; it is not "soon".
+  final toExitRaw = eta?.difference(now).inMinutes;
+  final toExit = toExitRaw == null || toExitRaw < 0 ? null : toExitRaw;
+  final info = j?.currentLegInfo;
+  final claimFrom = m.journey?.claimFromMinute ?? 60;
+
+  if (r.cancelled) {
+    return (
+      eyebrow: 'Unterwegs · ${r.line}',
+      title: 'Dein Zug fällt aus.',
+      subtitle: 'Unten kannst du einen anderen Zug zum selben Ziel wählen.',
+      track: null,
+    );
+  }
+
+  if (next != null && toExit != null && toExit <= 10) {
+    final nextDep = next.liveDeparture ?? next.plannedDeparture;
+    final gap = nextDep == null || eta == null ? null : nextDep.difference(eta).inMinutes;
+    final from = _track(info?.arrivalPlatform), to = _track(next.platform);
+    if (gap != null && gap <= 0) {
+      return (eyebrow: 'Umstieg · $exit', title: 'Der Anschluss wird knapp.', subtitle: 'Wir planen um, sobald du in $exit bist.', track: to);
+    }
+    final time = gap == null ? '' : '${_minutes(gap)} Zeit';
+    return (
+      eyebrow: 'Umstieg · $exit',
+      title: toExit <= 1 ? 'Jetzt umsteigen.' : 'Umstieg in ${_minutes(toExit)}.',
+      subtitle: from != null && to != null
+          ? 'Von Gleis $from zu Gleis $to${time.isEmpty ? '' : ', $time'}.'
+          : '${next.line} nach ${next.headsign.isNotEmpty ? next.headsign : next.toStationName}${time.isEmpty ? '' : ', $time'}.',
+      track: to,
+    );
+  }
+
+  // A claim outranks the welcome: someone boarding an hour late checked in for this line.
+  if (delay >= claimFrom) {
+    return (
+      eyebrow: 'Unterwegs · ${r.line}',
+      title: '+${_minutes(delay)}.',
+      subtitle: 'Ab hier entsteht ein Anspruch.',
+      track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
+    );
+  }
+
+  // Just boarded: the train is still at the platform or left in the last five minutes.
+  final boardDep = boarded < 0 ? null : (liveAt(stops[boarded]) ?? plannedAt(stops[boarded]));
+  if (boardDep != null && now.isBefore(boardDep.add(const Duration(minutes: 5)))) {
+    return (
+      eyebrow: 'Eingestiegen · ${r.line}',
+      title: 'Gute Fahrt.',
+      subtitle: next != null
+          ? 'In $exit steigst du um, um ${fmtLocal(eta)}. Bis dahin passen wir auf.'
+          : 'Ankunft in $exit um ${fmtLocal(eta)}. Bis dahin passen wir auf.',
+      track: _track(info?.platform),
+    );
+  }
+
+  if (next == null && toExit != null && toExit <= 10) {
+    final arr = _track(info?.arrivalPlatform);
+    return (
+      eyebrow: 'Ankunft · $exit',
+      title: toExit <= 1 ? 'Gleich da.' : 'Noch ${_minutes(toExit)}.',
+      subtitle: 'Ankunft um ${fmtLocal(eta)}${arr == null ? '' : ' auf Gleis $arr'}.',
+      track: arr,
+    );
+  }
+
+  final late = delay > 0 && planned != null ? ' statt ${fmtLocal(planned)}' : '';
+  return (
+    eyebrow: j != null && j.legs.length > 1 ? 'Unterwegs · Zug ${j.currentLeg} von ${j.legs.length}' : 'Unterwegs · ${r.line}',
+    title: delay > 0 ? '+${_minutes(delay)}.' : 'Pünktlich unterwegs.',
+    subtitle: next != null ? 'Umstieg in $exit um ${fmtLocal(eta)}$late.' : 'Ankunft in $exit um ${fmtLocal(eta)}$late.',
+    track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
+  );
+}
+
+/// The legs still to come after the one being ridden, in order.
+List<ApiLeg> _legsAhead(ApiJourney? j) {
+  if (j == null) return const [];
+  final ahead = j.legs.where((l) => (l.legNo ?? 0) > j.currentLeg).toList()..sort((a, b) => (a.legNo ?? 0).compareTo(b.legNo ?? 0));
+  return ahead;
+}
+
+/// The current leg, live, then every leg still ahead, with the change between them (#62).
+/// The situation — and the delay that matters — is the sheet's header, so the body is the plan:
+/// one card per train, where you get on and off and on which track, the stops in between folded.
 class _RidingView extends StatelessWidget {
   const _RidingView({required this.journey, required this.live, required this.stale, required this.stamp, required this.onWrongTrain, this.onAbort});
   final ApiJourney? journey;
@@ -384,198 +423,352 @@ class _RidingView extends StatelessWidget {
     final delay = r.liveDelayMinutes;
     final planned = r.plannedArrival ?? (exitIndex >= 0 ? plannedAt(stops[exitIndex]) : null);
     final eta = live.eta ?? planned?.add(Duration(minutes: delay));
-    final legsAhead = j == null ? const <ApiLeg>[] : j.legs.where((l) => (l.legNo ?? 0) > j.currentLeg).toList();
-    final transferName = legsAhead.isEmpty ? null : r.exitStationName;
-    final nextLeg = legsAhead.isEmpty ? null : legsAhead.first;
-    final connectionAtRisk = nextLeg?.plannedDeparture != null && eta != null && eta.isAfter(nextLeg!.plannedDeparture!);
+    final ahead = _legsAhead(j);
+    final info = j?.currentLegInfo;
+    final shown = j?.cappedDelay(delay) ?? delay;
+
+    final boarded = stops.isEmpty ? 0 : fromIndex(stops, r.fromStationId, r.fromStationName);
+    final exit = exitIndex < 0 ? null : exitIndex;
+    final current = stops.isEmpty
+        ? const <VStop>[]
+        : vStopsOf(
+            stops,
+            from: boarded,
+            // The train runs on past the exit; the passenger does not (docs/26 §4).
+            to: exit,
+            passed: r.passedStops - 1 + boarded,
+            boldIndex: exit,
+            // The two stops you have to do something at: get on, get off.
+            halos: {boarded, if (exit != null) exit},
+            labels: {
+              boarded: 'Zustieg',
+              if (exit != null) exit: ahead.isNotEmpty ? 'Umstieg' : 'Ziel',
+            },
+            operatorName: r.operator,
+            tracks: {boarded: info?.platform, if (exit != null) exit: info?.arrivalPlatform},
+          );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          j == null ? r.operator : '${r.operator} · Zug ${j.currentLeg} von ${j.legs.length} · Ziel ${j.destinationStationName}',
-          style: VText.body,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const VGap.m(),
-
-        // The delay and what it costs you, side by side: the figure on the left in its tint, and
-        // on the right the one consequence that matters — when you now reach the stop you get off
-        // at. The bubble points back at the figure it is explaining.
         Opacity(
           opacity: stale ? 0.45 : 1,
-          child: Builder(
-            builder: (context) => Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 48,
-                  child: VDelayTile(
-                    j?.cappedDelay(delay) ?? delay,
-                    cancelled: r.cancelled,
-                  ),
-                ),
-                const SizedBox(width: VSpace.md),
-                Expanded(
-                  flex: 52,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      VCallout(
-                        icon: Icons.schedule,
-                        line1: '${transferName != null ? 'Umstieg' : 'Ankunft'} ${r.exitStationName}',
-                        line2: delay > 0
-                            ? '${fmtLocal(eta)} statt ${fmtLocal(planned)}'
-                            : fmtLocal(planned),
-                      ),
-                      const VGap.s(),
-                      Text(
-                        r.cause ?? 'Wir behalten den weiteren Verlauf für dich im Blick.',
-                        style: VText.bodyS,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          child: _LegShell(
+            key: ValueKey(r.tripId),
+            live: true,
+            line: r.line,
+            headsign: stops.isEmpty ? r.exitStationName : stops.last.name,
+            cancelled: r.cancelled,
+            status: r.cancelled
+                ? const VPill('Ausfall', tone: VPillTone.red)
+                : shown > 0
+                    ? VDelayPill(shown)
+                    : const VPill('pünktlich', tone: VPillTone.green),
+            note: r.cause,
+            stops: current,
+            empty: 'Halte folgen, sobald der Zug im Feed ist.',
           ),
         ),
+        for (var i = 0; i < ahead.length; i++) ...[
+          _ChangeGap(
+            station: ahead[i].fromStationName,
+            arrive: i == 0 ? eta : (ahead[i - 1].liveArrival ?? ahead[i - 1].plannedArrival),
+            leg: ahead[i],
+          ),
+          // Keyed by trip: when a leg is confirmed the list shifts, and a fold opened on one
+          // train must not open the next.
+          _AheadLeg(key: ValueKey(ahead[i].tripId), leg: ahead[i], last: i == ahead.length - 1),
+        ],
         if (j?.countedCeilingMinutes != null && delay > j!.countedCeilingMinutes!) ...[
-          const VGap.s(),
+          const VGap.m(),
           Text('Mehr zählt nicht: die Zeit nach dem frühesten Zug ab ${j.transferStationName ?? 'dem Halt'} ist deine.', style: VText.bodyS),
         ],
-
         const VGap.m(),
-        const VDivider(),
-        const VGap.m(),
-
-        if (stops.isEmpty)
-          Text('Halte folgen, sobald der Zug im Feed ist.', style: VText.bodyS)
-        else
-          Builder(builder: (context) {
-            // docs/26 §4: the journey starts where the passenger got on. Stops the train called
-            // at before that are not theirs and only push the useful part off the screen.
-            final boarded = fromIndex(stops, r.fromStationId, r.fromStationName);
-            final exit = exitIndex < 0 ? null : exitIndex;
-            return VStopTimeline(
-              stops: vStopsOf(
-                stops,
-                from: boarded,
-                // The train runs on past the exit; the passenger does not (docs/26 §4).
-                to: exit,
-                passed: r.passedStops - 1 + boarded,
-                boldIndex: exit,
-                // The two stops you have to do something at: get on, get off.
-                halos: {boarded, if (exit != null) exit},
-                labels: {
-                  boarded: 'Zustieg',
-                  if (exit != null) exit: nextLeg != null ? 'Umstieg' : 'Ziel',
-                },
-                operatorName: r.operator,
-              ),
-            );
-          }),
-
-        if (nextLeg != null) ...[
-          const VGap.m(),
-          const VDivider(),
-          const VGap.m(),
-          const VEyebrow('Danach', size: VEyebrowSize.wide),
-          const VGap.s(),
-          // The onward train on its own card: it is a second journey, and on the page it reads as
-          // one because it is boxed rather than because a rule was drawn under the first.
-          VCard(
-            tone: VCardTone.raised,
-            padding: const EdgeInsets.all(VSpace.cardTight),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                VLegRow(
-                  line: nextLeg.line,
-                  cls: vLineClassOf(nextLeg.line),
-                  title: 'nach ${nextLeg.headsign.isNotEmpty ? nextLeg.headsign : nextLeg.toStationName}',
-                  subtitle: 'ab ${nextLeg.fromStationName} ${fmtLocal(nextLeg.liveDeparture ?? nextLeg.plannedDeparture)}'
-                      '${nextLeg.platform != null && nextLeg.platform!.isNotEmpty ? ' · Gl. ${nextLeg.platform}' : ''}',
-                ),
-                // #56: where you get off and where you get on, side by side — the one thing a
-                // change is about. Only what the feed knows; a missing track is not guessed.
-                if (_track(j?.currentLegInfo?.arrivalPlatform) != null || _track(nextLeg.platform) != null) ...[
-                  const VGap.s(),
-                  Row(
-                    key: const Key('transfer-tracks'),
-                    children: [
-                      const Icon(Icons.swap_horiz, size: 18, color: VColors.ink2),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'In ${nextLeg.fromStationName}: an Gleis ${_track(j?.currentLegInfo?.arrivalPlatform) ?? '–'}, ab Gleis ${_track(nextLeg.platform) ?? '–'}',
-                          style: VText.bodySStrong,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-                if (nextLeg.cancelled || connectionAtRisk || nextLeg.delayMin > 0) ...[
-                  const VGap.s(),
-                  Row(
-                    children: [
-                      if (nextLeg.cancelled)
-                        const VPill('Ausfall', tone: VPillTone.red)
-                      else if (connectionAtRisk)
-                        const VPill('knapp', tone: VPillTone.red)
-                      else
-                        VDelayPill(nextLeg.delayMin),
-                    ],
-                  ),
-                ],
-                const VGap.s(),
-                VNoteBanner(
-                  icon: Icons.chat_bubble_outline,
-                  text: connectionAtRisk
-                      ? 'Der Anschluss wird knapp. Wir planen um, sobald du da bist.'
-                      : 'Am Umstieg fragen wir einmal: bist du drin?',
-                ),
-                const VGap.md(),
-                // The second train's stops, so the whole journey reads as one line down the page
-                // rather than stopping at the change (docs/26 §4).
-                _NextLegStops(leg: nextLeg),
-              ],
-            ),
-          ),
-        ],
-
-        if (j != null) ...[
-          const VGap.m(),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(child: Text('Ziel ${j.destinationStationName}', style: VText.bodyS)),
-              Text('an ${fmtLocal(j.plannedArrival)}', style: VText.mono),
+              Expanded(
+                child: _Action(
+                  key: const Key('ride-wrong-train'),
+                  icon: Icons.swap_horiz,
+                  red: true,
+                  title: 'Zug wechseln',
+                  body: 'Anderer Zug, gleiches Ziel.',
+                  onTap: onWrongTrain,
+                ),
+              ),
+              if (onAbort != null) ...[
+                const SizedBox(width: VSpace.s),
+                Expanded(
+                  child: _Action(
+                    key: const Key('ride-abort'),
+                    icon: Icons.close,
+                    red: false,
+                    title: 'Fahrt beenden',
+                    body: 'Wir fragen kurz, was passiert ist.',
+                    onTap: onAbort,
+                  ),
+                ),
+              ],
             ],
           ),
-        ],
-
+        ),
         const VGap.m(),
-        const VDivider(),
-        const VGap.s(),
         Text(
           stale ? 'Letzter Stand $stamp · Verbindung fehlt.' : 'Stand $stamp · Wir folgen dem Zug, nicht dir.',
           style: VText.caption,
         ),
-        if (delay >= 60) ...[
-          const VGap.xs(),
-          Text('Ab hier entsteht ein Anspruch.', style: VText.bodySStrong),
-        ],
-        const VGap.m(),
-        Row(
-          children: [
-            Expanded(child: VGhostButton(label: 'Zug wechseln', color: VColors.ink2, onTap: onWrongTrain)),
-            if (onAbort != null) Expanded(child: VGhostButton(label: 'Abbrechen', color: VColors.ink2, onTap: onAbort)),
-          ],
-        ),
       ],
+    );
+  }
+}
+
+/// One train of the journey on a card (#62): line, direction and status on top, then where you
+/// get on and off. The stops in between are folded behind one quiet row — the glance is the two
+/// ends; the list is there for whoever wants to count.
+///
+/// The train you are on is tinted with the red line; a train still ahead is a white card with the
+/// ink line, so two live journeys never stand on one screen.
+class _LegShell extends StatefulWidget {
+  const _LegShell({super.key, required this.live, required this.line, required this.headsign, required this.cancelled, required this.status, required this.stops, this.note, this.empty});
+  final bool live;
+  final String line;
+  final String headsign;
+  final bool cancelled;
+  final Widget? status;
+  final List<VStop> stops;
+  final String? note;
+
+  /// Said instead of the stops when there are none.
+  final String? empty;
+
+  @override
+  State<_LegShell> createState() => _LegShellState();
+}
+
+class _LegShellState extends State<_LegShell> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = widget;
+    final between = w.stops.length - 2;
+    final shown = _open || between <= 0 ? w.stops : [w.stops.first, w.stops.last];
+    return VCard(
+      tone: w.live ? VCardTone.tint : VCardTone.raised,
+      padding: const EdgeInsets.all(VSpace.cardTight),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              LineBadge(w.line, large: w.live, cancelled: w.cancelled),
+              const SizedBox(width: VSpace.s),
+              Expanded(child: Text('nach ${w.headsign}', style: VText.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+              if (w.status != null) ...[const SizedBox(width: VSpace.s), w.status!],
+            ],
+          ),
+          if (w.note != null && w.note!.isNotEmpty) ...[
+            const VGap.s(),
+            Text(w.note!, style: VText.bodyS),
+          ],
+          if (w.stops.isEmpty && w.empty != null) ...[
+            const VGap.s(),
+            Text(w.empty!, style: VText.bodyS),
+          ] else
+            VStopTimeline(stops: shown, tone: w.live ? VTimelineTone.live : VTimelineTone.quiet),
+          if (between > 0)
+            InkWell(
+              onTap: () => setState(() => _open = !_open),
+              borderRadius: BorderRadius.circular(VRadius.sm),
+              child: Padding(
+                // Under the names, not under the spine.
+                padding: const EdgeInsets.fromLTRB(40, VSpace.xs, 0, VSpace.xs),
+                child: Row(
+                  children: [
+                    Text(
+                      _open ? 'Halte dazwischen ausblenden' : '$between ${between == 1 ? 'Halt' : 'Halte'} dazwischen',
+                      style: VText.bodySStrong.copyWith(color: VColors.ink2),
+                    ),
+                    const SizedBox(width: VSpace.xs),
+                    Icon(_open ? Icons.expand_less : Icons.expand_more, size: 18, color: VColors.ink2),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A train still ahead (docs/26 §4). `ApiLeg` carries only its endpoints, so the stops come from
+/// the trip itself; while that is in flight — or when the feed has nothing — the two ends alone
+/// still say where the passenger gets on and off, which is the part that matters.
+class _AheadLeg extends StatefulWidget {
+  const _AheadLeg({super.key, required this.leg, required this.last});
+  final ApiLeg leg;
+
+  /// The journey ends where this leg does.
+  final bool last;
+
+  @override
+  State<_AheadLeg> createState() => _AheadLegState();
+}
+
+class _AheadLegState extends State<_AheadLeg> {
+  List<ApiStop> _stops = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void didUpdateWidget(covariant _AheadLeg old) {
+    super.didUpdateWidget(old);
+    if (old.leg.tripId != widget.leg.tripId) _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final trip = await RepoScope.read(context).repo.trip(widget.leg.tripId);
+      if (mounted) setState(() => _stops = trip.stops);
+    } catch (_) {
+      // The endpoints are enough; a missing feed is not worth an error here.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = widget.leg;
+    final endTag = widget.last ? 'Ziel' : 'Umstieg';
+    final from = _stops.isEmpty ? -1 : fromIndex(_stops, l.fromStationId, l.fromStationName);
+    final to = _stops.isEmpty ? -1 : fromIndex(_stops, l.toStationId, l.toStationName);
+    final List<VStop> stops = from >= 0 && to > from
+        ? vStopsOf(
+            _stops,
+            from: from,
+            to: to,
+            // Nothing of this train has been ridden yet, so no stop is behind us.
+            passed: from - 1,
+            labels: {from: 'Umstieg', to: endTag},
+            operatorName: l.operator,
+            tracks: {from: l.platform, to: l.arrivalPlatform},
+          )
+        : [
+            VStop(station: l.fromStationName, time: fmtLocal(l.liveDeparture ?? l.plannedDeparture), tag: 'Umstieg', track: _track(l.platform)),
+            VStop(station: l.toStationName, time: fmtLocal(l.liveArrival ?? l.plannedArrival), tag: endTag, track: _track(l.arrivalPlatform)),
+          ];
+    return _LegShell(
+      live: false,
+      line: l.line,
+      headsign: l.headsign.isNotEmpty ? l.headsign : l.toStationName,
+      cancelled: l.cancelled,
+      status: l.cancelled
+          ? const VPill('Ausfall', tone: VPillTone.red)
+          : l.delayMin > 0
+              ? VDelayPill(l.delayMin)
+              // On time only when the feed has said so; no live time is no claim.
+              : l.liveDeparture != null
+                  ? const VPill('pünktlich', tone: VPillTone.green)
+                  : null,
+      stops: stops,
+    );
+  }
+}
+
+/// The change between two trains (#62): the walk, and how long there is for it — from the
+/// forecast arrival to the connection's departure. At zero or below it says so in red; at the change
+/// itself the sheet asks once whether you made it.
+class _ChangeGap extends StatelessWidget {
+  const _ChangeGap({required this.station, required this.arrive, required this.leg});
+  final String station;
+  final DateTime? arrive;
+  final ApiLeg leg;
+
+  @override
+  Widget build(BuildContext context) {
+    final dep = leg.liveDeparture ?? leg.plannedDeparture;
+    final gap = arrive == null || dep == null ? null : dep.difference(arrive!).inMinutes;
+    final tight = gap != null && gap <= 0;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: VSpace.s),
+      child: Row(
+        children: [
+          // The dotted path from one spine to the next, on the spines' axis.
+          SizedBox(
+            width: VSpace.cardTight * 2 + 28,
+            child: Column(
+              children: [
+                for (var i = 0; i < 5; i++)
+                  Container(
+                    width: 3,
+                    height: 3,
+                    margin: const EdgeInsets.symmetric(vertical: 3),
+                    decoration: const BoxDecoration(color: VColors.ink3, shape: BoxShape.circle),
+                  ),
+              ],
+            ),
+          ),
+          Icon(Icons.directions_walk, size: 22, color: tight ? VColors.red : VColors.ink2),
+          const SizedBox(width: VSpace.s),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Umstieg in $station', style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(
+                  gap == null
+                      ? 'Umstiegszeit folgt'
+                      : tight
+                          ? 'Wird knapp. Wir planen um, sobald du da bist.'
+                          : '${_minutes(gap)} zum Umsteigen',
+                  style: VText.bodyStrong.copyWith(color: tight ? VColors.red : VColors.ink),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One of the two things you can do on a moving train, as a tile: a mark, what it is, what it
+/// does. Two side by side, so neither reads as the thing you are expected to press.
+class _Action extends StatelessWidget {
+  const _Action({super.key, required this.icon, required this.red, required this.title, required this.body, required this.onTap});
+  final IconData icon;
+  final bool red;
+  final String title;
+  final String body;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: red ? VColors.redTintSoft : VColors.greyFill,
+      borderRadius: BorderRadius.circular(VRadius.lg),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(VRadius.lg),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(VSpace.cardTight),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              VIconBadge(icon: icon, tone: red ? VBadgeTone.red : VBadgeTone.neutral, size: VControl.badgeSmall, iconColor: red ? null : VColors.ink2),
+              const VGap.s(),
+              Text(title, style: VText.bodyStrong.copyWith(color: red ? VColors.red : VColors.ink)),
+              const SizedBox(height: 2),
+              Text(body, style: VText.bodyS.copyWith(color: VColors.ink2)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

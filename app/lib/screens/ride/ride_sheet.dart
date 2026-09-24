@@ -241,8 +241,9 @@ class _RideSheetLayerState extends State<RideSheetLayer> {
                         ),
                       ),
                       const SizedBox(height: 14),
-                      if (transferHero(m) case final hero?)
-                        // #57: at a change the header is the question itself, over the platform.
+                      if (transferHero(m) ?? ridingHero(m) case final hero?)
+                        // #57, #62: the header is the moment itself — the change, the boarding, the arrival —
+                        // over the platform.
                         LayoutBuilder(
                           builder: (context, c) => Stack(
                             clipBehavior: Clip.none,
@@ -252,7 +253,11 @@ class _RideSheetLayerState extends State<RideSheetLayer> {
                               Positioned(right: -VSpace.sheet, top: 30, child: TransferArt(width: c.maxWidth * 0.42, track: hero.track)),
                               Padding(
                                 padding: EdgeInsets.only(right: c.maxWidth * 0.36, bottom: VSpace.l),
-                                child: Column(
+                                // At least as tall as the drawing down to where it has faded, so a
+                                // short headline does not leave the platform standing on the card.
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(minHeight: 30 + c.maxWidth * 0.42 * 440 / 341 * 0.62 - VSpace.l),
+                                  child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(hero.eyebrow.toUpperCase(), style: VText.eyebrow, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -261,6 +266,7 @@ class _RideSheetLayerState extends State<RideSheetLayer> {
                                     const SizedBox(height: 6),
                                     Text(hero.subtitle, style: VText.body.copyWith(color: VColors.ink2)),
                                   ],
+                                  ),
                                 ),
                               ),
                               Positioned(right: 0, top: 0, child: VCircleIconButton(icon: Icons.expand_more, onTap: m.closeSheet)),

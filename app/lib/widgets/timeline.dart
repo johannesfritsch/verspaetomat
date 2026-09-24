@@ -49,6 +49,7 @@ class VStop {
     this.bold = false,
     this.halo = false,
     this.mark,
+    this.track,
   });
 
   /// The station, as the railway writes it. Long ones ellipsize; they never wrap.
@@ -76,6 +77,10 @@ class VStop {
   /// The operator's mark, set under the station name. The timeline does not know what a railway
   /// looks like, so the caller hands it one.
   final Widget? mark;
+
+  /// The track the passenger gets on or off at, when the feed has one (#62). Only the stops they
+  /// act at carry it; a column of tracks for stops they sit through would be noise.
+  final String? track;
 }
 
 /// The stops of one train as a single vertical line.
@@ -185,6 +190,10 @@ class _StopRow extends StatelessWidget {
               ],
               const SizedBox(width: VSpace.md),
               VStopTime(time: stop.time, delta: stop.delta, bold: stop.bold),
+              if (stop.track != null) ...[
+                const SizedBox(width: VSpace.md),
+                VTrackBox(stop.track!),
+              ],
             ],
           ),
         ),
@@ -349,6 +358,34 @@ class VStopTime extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The track as the station signs it: a small grey plate, "Gleis" over the number (#62). Fixed
+/// width, so the times beside a column of plates stay in one column.
+class VTrackBox extends StatelessWidget {
+  const VTrackBox(this.track, {super.key});
+
+  final String track;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 48,
+        padding: const EdgeInsets.symmetric(vertical: VSpace.xs),
+        decoration: BoxDecoration(
+          color: VColors.greyFill,
+          borderRadius: BorderRadius.circular(VRadius.sm),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Gleis', style: VText.caption.copyWith(color: VColors.ink2)),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(track, style: VText.numberS, maxLines: 1),
+            ),
+          ],
+        ),
+      );
 }
 
 /// What a stop is to the passenger, in one word.

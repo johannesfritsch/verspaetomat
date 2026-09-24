@@ -247,10 +247,10 @@ void main() {
     // Not awaited: frames come from the test pumps, so the future would wait forever.
     monitor().sheetController.animateTo(0.5, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
     await shot('sheet-half');
-    // "Abbrechen" asks why, and "Ich gebe auf" explains the Art. 18 right (docs/21 §1).
+    // "Fahrt beenden" asks why, and "Ich gebe auf" explains the Art. 18 right (docs/21 §1).
     monitor().sheetController.animateTo(0.92, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
     await wait(tester, 800);
-    final abbrechen = find.widgetWithText(VGhostButton, 'Abbrechen').first;
+    final abbrechen = find.byKey(const Key('ride-abort')).first;
     await tester.ensureVisible(abbrechen);
     await wait(tester, 600);
     await tester.tap(abbrechen);
@@ -422,6 +422,13 @@ void main() {
     }
     demo.startJourney(origin: 'Köln Hbf', destination: 'Lüdenscheid', legs: [tourLeg('re7-0747', 'Köln Hbf', 'Hagen Hbf'), tourLeg('rb52-0855', 'Hagen Hbf', 'Lüdenscheid')]);
     await wait(tester, 600);
+    // #62: two trains on the sheet, the change between them.
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
+    await wait(tester, 600);
+    monitor().openSheet();
+    await shot('sheet-riding-umstieg');
+    monitor().closeSheet();
+    await wait(tester, 400);
     demo.liveDelay = 74;
     demo.replanJourney();
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
