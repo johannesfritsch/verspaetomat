@@ -19,6 +19,7 @@ import 'package:verspaetomat/state/ride_monitor.dart';
 import 'package:verspaetomat/screens/claims/claims_widgets.dart' show IncidentRow;
 import 'package:verspaetomat/screens/claims/signature_board.dart';
 import 'package:verspaetomat/screens/community/community_widgets.dart' show BadgeIcon, SwitchRow;
+import 'package:verspaetomat/screens/ride/welcher_zug_screen.dart' show ItineraryTile;
 import 'package:verspaetomat/screens/share/share_moments.dart' show showConfirmedSheet;
 import 'package:verspaetomat/widgets/ticket.dart' show Ticket;
 import 'package:verspaetomat/widgets/kit.dart' show VCard, VDropzone, VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
@@ -313,6 +314,13 @@ void main() {
     await tester.tap(find.byType(VSelectCard).first);
     await wait(tester, 1800);
     await shot('einchecken-zug-sheet');
+    // #67: a train chosen, Weiter, and the ticket in a sheet of its own.
+    await tester.tap(find.byType(ItineraryTile).first, warnIfMissed: false);
+    await wait(tester, 600);
+    await tester.tap(find.widgetWithText(VPrimaryButton, 'Weiter').first, warnIfMissed: false);
+    await wait(tester, 1400);
+    await shot('einchecken-fahrkarte');
+    await dismissSheet(tester);
     await dismissSheet(tester);
     demo.reset();
     // docs/24 §3: the pause, and the one line on Home that says it is running.

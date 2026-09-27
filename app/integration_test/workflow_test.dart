@@ -188,11 +188,12 @@ Future<void> tapInSheet(WidgetTester tester, String text) async {
   await settle(tester);
 }
 
-/// Pulls the ride sheet down (the header's chevron) so the bar shows, then taps the bar to
-/// open it again: the docs/19 path the test exercises after every check-in.
+/// Opens the ride sheet from the bar: the docs/19 path the test exercises after every check-in.
+/// A check-in lands on Home with the bar (#67); where the sheet is open already — a push, an
+/// arrival — it is pulled down first (the header's chevron) so the bar shows.
 Future<void> reopenSheetFromBar(WidgetTester tester) async {
-  await pumpUntilFound(tester, rideSheet, timeout: const Duration(seconds: 20));
-  await tapIcon(tester, Icons.expand_more);
+  await pumpUntilFound(tester, find.byWidgetPredicate((w) => w.key == const Key('ride-bar') || w.key == const Key('ride-sheet-handle')), timeout: const Duration(seconds: 20));
+  if (rideSheet.evaluate().isNotEmpty) await tapIcon(tester, Icons.expand_more);
   await pumpUntilFound(tester, rideBar, timeout: const Duration(seconds: 20));
   await pumpUntilFound(tester, find.textContaining('nach '), timeout: const Duration(seconds: 20));
   await tester.tap(rideBar);
@@ -312,13 +313,28 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
     pick = rows.first;
   }
   final picked = tester.widget<ItineraryTile>(pick).itinerary;
+  // By the connection, not by position: the list builds its cards lazily (#67), so after a scroll
+  // „the third tile" can be another one, or none.
+  pick = find.byWidgetPredicate((w) => w is ItineraryTile && identical(w.itinerary, picked));
   // ignore: avoid_print
   print('journey → $match: ${picked.legs.map((l) => l.line).join(' + ')} (${picked.transfers} transfers)');
-  await tester.ensureVisible(pick);
+  // Into the upper third, not merely into view: Zurück and Weiter float over the foot of the list
+  // (#67), and a card scrolled to the bottom edge sits under them, where the tap would land on a
+  // button instead.
+  await Scrollable.ensureVisible(tester.element(pick), alignment: 0.3);
+  await settle(tester);
   await tester.tap(pick, warnIfMissed: false);
   await settle(tester);
-  // Tapping a card only chooses it now; the sheet's own „Weiter" is what checks in.
+  // Tapping a card only chooses it; „Weiter" asks for the ticket in a sheet of its own (#67), and
+  // „Jetzt einchecken" there checks in. The ticket is chosen explicitly, so the scenario does not
+  // depend on the account's setting: the Deutschlandticket, unless a long-distance train makes it
+  // impossible.
   await tapText(tester, 'Weiter');
+  await pumpUntilFound(tester, find.text('Fahrkarte auswählen'), timeout: const Duration(seconds: 20));
+  final longDistance = picked.legs.any((l) => l.category == ApiCategory.fern);
+  await tester.tap(find.byKey(Key(longDistance ? 'ticket-zeitkarte' : 'ticket-deutschlandticket')), warnIfMissed: false);
+  await settle(tester);
+  await tapText(tester, 'Jetzt einchecken');
   return picked;
 }
 
@@ -328,8 +344,8 @@ Future<String> rideOnce(WidgetTester tester, Stellwerk sw, int n, {String? known
   final picked = (await chooseJourney(tester, 'Düsseldorf Hbf', match: 'Düsseldorf H', viaSquare: true))!;
   final line = picked.first.line;
 
-  // The check-in opens the ride sheet on Home (docs/19); it shows the line, no simulate
-  // buttons in local mode. Pull it down, find the bar, tap the bar: the sheet is back.
+  // The check-in lands on Home with the bar (#67, docs/19); it shows the line, no simulate
+  // buttons in local mode. Tap the bar: the sheet opens.
   await pumpUntilFound(tester, find.textContaining(line, findRichText: true), timeout: const Duration(seconds: 40));
   expect(find.textContaining('Demo:'), findsNothing);
   await reopenSheetFromBar(tester);
@@ -513,9 +529,7 @@ void main() {
       }
       final leg1 = picked.legs.first.line;
       await pumpUntilFound(tester, find.textContaining(leg1, findRichText: true), timeout: const Duration(seconds: 40));
-      // The sheet opened with the check-in; pull it down so the bar carries the ride (docs/19).
-      await pumpUntilFound(tester, rideSheet, timeout: const Duration(seconds: 20));
-      await tapIcon(tester, Icons.expand_more);
+      // The check-in lands on Home, and the bar carries the ride (#67, docs/19).
       await pumpUntilFound(tester, rideBar, timeout: const Duration(seconds: 20));
 
       // Leg 1 ends: the journey goes into transfer; the bar (or the sheet's card) offers "Ich bin drin".
@@ -588,9 +602,8 @@ void main() {
         print('no connecting itinerary offered right now; missed-connection scenario skipped');
         return;
       }
-      await pumpUntilFound(tester, rideSheet, timeout: const Duration(seconds: 40));
-      await tapIcon(tester, Icons.expand_more);
-      await pumpUntilFound(tester, rideBar, timeout: const Duration(seconds: 20));
+      // The check-in lands on Home, and the bar carries the ride (#67).
+      await pumpUntilFound(tester, rideBar, timeout: const Duration(seconds: 40));
 
       // Leg 1 ends; open the sheet on the change.
       await sw.fastForward(customer);

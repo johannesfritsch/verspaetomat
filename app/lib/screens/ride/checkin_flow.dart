@@ -7,6 +7,7 @@ import '../../repo/app_repository.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../state/nearby_monitor.dart';
+import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'ride_widgets.dart';
@@ -666,8 +667,16 @@ class _WelcherZugSheet extends StatelessWidget {
             // #67: checked in, everything closes and Home shows the ride under way. A Weiterfahrt
             // goes back to the ride it continues.
             onStarted: () {
+              // Home learns of the journey now, not at the next poll: the bar is there when the
+              // sheet is gone. `/ride` used to do this by opening the ride sheet.
+              final monitor = RideScope.read(context);
               Navigator.of(context).pop(const StepResult<void>.value(null));
-              context.go(continueJourneyId == null ? Routes.home : Routes.ride);
+              if (continueJourneyId == null) {
+                context.go(Routes.home);
+                unawaited(monitor?.refresh(quiet: true));
+              } else {
+                context.go(Routes.ride);
+              }
             },
           ),
         ),

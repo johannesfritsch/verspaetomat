@@ -346,12 +346,15 @@ class _WelcherZugListState extends State<WelcherZugList> {
                   ),
                   child: Row(
                     children: [
-                      Expanded(child: VOutlineButton(label: 'Zurück', icon: Icons.arrow_back, onTap: _sending ? null : widget.onBack)),
+                      // Grey, like „Schließen" on the other sheets: going back is not the thing
+                      // this step is for, and an ink outline beside the red button read louder
+                      // than it.
+                      Expanded(child: VTintButton(label: 'Zurück', icon: Icons.arrow_back, tone: VTintTone.neutral, onTap: _sending ? null : widget.onBack)),
                       const SizedBox(width: VSpace.s),
                       Expanded(
+                        // No arrow at half the width: it ran into the label.
                         child: VPrimaryButton(
                           label: 'Weiter',
-                          trailingIcon: Icons.arrow_forward,
                           busy: _sending,
                           onTap: _chosen == null || _sending ? null : () => _next(_chosen!),
                         ),
