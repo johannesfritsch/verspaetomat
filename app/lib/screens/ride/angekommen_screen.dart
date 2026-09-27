@@ -359,8 +359,12 @@ Future<void> showArrivalSheet(BuildContext context, {String? variant, ApiArrival
 /// in the picture is blank; its face is measured in the image (612 × 382) — centre (490, 121),
 /// 136 × 54, tilted by 15.8° — so the name sits on it at any width.
 class ArrivalArt extends StatelessWidget {
-  const ArrivalArt({super.key, required this.station, this.mark});
+  const ArrivalArt({super.key, required this.station, this.mark, this.widthFactor = 0.72});
   final String station;
+
+  /// How much of the width the drawing takes, from the right. The arrival leaves room on the left
+  /// for its figure; the ticket sheet (#67) has none and takes all of it.
+  final double widthFactor;
 
   /// What stands on the left, in front of the sky: the check or the figure.
   final Widget? mark;
@@ -380,7 +384,7 @@ class ArrivalArt extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
       // Room on the left for the figure: „+68" at its size is about a quarter of the width.
-      final w = c.maxWidth * 0.72;
+      final w = c.maxWidth * widthFactor;
       final h = w * 382 / 612;
       double x(double v) => w * v / 612;
       double y(double v) => h * v / 382;

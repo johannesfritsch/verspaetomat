@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../mock/mock_data.dart' show TicketType, TicketTypeX;
 import '../../repo/app_repository.dart';
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
@@ -640,42 +639,6 @@ class CountUpDelay extends StatelessWidget {
 // Sheets and shortcuts
 // ---------------------------------------------------------------------------
 
-/// The sheet that switches the ticket type for the next ride.
-Future<void> showTicketSheet(BuildContext context) {
-  final session = RepoScope.read(context);
-  return showVSheet(
-    context,
-    builder: (ctx) => ListenableBuilder(
-      listenable: session,
-      builder: (context, _) {
-        final current = session.me?.settings.ticket ?? TicketType.deutschlandticket;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: VSpace.l),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const VSheetHeader(title: 'Welches Ticket?', subtitle: 'Entscheidet, was eine Verspätung wert ist.'),
-              for (final t in TicketType.values)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
-                  child: VChoiceCard(
-                    title: t.label,
-                    subtitle: t.rule,
-                    selected: current == t,
-                    onTap: () {
-                      session.updateSettings(MePatch(ticket: t));
-                      Navigator.of(ctx).pop();
-                    },
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
-    ),
-  );
-}
 
 /// Station search as a sheet; returns the picked station.
 /// The station search inside the sheet that asked for it (#59). It used to be a second sheet

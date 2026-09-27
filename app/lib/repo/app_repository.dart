@@ -45,7 +45,9 @@ abstract class AppRepository {
   /// Predicted and recent destinations; `from` is the station the customer stands at.
   Future<ApiDestinations> destinations({String? from});
   /// Itineraries from one station to another; `firstTrip` keeps only those starting with that train.
-  Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip});
+  /// [time]: plan from then instead of now (#67, „Früher"). Without it the plan starts half an
+  /// hour back, so the train that just left is on the list too.
+  Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip, DateTime? time});
   Future<ApiJourneyLive> startJourney(StartJourneyRequest request);
   /// The current journey (riding, in transfer, or arrived in the last two hours), else null.
   Future<ApiJourneyLive?> currentJourney();

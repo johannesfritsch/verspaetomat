@@ -213,7 +213,8 @@ class HttpRepository implements AppRepository {
   }
 
   @override
-  Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip}) => client.planJourney(from: from, to: to, firstTrip: firstTrip);
+  Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip, DateTime? time}) =>
+      client.planJourney(from: from, to: to, firstTrip: firstTrip, time: time);
   @override
   Future<ApiJourneyLive> startJourney(StartJourneyRequest request) => client.startJourney(request);
   @override

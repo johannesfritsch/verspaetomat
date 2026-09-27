@@ -141,7 +141,9 @@ class MockRepository implements AppRepository {
 
   /// Demo: direct trains straight from the Köln board; Düsseldorf and Lüdenscheid also via Hagen.
   @override
-  Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip}) async {
+  Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip, DateTime? time}) async {
+    // The Demo board is one fixed morning: there is nothing earlier than it to page back to.
+    if (time != null) return ApiPlan(from: ApiStation(id: from, name: from), to: ApiStation(id: to, name: to), itineraries: const []);
     final fromName = from.startsWith('mock:') ? 'Köln Hbf' : from;
     final target = _norm(to.startsWith('mock:') ? to.substring(5).replaceAll('-', ' ') : to);
     final targetName = to.startsWith('mock:') ? _nameFromId(to) : to;

@@ -16,13 +16,14 @@ import 'welcher_zug_screen.dart';
 ///
 /// Before this the source station was a fact the app asserted and the passenger could only
 /// accept: when the detection was wrong there was no way through the flow at all. Now every
-/// step is answerable, and each one shows what the previous settled as a breadcrumb, so any
-/// of them can be reopened without starting over.
+/// step is answerable, and each one can go back to the one before without starting over.
 ///
 ///  1. **Von wo?** — the detected station preselected, the next two beneath it, the stations
 ///     this person uses most, then search.
 ///  2. **Wohin?** — destinations from history, then search.
-///  3. **Welcher Zug?** — the itineraries, one swipe from the choice above.
+///  3. **Welcher Zug?** — the itineraries, with the delays in their times and „Früher" for the
+///     trains before them; Zurück and Weiter float at the foot (#67). Weiter asks for the ticket
+///     in a sheet of its own, and „Jetzt einchecken" there closes everything and goes Home.
 ///
 /// It always starts at step 1, even when the detection is right: one tap on the preselected
 /// station moves on, and the passenger sees what the app thinks before committing to it. Home
@@ -106,30 +107,6 @@ class StepResult<T> {
   const StepResult.back() : value = null, back = true;
   final T? value;
   final bool back;
-}
-
-/// The breadcrumb: what an earlier step settled, tappable to reopen it (`Ab München Hbf ▾`).
-class _Breadcrumb extends StatelessWidget {
-  const _Breadcrumb({required this.label, required this.onTap});
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: VSpace.page, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(child: Text(label, style: VText.bodySStrong, maxLines: 1, overflow: TextOverflow.ellipsis)),
-            const Icon(Icons.expand_more, size: 18, color: VColors.ink2),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 /// A sheet's header with the drawing behind it.
@@ -673,28 +650,25 @@ class _WelcherZugSheet extends StatelessWidget {
             narrow: true,
           ),
         ),
-        _Breadcrumb(
-          label: '${from.name} → ${to.name}',
-          onTap: () => Navigator.of(context).pop(const StepResult<void>.back()),
-        ),
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: VSpace.sheet),
-            child: WelcherZugList(
-              fromStationId: from.id,
-              fromStationName: from.name,
-              toStationId: to.id,
-              toStationName: to.name,
-              fromLat: from.lat,
-              fromLon: from.lon,
-              continueJourneyId: continueJourneyId,
-              earliestOnwardArrival: earliestOnwardArrival,
-              countedMinutes: countedMinutes,
-              onStarted: () {
-                Navigator.of(context).pop(const StepResult<void>.value(null));
-                context.go(Routes.ride);
-              },
-            ),
+          child: WelcherZugList(
+            fromStationId: from.id,
+            fromStationName: from.name,
+            toStationId: to.id,
+            toStationName: to.name,
+            fromLat: from.lat,
+            fromLon: from.lon,
+            continueJourneyId: continueJourneyId,
+            earliestOnwardArrival: earliestOnwardArrival,
+            countedMinutes: countedMinutes,
+            // Zurück replaces the breadcrumb this step had: the same way up, always in reach.
+            onBack: () => Navigator.of(context).pop(const StepResult<void>.back()),
+            // #67: checked in, everything closes and Home shows the ride under way. A Weiterfahrt
+            // goes back to the ride it continues.
+            onStarted: () {
+              Navigator.of(context).pop(const StepResult<void>.value(null));
+              context.go(continueJourneyId == null ? Routes.home : Routes.ride);
+            },
           ),
         ),
       ],
