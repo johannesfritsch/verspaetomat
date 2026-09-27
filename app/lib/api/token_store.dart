@@ -3,6 +3,8 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../platform/diagnose_log.dart';
+
 /// The keychain could not be read — on iOS almost always because the phone is locked and the
 /// app was started in the background (prewarming, a geofence wake, a push). It is not the same
 /// as „there is no token": treating it as that created a new, empty account under a passenger
@@ -12,6 +14,14 @@ class KeychainUnavailable implements Exception {
   final Object cause;
   @override
   String toString() => 'Schlüsselbund gerade nicht lesbar ($cause)';
+}
+
+/// The keychain did not keep a token that was just written: the account works for this session,
+/// but the next start will not find it.
+class TokenNotSaved implements Exception {
+  const TokenNotSaved();
+  @override
+  String toString() => 'Dieses Telefon hat sich das Konto nicht gemerkt. Versuch es gleich noch einmal — die zwölf Wörter bleiben gültig.';
 }
 
 /// Holds the device token. Keychain / Keystore on phones; in-memory fallback
@@ -50,7 +60,11 @@ class TokenStore {
   /// the keychain cannot be read: the caller must not take that as „no account yet".
   Future<String?> token() async {
     if (_memToken != null || _secure == null) return _memToken;
-    return _memToken = await _read(_key);
+    final t = _memToken = await _read(_key);
+    // Once per start (the value is kept in memory after this): whether the account survived the
+    // last restart is the first thing to know when „my minutes are gone" (#69 follow-up).
+    DiagnoseLog.instance.add('keychain', t == null ? 'kein Token im Schlüsselbund' : 'Token aus dem Schlüsselbund gelesen', bad: t == null);
+    return t;
   }
 
   Future<String?> deviceId() async {
@@ -82,16 +96,57 @@ class TokenStore {
     }
   }
 
-  Future<void> save({required String deviceId, required String token}) async {
+  /// Stores the token and checks that it is there: true when the keychain gives back what was
+  /// written. Memory always holds it, so this session goes on either way; a false means the next
+  /// start would not find it — which is how a recovered account showed 158 minutes and then 0
+  /// after a restart (27 September 2026, the #69 follow-up). The write used to be silent about it.
+  ///
+  /// First the plugin's own write (update or add). Only if what comes back is not the token does
+  /// it clear every variant of the entry and write again: an entry the plugin's update cannot
+  /// match — another accessibility, another sync state — makes its add fail as a duplicate. The
+  /// clearing is the second attempt and never the first, so a failure cannot cost a token that
+  /// was still intact.
+  Future<bool> save({required String deviceId, required String token}) async {
     _memToken = token;
     _memDevice = deviceId;
-    if (_secure == null) return;
-    try {
-      await _secure.write(key: _key, value: token, iOptions: _ios);
-      await _secure.write(key: _deviceKey, value: deviceId, iOptions: _ios);
-    } catch (_) {
-      // Keychain unavailable (simulator quirks, previews): memory keeps the session alive.
+    final secure = _secure;
+    if (secure == null) return true;
+    Future<bool> writeAndCheck() async {
+      await secure.write(key: _key, value: token, iOptions: _ios);
+      await secure.write(key: _deviceKey, value: deviceId, iOptions: _ios);
+      return await secure.read(key: _key, iOptions: _ios) == token;
     }
+
+    Object? error;
+    try {
+      if (await writeAndCheck()) {
+        DiagnoseLog.instance.add('keychain', 'Token gespeichert');
+        return true;
+      }
+    } catch (e) {
+      error = e;
+    }
+    try {
+      for (final o in const [_ios, _iosBefore78]) {
+        try {
+          await secure.delete(key: _key, iOptions: o);
+          await secure.delete(key: _deviceKey, iOptions: o);
+        } catch (_) {}
+      }
+      if (await writeAndCheck()) {
+        DiagnoseLog.instance.add('keychain', 'Token gespeichert (zweiter Versuch${error == null ? '' : ' nach ${_short(error)}'})');
+        return true;
+      }
+    } catch (e) {
+      error = e;
+    }
+    DiagnoseLog.instance.add('keychain', 'Token NICHT gespeichert${error == null ? ': gelesen wird ein anderer Wert' : ': ${_short(error)}'}', bad: true);
+    return false;
+  }
+
+  static String _short(Object e) {
+    final s = e.toString().replaceAll('\n', ' ');
+    return s.length > 60 ? '${s.substring(0, 60)}…' : s;
   }
 
   Future<void> clear() async {

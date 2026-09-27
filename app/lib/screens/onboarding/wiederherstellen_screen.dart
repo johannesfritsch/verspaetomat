@@ -6,6 +6,7 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../../api/token_store.dart' show TokenNotSaved;
 
 /// Where the twelve words are typed back in.
 ///
@@ -126,9 +127,12 @@ class _WiederherstellenScreenState extends State<WiederherstellenScreen> {
     } catch (e) {
       if (!mounted) return;
       final unknown = e.toString().contains('unknown recovery code') || e.toString().contains('404');
-      setState(() => _error = unknown
-          ? 'Diese zwölf Wörter kennen wir nicht. Prüf die Reihenfolge und die Schreibweise.'
-          : 'Das hat nicht geklappt: $e');
+      setState(() => _error = e is TokenNotSaved
+          // Said as it is: the words are still right, and trying again is the whole remedy.
+          ? e.toString()
+          : unknown
+              ? 'Diese zwölf Wörter kennen wir nicht. Prüf die Reihenfolge und die Schreibweise.'
+              : 'Das hat nicht geklappt: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

@@ -111,6 +111,9 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
     if (!isLocal) throw 'Im Demo-Modus gibt es kein Konto zum Zurückholen.';
     await _http.recover(code);
     await _bootstrap();
+    // The account was onboarded on the phone it came from; this install should not greet it with
+    // Willkommen again at the next start. `init` sets the same flag, but only at startup.
+    if (me?.settings.onboardingDone == true) await prefs.setBool(onboardingDoneKey, true);
     notifyListeners();
   }
 

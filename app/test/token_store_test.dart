@@ -34,6 +34,24 @@ class _Keychain extends FlutterSecureStorage {
       items.remove(_k(key, iOptions));
 }
 
+/// A keychain like iOS's for an entry the plugin's update cannot match: it is unique by key alone,
+/// so an add under another accessibility fails as a duplicate while that entry is there.
+class _Duplicate extends _Keychain {
+  _Duplicate(super.items);
+  @override
+  Future<void> write({required String key, required String? value, AppleOptions? iOptions, AndroidOptions? aOptions, LinuxOptions? lOptions, WebOptions? webOptions, AppleOptions? mOptions, WindowsOptions? wOptions}) async {
+    if (items.keys.any((k) => k.startsWith('$key|') && k != _k(key, iOptions))) throw PlatformException(code: '-25299', message: 'duplicate item');
+    await super.write(key: key, value: value, iOptions: iOptions);
+  }
+}
+
+/// A keychain that answers every write with success and keeps nothing.
+class _Forgetful extends _Keychain {
+  _Forgetful() : super({});
+  @override
+  Future<void> write({required String key, required String? value, AppleOptions? iOptions, AndroidOptions? aOptions, LinuxOptions? lOptions, WebOptions? webOptions, AppleOptions? mOptions, WindowsOptions? wOptions}) async {}
+}
+
 /// 23 September 2026: a background start with the phone locked read no token, made a new
 /// account — four of them, in seven seconds — and the ride under way vanished from the app.
 void main() {
@@ -75,5 +93,56 @@ void main() {
     expect(items.containsKey('verspaetomat.device_token|unlocked'), isFalse);
     await repo.ensureDevice();
     expect(created, isEmpty, reason: 'the old account is kept, no new one is made');
+  });
+
+  // 27 September 2026: a recovered account showed 158 minutes, and 0 after a restart. The token
+  // write had failed and said nothing; memory carried the session until the app was closed.
+  group('saving the token says whether it stuck', () {
+    test('a plain save is read back', () async {
+      final items = <String, String>{};
+      final tokens = TokenStore.over(_Keychain(items));
+      expect(await tokens.save(deviceId: 'd', token: 't'), isTrue);
+      expect(items['verspaetomat.device_token|first_unlock'], 't');
+    });
+
+    test('an entry the update cannot match is cleared and the second write sticks', () async {
+      final items = {'verspaetomat.device_token|unlocked': 'stale', 'verspaetomat.device_id|unlocked': 'id-stale'};
+      final tokens = TokenStore.over(_Duplicate(items));
+      expect(await tokens.save(deviceId: 'd', token: 'new'), isTrue);
+      expect(items['verspaetomat.device_token|first_unlock'], 'new');
+      expect(items.containsKey('verspaetomat.device_token|unlocked'), isFalse);
+    });
+
+    test('a keychain that keeps nothing: the session goes on, and the save says false', () async {
+      final tokens = TokenStore.over(_Forgetful());
+      expect(await tokens.save(deviceId: 'd', token: 't'), isFalse);
+      expect(await tokens.token(), 't', reason: 'memory still carries this session');
+    });
+
+    test('a locked keychain: no throw, just false', () async {
+      final tokens = TokenStore.over(const _Locked());
+      expect(await tokens.save(deviceId: 'd', token: 't'), isFalse);
+    });
+
+    test('a recovery whose token does not stick is reported, not celebrated', () async {
+      final tokens = TokenStore.over(_Forgetful());
+      final client = MockClient((r) async => r.url.path == '/v1/devices/recover'
+          ? http.Response('{"device_id":"old-account","token":"recovered"}', 200)
+          : http.Response('{}', 404));
+      final repo = HttpRepository(client: ApiClient(baseUrl: 'http://x', tokens: tokens, inner: client), tokens: tokens);
+      await expectLater(repo.recover('zwölf wörter'), throwsA(isA<TokenNotSaved>()));
+    });
+
+    test('a recovery that sticks: the recovered token is the one stored', () async {
+      final items = <String, String>{'verspaetomat.device_token|first_unlock': 'fresh-account'};
+      final tokens = TokenStore.over(_Keychain(items));
+      final client = MockClient((r) async => r.url.path == '/v1/devices/recover'
+          ? http.Response('{"device_id":"old-account","token":"recovered"}', 200)
+          : http.Response('{}', 404));
+      final repo = HttpRepository(client: ApiClient(baseUrl: 'http://x', tokens: tokens, inner: client), tokens: tokens);
+      await repo.recover('zwölf wörter');
+      expect(items['verspaetomat.device_token|first_unlock'], 'recovered');
+      expect(items['verspaetomat.device_id|first_unlock'], 'old-account');
+    });
   });
 }

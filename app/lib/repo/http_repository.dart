@@ -72,13 +72,21 @@ class HttpRepository implements AppRepository {
   Future<bool> _ensureDevice() async {
     if (await tokens.token() != null) return true;
     final auth = await client.createDevice();
+    DiagnoseLog.instance.add('konto', 'neues Konto angelegt (${auth.deviceId.length > 8 ? auth.deviceId.substring(0, 8) : auth.deviceId})', bad: true);
+    // A token that did not stick still carries this session; the log says the next start will
+    // not find it.
     await tokens.save(deviceId: auth.deviceId, token: auth.token);
     return true;
   }
 
+  /// Points this install at the account the twelve words belong to. Throws [TokenNotSaved] when
+  /// the keychain would not keep the new token: the account is on this phone for now, but the
+  /// next start would not find it, and the passenger has to hear that while the words are still
+  /// in front of them.
   Future<void> recover(String recoveryCode) async {
     final auth = await client.recoverDevice(recoveryCode);
-    await tokens.save(deviceId: auth.deviceId, token: auth.token);
+    DiagnoseLog.instance.add('konto', 'Konto zurückgeholt (${auth.deviceId.length > 8 ? auth.deviceId.substring(0, 8) : auth.deviceId})');
+    if (!await tokens.save(deviceId: auth.deviceId, token: auth.token)) throw const TokenNotSaved();
   }
 
   @override
