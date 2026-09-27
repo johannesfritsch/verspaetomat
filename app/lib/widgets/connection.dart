@@ -13,10 +13,13 @@ import 'surfaces.dart';
 // than as a list row — two times at the edges, the journey drawn between them, and the reasons
 // to pick this one on a line underneath.
 //
-// Two things the mockup draws are deliberately absent. There is no arrival platform, because the
-// app only ever knows the platform you got on at; the arrival column carries the station and
-// stops there. And there is no occupancy tag: "Hohe Auslastung" is drawn in the mockup and the
-// app has no such data, so the widget has no way to say it.
+// One thing the mockup draws is deliberately absent: there is no occupancy tag. "Hohe Auslastung"
+// is drawn in the mockup and the app has no such data, so the widget has no way to say it. The
+// arrival platform is there since the plan carries it (#56), and only where it does.
+//
+// Since #67 the times carry their delay: the planned time, struck through when the train is late,
+// with the difference beside it, and under it the time it will actually be — the one that matters
+// to somebody deciding which train they are sitting in.
 
 /// One connection, and whether it is the chosen one.
 ///
@@ -46,10 +49,28 @@ class VConnectionCard extends StatelessWidget {
     required this.tags,
     required this.selected,
     required this.onTap,
+    this.departDelta,
+    this.departLive,
+    this.arriveDelta,
+    this.arriveLive,
+    this.arrivePlatform,
   });
 
-  /// "05:25". German clock, no seconds.
+  /// "05:25", the planned time. German clock, no seconds.
   final String departTime;
+
+  /// Minutes off the plan at departure, when the feed says; null prints no difference at all.
+  final int? departDelta;
+
+  /// The live departure, shown under the planned one when the train is late.
+  final String? departLive;
+
+  /// Minutes off the plan at arrival, and the live arrival: the same pair for the right end.
+  final int? arriveDelta;
+  final String? arriveLive;
+
+  /// "Gl. 13", when the plan knows where the train comes in.
+  final String? arrivePlatform;
 
   final String departStation;
 
@@ -93,6 +114,8 @@ class VConnectionCard extends StatelessWidget {
                   flex: 4,
                   child: _VEnd(
                     time: departTime,
+                    delta: departDelta,
+                    live: departLive,
                     station: departStation,
                     platform: departPlatform,
                   ),
@@ -104,7 +127,7 @@ class VConnectionCard extends StatelessWidget {
                   flex: 4,
                   // The mockup sets the arrival flush left like the departure rather than
                   // mirroring it, and that is what keeps the two times on one baseline grid.
-                  child: _VEnd(time: arriveTime, station: arriveStation),
+                  child: _VEnd(time: arriveTime, delta: arriveDelta, live: arriveLive, station: arriveStation, platform: arrivePlatform),
                 ),
                 const SizedBox(width: VSpace.s),
                 _VSelectMark(selected: selected),
@@ -126,26 +149,51 @@ class VConnectionCard extends StatelessWidget {
 /// it is wider than the column will ever be, so the only question is whether it truncates or
 /// breaks the layout.
 class _VEnd extends StatelessWidget {
-  const _VEnd({required this.time, required this.station, this.platform});
+  const _VEnd({required this.time, required this.station, this.platform, this.delta, this.live});
 
   final String time;
   final String station;
   final String? platform;
+  final int? delta;
+  final String? live;
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) {
+    final d = delta;
+    final late = d != null && d > 0;
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           // The time measures 18.2 pt in the mockup. VText.numberS at 20 is the nearest token and
           // the right register besides: a departure time is a figure, and it is tabular so that
-          // four of these stack into a column that reads down the digits.
-          Text(
-            time,
-            style: VText.numberS,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          // four of these stack into a column that reads down the digits. Late, it is struck
+          // through and steps back to ink3: the plan is history, the live time under it is not.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  time,
+                  style: late
+                      ? VText.numberS.copyWith(color: VColors.ink3, fontWeight: FontWeight.w600, decoration: TextDecoration.lineThrough, decorationColor: VColors.ink3)
+                      : VText.numberS,
+                  maxLines: 1,
+                ),
+                if (d != null) ...[
+                  const SizedBox(width: VSpace.xs),
+                  // Signed on every row, the way the ride sheet's timeline does it: "+0" is how
+                  // "we checked, it is on time" looks, and a blank would read as "unknown".
+                  Text(d >= 0 ? '+$d' : '$d', style: VText.delta.copyWith(color: late ? VColors.red : VColors.green)),
+                ],
+              ],
+            ),
           ),
+          if (late && live != null)
+            Text(live!, style: VText.numberS.copyWith(color: VColors.red), maxLines: 1),
           // No gap between the three lines: the mockup stacks them on their line boxes alone,
           // measured baseline to baseline at 16 and 13 pt.
           Text(
@@ -157,15 +205,25 @@ class _VEnd extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
           if (platform != null)
-            Text(
-              platform!,
-              // Measured #6E7588, which is VColors.ink2 to within a level.
-              style: VText.caption.copyWith(color: VColors.ink2),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            Padding(
+              padding: const EdgeInsets.only(top: VSpace.xs),
+              // A small grey plate, as in the #67 mockup: the track is a thing you look for on a
+              // sign, and on the card it reads as one.
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(color: VColors.greyFill, borderRadius: BorderRadius.circular(VRadius.sm)),
+                child: Text(
+                  platform!,
+                  // Measured #6E7588, which is VColors.ink2 to within a level.
+                  style: VText.caption.copyWith(color: VColors.ink2),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ),
         ],
       );
+  }
 }
 
 /// The middle of a connection: how long it takes, the rule it takes it along, and the train.
