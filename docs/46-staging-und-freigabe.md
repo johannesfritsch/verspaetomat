@@ -50,7 +50,10 @@ ssh verspaetomat-staging /opt/verspaetomat/deploy/deploy.sh  # Backend und Websi
 STAGE=staging app/tools/release.sh                           # Staging-App nach TestFlight
 ```
 
-**Freigabe für Produktion (manchmal)**
+Danach ist Schluss: Johannes probiert den Staging-Build. Staging ist sein Tor, kein Zwischenschritt —
+bestandene Tests sind die Bedingung für Staging, kein Ersatz für seinen Test.
+
+**Freigabe für Produktion (manchmal, nur auf Johannes' Wort)**
 
 ```bash
 deploy/promote.sh            # den Commit, der auf Staging läuft
