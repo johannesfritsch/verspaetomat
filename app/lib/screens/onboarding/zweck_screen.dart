@@ -54,7 +54,6 @@ class _ZweckScreenState extends State<ZweckScreen> {
       asset: 'assets/onboarding/setup-zweck.webp',
       imageHeight: 170,
       title: 'Wähle einen Verein',
-      busy: _busy,
       body: [
         const SetupText('Deine Entschädigung geht direkt dorthin. Von der Bahn, nicht über uns.'),
         if (ngos.isEmpty)
@@ -74,7 +73,9 @@ class _ZweckScreenState extends State<ZweckScreen> {
             ),
       ],
       primary: 'Weiter',
-      onPrimary: _busy ? null : _next,
+      // With no list yet there is nothing to choose; „Später entscheiden" stays for that.
+      busy: _busy || (ngos.isEmpty && session.busy),
+      onPrimary: _busy || ngos.isEmpty ? null : _next,
       secondary: 'Später entscheiden',
       onSecondary: _busy ? null : () => context.go(Routes.permissions),
       footnote: 'Du kannst deinen Zweck später jederzeit ändern.',

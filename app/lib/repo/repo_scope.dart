@@ -393,6 +393,17 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
+  /// The account setup once more, after it failed (#70: the onboarding waits for it). A no-op
+  /// while one is already running.
+  Future<void> retrySetup() async {
+    if (busy) return;
+    await _bootstrap();
+    notifyListeners();
+  }
+
+  /// Whether this install has an account to write to yet. Demo always has one.
+  bool get accountReady => !isLocal || (me != null && !busy);
+
   Future<void> refresh() async {
     try {
       me = await repo.getMe();

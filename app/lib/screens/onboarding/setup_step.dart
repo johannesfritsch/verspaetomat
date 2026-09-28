@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 
@@ -60,18 +61,35 @@ class SetupStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // #70: every step writes to the account, so none of them moves on before there is one. While
+    // it is being set up, both answers wait and the button shows why; if setting it up failed,
+    // the only answer is to try again — a tap into nothing would pretend the choice was kept.
+    final session = RepoScope.of(context);
+    final ready = session.accountReady;
+    final failed = !ready && !session.busy;
     return VScreen(
       showBack: false,
       scroll: true,
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          VPrimaryButton(label: primary, busy: busy, onTap: onPrimary),
-          if (secondary != null) ...[
+          if (failed)
+            VPrimaryButton(key: const Key('setup-retry'), label: 'Erneut versuchen', icon: Icons.refresh, onTap: session.retrySetup)
+          else
+            VPrimaryButton(label: primary, busy: busy || !ready, onTap: ready ? onPrimary : null),
+          if (secondary != null && !failed) ...[
             const VGap.s(),
-            VTintButton(label: secondary!, tone: VTintTone.neutral, onTap: onSecondary),
+            VTintButton(label: secondary!, tone: VTintTone.neutral, onTap: ready ? onSecondary : null),
           ],
-          if (footnote != null) ...[
+          if (!ready) ...[
+            const VGap.s(),
+            Text(
+              failed ? 'Dein Konto ließ sich gerade nicht einrichten. ${session.error ?? ''}'.trim() : 'Einen Moment, dein Konto wird vorbereitet …',
+              key: const Key('setup-waiting'),
+              style: VText.caption,
+              textAlign: TextAlign.center,
+            ),
+          ] else if (footnote != null) ...[
             const VGap.s(),
             Text(footnote!, style: VText.caption, textAlign: TextAlign.center),
           ],
