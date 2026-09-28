@@ -246,6 +246,10 @@ async fn customer_json(pool: &PgPool, flags: &crate::flags::Table, c: &CustomerR
             "quiet_to": c.quiet_to.map(|t| t.format("%H:%M").to_string()),
             "nudge_snooze_until": c.nudge_snooze_until,
         },
+        // #74: minutes are the one figure. The points_* fields carry the same numbers for builds
+        // from before, which read nothing else (docs/47).
+        "minutes_total": points_total,
+        "minutes_this_week": points_week,
         "points_total": points_total,
         "points_this_week": points_week,
         "level_name": level,
@@ -979,7 +983,7 @@ pub async fn nachtrag(State(s): State<AppState>, c: Customer, Json(n): Json<Nach
     .bind(c.0.ticket)
     .bind(delay as i32)
     .bind(t.cancelled || exit.cancelled)
-    .bind(rules::points_for(delay, t.cancelled, true) as i32)
+    .bind(rules::counted_minutes(delay, t.cancelled) as i32)
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
@@ -2583,7 +2587,7 @@ pub async fn boards(State(s): State<AppState>, c: Customer, Query(q): Query<Boar
         _ => "line",
     };
     let entries = board_entries(&s.pool, &c.0, scope).await.map_err(internal)?;
-    let out: Vec<Value> = entries.into_iter().enumerate().map(|(k, (name, points, is_me, seed))| json!({ "rank": k + 1, "name": name, "points": points, "is_me": is_me, "seed": seed })).collect();
+    let out: Vec<Value> = entries.into_iter().enumerate().map(|(k, (name, points, is_me, seed))| json!({ "rank": k + 1, "name": name, "minutes": points, "points": points, "is_me": is_me, "seed": seed })).collect();
     Ok(Json(json!(out)))
 }
 
@@ -2805,13 +2809,13 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
                 _ => c.0.home_station_name.as_deref().and_then(|n| n.split_whitespace().next()).unwrap_or("").to_string(),
             };
             let gap = if pos == 0 { None } else { Some(entries[pos - 1].1 - entries[pos].1) };
-            board = json!({ "scope": scope, "key": key, "rank": pos + 1, "size": entries.len(), "points": entries[pos].1, "gap_to_next": gap });
+            board = json!({ "scope": scope, "key": key, "rank": pos + 1, "size": entries.len(), "minutes": entries[pos].1, "points": entries[pos].1, "gap_to_next": gap });
             break;
         }
     }
 
     // Community with my share. `my_minutes` is minutes, out of the same column and the same set of
-    // rides as the total it is a share of — it used to be the Geduldspunkte total, so Home's dark
+    // rides as the total it is a share of — it used to be the points total, so Home's dark
     // board said „N davon deine" under a label that says minutes and the two numbers were counted
     // by different rules (a ride given up carries points but no final delay).
     let (minutes, my_minutes, my_confirmed): (i64, i64, i64) = sqlx::query_as(
@@ -2884,9 +2888,13 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     let next = NextThing::pick(candidates).map(|n| n.to_json()).unwrap_or(Value::Null);
 
     Ok(Json(json!({
+        // #74: minutes, and the same numbers once more under their old names for older builds.
+        "minutes_this_week": points_this_week,
+        "minutes_last_week": points_last_week,
+        // Monday first, seven entries, always present (issue #33).
+        "minutes_by_day": points_by_day.to_vec(),
         "points_this_week": points_this_week,
         "points_last_week": points_last_week,
-        // Monday first, seven entries, always present (issue #33).
         "points_by_day": points_by_day.to_vec(),
         // Which of those seven is today, in Europe/Berlin — the same clock the buckets were cut
         // with. The app must not work this out from the device: a phone in another timezone, or
@@ -2895,7 +2903,7 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
         "today_index": today_index,
         "unread_mails": unread_mails(pool, c.0.id).await.map_err(internal)?,
         "rides_this_week": rides_this_week,
-        "level": { "name": level_name, "next_name": next_name, "points_to_next": points_to_next, "progress": progress },
+        "level": { "name": level_name, "next_name": next_name, "minutes_to_next": points_to_next, "points_to_next": points_to_next, "progress": progress },
         "money": { "open_cents": open_cents, "missing_cents": missing_cents, "ready": ready, "ready_desk": ready_desk, "ngo_name": ngo_name },
         "board": board,
         "community": { "minutes_total": minutes, "my_minutes": my_minutes, "confirmed_cents": confirmed_all, "my_confirmed_cents": my_confirmed },

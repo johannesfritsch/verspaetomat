@@ -35,8 +35,8 @@ struct RidingRow {
     planned_arrival: DateTime<Utc>,
 }
 
-/// Points for a ride: one per minute late from minute 1; a cancellation counts as at least 60.
-pub fn points_for(final_delay_min: i64, cancelled: bool) -> i64 {
+/// The minutes a ride counts (#74): its delay from minute 1; a cancellation counts at least 60.
+pub fn counted_minutes(final_delay_min: i64, cancelled: bool) -> i64 {
     if cancelled {
         final_delay_min.max(60)
     } else {
@@ -161,7 +161,7 @@ pub async fn finalise_ride(
     actual_arrival: Option<DateTime<Utc>>,
     self_entered: bool,
 ) -> Result<()> {
-    let points = points_for(final_delay_min, cancelled);
+    let points = counted_minutes(final_delay_min, cancelled);
     let updated = sqlx::query(
         "update rides set status = 'arrived', actual_arrival = coalesce($2, planned_arrival + make_interval(mins => $3)), \
          final_delay_min = $3, cancelled = $4, self_entered = $5, points = $6, finalised_at = now(), last_polled_at = now() \
@@ -201,10 +201,10 @@ mod tests {
 
     #[test]
     fn points() {
-        assert_eq!(points_for(14, false), 14);
-        assert_eq!(points_for(0, false), 0);
-        assert_eq!(points_for(-2, false), 0);
-        assert_eq!(points_for(12, true), 60);
-        assert_eq!(points_for(75, true), 75);
+        assert_eq!(counted_minutes(14, false), 14);
+        assert_eq!(counted_minutes(0, false), 0);
+        assert_eq!(counted_minutes(-2, false), 0);
+        assert_eq!(counted_minutes(12, true), 60);
+        assert_eq!(counted_minutes(75, true), 75);
     }
 }

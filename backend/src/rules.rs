@@ -71,11 +71,14 @@ pub fn flat_claim_cents(ticket: TicketType, first_class: bool) -> Option<Cents> 
     }
 }
 
-/// Points for a ride: one per minute late from minute 1; a cancellation is 60; a Nachtrag is 1.
-pub fn points_for(delay_minutes: i64, cancelled: bool, nachtrag: bool) -> i64 {
-    if nachtrag {
-        return 1;
-    }
+/// The minutes a ride counts (#74, docs/47): its delay at the exit stop, from minute 1. A
+/// cancellation counts at least 60 — the law treats it like an hour late, and a train that never
+/// ran has no delay of its own to measure. There is no other currency: what used to be called
+/// Geduldspunkte was this number under a second name. A ride entered afterwards (Nachtrag) counts
+/// its minutes too; it only stays off the boards, like every ride without a location fix.
+///
+/// Stored in the `points` columns of `rides` and `journeys`, whose name predates #74.
+pub fn counted_minutes(delay_minutes: i64, cancelled: bool) -> i64 {
     if cancelled {
         return 60.max(delay_minutes);
     }
@@ -396,9 +399,10 @@ mod tests {
     }
 
     #[test]
-    fn points() {
-        assert_eq!(points_for(14, false, false), 14);
-        assert_eq!(points_for(0, true, false), 60);
-        assert_eq!(points_for(90, false, true), 1);
+    fn minutes_counted() {
+        assert_eq!(counted_minutes(14, false), 14);
+        assert_eq!(counted_minutes(-3, false), 0, "early is not negative waiting");
+        assert_eq!(counted_minutes(0, true), 60, "a cancellation counts as the hour");
+        assert_eq!(counted_minutes(95, true), 95, "and more if it cost more");
     }
 }

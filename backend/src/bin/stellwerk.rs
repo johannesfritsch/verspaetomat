@@ -1016,11 +1016,11 @@ fn print_journey(v: &Value) {
         if j["missed_connection"].as_bool().unwrap_or(false) { "  ·  ANSCHLUSS VERPASST" } else { "" }
     );
     if status == "arrived" {
-        println!("angekommen {}  ·  +{} min  ·  {} Punkte{}", hhmm(&j["actual_arrival"]), s(j, "final_delay_min"), s(j, "points"), if j["incomplete"].as_bool().unwrap_or(false) { "  ·  unvollständig" } else { "" });
+        println!("angekommen {}  ·  +{} min  ·  {} min gezählt{}", hhmm(&j["actual_arrival"]), s(j, "final_delay_min"), s(j, "points"), if j["incomplete"].as_bool().unwrap_or(false) { "  ·  unvollständig" } else { "" });
     }
     // Why it ended, and — while in transfer — whether this is a real change of train (docs/21).
     match j["end_reason"].as_str() {
-        Some("aufgegeben") => println!("beendet: aufgegeben  ·  keine Punkte, kein Anspruch"),
+        Some("aufgegeben") => println!("beendet: aufgegeben  ·  das Warten zählt, kein Anspruch"),
         Some("nicht_gefahren") => println!("beendet: gar nicht mitgefahren"),
         Some("beendet") => println!("beendet: vom Fahrgast"),
         _ => {}
@@ -1123,7 +1123,7 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Ff { customer } => {
             let v = api.post(&format!("/admin/customers/{customer}/ff"), json!({})).await?;
             let r = &v["ride"];
-            println!("Angekommen: {} → {}  +{} min  ·  {} Punkte", s(r, "line"), s(r, "exit_station_name"), s(r, "final_delay_min"), s(r, "points"));
+            println!("Angekommen: {} → {}  +{} min  ·  {} min gezählt", s(r, "line"), s(r, "exit_station_name"), s(r, "final_delay_min"), s(r, "points"));
             if let Some(i) = v.get("incident").filter(|i| !i.is_null()) {
                 println!("Anspruch: {} ct  ·  {}  ·  {}", s(i, "amount_cents"), s(i, "status"), s(i, "desk"));
             } else {
@@ -1643,7 +1643,7 @@ async fn main() -> anyhow::Result<()> {
                 let v = api.post(&format!("/admin/customers/{customer}/backdate"), body).await?;
                 let j = &v["journey"];
                 println!(
-                    "{}  {}  {} → {}  ·  +{} min  ·  {} Punkte",
+                    "{}  {}  {} → {}  ·  +{} min  ·  {} min gezählt",
                     dhm(&j["planned_departure"]), s(&v["ride"], "line"), s(j, "origin_station_name"), s(j, "destination_station_name"),
                     s(j, "final_delay_min"), s(&v, "points")
                 );

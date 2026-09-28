@@ -194,7 +194,7 @@ pub async fn journey_json(pool: &PgPool, j: &JourneyRow) -> anyhow::Result<Value
         "destination_station_id": j.destination_station_id, "destination_station_name": j.destination_station_name,
         "planned_departure": j.planned_departure, "planned_arrival": j.planned_arrival,
         "actual_arrival": j.actual_arrival, "final_delay_min": j.final_delay_min,
-        "missed_connection": j.missed_connection, "incomplete": j.incomplete, "cancelled": j.cancelled, "points": j.points, "ticket": j.ticket,
+        "missed_connection": j.missed_connection, "incomplete": j.incomplete, "cancelled": j.cancelled, "counted_minutes": j.points, "points": j.points, "ticket": j.ticket,
         "current_leg": j.current_leg, "legs": legs, "next_leg": next,
         "transfer_station_name": transfer_station_name, "transfer_deadline": j.transfer_deadline,
         "transfer_reason": if transfer_reason.is_empty() { Value::Null } else { json!(transfer_reason) },
@@ -236,7 +236,7 @@ fn legacy_ride_as_journey(r: &RideRow) -> Value {
         "destination_station_id": r.exit_station_id, "destination_station_name": r.exit_station_name,
         "planned_departure": r.planned_departure, "planned_arrival": r.planned_arrival,
         "actual_arrival": r.actual_arrival, "final_delay_min": r.final_delay_min,
-        "missed_connection": false, "incomplete": false, "cancelled": r.cancelled, "points": r.points, "ticket": r.ticket,
+        "missed_connection": false, "incomplete": false, "cancelled": r.cancelled, "counted_minutes": r.points, "points": r.points, "ticket": r.ticket,
         "current_leg": 1, "legs": [leg], "next_leg": Value::Null, "transfer_station_name": Value::Null, "transfer_deadline": Value::Null,
         "transfer_reason": Value::Null, "end_reason": Value::Null, "earliest_onward_arrival": Value::Null,
         "created_at": r.checked_in_at, "finalised_at": r.finalised_at, "legacy": true,
@@ -874,7 +874,7 @@ fn default_true() -> bool {
 /// A mis-tap — still at the boarding station, no stop passed — is not an interruption: the leg
 /// is *replaced*, nothing is earned and no `earliest_onward_arrival` is recorded, because the
 /// railway has not made anyone wait. Once the train has moved, the leg *ends* the way
-/// "Ich fahre später weiter" ends it (docs/21 §2): the Geduldspunkte stay (docs/22 §1), and the
+/// "Ich fahre später weiter" ends it (docs/21 §2): the minutes stay (docs/22 §1), and the
 /// delay ceiling applies, so a later train than the earliest one does not inflate the claim.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TrainChange {
@@ -934,12 +934,12 @@ pub fn end_reason_for(arrived: bool, reason: Option<&str>) -> Result<&'static st
     }
 }
 
-/// docs/22 §1: what an aborted journey is worth in Geduldspunkte. Giving up loses the claim —
+/// docs/22 §1: how many minutes an aborted journey counts (#74). Giving up loses the claim —
 /// compensation hangs on arriving — but not the patience, because the waiting really happened.
 /// Never having boarded is worth nothing: that journey did not happen at all.
-pub fn abandon_points(end_reason: &str, delay_min: i64, cancelled: bool) -> i64 {
+pub fn abandon_minutes(end_reason: &str, delay_min: i64, cancelled: bool) -> i64 {
     match end_reason {
-        "aufgegeben" => rules::points_for(delay_min, cancelled, false),
+        "aufgegeben" => rules::counted_minutes(delay_min, cancelled),
         _ => 0,
     }
 }
@@ -962,9 +962,9 @@ pub async fn finish(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
         finalise_journey(s.clone(), &j, actual, j.planned_arrival, false, false, "finished by the passenger").await.map_err(internal)?
     } else {
         // docs/22 §1: giving up loses the claim (compensation hangs on arriving) but not the
-        // patience — the waiting really happened, so the leg keeps its Geduldspunkte. Having
+        // patience — the waiting really happened, so the leg keeps its minutes. Having
         // never boarded earns nothing: that journey did not happen at all.
-        let points = riding.as_ref().map(|r| abandon_points(end_reason, r.live_delay_min as i64, r.cancelled)).unwrap_or(0);
+        let points = riding.as_ref().map(|r| abandon_minutes(end_reason, r.live_delay_min as i64, r.cancelled)).unwrap_or(0);
         if let Some(r) = &riding {
             if end_reason == "aufgegeben" {
                 sqlx::query("update rides set status = 'abandoned', points = $2, final_delay_min = $3, finalised_at = now() where id = $1")
@@ -1321,10 +1321,10 @@ pub async fn expire_transfers(s: &AppState) -> anyhow::Result<usize> {
             // continue later (docs/21 §2) and never did. They reached no stop, so there is no
             // delay to measure and no claim to make — compensation hangs on arriving (docs/02).
             // The waiting still counts (docs/22 §1): the leg the passenger stepped off keeps
-            // its Geduldspunkte, exactly as if they had said "Ich gebe auf" on the spot.
+            // its minutes, exactly as if they had said "Ich gebe auf" on the spot.
             sqlx::query("update rides set status = 'abandoned' where journey_id = $1 and status = 'riding'").bind(j.id).execute(&s.pool).await?;
             let waited: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 and status = 'abandoned' order by leg_no desc limit 1").bind(j.id).fetch_optional(&s.pool).await?;
-            let points = waited.as_ref().map(|r| abandon_points("aufgegeben", r.live_delay_min as i64, r.cancelled)).unwrap_or(0);
+            let points = waited.as_ref().map(|r| abandon_minutes("aufgegeben", r.live_delay_min as i64, r.cancelled)).unwrap_or(0);
             if let Some(r) = &waited {
                 if r.finalised_at.is_none() && points > 0 {
                     sqlx::query("update rides set points = $2, final_delay_min = $3, finalised_at = now() where id = $1")
@@ -1370,7 +1370,7 @@ pub async fn finalise_journey(
     // passenger's own waiting is theirs (docs/21 §2). `actual_arrival` keeps the true time.
     let counted = counted_arrival(actual, j.earliest_onward_arrival);
     let delay = journey_delay_min(counted, planned, cancelled);
-    let points = rules::points_for(delay, cancelled, false);
+    let points = rules::counted_minutes(delay, cancelled);
     let updated: JourneyRow = sqlx::query_as(
         "update journeys set status = 'arrived', actual_arrival = $2, final_delay_min = $3, cancelled = cancelled or $4, incomplete = $5, points = $6,
             next_leg = null, transfer_deadline = null, finalised_at = now() where id = $1 and status in ('riding','transfer') returning *",
@@ -1599,12 +1599,12 @@ mod tests {
     /// docs/22 §1: the patience is kept, the claim is not; never boarding earns neither.
     #[test]
     fn giving_up_keeps_the_patience() {
-        assert_eq!(abandon_points("aufgegeben", 43, false), 43, "43 minutes waited are 43 Geduldspunkte");
-        assert_eq!(abandon_points("aufgegeben", 0, false), 0, "no delay, nothing to honour");
-        assert_eq!(abandon_points("aufgegeben", 12, true), 60, "a cancelled train is worth the usual 60");
-        assert_eq!(abandon_points("nicht_gefahren", 43, false), 0, "a journey that never happened earns nothing");
-        assert_eq!(abandon_points("nicht_gefahren", 12, true), 0);
-        assert_eq!(abandon_points("beendet", 43, false), 0, "arriving goes through the journey's own finalisation");
+        assert_eq!(abandon_minutes("aufgegeben", 43, false), 43, "43 minutes waited count 43");
+        assert_eq!(abandon_minutes("aufgegeben", 0, false), 0, "no delay, nothing to honour");
+        assert_eq!(abandon_minutes("aufgegeben", 12, true), 60, "a cancelled train is worth the usual 60");
+        assert_eq!(abandon_minutes("nicht_gefahren", 43, false), 0, "a journey that never happened earns nothing");
+        assert_eq!(abandon_minutes("nicht_gefahren", 12, true), 0);
+        assert_eq!(abandon_minutes("beendet", 43, false), 0, "arriving goes through the journey's own finalisation");
     }
 
     /// A passenger who gives up on one train gets longer than a real transfer to pick the next.

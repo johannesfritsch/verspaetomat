@@ -233,7 +233,7 @@ async fn the_share_figures_are_one_passengers_own(pool: PgPool) {
 
 #[sqlx::test(migrations = "./migrations")]
 async fn minutes_count_where_the_points_do(pool: PgPool) {
-    // #71: Home said 158 minutes, Ich 146 Geduldspunkte. The minutes were summed per train.
+    // #71: Home said 158 minutes, Ich 146 points. The minutes were summed per train.
     let app = app(pool.clone(), None).await;
     let (me, token) = device(&app).await;
 

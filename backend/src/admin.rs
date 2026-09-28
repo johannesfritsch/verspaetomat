@@ -1024,7 +1024,7 @@ pub async fn backdate(State(s): State<AppState>, _a: Admin, _sim: Simulation, Pa
     let operator_known: bool = sqlx::query_scalar("select exists(select 1 from operators where name = $1)").bind(&operator).fetch_one(&s.pool).await.map_err(internal)?;
     let line = b.line.clone().unwrap_or_else(|| "RE 5".to_string());
     let delay = b.delay_minutes;
-    let points = crate::rules::points_for(delay, b.cancelled, false);
+    let points = crate::rules::counted_minutes(delay, b.cancelled);
     let trip_id = format!("stellwerk:{}", Uuid::new_v4());
 
     let leg = crate::train::PlanLeg {
