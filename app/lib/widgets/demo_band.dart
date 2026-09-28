@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme/tokens.dart';
 
@@ -40,7 +41,12 @@ class DemoBand extends StatelessWidget {
               left: 0,
               right: 0,
               top: 0,
-              child: _Band(top: media.padding.top),
+              // Light status bar text on the dark band; the screens below ask for dark text,
+              // which on the band could not be read.
+              child: AnnotatedRegion<SystemUiOverlayStyle>(
+                value: SystemUiOverlayStyle.light,
+                child: _Band(top: media.padding.top),
+              ),
             ),
           ],
         );
