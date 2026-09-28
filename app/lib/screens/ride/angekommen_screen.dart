@@ -230,14 +230,23 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // The station you arrived at, over the platform drawing; on its left, what the ride
-          // came to: the check when it was on time, the figure when it was not.
-          ArrivalArt(
+          // #63: the drawing says how it went — the daytime platform with the station on its sign,
+          // the evening one with the clock from an hour late on, the empty platform for a
+          // cancellation. Each carries its own mark on the left, so the figure goes under it.
+          ArrivalScene(
+            kind: cancelled
+                ? ArrivalSceneKind.cancelled
+                : delay >= 60
+                    ? ArrivalSceneKind.late
+                    : ArrivalSceneKind.arrived,
             station: where,
-            mark: delay <= 0 && !cancelled ? const _OnTimeMark() : CountUpDelay(delay, cancelled: cancelled, size: VDelaySize.large),
           ),
           const VGap.s(),
           Text('ANGEKOMMEN', style: VText.eyebrow),
+          if (delay > 0 && !cancelled) ...[
+            const VGap.xs(),
+            CountUpDelay(delay, size: VDelaySize.large),
+          ],
           const VGap.xs(),
           Text(_headline(delay, cancelled, points), style: VText.h1),
           const VGap.s(),
@@ -355,9 +364,10 @@ Future<void> showArrivalSheet(BuildContext context, {String? variant, ApiArrival
   );
 }
 
-/// The drawing of #63: a train in at a platform, the station's own name on the sign. The sign
-/// in the picture is blank; its face is measured in the image (612 × 382) — centre (490, 121),
-/// 136 × 54, tilted by 15.8° — so the name sits on it at any width.
+/// The platform drawing of the ticket sheet (#67), with the station you leave from on its sign.
+/// It was the arrival's placeholder until #63 brought drawings of its own ([ArrivalScene]). The
+/// sign in the picture is blank; its face is measured in the image (612 × 382) — centre
+/// (490, 121), 136 × 54, tilted by 15.8° — so the name sits on it at any width.
 class ArrivalArt extends StatelessWidget {
   const ArrivalArt({super.key, required this.station, this.mark, this.widthFactor = 0.72});
   final String station;
@@ -450,17 +460,89 @@ class ArrivalArt extends StatelessWidget {
   }
 }
 
-/// On time: a green check, the one place on the arrival where green means „so war es geplant".
-class _OnTimeMark extends StatelessWidget {
-  const _OnTimeMark();
+/// Which of the four #63 drawings the arrival stands on.
+enum ArrivalSceneKind {
+  /// In, on time or less than an hour late: the daytime platform, the station on its sign.
+  arrived,
+
+  /// An hour late or more: the evening platform with the clock.
+  late,
+
+  /// The train did not run: the empty platform, the ✕.
+  cancelled,
+
+  /// No live data at the end: the platform in fog, the clock with the question mark.
+  noData,
+}
+
+/// The arrival's drawing (#63), full width. Each one fades out to the left and carries its own
+/// mark there — a check, an ✕, a clock — so nothing is laid over that side. On [ArrivalSceneKind.arrived]
+/// the sign is blank in the picture and carries the station: its face is measured in the source
+/// (1672 × 941) — centre (1478, 372), 205 × 95, tilted by 12.4°.
+class ArrivalScene extends StatelessWidget {
+  const ArrivalScene({super.key, required this.kind, this.station});
+  final ArrivalSceneKind kind;
+  final String? station;
+
+  static String _asset(ArrivalSceneKind k) => switch (k) {
+        ArrivalSceneKind.arrived => 'assets/sheet/angekommen-puenktlich.webp',
+        ArrivalSceneKind.late => 'assets/sheet/angekommen-spaet.webp',
+        ArrivalSceneKind.cancelled => 'assets/sheet/angekommen-ausfall.webp',
+        ArrivalSceneKind.noData => 'assets/sheet/angekommen-keinedaten.webp',
+      };
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: 64,
-        height: 64,
-        decoration: const BoxDecoration(color: VColors.green, shape: BoxShape.circle),
-        child: const Icon(Icons.check_rounded, color: VColors.paperElevated, size: 40),
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, c) {
+      final w = c.maxWidth;
+      final h = w * 941 / 1672;
+      double x(double v) => w * v / 1672;
+      double y(double v) => h * v / 941;
+      return SizedBox(
+        key: Key('arrival-scene-${kind.name}'),
+        height: h,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: ShaderMask(
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (rect) => const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black, Colors.black, Colors.transparent],
+                  stops: [0, 0.82, 1],
+                ).createShader(rect),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(VRadius.md),
+                  child: Image.asset(_asset(kind), fit: BoxFit.cover),
+                ),
+              ),
+            ),
+            if (kind == ArrivalSceneKind.arrived && station != null)
+              Positioned(
+                left: x(1478 - 102),
+                top: y(372 - 47),
+                width: x(205),
+                height: y(95),
+                child: Transform.rotate(
+                  angle: -0.216,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      ArrivalArt.signLines(station!),
+                      key: const Key('arrival-sign'),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      style: VText.title.copyWith(color: VColors.inkOnDark, height: 1.15),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       );
+    });
+  }
 }
 
 /// The ride as it went (#63): where it left, each train, where it arrived — time, track and
@@ -766,6 +848,8 @@ class _NoDataStepState extends State<_NoDataStep> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const ArrivalScene(kind: ArrivalSceneKind.noData),
+          const VGap.s(),
           Text('KEINE DATEN BEI ANKUNFT', style: VText.eyebrow),
           const VGap.xs(),
           Text('Wann bist du angekommen?', style: VText.h1),

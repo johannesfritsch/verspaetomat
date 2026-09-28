@@ -43,6 +43,8 @@ const tour = <(String, String)>[
   ('antraege', Routes.claims),
   ('antrag', '${Routes.claim}?desk=Servicecenter%20Fahrgastrechte'),
   ('antrag-unbekannt', '${Routes.claim}?desk=Unbekannt'),
+  // #72: the walkthrough under its band.
+  ('vorfuehrung', Routes.demoClaim),
   ('antwort-ok', '${Routes.reply}?mail=m-0718-in'),
   ('antwort-frage', '${Routes.reply}?demo=question'),
   ('antwort-nein', '${Routes.reply}?demo=rejected'),
