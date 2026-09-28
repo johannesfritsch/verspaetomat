@@ -27,8 +27,10 @@ pub async fn share_facts(State(s): State<AppState>, c: Customer) -> ApiResult {
 }
 
 pub async fn facts(pool: &PgPool, id: Uuid, now: DateTime<Utc>) -> anyhow::Result<Value> {
+    // Minutes as the points count them: per journey, at the destination (#71, `waited_minutes`).
     let (minutes, rides): (i64, i64) = sqlx::query_as(
-        "select coalesce(sum(final_delay_min),0)::bigint, count(*) from rides where customer_id = $1 and status = 'arrived'",
+        "select (select coalesce(sum(minutes),0)::bigint from waited_minutes where customer_id = $1),
+                (select count(*) from rides where customer_id = $1 and status = 'arrived')",
     )
     .bind(id)
     .fetch_one(pool)
@@ -66,7 +68,9 @@ pub async fn facts(pool: &PgPool, id: Uuid, now: DateTime<Utc>) -> anyhow::Resul
     // Last calendar month, whole. Null when nothing was late in it: an empty month gets no card.
     let month: (String, i64, i64, i64, i64) = sqlx::query_as(
         "select to_char(date_trunc('month', $2 at time zone 'Europe/Berlin') - interval '1 month', 'YYYY-MM'),
-                coalesce(sum(final_delay_min),0)::bigint, count(*), coalesce(max(final_delay_min),0)::bigint, coalesce(sum(points),0)::bigint
+                (select coalesce(sum(w.minutes),0)::bigint from waited_minutes w where w.customer_id = $1
+                   and date_trunc('month', w.started_at at time zone 'Europe/Berlin') = date_trunc('month', $2 at time zone 'Europe/Berlin') - interval '1 month'),
+                count(*), coalesce(max(final_delay_min),0)::bigint, coalesce(sum(points),0)::bigint
          from rides
          where customer_id = $1 and status = 'arrived'
            and date_trunc('month', checked_in_at at time zone 'Europe/Berlin') = date_trunc('month', $2 at time zone 'Europe/Berlin') - interval '1 month'",

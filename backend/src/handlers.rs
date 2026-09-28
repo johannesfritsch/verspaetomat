@@ -2528,7 +2528,7 @@ pub async fn process_inbound(s: &AppState, mut m: InboundMail) -> Result<Value, 
 /// point; when that stops being true, it gets a cache here rather than a lie in the client.
 pub async fn community_pulse(State(s): State<AppState>, _c: Customer) -> ApiResult {
     let (minutes, users): (i64, i64) = sqlx::query_as(
-        "select coalesce(sum(final_delay_min),0)::bigint, (select count(*) from customers)::bigint from rides where status = 'arrived'",
+        "select coalesce(sum(minutes),0)::bigint, (select count(*) from customers)::bigint from waited_minutes",
     )
     .fetch_one(&s.pool)
     .await
@@ -2543,7 +2543,7 @@ pub async fn community_pulse(State(s): State<AppState>, _c: Customer) -> ApiResu
 }
 
 pub async fn community(State(s): State<AppState>, _c: Customer) -> ApiResult {
-    let (minutes, users): (i64, i64) = sqlx::query_as("select coalesce(sum(final_delay_min),0)::bigint, (select count(*) from customers)::bigint from rides where status = 'arrived'").fetch_one(&s.pool).await.map_err(internal)?;
+    let (minutes, users): (i64, i64) = sqlx::query_as("select coalesce(sum(minutes),0)::bigint, (select count(*) from customers)::bigint from waited_minutes").fetch_one(&s.pool).await.map_err(internal)?;
     let (submitted, confirmed): (i64, i64) = sqlx::query_as(
         "select coalesce(sum(amount_cents) filter (where status = 'eingereicht'),0)::bigint, coalesce(sum(coalesce(confirmed_cents, amount_cents)) filter (where status = 'bestaetigt'),0)::bigint from incidents",
     )
@@ -2815,8 +2815,8 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     // board said „N davon deine" under a label that says minutes and the two numbers were counted
     // by different rules (a ride given up carries points but no final delay).
     let (minutes, my_minutes, my_confirmed): (i64, i64, i64) = sqlx::query_as(
-        "select (select coalesce(sum(final_delay_min),0)::bigint from rides where status = 'arrived'),
-                (select coalesce(sum(final_delay_min),0)::bigint from rides where customer_id = $1 and status = 'arrived'),
+        "select (select coalesce(sum(minutes),0)::bigint from waited_minutes),
+                (select coalesce(sum(minutes),0)::bigint from waited_minutes where customer_id = $1),
                 (select coalesce(sum(coalesce(confirmed_cents, amount_cents)),0)::bigint from incidents where customer_id = $1 and status = 'bestaetigt')",
     )
     .bind(c.0.id)

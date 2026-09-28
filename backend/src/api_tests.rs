@@ -232,6 +232,52 @@ async fn the_share_figures_are_one_passengers_own(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn minutes_count_where_the_points_do(pool: PgPool) {
+    // #71: Home said 158 minutes, Ich 146 Geduldspunkte. The minutes were summed per train.
+    let app = app(pool.clone(), None).await;
+    let (me, token) = device(&app).await;
+
+    // A journey with a change: the RE 7 was 12 late at Hagen, the RB 52 came in 68 late. The
+    // journey counts 68 — at the destination (docs/17), as its points do.
+    let j = Uuid::new_v4();
+    let now = Utc::now();
+    sqlx::query(
+        "insert into journeys (id, customer_id, origin_station_id, origin_station_name, destination_station_id, destination_station_name,
+                               itinerary, plan, planned_departure, planned_arrival, ticket, status, current_leg, final_delay_min, points, finalised_at)
+         values ($1, $2, 'vs:1', 'Köln Hbf', 'vs:3', 'Lüdenscheid', '{}'::jsonb, '[]'::jsonb, $3, $4, 'deutschlandticket', 'arrived', 2, 68, 68, $4)",
+    )
+    .bind(j)
+    .bind(me)
+    .bind(now - Duration::hours(3))
+    .bind(now - Duration::hours(1))
+    .execute(&pool)
+    .await
+    .expect("journey");
+    let first = ride(&pool, me, "RE 7", 12, 0).await;
+    let second = ride(&pool, me, "RB 52", 68, 0).await;
+    for (r, leg, points) in [(first, 1, 0), (second, 2, 68)] {
+        sqlx::query("update rides set journey_id = $2, leg_no = $3, points = $4 where id = $1")
+            .bind(r)
+            .bind(j)
+            .bind(leg)
+            .bind(points)
+            .execute(&pool)
+            .await
+            .expect("leg");
+    }
+    // Given up after 20 minutes on the platform-side train: the waiting counts (docs/22 §1).
+    let gave_up = ride(&pool, me, "S 12", 20, 1).await;
+    sqlx::query("update rides set status = 'abandoned' where id = $1").bind(gave_up).execute(&pool).await.expect("abandon");
+    // A ride of its own, from before journeys.
+    ride(&pool, me, "RE 5", 10, 2).await;
+
+    let (_, share) = call(&app, "GET", "/v1/me/share", Some(&token), None).await;
+    let (_, me_json) = call(&app, "GET", "/v1/me", Some(&token), None).await;
+    assert_eq!(share["minutes_total"], 68 + 20 + 10, "per journey, not per train: {share}");
+    assert_eq!(me_json["points_total"], share["minutes_total"], "the two screens agree");
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn an_empty_account_has_no_record_and_no_month(pool: PgPool) {
     let app = app(pool.clone(), None).await;
     let (_, token) = device(&app).await;
