@@ -94,7 +94,7 @@ const datenschutz = LegalDoc(
       'Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Nutzung der App).',
     ]),
     LegalSection('Was wir speichern', [
-      'Beim Fahren: den Bahnhof, an dem du eingecheckt hast, die Position, mit der du das bestätigt hast, den Zug, den Ausstieg, die Zeiten laut Fahrplan und Live-Daten, die daraus berechneten Geduldspunkte und Abzeichen. Optional einen Anzeigenamen, den du selbst wählst.',
+      'Beim Fahren: den Bahnhof, an dem du eingecheckt hast, die Position, mit der du das bestätigt hast, den Zug, den Ausstieg, die Zeiten laut Fahrplan und Live-Daten, die daraus gezählten Minuten und Abzeichen. Optional einen Anzeigenamen, den du selbst wählst.',
       'Beim ersten Antrag, nicht früher: Name, Anschrift, deine private E-Mail-Adresse und bei Zeitkarten die Ticketnummer. Name, Anschrift und Ticketnummer stehen auf dem Antragsformular, weil das Eisenbahnunternehmen sie verlangt. Deine private E-Mail-Adresse steht nicht darauf: Im Formular steht die Verspätomat-Adresse dieses Antrags, damit die Antwort dorthin geht. Deine eigene Adresse benutzen wir nur, um dir jede Mail in Kopie zu schicken.',
       'Pro Antrag: das Bild deines Tickets für die betroffenen Monate und deine Unterschrift (getippt oder gezeichnet). Beides landet nur im PDF und in der Mail an das Unternehmen.',
       'Der Schriftverkehr über deine Verspätomat-Adresse: die Anträge, die du abschickst, und die Antworten des Unternehmens. Dazu unten mehr.',
@@ -130,7 +130,7 @@ const datenschutz = LegalDoc(
       'Server: Hetzner Online GmbH, Gunzenhausen. Der Dienst läuft auf Servern in der Europäischen Union.',
     ]),
     LegalSection('Wie lange', [
-      'Fahrten, Punkte, Abzeichen und die Einträge im Konto bleiben, bis du sie löschst.',
+      'Fahrten, Minuten, Abzeichen und die Einträge im Konto bleiben, bis du sie löschst.',
       'Ticketbilder, Unterschrift und die Anhänge der Antworten löschen wir, sobald ein Antrag abgeschlossen ist (bestätigt, abgelehnt oder verfallen). Wenn du unter Einstellungen „Korrespondenz nach Abschluss behalten“ einschaltest, bleiben sie, bis du es ausschaltest oder alles löschst.',
       'Offene Ansprüche verfallen drei Monate nach der Fahrt; danach steht nur noch der Eintrag „verfallen“ im Konto.',
     ]),

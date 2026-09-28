@@ -117,8 +117,8 @@ class _JourneyRow extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 // Giving up keeps the waiting (docs/22 §1): the journey has no arrival delay,
-                // but its Geduldspunkte are the minutes that were really spent waiting.
-                VDelay(j.finalDelayMin ?? (j.gaveUp ? j.points : 0), size: VDelaySize.small, cancelled: j.cancelled),
+                // but it counts the minutes that were really spent waiting.
+                VDelay(j.finalDelayMin ?? (j.gaveUp ? j.countedMinutes : 0), size: VDelaySize.small, cancelled: j.cancelled),
               ],
             ),
           ),
@@ -172,7 +172,7 @@ Future<void> showJourneySheet(BuildContext context, ApiJourney j, {required Void
                 const VRule(),
                 VKeyValue('Tatsächliche Ankunft', fmtLocal(j.actualArrival), strong: true),
                 const VRule(),
-                VKeyValue('Geduldspunkte', '${j.points}', strong: true),
+                VKeyValue('Gezählte Minuten', '${j.countedMinutes}', strong: true),
                 const VGap.m(),
                 if (j.deletable)
                   VGhostButton(

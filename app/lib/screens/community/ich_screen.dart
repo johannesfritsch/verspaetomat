@@ -110,13 +110,13 @@ class IchScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const VBoardLabel('Geduldspunkte', icon: Icons.workspace_premium_outlined),
+                  const VBoardLabel('Minuten gewartet', icon: Icons.schedule),
                   const VGap.s(),
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      fmtInt(me.pointsTotal),
+                      fmtInt(me.minutesTotal),
                       style: VText.number.copyWith(color: VColors.inkOnDark),
                     ),
                   ),
@@ -125,8 +125,8 @@ class IchScreen extends StatelessWidget {
                     VProgressBar(value: lvl.progress, ground: VProgressGround.red),
                     const VGap.s(),
                     VBoardCaption(
-                      lvl.pointsToNext > 0
-                          ? '${fmtInt(lvl.pointsToNext)} bis „${lvl.nextName}“'
+                      lvl.minutesToNext > 0
+                          ? '${fmtInt(lvl.minutesToNext)} Minuten bis „${lvl.nextName}“'
                           : '${lvl.name} · höchste Stufe erreicht',
                       maxLines: 1,
                     ),
@@ -152,7 +152,7 @@ class IchScreen extends StatelessWidget {
                   ),
                   VStat(
                     icon: Icons.bar_chart,
-                    value: '+${fmtInt(me.pointsThisWeek)}',
+                    value: '+${fmtInt(me.minutesThisWeek)}',
                     label: 'Diese Woche',
                   ),
                   VStat(

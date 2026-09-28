@@ -177,10 +177,10 @@ class VBadge {
 }
 
 class BoardEntry {
-  const BoardEntry({required this.rank, required this.name, required this.points, this.isMe = false});
+  const BoardEntry({required this.rank, required this.name, required this.minutes, this.isMe = false});
   final int rank;
   final String name;
-  final int points;
+  final int minutes;
   final bool isMe;
 }
 
@@ -746,56 +746,56 @@ class Mock {
     VBadge(id: 'minuten-64000', name: '64.000 Minuten', rule: '64.000 Verspätungsminuten gesammelt', earned: false),
   ];
 
-  static const pointsTotal = 1372;
+  static const minutesTotal = 1372;
 
   /// Minutes this passenger waited — the figure on Home's first board (#47).
-  /// Not the same number as [pointsTotal] and never larger: a ride given up earns its
+  /// Not the same number as [minutesTotal] and never larger: a ride given up earns its
   /// points but has no final delay to add (docs/22).
   static const myMinutes = 1298;
-  static const pointsThisWeek = 96;
+  static const minutesThisWeek = 96;
   static const levelName = 'Gleis 7';
   static const nextLevelName = 'Bahnhofsmission';
   static const nextLevelAt = 1500;
 
   static const boardLine = <BoardEntry>[
-    BoardEntry(rank: 1, name: 'Miri aus Hamm', points: 212),
-    BoardEntry(rank: 2, name: 'tobi_aus_kalk', points: 174),
-    BoardEntry(rank: 3, name: 'Anke W.', points: 151),
-    BoardEntry(rank: 4, name: 'Gleiswechsel', points: 133),
-    BoardEntry(rank: 5, name: 'Johannes', points: 96, isMe: true),
-    BoardEntry(rank: 6, name: 'nachtschicht', points: 88),
-    BoardEntry(rank: 7, name: 'Ruhrpott-Rita', points: 71),
-    BoardEntry(rank: 8, name: 'Sven aus Unna', points: 64),
-    BoardEntry(rank: 9, name: 'Paul & Paula', points: 52),
-    BoardEntry(rank: 10, name: 'ICEkalt', points: 47),
+    BoardEntry(rank: 1, name: 'Miri aus Hamm', minutes: 212),
+    BoardEntry(rank: 2, name: 'tobi_aus_kalk', minutes: 174),
+    BoardEntry(rank: 3, name: 'Anke W.', minutes: 151),
+    BoardEntry(rank: 4, name: 'Gleiswechsel', minutes: 133),
+    BoardEntry(rank: 5, name: 'Johannes', minutes: 96, isMe: true),
+    BoardEntry(rank: 6, name: 'nachtschicht', minutes: 88),
+    BoardEntry(rank: 7, name: 'Ruhrpott-Rita', minutes: 71),
+    BoardEntry(rank: 8, name: 'Sven aus Unna', minutes: 64),
+    BoardEntry(rank: 9, name: 'Paul & Paula', minutes: 52),
+    BoardEntry(rank: 10, name: 'ICEkalt', minutes: 47),
   ];
 
   static const boardCity = <BoardEntry>[
-    BoardEntry(rank: 1, name: 'Ehrenfeld-Express', points: 388),
-    BoardEntry(rank: 2, name: 'Miri aus Hamm', points: 212),
-    BoardEntry(rank: 3, name: 'Kalk-Kalle', points: 190),
-    BoardEntry(rank: 4, name: 'tobi_aus_kalk', points: 174),
-    BoardEntry(rank: 5, name: 'Anke W.', points: 151),
-    BoardEntry(rank: 6, name: 'Südstadt-Sonja', points: 140),
-    BoardEntry(rank: 7, name: 'Gleiswechsel', points: 133),
-    BoardEntry(rank: 8, name: 'Deutzer Brücke', points: 118),
-    BoardEntry(rank: 9, name: 'nachtschicht', points: 88),
-    BoardEntry(rank: 10, name: 'Ruhrpott-Rita', points: 71),
-    BoardEntry(rank: 14, name: 'Johannes', points: 96, isMe: true),
+    BoardEntry(rank: 1, name: 'Ehrenfeld-Express', minutes: 388),
+    BoardEntry(rank: 2, name: 'Miri aus Hamm', minutes: 212),
+    BoardEntry(rank: 3, name: 'Kalk-Kalle', minutes: 190),
+    BoardEntry(rank: 4, name: 'tobi_aus_kalk', minutes: 174),
+    BoardEntry(rank: 5, name: 'Anke W.', minutes: 151),
+    BoardEntry(rank: 6, name: 'Südstadt-Sonja', minutes: 140),
+    BoardEntry(rank: 7, name: 'Gleiswechsel', minutes: 133),
+    BoardEntry(rank: 8, name: 'Deutzer Brücke', minutes: 118),
+    BoardEntry(rank: 9, name: 'nachtschicht', minutes: 88),
+    BoardEntry(rank: 10, name: 'Ruhrpott-Rita', minutes: 71),
+    BoardEntry(rank: 14, name: 'Johannes', minutes: 96, isMe: true),
   ];
 
   static const boardGermany = <BoardEntry>[
-    BoardEntry(rank: 1, name: 'Wartehalle Wanne', points: 1204),
-    BoardEntry(rank: 2, name: 'Uelzen-Ulla', points: 987),
-    BoardEntry(rank: 3, name: 'Stellwerk Stendal', points: 871),
-    BoardEntry(rank: 4, name: 'Ehrenfeld-Express', points: 388),
-    BoardEntry(rank: 5, name: 'BOB-Fahrer', points: 355),
-    BoardEntry(rank: 6, name: 'Erzgebirge Erik', points: 301),
-    BoardEntry(rank: 7, name: 'Miri aus Hamm', points: 212),
-    BoardEntry(rank: 8, name: 'S-Bahn Sabine', points: 199),
-    BoardEntry(rank: 9, name: 'Kalk-Kalle', points: 190),
-    BoardEntry(rank: 10, name: 'tobi_aus_kalk', points: 174),
-    BoardEntry(rank: 3021, name: 'Johannes', points: 96, isMe: true),
+    BoardEntry(rank: 1, name: 'Wartehalle Wanne', minutes: 1204),
+    BoardEntry(rank: 2, name: 'Uelzen-Ulla', minutes: 987),
+    BoardEntry(rank: 3, name: 'Stellwerk Stendal', minutes: 871),
+    BoardEntry(rank: 4, name: 'Ehrenfeld-Express', minutes: 388),
+    BoardEntry(rank: 5, name: 'BOB-Fahrer', minutes: 355),
+    BoardEntry(rank: 6, name: 'Erzgebirge Erik', minutes: 301),
+    BoardEntry(rank: 7, name: 'Miri aus Hamm', minutes: 212),
+    BoardEntry(rank: 8, name: 'S-Bahn Sabine', minutes: 199),
+    BoardEntry(rank: 9, name: 'Kalk-Kalle', minutes: 190),
+    BoardEntry(rank: 10, name: 'tobi_aus_kalk', minutes: 174),
+    BoardEntry(rank: 3021, name: 'Johannes', minutes: 96, isMe: true),
   ];
 
   static const communityMinutes = 1208311;

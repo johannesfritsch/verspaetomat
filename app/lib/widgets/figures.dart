@@ -174,7 +174,7 @@ class VProgressBar extends StatelessWidget {
   static const _unboundedWidth = 120.0;
 }
 
-/// Geduldspunkte over time, with one column picked out.
+/// Minutes over time, with one column picked out.
 ///
 /// Seven bars is the shape the design asks for — a week, Monday first, today solid. But the app
 /// does not always have seven days to show. Since issue #33 the standing endpoint carries a daily

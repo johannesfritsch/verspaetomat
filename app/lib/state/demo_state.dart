@@ -54,8 +54,8 @@ class DemoJourney {
   /// How it ended (docs/21 §3): `beendet`, `aufgegeben`, `nicht_gefahren`, or null.
   String? endReason;
 
-  /// Geduldspunkte the journey was worth. Giving up keeps the waiting (docs/22 §1).
-  int points = 0;
+  /// Minutes the journey counts (#74). Giving up keeps the waiting (docs/22 §1).
+  int countedMinutes = 0;
 
   /// The passenger asked to continue: this transfer is a Weiterfahrt (docs/21 §2).
   bool replanned = false;
@@ -246,8 +246,8 @@ class DemoState extends ChangeNotifier {
   bool finalSelfEntered = false;
   VBadge? newBadge;
 
-  /// Geduldspunkte the last abandoned journey was worth, for the "Aufgegeben" card (docs/22 §1).
-  int lastAbandonPoints = 0;
+  /// Minutes the last abandoned journey counts, for the "Aufgegeben" card (docs/22 §1).
+  int lastAbandonMinutes = 0;
 
   bool get hasClaimFromLastRide => finalDelay != null && finalDelay! >= 60;
 
@@ -328,8 +328,8 @@ class DemoState extends ChangeNotifier {
     if (!arrived) {
       j.endReason = reason ?? 'aufgegeben';
       // docs/22 §1: the claim is gone, the patience is not — except for a trip never taken.
-      j.points = j.endReason == 'aufgegeben' ? (j.current.departure.cancelled ? (liveDelay < 60 ? 60 : liveDelay) : (liveDelay < 0 ? 0 : liveDelay)) : 0;
-      lastAbandonPoints = j.points;
+      j.countedMinutes = j.endReason == 'aufgegeben' ? (j.current.departure.cancelled ? (liveDelay < 60 ? 60 : liveDelay) : (liveDelay < 0 ? 0 : liveDelay)) : 0;
+      lastAbandonMinutes = j.countedMinutes;
       j.phase = JourneyPhase.abandoned;
       journeyHistory.insert(0, j);
       journey = null;

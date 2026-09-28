@@ -578,8 +578,8 @@ class ApiCustomer {
     this.relayAddress,
     this.personalData,
     required this.settings,
-    this.pointsTotal = 0,
-    this.pointsThisWeek = 0,
+    this.minutesTotal = 0,
+    this.minutesThisWeek = 0,
     this.levelName = '',
     this.nextLevelName = '',
     this.nextLevelAt = 0,
@@ -591,8 +591,8 @@ class ApiCustomer {
   final String? relayAddress;
   final ApiPersonalData? personalData;
   final ApiSettings settings;
-  final int pointsTotal;
-  final int pointsThisWeek;
+  final int minutesTotal;
+  final int minutesThisWeek;
   final String levelName;
   final String nextLevelName;
   final int nextLevelAt;
@@ -611,8 +611,9 @@ class ApiCustomer {
         relayAddress: _sn(j['relay_address']),
         personalData: _m(j['personal_data']) == null ? null : ApiPersonalData.fromJson(_m(j['personal_data'])!),
         settings: ApiSettings.fromJson(_m(j['settings']) ?? const {}),
-        pointsTotal: _i(j['points_total']),
-        pointsThisWeek: _i(j['points_this_week']),
+        // #74: the minute names first; a server from before sends only the old ones.
+        minutesTotal: _i(j['minutes_total'] ?? j['points_total']),
+        minutesThisWeek: _i(j['minutes_this_week'] ?? j['points_this_week']),
         levelName: _s(j['level_name']),
         nextLevelName: _s(j['next_level_name']),
         nextLevelAt: _i(j['next_level_at']),
@@ -689,7 +690,7 @@ class ApiRide {
     this.cancelled = false,
     this.selfEntered = false,
     this.nachtrag = false,
-    this.points = 0,
+    this.countedMinutes = 0,
     required this.date,
   });
   final String id;
@@ -713,7 +714,9 @@ class ApiRide {
   final bool cancelled;
   final bool selfEntered;
   final bool nachtrag;
-  final int points;
+  /// The minutes this ride counts (#74): its delay, at least 60 for a cancellation; 0 for a leg
+  /// whose journey counts on its last one.
+  final int countedMinutes;
   final DateTime date;
 
   factory ApiRide.fromJson(Map<String, dynamic> j) => ApiRide(
@@ -738,7 +741,7 @@ class ApiRide {
         cancelled: _b(j['cancelled']),
         selfEntered: _b(j['self_entered']),
         nachtrag: _b(j['nachtrag']),
-        points: _i(j['points']),
+        countedMinutes: _i(j['counted_minutes'] ?? j['points']),
         date: _date(j['date']) ?? _dt(j['planned_arrival'])?.toLocal() ?? DateTime.now(),
       );
 }
@@ -1178,12 +1181,13 @@ class ApiCommunity {
 }
 
 class ApiBoardEntry {
-  const ApiBoardEntry({required this.rank, required this.name, required this.points, this.isMe = false});
+  const ApiBoardEntry({required this.rank, required this.name, required this.minutes, this.isMe = false});
   final int rank;
   final String name;
-  final int points;
+  /// Counted minutes of location-verified rides in the last seven days (#74).
+  final int minutes;
   final bool isMe;
-  factory ApiBoardEntry.fromJson(Map<String, dynamic> j) => ApiBoardEntry(rank: _i(j['rank']), name: _s(j['name']), points: _i(j['points']), isMe: _b(j['is_me']));
+  factory ApiBoardEntry.fromJson(Map<String, dynamic> j) => ApiBoardEntry(rank: _i(j['rank']), name: _s(j['name']), minutes: _i(j['minutes'] ?? j['points']), isMe: _b(j['is_me']));
 }
 /// Attachment labels from plain strings or `{label|name|upload_id}` objects.
 List<String> _labels(dynamic v) => (v as List? ?? const [])
@@ -1197,8 +1201,8 @@ List<String> _labels(dynamic v) => (v as List? ?? const [])
 
 class ApiStanding {
   const ApiStanding({
-    this.pointsThisWeek = 0,
-    this.pointsLastWeek = 0,
+    this.minutesThisWeek = 0,
+    this.minutesLastWeek = 0,
     this.ridesThisWeek = 0,
     this.level,
     this.money,
@@ -1206,16 +1210,16 @@ class ApiStanding {
     this.community,
     this.next,
     this.unreadMails = 0,
-    this.pointsByDay = const [],
+    this.minutesByDay = const [],
     this.todayIndex = -1,
   });
-  final int pointsThisWeek;
-  final int pointsLastWeek;
+  final int minutesThisWeek;
+  final int minutesLastWeek;
 
-  /// Geduldspunkte per weekday of the running week, Monday first, always seven entries — or empty
+  /// Counted minutes per weekday of the running week, Monday first, always seven entries — or empty
   /// on a server that predates issue #33, which the chart reads as "no daily breakdown" rather
   /// than as a week of zeroes.
-  final List<int> pointsByDay;
+  final List<int> minutesByDay;
 
   /// Which of those seven days is today, in Europe/Berlin — the clock the buckets were cut with.
   /// Never the device's weekday: a phone in another timezone, or one showing a standing fetched
@@ -1236,13 +1240,13 @@ class ApiStanding {
   static const empty = ApiStanding();
 
   factory ApiStanding.fromJson(Map<String, dynamic> j) => ApiStanding(
-        pointsThisWeek: _i(j['points_this_week']),
-        pointsLastWeek: _i(j['points_last_week']),
+        minutesThisWeek: _i(j['minutes_this_week'] ?? j['points_this_week']),
+        minutesLastWeek: _i(j['minutes_last_week'] ?? j['points_last_week']),
         ridesThisWeek: _i(j['rides_this_week']),
         // Anything but seven numbers is not a week, and half a week drawn as a week would be
         // worse than the two-column chart it replaced.
-        pointsByDay: (j['points_by_day'] as List?)?.length == 7
-            ? [for (final v in (j['points_by_day'] as List)) _i(v)]
+        minutesByDay: ((j['minutes_by_day'] ?? j['points_by_day']) as List?)?.length == 7
+            ? [for (final v in ((j['minutes_by_day'] ?? j['points_by_day']) as List)) _i(v)]
             : const [],
         todayIndex: _i(j['today_index'], -1),
         level: _m(j['level']) == null ? null : ApiStandingLevel.fromJson(_m(j['level'])!),
@@ -1255,15 +1259,15 @@ class ApiStanding {
 }
 
 class ApiStandingLevel {
-  const ApiStandingLevel({required this.name, required this.nextName, required this.pointsToNext, required this.progress});
+  const ApiStandingLevel({required this.name, required this.nextName, required this.minutesToNext, required this.progress});
   final String name;
   final String nextName;
-  final int pointsToNext;
+  final int minutesToNext;
   final double progress; // 0..1
   factory ApiStandingLevel.fromJson(Map<String, dynamic> j) => ApiStandingLevel(
         name: _s(j['name']),
         nextName: _s(j['next_name']),
-        pointsToNext: _i(j['points_to_next']),
+        minutesToNext: _i(j['minutes_to_next'] ?? j['points_to_next']),
         progress: ((j['progress'] as num?)?.toDouble() ?? 0).clamp(0, 1),
       );
 }
@@ -1285,19 +1289,19 @@ class ApiStandingMoney {
 }
 
 class ApiStandingBoard {
-  const ApiStandingBoard({required this.scope, required this.key, required this.rank, required this.size, required this.points, this.gapToNext});
+  const ApiStandingBoard({required this.scope, required this.key, required this.rank, required this.size, required this.minutes, this.gapToNext});
   final String scope; // line | city
   final String key;
   final int rank;
   final int size;
-  final int points;
+  final int minutes;
   final int? gapToNext;
   factory ApiStandingBoard.fromJson(Map<String, dynamic> j) => ApiStandingBoard(
         scope: _s(j['scope']),
         key: _s(j['key']),
         rank: _i(j['rank']),
         size: _i(j['size']),
-        points: _i(j['points']),
+        minutes: _i(j['minutes'] ?? j['points']),
         gapToNext: j['gap_to_next'] == null ? null : _i(j['gap_to_next']),
       );
 }
@@ -1538,7 +1542,7 @@ class ApiJourney {
     this.missedConnection = false,
     this.incomplete = false,
     this.cancelled = false,
-    this.points = 0,
+    this.countedMinutes = 0,
     this.ticket = TicketType.deutschlandticket,
     this.currentLeg = 1,
     this.legs = const [],
@@ -1569,7 +1573,9 @@ class ApiJourney {
   final bool missedConnection;
   final bool incomplete;
   final bool cancelled;
-  final int points;
+  /// The minutes this journey counts (#74): its delay at the destination, at least 60 for a
+  /// cancellation, the waiting on a journey given up.
+  final int countedMinutes;
   final TicketType ticket;
   final int currentLeg;
   final List<ApiLeg> legs;
@@ -1652,7 +1658,7 @@ class ApiJourney {
         missedConnection: _b(j['missed_connection']),
         incomplete: _b(j['incomplete']),
         cancelled: _b(j['cancelled']),
-        points: _i(j['points']),
+        countedMinutes: _i(j['counted_minutes'] ?? j['points']),
         ticket: ticketFromWire(_sn(j['ticket'])),
         currentLeg: _i(j['current_leg'], 1),
         legs: _ml(j['legs']).map(ApiLeg.fromJson).toList(),
@@ -1821,19 +1827,17 @@ class ApiShareLine {
 }
 
 class ApiShareMonth {
-  const ApiShareMonth({required this.month, required this.minutes, required this.rides, required this.worstMinutes, required this.points, required this.confirmedCents});
+  const ApiShareMonth({required this.month, required this.minutes, required this.rides, required this.worstMinutes, required this.confirmedCents});
   final String month; // "2026-08"
   final int minutes;
   final int rides;
   final int worstMinutes;
-  final int points;
   final int confirmedCents;
   factory ApiShareMonth.fromJson(Map<String, dynamic> j) => ApiShareMonth(
         month: _s(j['month']),
         minutes: _i(j['minutes']),
         rides: _i(j['rides']),
         worstMinutes: _i(j['worst_minutes']),
-        points: _i(j['points']),
         confirmedCents: _i(j['confirmed_cents']),
       );
 }

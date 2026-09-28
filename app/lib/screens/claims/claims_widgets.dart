@@ -298,7 +298,7 @@ Future<bool> confirmDeleteRide(BuildContext context) async {
         children: [
           const VSheetHeader(
             title: 'Fahrt löschen?',
-            subtitle: 'Die Fahrt, ihre Punkte und der Anspruch verschwinden. Das lässt sich nicht rückgängig machen.',
+            subtitle: 'Die Fahrt, ihre Minuten und der Anspruch verschwinden. Das lässt sich nicht rückgängig machen.',
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: VSpace.page),

@@ -757,7 +757,7 @@ class _DiscardedCard extends StatelessWidget {
           children: [
             Text('Nicht eingereicht', style: VText.title),
             const SizedBox(height: 4),
-            Text('Von dir aussortiert. Die Minuten und Punkte bleiben.', style: VText.caption),
+            Text('Von dir aussortiert. Die Minuten bleiben.', style: VText.caption),
             const VGap.s(),
             for (final i in incidents)
               IncidentRow(
@@ -809,7 +809,7 @@ class _ExpiredCard extends StatelessWidget {
           children: [
             Text('Verfallen', style: VText.title),
             const SizedBox(height: 4),
-            Text('Frist um, bevor 4 € zusammenkamen. Die Minuten und Punkte bleiben.', style: VText.caption),
+            Text('Frist um, bevor 4 € zusammenkamen. Die Minuten bleiben.', style: VText.caption),
             const VGap.s(),
             for (final i in incidents) IncidentRow(incident: i, onTap: () => showEvidenceSheet(context, i)),
           ],

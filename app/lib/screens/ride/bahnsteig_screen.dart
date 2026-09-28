@@ -112,7 +112,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     final me = _session.me;
     final stamp = me == null
         ? null
-        : '${me.id}:${me.pointsTotal}:${me.pointsThisWeek}:${me.settings.ngoId}:${me.settings.showOnBoards}';
+        : '${me.id}:${me.minutesTotal}:${me.minutesThisWeek}:${me.settings.ngoId}:${me.settings.showOnBoards}';
     if (stamp != _lastMeStamp) {
       _lastMeStamp = stamp;
       _loadStanding();
@@ -513,11 +513,15 @@ class _ArrivedBlock extends StatelessWidget {
     final j = journey;
     final delay = j?.finalDelayMin ?? r.finalDelayMinutes ?? 0;
     final where = j?.destinationStationName ?? r.exitStationName;
-    final points = j?.points ?? r.points;
+    final minutes = j?.countedMinutes ?? r.countedMinutes;
     final cancelled = j?.cancelled ?? r.cancelled;
-    // Two lines beside the figure: where it ended, and what the waiting was worth. Next to a
-    // green nought „0 Geduldspunkte" would only say the same thing twice.
-    final worth = delay > 0 || cancelled ? '$points Geduldspunkte' : 'pünktlich, keine Punkte';
+    // Two lines beside the figure: where it ended, and what counted. Next to a green nought
+    // „0 Minuten" would only say the same thing twice.
+    final worth = cancelled
+        ? '$minutes Minuten angerechnet'
+        : delay > 0
+            ? '$minutes Minuten gewartet'
+            : 'pünktlich, keine Wartezeit';
     final note = j?.missedConnection == true ? '$worth · Anschluss verpasst' : worth;
     // One journey, over: the Fahrkarte, punched (app/STYLE.md).
     return VFahrkarte(
@@ -583,12 +587,12 @@ class _Momentum extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final st = standing;
-    final quiet = st.pointsThisWeek == 0;
-    final never = quiet && st.pointsLastWeek == 0;
-    final diff = st.pointsThisWeek - st.pointsLastWeek;
+    final quiet = st.minutesThisWeek == 0;
+    final never = quiet && st.minutesLastWeek == 0;
+    final diff = st.minutesThisWeek - st.minutesLastWeek;
 
     final line = never
-        ? 'Jede Minute Verspätung wird ein Geduldspunkt.'
+        ? 'Jede Minute Verspätung zählt.'
         : diff > 0
             ? '${fmtInt(diff)} mehr als letzte Woche'
             : diff < 0
@@ -615,7 +619,7 @@ class _Momentum extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const VEyebrow('Geduldspunkte diese Woche', size: VEyebrowSize.s),
+                      const VEyebrow('Minuten diese Woche', size: VEyebrowSize.s),
                       const VGap.xs(),
                       // A FittedBox as a net for a very long figure, not as the size itself: it
                       // only ever shrinks, so the size on screen would otherwise depend on the
@@ -624,7 +628,7 @@ class _Momentum extends StatelessWidget {
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          quiet ? '0' : '+${fmtInt(st.pointsThisWeek)}',
+                          quiet ? '0' : '+${fmtInt(st.minutesThisWeek)}',
                           style: VText.numberM,
                         ),
                       ),
@@ -638,9 +642,9 @@ class _Momentum extends StatelessWidget {
                 // predates it the list is empty and the chart falls back to the two columns it
                 // has always drawn, so an old app against a new server and a new app against an
                 // old one both show a real chart rather than a gap.
-                if (st.pointsByDay.length == 7)
+                if (st.minutesByDay.length == 7)
                   VWeekBars(
-                    values: st.pointsByDay,
+                    values: st.minutesByDay,
                     // The server's weekday, not the device's: same clock the buckets were cut with.
                     todayIndex: st.todayIndex,
                     labels: const ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
@@ -651,7 +655,7 @@ class _Momentum extends StatelessWidget {
                   )
                 else
                   VWeekBars(
-                    values: [st.pointsLastWeek, st.pointsThisWeek],
+                    values: [st.minutesLastWeek, st.minutesThisWeek],
                     todayIndex: 1,
                     labels: const ['Letzte', 'Diese'],
                   ),

@@ -1224,14 +1224,14 @@ Future<void> showAbortSheet(BuildContext context, RideMonitor monitor) {
                 VChoiceCard(
                   key: const Key('abort-aufgegeben'),
                   title: 'Ich gebe auf',
-                  subtitle: 'Zu viel Verspätung, ich fahre nicht mehr. Die Wartezeit zählt für deine Geduldspunkte, ein Anspruch entsteht nicht.',
+                  subtitle: 'Zu viel Verspätung, ich fahre nicht mehr. Die Wartezeit zählt als Minuten, ein Anspruch entsteht nicht.',
                   selected: false,
                   trailing: const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
                   onTap: () async {
                     Navigator.of(ctx).pop();
                     final ticket = RepoScope.read(context).me?.settings.ticket;
                     await _abortAction(context, monitor, () => monitor.finish(arrived: false, reason: 'aufgegeben'));
-                    if (context.mounted) await showGaveUpSheet(context, ticket, monitor.lastAbandonPoints);
+                    if (context.mounted) await showGaveUpSheet(context, ticket, monitor.lastAbandonMinutes);
                   },
                 ),
                 const VGap.s(),
@@ -1268,7 +1268,7 @@ Future<void> _abortAction(BuildContext context, RideMonitor monitor, Future<void
 
 /// After "Ich gebe auf": the right the passenger has instead, which almost nobody knows.
 /// Art. 18 VO (EU) 2021/782 — the fare back, not the compensation (docs/02, docs/21 §0).
-Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket, [int points = 0]) {
+Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket, [int minutes = 0]) {
   final single = ticket == TicketType.einzelfahrkarte;
   return showVSheet(
     context,
@@ -1280,7 +1280,7 @@ Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket, [int poin
         children: [
           VSheetHeader(
             title: 'Aufgegeben',
-            subtitle: points > 0 ? '+$points Geduldspunkte für die Wartezeit.' : 'Keine Wartezeit, keine Geduldspunkte.',
+            subtitle: minutes > 0 ? '+$minutes Minuten für die Wartezeit.' : 'Keine Wartezeit, keine Minuten.',
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: VSpace.page),

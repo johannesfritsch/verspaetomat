@@ -54,8 +54,8 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
   /// The current leg as the ride screens consume it.
   ApiRideLive? get rideLive => live ?? journey?.asRideLive;
 
-  /// Geduldspunkte the last aborted journey was worth (docs/22 §1); 0 after an arrival.
-  int lastAbandonPoints = 0;
+  /// Minutes the last aborted journey counts (docs/22 §1); 0 after an arrival.
+  int lastAbandonMinutes = 0;
 
   /// The sheet stays open on arrival and shows the reveal; this is that state.
   bool get arrivedInSheet => sheetOpen && arrived;
@@ -174,7 +174,7 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
         // docs/22 §1: an abandoned journey still reports the patience it earned, so the
         // closing card can name it. Arriving goes through the reveal as before.
         final done = await session.repo.finishJourney(j.journey.id, arrived: arrived, reason: reason);
-        lastAbandonPoints = arrived ? 0 : done.points;
+        lastAbandonMinutes = arrived ? 0 : done.countedMinutes;
         await refresh(quiet: true);
         if (!arrived) sheetOpen = false;
         return null;

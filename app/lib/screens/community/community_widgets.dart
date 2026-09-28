@@ -173,7 +173,7 @@ class BoardRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Text(fmtInt(entry.points), style: VText.mono.copyWith(fontWeight: FontWeight.w700, color: VColors.ink)),
+          Text(fmtInt(entry.minutes), style: VText.mono.copyWith(fontWeight: FontWeight.w700, color: VColors.ink)),
         ],
       ),
     );

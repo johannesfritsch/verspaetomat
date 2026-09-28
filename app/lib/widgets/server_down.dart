@@ -82,7 +82,7 @@ class ServerDownScreen extends StatelessWidget {
               _Reassurance(
                 icon: Icons.inventory_2_outlined,
                 title: 'Nichts ist weg',
-                line: 'Fahrten, Anträge und Punkte sind gespeichert.',
+                line: 'Fahrten, Anträge und Minuten sind gespeichert.',
               ),
               _Reassurance(
                 icon: Icons.schedule,

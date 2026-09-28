@@ -95,7 +95,6 @@ class TicketData {
   /// One arrival. The delay is the hero; the money only appears if there is any.
   factory TicketData.angekommen({
     required int minutes,
-    required int points,
     String? strecke,
     String? fahrgast,
     DateTime? date,
@@ -109,7 +108,8 @@ class TicketData {
         fahrgast: fahrgast,
         strecke: strecke,
         date: date,
-        fields: [('PUNKTE', '+$points')],
+        // No second figure (#74): the minutes are the hero and the only number there is.
+        fields: const [],
         line: line,
       );
 

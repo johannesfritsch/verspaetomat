@@ -260,7 +260,7 @@ class MockRepository implements AppRepository {
       finalDelayMin: j.finalDelay,
       missedConnection: j.missedConnection,
       cancelled: j.legs.any((l) => l.cancelled),
-      points: j.points != 0 ? j.points : (j.finalDelay ?? 0),
+      countedMinutes: j.countedMinutes != 0 ? j.countedMinutes : (j.finalDelay ?? 0),
       ticket: state.ticket,
       currentLeg: j.currentLeg,
       legs: legs,
@@ -395,7 +395,7 @@ class MockRepository implements AppRepository {
         actualArrival: planned.add(Duration(minutes: 50 + r.delay)),
         finalDelayMin: r.delay,
         cancelled: r.cancelled,
-        points: r.cancelled ? 60 : r.delay,
+        countedMinutes: r.cancelled ? 60 : r.delay,
         legacy: true,
         deletable: _lockedByAClaim(r.date, [r.line]) == null,
         deleteRefusal: _lockedByAClaim(r.date, [r.line]),
@@ -429,7 +429,7 @@ class MockRepository implements AppRepository {
         finalDelayMinutes: finalDelay,
         cancelled: cancelled,
         selfEntered: selfEntered,
-        points: points,
+        countedMinutes: points,
         date: Mock.today,
       );
 
@@ -448,7 +448,7 @@ class MockRepository implements AppRepository {
         status: ApiRideStatus.arrived,
         finalDelayMinutes: r.delay,
         cancelled: r.cancelled,
-        points: r.cancelled ? 60 : r.delay,
+        countedMinutes: r.cancelled ? 60 : r.delay,
         date: r.date,
       );
 
@@ -569,8 +569,8 @@ class MockRepository implements AppRepository {
           quietTo: state.quietHours ? '06:00' : null,
           nudgeSnoozeUntil: state.nudgeSnoozeUntil,
         ),
-        pointsTotal: Mock.pointsTotal + state.bonusPoints,
-        pointsThisWeek: Mock.pointsThisWeek + state.bonusPoints,
+        minutesTotal: Mock.minutesTotal + state.bonusPoints,
+        minutesThisWeek: Mock.minutesThisWeek + state.bonusPoints,
         levelName: Mock.levelName,
         nextLevelName: Mock.nextLevelName,
         nextLevelAt: Mock.nextLevelAt,
@@ -1010,7 +1010,7 @@ class MockRepository implements AppRepository {
       confirmedCents: 1200,
       record: top == null ? null : ApiShareRecord(rideId: top.id, line: top.line, to: top.exitStationName, minutes: top.finalDelayMinutes ?? 0, at: top.plannedArrival ?? top.date),
       topLine: line == null ? null : ApiShareLine(line: line.key, minutes: line.value.$1, rides: line.value.$2, month: ym(now)),
-      lastMonth: ApiShareMonth(month: ym(prev), minutes: 318, rides: 17, worstMinutes: 94, points: 318, confirmedCents: 450),
+      lastMonth: ApiShareMonth(month: ym(prev), minutes: 318, rides: 17, worstMinutes: 94, confirmedCents: 450),
       confirmedClaims: [
         ApiShareConfirmed(claimId: 'demo-claim', cents: 600, ngo: Mock.ngos.first.name, cases: 4, minutes: 281, confirmedAt: now.subtract(const Duration(days: 2))),
       ],
@@ -1020,7 +1020,7 @@ class MockRepository implements AppRepository {
   /// Demo: the same shape the backend computes, from the mock and the demo state.
   @override
   Future<ApiStanding> standing() async {
-    final pointsTotal = Mock.pointsTotal + state.bonusPoints;
+    final minutesTotal = Mock.minutesTotal + state.bonusPoints;
     final open = state.openIncidents;
     final openCents = _cents(open.fold(0.0, (s, i) => s + i.amount));
     final readyDesk = state.readyDesk;
@@ -1046,10 +1046,10 @@ class MockRepository implements AppRepository {
     } else if (state.newBadge != null) {
       next = ApiStandingNext(kind: 'badge', title: 'Neues Abzeichen', body: state.newBadge!.name, badgeId: state.newBadge!.id);
     }
-    final weekPoints = Mock.pointsThisWeek + state.bonusPoints;
+    final weekPoints = Mock.minutesThisWeek + state.bonusPoints;
     return ApiStanding(
-      pointsThisWeek: weekPoints,
-      pointsLastWeek: 41,
+      minutesThisWeek: weekPoints,
+      minutesLastWeek: 41,
       ridesThisWeek: 3,
       // Three of the week's days carry the whole total, the way a real week does — nobody is late
       // on a schedule (issue #33). The bars must add up to the figure printed beside them.
@@ -1058,7 +1058,7 @@ class MockRepository implements AppRepository {
       // website, and a lit bar that followed the real weekday would make the committed shot
       // depend on which day the tour was run.
       todayIndex: 4,
-      pointsByDay: weekPoints == 0
+      minutesByDay: weekPoints == 0
           ? const [0, 0, 0, 0, 0, 0, 0]
           : [
               0,
@@ -1072,13 +1072,13 @@ class MockRepository implements AppRepository {
       level: ApiStandingLevel(
         name: Mock.levelName,
         nextName: Mock.nextLevelName,
-        pointsToNext: (Mock.nextLevelAt - pointsTotal).clamp(0, Mock.nextLevelAt),
-        progress: (pointsTotal / Mock.nextLevelAt).clamp(0, 1),
+        minutesToNext: (Mock.nextLevelAt - minutesTotal).clamp(0, Mock.nextLevelAt),
+        progress: (minutesTotal / Mock.nextLevelAt).clamp(0, 1),
       ),
       money: ApiStandingMoney(openCents: openCents, missingCents: open.isEmpty ? 400 : missing, ready: readyDesk != null, readyDesk: readyDesk, ngoName: state.ngo.name),
       board: me == null || !state.showOnBoards
           ? null
-          : ApiStandingBoard(scope: 'line', key: 'RE 7', rank: me.rank, size: Mock.boardLine.length, points: me.points, gapToNext: above == null ? null : above.points - me.points + 1),
+          : ApiStandingBoard(scope: 'line', key: 'RE 7', rank: me.rank, size: Mock.boardLine.length, minutes: me.minutes, gapToNext: above == null ? null : above.minutes - me.minutes + 1),
       community: ApiStandingCommunity(
         minutesTotal: Mock.communityMinutes,
         myMinutes: Mock.myMinutes + state.bonusPoints,
@@ -1097,7 +1097,7 @@ class MockRepository implements AppRepository {
       'germany' => Mock.boardGermany,
       _ => Mock.boardLine,
     };
-    return list.where((e) => state.showOnBoards || !e.isMe).map((e) => ApiBoardEntry(rank: e.rank, name: e.name, points: e.points, isMe: e.isMe)).toList();
+    return list.where((e) => state.showOnBoards || !e.isMe).map((e) => ApiBoardEntry(rank: e.rank, name: e.name, minutes: e.minutes, isMe: e.isMe)).toList();
   }
 
 }

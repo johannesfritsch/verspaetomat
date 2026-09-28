@@ -82,7 +82,7 @@ void main() {
 
   group('Angekommen und pünktlich', () {
     test('a delay is red, a punctual arrival is not', () {
-      expect(TicketData.angekommen(minutes: 68, points: 68).isPunctual, isFalse);
+      expect(TicketData.angekommen(minutes: 68).isPunctual, isFalse);
       expect(TicketData.puenktlich().isPunctual, isTrue);
     });
 
@@ -94,8 +94,8 @@ void main() {
     });
 
     test('59 and 60 minutes both read as minutes; the claim is not the card’s business', () {
-      expect(TicketData.angekommen(minutes: 59, points: 59).numberLabel, 'MINUTEN');
-      expect(TicketData.angekommen(minutes: 60, points: 60).numberLabel, 'MINUTEN');
+      expect(TicketData.angekommen(minutes: 59).numberLabel, 'MINUTEN');
+      expect(TicketData.angekommen(minutes: 60).numberLabel, 'MINUTEN');
     });
   });
 

@@ -107,7 +107,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
       if (!mounted) return;
       final d = result.ride.finalDelayMinutes ?? 0;
       final delayText = result.ride.cancelled ? 'Ausfall' : (d > 0 ? '+$d am ${exit.name}' : 'pünktlich am ${exit.name}');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nachgetragen: ${t.line}, $delayText · 1 Geduldspunkt.')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Nachgetragen: ${t.line}, $delayText · ${result.ride.countedMinutes} ${result.ride.countedMinutes == 1 ? 'Minute' : 'Minuten'} gezählt.')));
       context.go(Routes.home);
     } catch (e) {
       if (mounted) {
@@ -211,7 +211,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
               compact: true,
             ),
           const VGap.l(),
-          Text('Ein Nachtrag bringt einen Geduldspunkt, zählt für Anträge, wenn der Feed eine Verspätung kennt, und taucht nie in Ranglisten auf. Der Fahrplan zeigt die Züge von heute.', style: VText.caption),
+          Text('Ein Nachtrag zählt seine Minuten, geht in Anträge ein, wenn der Feed eine Verspätung kennt, und taucht nie in Ranglisten auf. Der Fahrplan zeigt die Züge von heute.', style: VText.caption),
         ],
       ),
     );

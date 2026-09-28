@@ -356,7 +356,7 @@ class _Board extends StatelessWidget {
   }
 }
 
-/// The customer's own place, above the boards: "Platz 5 auf der RE 7 diese Woche · 38 Punkte bis Platz 4".
+/// The customer's own place, above the boards: "Platz 5 auf der RE 7 diese Woche · 38 Minuten bis Platz 4".
 class _RankLine extends StatelessWidget {
   const _RankLine({required this.board});
   final ApiStandingBoard board;
@@ -366,7 +366,7 @@ class _RankLine extends StatelessWidget {
     final where = board.scope == 'city' ? 'in ${board.key}' : 'auf der ${board.key}';
     final gap = board.gapToNext == null
         ? 'ganz oben'
-        : '${fmtInt(board.gapToNext!)} ${board.gapToNext == 1 ? 'Punkt' : 'Punkte'} bis Platz ${board.rank - 1}';
+        : '${fmtInt(board.gapToNext!)} ${board.gapToNext == 1 ? 'Minute' : 'Minuten'} bis Platz ${board.rank - 1}';
     return Row(
       crossAxisAlignment: CrossAxisAlignment.baseline,
       textBaseline: TextBaseline.alphabetic,

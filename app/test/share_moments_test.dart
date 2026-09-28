@@ -10,7 +10,7 @@ void main() {
         ridesTotal: 2,
         confirmedCents: 0,
         record: recordRide == null ? null : ApiShareRecord(rideId: recordRide, line: 'RE 7', minutes: 94),
-        lastMonth: month == null ? null : ApiShareMonth(month: month, minutes: 94, rides: 2, worstMinutes: 94, points: 94, confirmedCents: 0),
+        lastMonth: month == null ? null : ApiShareMonth(month: month, minutes: 94, rides: 2, worstMinutes: 94, confirmedCents: 0),
         confirmedClaims: [for (final c in confirmed) ApiShareConfirmed(claimId: c, cents: 600, ngo: 'X', cases: 4, minutes: 281)],
       );
 

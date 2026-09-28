@@ -16,7 +16,7 @@ import 'welcher_zug_screen.dart';
 /// The itineraries run from wherever the passenger is now to the **unchanged** destination.
 /// What the confirm does is worked out rather than asked: still at the boarding station with
 /// no stop behind them, the leg is replaced (a mis-tap, nothing earned, no interruption);
-/// otherwise the leg ends as docs/21 §2 ends it, keeping its Geduldspunkte (docs/22 §1), and
+/// otherwise the leg ends as docs/21 §2 ends it, keeping its minutes (docs/22 §1), and
 /// the chosen train becomes the next one under the delay ceiling.
 Future<void> showChangeTrainSheet(
   BuildContext context, {
@@ -139,7 +139,7 @@ class _ChangeTrainListState extends State<_ChangeTrainList> {
         const VGap.s(),
         Text('Ab ${widget.fromStationName} → ${widget.toStationName}', style: VText.bodyStrong),
         const SizedBox(height: 2),
-        Text('Deine Geduldspunkte bleiben. Die Verspätung zählt weiter am Ziel.', style: VText.caption),
+        Text('Deine Minuten bleiben. Die Verspätung zählt weiter am Ziel.', style: VText.caption),
         const VGap.m(),
         if (_loading) ...const [VSkeletonCard(trailing: true), SizedBox(height: VSpace.s), VSkeletonCard(trailing: true)],
         if (_error != null) ...[const OfflineBanner(), ErrorLine(message: _error!, onRetry: _load)],

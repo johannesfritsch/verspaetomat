@@ -22,14 +22,14 @@ void main() {
       );
 
   const others = [
-    ApiBoardEntry(rank: 1, name: 'Miri aus Hamm', points: 212),
-    ApiBoardEntry(rank: 2, name: 'tobi_aus_kalk', points: 174),
-    ApiBoardEntry(rank: 4, name: 'Gleiswechsel', points: 133),
-    ApiBoardEntry(rank: 10, name: 'Johannes', points: 4),
+    ApiBoardEntry(rank: 1, name: 'Miri aus Hamm', minutes: 212),
+    ApiBoardEntry(rank: 2, name: 'tobi_aus_kalk', minutes: 174),
+    ApiBoardEntry(rank: 4, name: 'Gleiswechsel', minutes: 133),
+    ApiBoardEntry(rank: 10, name: 'Johannes', minutes: 4),
   ];
 
   testWidgets('every name starts on the same edge, the passenger\'s own included', (tester) async {
-    await tester.pumpWidget(list([...others, const ApiBoardEntry(rank: 11, name: '—', points: 0, isMe: true)]));
+    await tester.pumpWidget(list([...others, const ApiBoardEntry(rank: 11, name: '—', minutes: 0, isMe: true)]));
     final lefts = {
       for (final name in ['Miri aus Hamm', 'tobi_aus_kalk', 'Gleiswechsel', 'Johannes', 'Du'])
         name: tester.getRect(find.text(name)).left,
@@ -47,7 +47,7 @@ void main() {
   });
 
   testWidgets('a four-figure place stays on one line inside its column', (tester) async {
-    await tester.pumpWidget(list(const [ApiBoardEntry(rank: 3021, name: 'Du', points: 7, isMe: true)]));
+    await tester.pumpWidget(list(const [ApiBoardEntry(rank: 3021, name: 'Du', minutes: 7, isMe: true)]));
     final place = tester.getRect(find.text('3021'));
     expect(place.width, lessThanOrEqualTo(28), reason: 'it is scaled down, not wrapped');
     expect(place.height, lessThan(24), reason: 'one line: a second one would be clipped by the disc');

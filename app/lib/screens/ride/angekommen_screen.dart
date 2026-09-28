@@ -158,7 +158,8 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     // Either one: a journey that does not carry the flag still ended on a cancelled train.
     final cancelled = (j?.cancelled ?? false) || r.cancelled;
     final delay = j?.finalDelayMin ?? r.finalDelayMinutes ?? 0;
-    final points = (j?.points ?? r.points) > 0 ? (j?.points ?? r.points) : (cancelled ? 60 : delay);
+    // The minutes this arrival counts (#74): the server's figure, else the rule it follows.
+    final minutes = (j?.countedMinutes ?? r.countedMinutes) > 0 ? (j?.countedMinutes ?? r.countedMinutes) : (cancelled ? 60 : delay);
     final planned = j?.plannedArrival ?? r.plannedArrival;
     final actual = j?.actualArrival ?? planned?.add(Duration(minutes: delay));
     final where = j?.destinationStationName ?? r.exitStationName;
@@ -187,7 +188,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
           // card — rare enough to be the joke, and the joke travels.
           lines: delay > 0 ? ShareLines.angekommen(minutes: delay, to: where) : ShareLines.puenktlich(to: where),
           build: ({fahrgast, strecke, date, line}) => delay > 0
-              ? TicketData.angekommen(minutes: delay, points: points, strecke: strecke, fahrgast: fahrgast, date: date, line: line)
+              ? TicketData.angekommen(minutes: delay, strecke: strecke, fahrgast: fahrgast, date: date, line: line)
               : TicketData.puenktlich(strecke: strecke, fahrgast: fahrgast, date: date, line: line),
         );
 
@@ -217,7 +218,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
 
     final String subline;
     if (cancelled) {
-      subline = 'Reise nicht angetreten. 60 Minuten angerechnet.';
+      subline = 'Reise nicht angetreten.';
     } else {
       final extra = '${r.cause != null ? ' · ${r.cause}' : ''}${r.selfEntered ? ' · selbst eingetragen' : ''}';
       subline = delay > 0
@@ -248,7 +249,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
             CountUpDelay(delay, size: VDelaySize.large),
           ],
           const VGap.xs(),
-          Text(_headline(delay, cancelled, points), style: VText.h1),
+          Text(_headline(delay, cancelled, minutes), style: VText.h1),
           const VGap.s(),
           Text(subline, style: VText.body.copyWith(color: VColors.ink2)),
           if (j != null && j.missedConnection) ...[
@@ -308,12 +309,14 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     );
   }
 
-  String _headline(int delay, bool cancelled, int points) {
-    if (cancelled) return '60 Minuten.\n$points Geduldspunkte.';
+  /// Two lines: the minutes, and what they are (#74). There is one figure only, so the second line
+  /// no longer repeats it under another name.
+  String _headline(int delay, bool cancelled, int minutes) {
+    if (cancelled) return 'Ausgefallen.\n$minutes Minuten angerechnet.';
     if (delay == 59) return '59 Minuten.\nUm eine Minute.';
     if (delay <= 0) return 'Pünktlich.\nAuch das gibt es.';
-    if (delay == 1) return 'Eine Minute.\nEin Geduldspunkt.';
-    return '$delay Minuten.\n$points Geduldspunkte.';
+    if (delay == 1) return 'Eine Minute.\nAuch die zählt.';
+    return '$delay Minuten.\nAlle gezählt.';
   }
 
   void _trotzdem(BuildContext context, ApiNgo ngo) {
@@ -777,7 +780,7 @@ class _NoClaimCard extends StatelessWidget {
                 Text(title, style: VText.bodyStrong),
                 if (delay != 59) ...[
                   const SizedBox(height: VSpace.xs),
-                  Text('Ab 60 Minuten entsteht ein Anspruch. Bis dahin zählen die Punkte, und $ngoName freut sich auch so.', style: VText.bodyS),
+                  Text('Ab 60 Minuten entsteht ein Anspruch. Bis dahin zählen die Minuten, und $ngoName freut sich auch so.', style: VText.bodyS),
                 ],
               ],
             ),
@@ -865,7 +868,7 @@ class _NoDataStepState extends State<_NoDataStep> {
             ],
           ),
           const VGap.xl(),
-          Text('Die Fahrt zählt Punkte. Im Konto steht sie als „selbst eingetragen“, und im Antrag auch.', style: VText.caption),
+          Text('Die Fahrt zählt ihre Minuten. Im Konto steht sie als „selbst eingetragen“, und im Antrag auch.', style: VText.caption),
           const VGap.l(),
           VPrimaryButton(label: 'Übernehmen', onTap: () => widget.onDone(_minutes)),
         ],

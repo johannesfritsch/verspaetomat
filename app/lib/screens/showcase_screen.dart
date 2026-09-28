@@ -97,7 +97,7 @@ class ShowcaseScreen extends StatelessWidget {
             const _Entry('Bahnsteig', 'Home', Routes.home),
             const _Entry('Unterwegs', 'die Fahrt', Routes.ride),
             _Entry('Angekommen +68', 'Anspruch, Bündel bereit', '${Routes.arrived}?variant=68', demoOnly: true),
-            _Entry('Angekommen +14', 'kein Anspruch, Punkte', '${Routes.arrived}?variant=14', demoOnly: true),
+            _Entry('Angekommen +14', 'kein Anspruch, Minuten', '${Routes.arrived}?variant=14', demoOnly: true),
             _Entry('Angekommen +59', 'um eine Minute', '${Routes.arrived}?variant=59', demoOnly: true),
             _Entry('Angekommen, Ausfall', 'Reise nicht angetreten', '${Routes.arrived}?variant=cancelled', demoOnly: true),
             _Entry('Angekommen, keine Daten', 'selbst eingetragen', '${Routes.arrived}?variant=nodata', demoOnly: true),

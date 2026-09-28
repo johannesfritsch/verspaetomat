@@ -19,7 +19,7 @@ const _rows = <_Row>[
   _Row('Position, nächster Halt, aktuelle Verspätung während der Fahrt', 'Die Live-Daten für genau diesen einen Zug, die unser Server verfolgt, während du fährst. Dein Standort wird dafür nicht benutzt.', fresh: 'Alle 30 bis 60 Sekunden, mit „Stand 08:41“', missing: 'Der Fahrt-Screen zeigt den letzten Stand und sein Alter. Bei Ankunft kannst du die Zeit selbst eintragen; solche Fahrten sind auf dem Antrag als „selbst eingetragen“ markiert.'),
   _Row('Verspätung an deinem Ausstieg (die Zahl, die zählt)', 'Geplante Ankunft aus dem Fahrplan, tatsächliche Ankunft aus den Live-Daten, an dem Halt, den du gewählt hast.', fresh: 'Endgültig ein paar Minuten nach Ankunft'),
   _Row('Ursache („Stellwerksstörung“)', 'Die Störungsmeldung des Betreibers, wenn er eine veröffentlicht.', fresh: 'Mit der Verspätung', missing: 'Kein Abzeichen, sonst ändert sich nichts.'),
-  _Row('Geduldspunkte', 'Von der App aus der endgültigen Verspätung gezählt.', fresh: 'Sofort bei Ankunft'),
+  _Row('Minuten', 'Aus der endgültigen Verspätung am Ziel gezählt, ein Ausfall mit 60.', fresh: 'Sofort bei Ankunft'),
   _Row('„Anspruch: 1,50 €“', 'Die gesetzlichen Regeln für deinen Tickettyp, angewendet auf die endgültige Verspätung. Die Regeln stehen in der App und verlinken auf die offizielle DB-Seite.', fresh: 'Sofort bei Ankunft'),
   _Row('Kontostatus: gesammelt, bereit, eingereicht, bestätigt, verfallen', 'gesammelt und bereit: von der App berechnet. eingereicht: dein Antrag hat deine Verspätomat-Adresse verlassen. bestätigt oder abgelehnt: die E-Mail-Antwort der Bahn an diese Adresse, gelesen nach Betrag und Ergebnis, oder dein Foto einer Postantwort, oder die Meldung des Vereins. verfallen: die Frist ist vorbei.', fresh: 'Antworten: sofort bei Eingang', missing: 'Eine Antwort, die wir nicht lesen können, zeigen wir dir, damit du das Ergebnis einträgst.'),
   _Row('„Älteste Verspätung verfällt in 3 Wochen“', 'Drei Monate nach dem Fahrtdatum, die gesetzliche Frist.', fresh: 'Täglich'),
@@ -33,7 +33,7 @@ const _rows = <_Row>[
   _Row('Community: Minuten', 'Summe aller endgültigen Verspätungen aller Fahrgäste; ein Ausfall zählt mit mindestens 60 Minuten.', fresh: 'Live'),
   _Row('Community: Euro „eingereicht“ und „bestätigt“', 'Summe der Kontostatus aller Fahrgäste.', fresh: 'Live für eingereicht, monatlich für bestätigt'),
   _Row('Bestätigt pro Verein', 'Summe aller bestätigten Anträge, die diesen Verein als Empfänger nennen.', fresh: 'Live; Vereinsmeldungen monatlich'),
-  _Row('Ranglisten', 'Nur verifizierte Fahrten (ein Standort-Fix am Bahnhof beim Check-in).', fresh: 'Live, sieben Tage', missing: 'Unverifizierte Fahrten bringen Punkte, aber keinen Platz.'),
+  _Row('Ranglisten', 'Nur verifizierte Fahrten (ein Standort-Fix am Bahnhof beim Check-in).', fresh: 'Live, sieben Tage', missing: 'Unverifizierte Fahrten zählen ihre Minuten, aber keinen Platz.'),
   _Row('Abzeichen', 'Von der App aus den Fahrtdaten vergeben, bei Ursachen aus der Störungsmeldung des Betreibers.', fresh: 'Bei Ankunft'),
 ];
 

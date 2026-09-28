@@ -62,7 +62,7 @@ const _cards = <_Card>[
     head: 'Warten ',
     tail: 'zählt.',
     redFirst: false,
-    subtitle: 'Minuten werden zu Punkten.',
+    subtitle: 'Jede Minute Verspätung zählt.',
   ),
   _Card(
     asset: 'assets/onboarding/zweck.webp',
