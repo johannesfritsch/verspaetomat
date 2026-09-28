@@ -11,6 +11,7 @@ import 'screens/ride/checkin_flow.dart';
 import 'state/demo_state.dart';
 import 'theme/app_theme.dart';
 import 'theme/tokens.dart';
+import 'widgets/demo_band.dart';
 
 /// Backend base URL. `--dart-define=API_URL=http://192.168.0.10:8080` for a phone.
 const apiUrl = String.fromEnvironment('API_URL', defaultValue: 'http://127.0.0.1:8080');
@@ -96,6 +97,8 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
           theme: buildAppTheme(),
           routerConfig: router,
           color: VColors.paper,
+          // Over every route and sheet while a walkthrough runs (#72).
+          builder: (context, child) => DemoBand(child: child ?? const SizedBox.shrink()),
         ),
       ),
     );

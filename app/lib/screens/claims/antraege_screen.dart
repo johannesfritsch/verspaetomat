@@ -246,6 +246,10 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
               onChanged: refresh,
             ),
           if (expired.isNotEmpty) _ExpiredCard(incidents: expired),
+          // #68: the walkthrough stays reachable once there are real cases — to show somebody how
+          // it goes without opening one's own. Below everything and quiet, the way the empty tab
+          // offers it: the real things on this tab come first.
+          if (!nothingAtAll) const _DemoEntry(),
         ];
 
         return VTabScaffold(
@@ -660,6 +664,31 @@ class EmptyAntraege extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// „Vorführung ansehen" under the real claims (#68): the same ghost button the empty tab has, and
+/// one line that says what it is, so nobody takes it for a claim of their own.
+class _DemoEntry extends StatelessWidget {
+  const _DemoEntry();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: VSpace.s, bottom: VSpace.m),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          VGhostButton(
+            key: const Key('antraege-demo'),
+            label: 'Vorführung ansehen',
+            icon: Icons.play_circle_outline,
+            onTap: () => context.push(Routes.demoClaim),
+          ),
+          Text('Der ganze Ablauf mit Beispieldaten, zum Zeigen. Deine Anträge bleiben, wie sie sind.', style: VText.caption),
+        ],
       ),
     );
   }

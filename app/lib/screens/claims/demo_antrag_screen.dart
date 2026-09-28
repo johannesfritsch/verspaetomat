@@ -6,6 +6,7 @@ import '../../repo/repo_scope.dart';
 import '../../state/demo_state.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../../widgets/demo_band.dart';
 import 'antrag_screen.dart';
 
 /// The whole Antrag, walked through with example data, from an account that has never had a delay.
@@ -33,6 +34,10 @@ class _DemoAntragScreenState extends State<DemoAntragScreen> {
   @override
   void initState() {
     super.initState();
+    // The band over the whole app (#72), for as long as this walkthrough is on the stack. After the
+    // frame, in both directions: the band's notifier rebuilds the app above this route, which is
+    // not allowed while that tree is being built or torn down.
+    WidgetsBinding.instance.addPostFrameCallback((_) => demoWalkthroughs.value++);
     _build();
   }
 
@@ -72,6 +77,7 @@ class _DemoAntragScreenState extends State<DemoAntragScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => demoWalkthroughs.value = (demoWalkthroughs.value - 1).clamp(0, 1 << 20));
     _session?.dispose();
     _demo.dispose();
     super.dispose();
