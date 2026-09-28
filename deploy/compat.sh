@@ -24,6 +24,10 @@ main() {
   echo "== $TAG (the app) against $API ($(curl -sf "$API/health" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p'))"
   git worktree add -q --detach "$WT" "$TAG"
   trap 'git worktree remove --force "$WT" >/dev/null 2>&1 || true' EXIT
+  # The toolchain of today, the app of then: an older tag's Podfile may not build with the Xcode on
+  # this Mac (Xcode 27 refuses pod targets below iOS 15). The Podfile is build tooling, not app
+  # behaviour, so the current one is used; every line of the app stays as the tag has it.
+  git show HEAD:app/ios/Podfile > "$WT/app/ios/Podfile"
   (
     cd "$WT/app"
     flutter pub get >/dev/null
