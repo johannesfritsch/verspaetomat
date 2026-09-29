@@ -1039,3 +1039,44 @@ enum Ordering {
     return (hits.map { t.id(at: $0.i) }, radius, !hits.isEmpty)
   }
 }
+
+/// The station premises (issue #64): the shared fixture the server rendered
+/// (`outlines.rs`, `fixture_set`), read to the numbers Dart and Kotlin assert too.
+final class PremiseTableTests: XCTestCase {
+  private static let fixture = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("test/fixtures/umrisse-fixture.bin")
+
+  func testTheFixtureReadsToTheServersNumbers() throws {
+    let t = try PremiseTable.parse(Data(contentsOf: Self.fixture))
+    XCTAssertEqual(t.version, 1_790_700_677)
+    XCTAssertEqual(t.generated, 1_790_640_000)
+    XCTAssertEqual(t.entries.keys.sorted(), [3, 17, 4711])
+    let small = try XCTUnwrap(t.entry(forStation: "vs:3"))
+    XCTAssertEqual(small.ring.radius, 300)
+    XCTAssertEqual(small.touch.map(\.radius), [120])
+    let koeln = try XCTUnwrap(t.entry(forStation: "vs:17"))
+    XCTAssertEqual(koeln.ring.lat, 50.943, accuracy: 1e-9)
+    XCTAssertEqual(koeln.ring.lon, 6.9587, accuracy: 1e-9)
+    XCTAssertEqual(koeln.ring.radius, 429)
+    XCTAssertEqual(koeln.touch.map(\.radius), [150, 139, 135])
+    XCTAssertEqual(koeln.touch[0].lat, 50.9435, accuracy: 1e-9)
+    let big = try XCTUnwrap(t.entry(forStation: "vs:4711"))
+    XCTAssertEqual(big.ring.radius, 1000)
+    XCTAssertEqual(big.touch.count, 6)
+    XCTAssertEqual(big.touch.last?.radius, 125)
+    XCTAssertNil(t.entry(forStation: "vs:4"))
+    XCTAssertNil(t.entry(forStation: "de-DELFI_de:05315:11201"), "a MOTIS id has no premise")
+  }
+
+  func testADamagedCopyIsRefusedWhole() throws {
+    let good = try Data(contentsOf: Self.fixture)
+    var flipped = good
+    flipped[flipped.count - 1] ^= 1
+    XCTAssertThrowsError(try PremiseTable.parse(flipped))
+    XCTAssertThrowsError(try PremiseTable.parse(good.prefix(good.count - 1)))
+    var magic = good
+    magic[0] = 0x41
+    XCTAssertThrowsError(try PremiseTable.parse(magic))
+  }
+}

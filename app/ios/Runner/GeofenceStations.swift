@@ -550,3 +550,99 @@ final class StationTable {
     return nil
   }
 }
+
+// MARK: - Station premises (issue #64, docs/48)
+
+/// One circle of a premise: the ring or a touch point.
+struct PremiseCircle: Codable, Equatable {
+  let lat: Double
+  let lon: Double
+  let radius: Double
+  var location: CLLocation { CLLocation(latitude: lat, longitude: lon) }
+}
+
+/// What the native layer needs of a premise: the ring it watches for arriving and leaving, and
+/// the touch points whose entry is the nudge. The corners stay in the file for the drawing on the
+/// Entwicklung page; nothing here tests a point against them.
+struct PremiseEntry: Codable, Equatable {
+  let ring: PremiseCircle
+  let touch: [PremiseCircle]
+}
+
+/// `umrisse.bin` beside the station extract, written by Dart (`premise_store.dart`), never here.
+/// The reader mirrors `outlines.rs` `parse_file` and `premise_file.dart` check for check; all
+/// four read `app/test/fixtures/umrisse-fixture.bin` to the same numbers.
+///
+/// Derived from OpenStreetMap, ODbL (docs/48).
+struct PremiseTable {
+  static let fileName = "umrisse.bin"
+  static let magic: [UInt8] = [0x56, 0x53, 0x4F, 0x4C] // "VSOL"
+  static let supportedFormat: UInt16 = 1
+  static let minHeaderLen = 32
+  static let minRecordLen = 20
+  /// The same floor as Dart's `PremiseStore.minPlausibleCount`.
+  static let minPlausibleCount = 1000
+
+  enum Failure: Error, Equatable {
+    case tooShort, magic, format(UInt16), layout, length, crc, order(Int), blob(Int), shape(Int)
+  }
+
+  let version: UInt32
+  let generated: UInt32
+  let entries: [UInt32: PremiseEntry]
+
+  var count: Int { entries.count }
+
+  /// Our station id is `vs:<n>`; an older build's MOTIS id has no premise.
+  func entry(forStation id: String) -> PremiseEntry? {
+    guard id.hasPrefix("vs:"), let n = UInt32(id.dropFirst(3)) else { return nil }
+    return entries[n]
+  }
+
+  static func parse(_ data: Data) throws -> PremiseTable {
+    let b = [UInt8](data)
+    guard b.count >= minHeaderLen else { throw Failure.tooShort }
+    for i in 0..<4 where b[i] != magic[i] { throw Failure.magic }
+    func u16(_ o: Int) -> UInt16 { UInt16(b[o]) | UInt16(b[o + 1]) << 8 }
+    func u32(_ o: Int) -> UInt32 { UInt32(b[o]) | UInt32(b[o + 1]) << 8 | UInt32(b[o + 2]) << 16 | UInt32(b[o + 3]) << 24 }
+    func i32(_ o: Int) -> Int32 { Int32(bitPattern: u32(o)) }
+    guard u16(4) == supportedFormat else { throw Failure.format(u16(4)) }
+    let hl = Int(u16(6)), count = Int(u32(8)), rl = Int(u32(12)), bl = Int(u32(16))
+    guard hl >= minHeaderLen, rl >= minRecordLen else { throw Failure.layout }
+    let (records, overflow) = rl.multipliedReportingOverflow(by: count)
+    guard !overflow, hl + records + bl == b.count else { throw Failure.length }
+    guard b.withUnsafeBytes({ CRC32.over($0, from: hl) }) == u32(28) else { throw Failure.crc }
+    let blob0 = hl + records
+    var out: [UInt32: PremiseEntry] = [:]
+    out.reserveCapacity(count)
+    var last: UInt32 = 0
+    for i in 0..<count {
+      let o = hl + i * rl
+      let id = u32(o)
+      guard id > last else { throw Failure.order(i) }
+      last = id
+      let nt = Int(b[o + 14]), nc = Int(b[o + 15]), off = Int(u32(o + 16))
+      guard off + nt * 10 + nc * 8 <= bl else { throw Failure.blob(i) }
+      let at = blob0 + off
+      let touch = (0..<nt).map { k in
+        PremiseCircle(lat: Double(i32(at + k * 10)) / 1e6, lon: Double(i32(at + k * 10 + 4)) / 1e6, radius: Double(u16(at + k * 10 + 8)))
+      }
+      let ring = PremiseCircle(lat: Double(i32(o + 4)) / 1e6, lon: Double(i32(o + 8)) / 1e6, radius: Double(u16(o + 12)))
+      // The server's `check_row`: a file that breaks it was not made by us.
+      guard (3...24).contains(nc), (300...1000).contains(ring.radius), (1...6).contains(nt), touch.allSatisfy({ $0.radius >= 120 })
+      else { throw Failure.shape(i) }
+      out[id] = PremiseEntry(ring: ring, touch: touch)
+    }
+    return PremiseTable(version: u32(24), generated: u32(20), entries: out)
+  }
+
+  /// The file on disk, or nil: none there, or not one we can trust. Nothing is deleted here —
+  /// Dart owns the directory and discards a bad download itself.
+  static func load() -> PremiseTable? {
+    guard let dir = StationPaths.stationsDirectory,
+          let data = try? Data(contentsOf: dir.appendingPathComponent(fileName), options: .mappedIfSafe),
+          let t = try? parse(data), t.count >= minPlausibleCount
+    else { return nil }
+    return t
+  }
+}

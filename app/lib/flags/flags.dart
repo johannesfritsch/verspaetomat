@@ -34,7 +34,7 @@ enum Flag {
     'station_premises',
     about: 'Der Hintergrund überwacht Bahnhofsring und Tastpunkte aus der Gelände-Datei statt '
         '300 m um den Bahnhof mit der 50-m-Wache.',
-    readBy: null,
+    readBy: 'iOS: Geofence.swift, über das Feld station_premises auf GET /v1/me/geofence',
   );
 
   const Flag(this.wire, {required this.about, this.readBy});

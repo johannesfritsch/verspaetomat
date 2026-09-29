@@ -199,3 +199,50 @@ final class GeofenceRulesTests: XCTestCase {
     XCTAssertEqual(GeofenceRules.idleDaysBeforeOff, 30)
   }
 }
+
+/// The region plan with premises on (issue #64, docs/48).
+final class PremiseRegionTests: XCTestCase {
+  private func st(_ n: Int) -> GeofenceStation { GeofenceStation(id: "vs:\(n)", name: "S\(n)", lat: 50 + Double(n) * 0.01, lon: 7) }
+  private let ring = PremiseCircle(lat: 50.5, lon: 7.5, radius: 450)
+  private func entry(_ touches: Int) -> PremiseEntry {
+    PremiseEntry(ring: ring, touch: (0..<touches).map { PremiseCircle(lat: 50.5 + Double($0) * 0.001, lon: 7.5, radius: 130) })
+  }
+
+  func testAStationWithAPremiseIsWatchedByItsRingAndOneWithoutBy300m() {
+    let specs = GeofenceRules.premiseRegions(set: [st(1), st(2)], stays: [], premise: { $0 == "vs:1" ? self.entry(3) : nil }, stationRadius: 300)
+    XCTAssertEqual(specs.map(\.id), ["station:vs:1", "station:vs:2"])
+    XCTAssertEqual(specs[0].radius, 450)
+    XCTAssertEqual(specs[0].lat, 50.5)
+    XCTAssertEqual(specs[1].radius, 300)
+    XCTAssertTrue(specs.allSatisfy { $0.entry && $0.exit })
+  }
+
+  /// A stay adds its touch points, keeps its own ring whatever the set says, and what no longer
+  /// fits beside the touch points is cut from the end of the set — never the stay, never past 19.
+  func testAStayKeepsItsRingAndMakesRoomForItsTouchPoints() {
+    let set = (1...19).map(st)
+    let stay = PremiseStay(station: st(42), entry: entry(6), enteredAt: Date(), nudged: false)
+    let specs = GeofenceRules.premiseRegions(set: set, stays: [stay], premise: { _ in nil }, stationRadius: 300)
+    XCTAssertEqual(specs.count, 19)
+    XCTAssertEqual(specs.first?.id, "station:vs:42")
+    XCTAssertEqual(specs.first?.radius, 450, "the stay's own ring, not the 300 m of a station without premise")
+    let touch = specs.filter { $0.id.hasPrefix("touch:") }
+    XCTAssertEqual(touch.map(\.id), (1...6).map { "touch:vs:42:\($0)" })
+    XCTAssertTrue(touch.allSatisfy { $0.entry && !$0.exit })
+    XCTAssertFalse(specs.contains { $0.id == "station:vs:19" }, "the least important station made room")
+  }
+
+  func testTwoStaysFitBesideTheUmbrella() {
+    let stays = [42, 43].map { PremiseStay(station: st($0), entry: entry(6), enteredAt: Date(), nudged: false) }
+    let specs = GeofenceRules.premiseRegions(set: (1...19).map(st), stays: stays, premise: { _ in nil }, stationRadius: 300)
+    XCTAssertEqual(specs.count, 19)
+    XCTAssertEqual(specs.filter { $0.id.hasPrefix("touch:") }.count, 12)
+    XCTAssertTrue(specs.contains { $0.id == "station:vs:42" } && specs.contains { $0.id == "station:vs:43" })
+  }
+
+  func testATouchPointNamesItsStation() {
+    XCTAssertEqual(GeofenceRules.stationId(ofTouch: "touch:vs:17:2"), "vs:17")
+    XCTAssertEqual(GeofenceRules.stationId(ofTouch: "touch:de-DELFI_de:05315:11201:1"), "de-DELFI_de:05315:11201")
+    XCTAssertNil(GeofenceRules.stationId(ofTouch: "station:vs:17"))
+  }
+}

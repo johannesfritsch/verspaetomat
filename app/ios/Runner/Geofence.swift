@@ -30,6 +30,21 @@ struct GeofenceConfig: Codable {
   /// that — so the whole background layer would be dead from the upgrade until the next
   /// foreground `configure`. `nudgeDelay` and `nudgeRadiusM` above already carry that hazard.
   var stationsLocal: Bool?
+  /// #64, docs/48: rings and touch points from `umrisse.bin` instead of 300 m and the 50 m GPS
+  /// watch (`station_premises` on /v1/me/geofence). Optional for the reason above.
+  var stationPremises: Bool?
+  /// The version of the premise file Dart holds; a new one re-reads the file.
+  var premisesVersion: Int?
+}
+
+/// A stay at one station (docs/48, „Einen Bahnhof betreten"): from entering its ring to leaving
+/// it. The whole station is kept, so its exit is understood even after the nearby list moved on.
+/// `entry` nil is the 300 m guard: a station without a premise, whose ring is itself the nudge.
+struct PremiseStay: Codable, Equatable {
+  let station: GeofenceStation
+  let entry: PremiseEntry?
+  let enteredAt: Date
+  var nudged: Bool
 }
 
 /// Pure rules, kept free of CoreLocation state so they can be unit-tested.
@@ -212,6 +227,62 @@ enum GeofenceRules {
     }
     for s in nearest where !known(s) && out.count < maxRegions { out.append(s) }
     return out
+  }
+
+  // MARK: station premises (issue #64, docs/48)
+
+  /// A stay ends by itself after this long, even without an exit (docs/48, „Netz darunter").
+  static let premiseStayCap: TimeInterval = 90 * 60
+  /// At most this many stations at once (Köln Hbf and Messe/Deutz); 2 × 6 touch points, two
+  /// rings and the umbrella fit in twenty.
+  static let maxStays = 2
+  static let touchPrefix = "touch:"
+
+  /// One region to monitor, as data, so the plan can be tested without CoreLocation state.
+  struct RegionSpec: Equatable {
+    let id: String
+    let lat: Double
+    let lon: Double
+    let radius: Double
+    let entry: Bool
+    let exit: Bool
+  }
+
+  /// The regions with premises on: every station of `set` with its ring (or the 300 m circle when
+  /// it has no premise), and the touch points of every stay. The stations of the stays always
+  /// stay in; what does not fit beside their touch points is cut from the end of `set`, which
+  /// `regionSet` orders by importance. At most [maxRegions] — the umbrella is the twentieth.
+  static func premiseRegions(
+    set: [GeofenceStation],
+    stays: [PremiseStay],
+    premise: (String) -> PremiseEntry?,
+    stationRadius: Double
+  ) -> [RegionSpec] {
+    let touches = stays.flatMap { st in
+      (st.entry?.touch ?? []).enumerated().map { k, t in
+        RegionSpec(id: touchPrefix + st.station.id + ":\(k + 1)", lat: t.lat, lon: t.lon, radius: t.radius, entry: true, exit: false)
+      }
+    }
+    var stations: [GeofenceStation] = stays.map(\.station)
+    for s in set where !stations.contains(where: { $0.id == s.id }) { stations.append(s) }
+    let budget = max(stays.count, maxRegions - touches.count)
+    let rings = stations.prefix(budget).map { s -> RegionSpec in
+      // A stay keeps the ring it was entered with, even if a newer file drew it differently:
+      // changing it would re-register it, and that is how an exit gets lost.
+      let e = stays.first(where: { $0.station.id == s.id })?.entry ?? premise(s.id)
+      if let r = e?.ring {
+        return RegionSpec(id: GeofenceManager.stationPrefix + s.id, lat: r.lat, lon: r.lon, radius: r.radius, entry: true, exit: true)
+      }
+      return RegionSpec(id: GeofenceManager.stationPrefix + s.id, lat: s.lat, lon: s.lon, radius: stationRadius, entry: true, exit: true)
+    }
+    return Array(rings) + touches
+  }
+
+  /// `touch:vs:17:2` → `vs:17`. Station ids may carry colons themselves; the number is last.
+  static func stationId(ofTouch id: String) -> String? {
+    guard id.hasPrefix(touchPrefix), let colon = id.lastIndex(of: ":") else { return nil }
+    let s = String(id[id.index(id.startIndex, offsetBy: touchPrefix.count)..<colon])
+    return s.isEmpty ? nil : s
   }
 
   /// One platform under two names: close together, and one name is the other plus the word for
@@ -706,6 +777,51 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     get { defaults.data(forKey: "geofence.nearest").flatMap { try? JSONDecoder().decode([GeofenceStation].self, from: $0) } ?? [] }
     set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "geofence.nearest") }
   }
+  // MARK: station premises state (issue #64, docs/48)
+
+  /// The open stays, by station id. Persisted: a stay outlives a suspension, a relaunch and an
+  /// app update, and its ring is the exit fence that ends it.
+  private var stays: [String: PremiseStay] {
+    get { defaults.data(forKey: "geofence.premise.stays").flatMap { try? JSONDecoder().decode([String: PremiseStay].self, from: $0) } ?? [:] }
+    set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "geofence.premise.stays") }
+  }
+  /// Stations whose ring was seen from outside since their last stay. Only these may start a
+  /// stay from a `requestState` „inside": otherwise every app launch next to a station — people
+  /// live next to stations — would open a stay and nudge (docs/48, Umsetzungsregeln).
+  private var seenOutside: [String] {
+    get { defaults.stringArray(forKey: "geofence.premise.outside") ?? [] }
+    set { defaults.set(Array(newValue.suffix(200)), forKey: "geofence.premise.outside") }
+  }
+  /// Stays ended by the 90-minute cap while the phone was still inside: closed until the ring is
+  /// left, so the cap cannot open the next stay at once.
+  private var closedStays: [String] {
+    get { defaults.stringArray(forKey: "geofence.premise.closed") ?? [] }
+    set { defaults.set(newValue, forKey: "geofence.premise.closed") }
+  }
+  private var premiseTableCache: PremiseTable?
+  private var premiseTableVersion: Int?
+
+  /// The premise file, when the server switched premises on and Dart holds one. Re-read when
+  /// Dart reports a new version.
+  private func premiseTable(_ c: GeofenceConfig) -> PremiseTable? {
+    guard c.stationPremises == true else { return nil }
+    if premiseTableCache == nil || premiseTableVersion != c.premisesVersion {
+      premiseTableCache = PremiseTable.load()
+      premiseTableVersion = c.premisesVersion
+    }
+    return premiseTableCache
+  }
+
+  /// Premises on: rings, touch points, stays. Off is every path exactly as it was.
+  private func premisesOn(_ c: GeofenceConfig) -> Bool { c.stationPremises == true }
+
+  /// What the phone already knows about where it is, for the log: no GPS is switched on for it
+  /// (docs/48, „Was der Test braucht"). Distances only, never coordinates.
+  private func positionNote(from centre: CLLocation) -> String {
+    guard let l = manager.location else { return "kein Standort bekannt" }
+    return "Standort \(Int(l.distance(from: centre))) m vom Ring, ±\(Int(l.horizontalAccuracy)) m, \(Int(-l.timestamp.timeIntervalSinceNow)) s alt"
+  }
+
   private var pendingNudge: [String: String]? {
     get { defaults.dictionary(forKey: "geofence.pendingNudge") as? [String: String] }
     set { defaults.set(newValue, forKey: "geofence.pendingNudge") }
@@ -725,15 +841,22 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       quietFrom: args["quietFrom"] as? String, quietTo: args["quietTo"] as? String,
       nudgeDelay: args["nudgeDelayS"] as? Double ?? GeofenceRules.defaultNudgeDelay,
       nudgeRadiusM: args["nudgeRadiusM"] as? Double ?? GeofenceRules.defaultNudgeRadius,
-      stationsLocal: args["stationsLocal"] as? Bool)
+      stationsLocal: args["stationsLocal"] as? Bool,
+      stationPremises: args["stationPremises"] as? Bool,
+      premisesVersion: args["premisesVersion"] as? Int)
     config = c
+    // Premises off again: no stay survives into the old behaviour.
+    if !premisesOn(c) && !stays.isEmpty { stays = [:] }
     // A journey that started while a nudge was already pending used to let it fire anyway: the
     // notification lives in iOS, not in the app, and nothing took it back (issue #11). The same
     // for a switched-off layer.
     if c.riding || !c.enabled {
       cancelAllNudges(reason: c.riding ? "riding" : "off")
     }
-    stopAllRegions()
+    // With premises on, the set is changed by comparison (`registerStations`): a stay's ring is
+    // never taken down and put back, because a region registered while the phone is already
+    // outside it never reports the exit (docs/48). Off, everything is as it always was.
+    if !premisesOn(c) { stopAllRegions() }
     // Nothing below works without authorisation — and starting location services without it is
     // what raised the system dialog at launch with no screen behind it (#43). CoreLocation puts
     // the prompt up itself the moment monitoring begins on a phone that has never been asked, so
@@ -747,13 +870,20 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     let authorised = authStatus == .authorizedAlways || authStatus == .authorizedWhenInUse
     guard c.enabled, authorised, CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else {
       manager.stopMonitoringSignificantLocationChanges()
+      stopAllRegions()
+      stays = [:]
       discCentre = nil
       lastEvent = "configure: nothing registered (enabled=\(c.enabled), auth=\(Self.permissionString(authStatus)))"
       reply(["registered": 0])
       return
     }
     startCoarseLayer()
+    expireStays(c)
     let n = registerStations(c)
+    // The free consistency check: a stay whose ring iOS now calls „outside" is over.
+    for id in stays.keys {
+      if let r = manager.monitoredRegions.first(where: { $0.identifier == Self.stationPrefix + id }) { manager.requestState(for: r) }
+    }
     // `stopAllRegions` just took the umbrella down, and the fix that puts it back may be ten
     // seconds away — or never, if `requestLocation` times out indoors or in a tunnel. Until it
     // lands there would be no umbrella at all, and the umbrella is the one trigger that brings
@@ -853,6 +983,14 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
         // that flipping it from a laptop and watching this line change is the proof that the
         // switch works in both directions.
         "stationsLocal": config?.stationsLocal == true,
+        // #64: premises on, which file, and the stays open right now.
+        "stationPremises": config?.stationPremises == true,
+        "premisesVersion": premiseTableCache.map { Int($0.version) } as Any,
+        "premisesCount": premiseTableCache?.count ?? 0,
+        "stays": stays.values.map { st -> [String: Any] in
+          ["id": st.station.id, "name": st.station.name, "enteredAt": st.enteredAt.timeIntervalSince1970,
+           "nudged": st.nudged, "touch": st.entry?.touch.count ?? 0, "ringM": st.entry?.ring.radius ?? 0]
+        },
         "umbrellaWhy": umbrellaWhy as Any,
         "mode": modeLabel,
         "lastEventAt": (defaults.object(forKey: "geofence.lastEvent.at") as? Date)?.timeIntervalSince1970 as Any,
@@ -883,6 +1021,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   func stop() {
     stopAllRegions()
+    stays = [:]
     endMode()
     nearest = []
     if var c = config { c.enabled = false; config = c }
@@ -919,6 +1058,13 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     let named = set.isEmpty ? "none" : set.map { $0.name }.joined(separator: ", ")
     lastEvent = "regionSet: \(c.stations.count) frequent + \(nearest.count) nearest, "
       + "nearHome=\(GeofenceRules.nearHome(frequent: c.stations, here: discCentre)) → \(set.count): \(named)"
+    if premisesOn(c) {
+      let table = premiseTable(c)
+      let specs = GeofenceRules.premiseRegions(
+        set: set, stays: Array(stays.values), premise: { table?.entry(forStation: $0) }, stationRadius: c.stationRadiusM)
+      applyRegions(specs)
+      return specs.filter { $0.id.hasPrefix(Self.stationPrefix) }.count
+    }
     for s in set {
       let r = CLCircularRegion(center: s.location.coordinate, radius: c.stationRadiusM, identifier: Self.stationPrefix + s.id)
       r.notifyOnEntry = true
@@ -930,6 +1076,32 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       manager.requestState(for: r)
     }
     return set.count
+  }
+
+  /// The one place regions change with premises on: what is registered and wanted stays
+  /// untouched, what is no longer wanted goes, what is new comes and is asked for its state. The
+  /// umbrella is `registerUmbrella`'s.
+  private func applyRegions(_ specs: [GeofenceRules.RegionSpec]) {
+    var want: [String: GeofenceRules.RegionSpec] = [:]
+    for sp in specs where want[sp.id] == nil { want[sp.id] = sp }
+    var kept = Set<String>()
+    for r in manager.monitoredRegions where r.identifier != Self.umbrellaId {
+      if let c = r as? CLCircularRegion, let w = want[r.identifier],
+         abs(c.radius - w.radius) < 1,
+         CLLocation(latitude: c.center.latitude, longitude: c.center.longitude).distance(from: CLLocation(latitude: w.lat, longitude: w.lon)) < 1 {
+        kept.insert(r.identifier)
+      } else {
+        manager.stopMonitoring(for: r)
+      }
+    }
+    for sp in specs where !kept.contains(sp.id) {
+      kept.insert(sp.id)
+      let r = CLCircularRegion(center: CLLocationCoordinate2D(latitude: sp.lat, longitude: sp.lon), radius: sp.radius, identifier: sp.id)
+      r.notifyOnEntry = sp.entry
+      r.notifyOnExit = sp.exit
+      manager.startMonitoring(for: r)
+      manager.requestState(for: r)
+    }
   }
 
   /// The coarse "where am I roughly" trigger (docs/25 §1). Significant location changes cost
@@ -950,6 +1122,16 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   private func significantUpdate(_ l: CLLocation, _ c: GeofenceConfig) {
     let speed = lastSignificant.map { GeofenceRules.speedBetween($0, l) } ?? 0
     lastSignificant = l
+    if premisesOn(c) {
+      expireStays(c)
+      // A fix clearly outside a stay's ring ends it, in case the exit is late or lost.
+      for (id, st) in stays {
+        let ring = st.entry?.ring ?? PremiseCircle(lat: st.station.lat, lon: st.station.lon, radius: c.stationRadiusM)
+        if l.distance(from: ring.location) > ring.radius + max(l.horizontalAccuracy, 100) {
+          endStay(id, c, why: "Standort außerhalb des Rings")
+        }
+      }
+    }
     if let centre = discCentre, GeofenceRules.insideDisc(l, centre: centre, radius: discRadius) {
       lastEvent = "inside the disc, nothing to do"
       return
@@ -980,7 +1162,9 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   private func station(for region: CLRegion) -> GeofenceStation? {
     guard region.identifier.hasPrefix(Self.stationPrefix), let c = config else { return nil }
     let id = String(region.identifier.dropFirst(Self.stationPrefix.count))
-    return (c.stations + nearest).first { $0.id == id }
+    // The stays first: their station may have left the nearby list since, and its exit still has
+    // to be understood (docs/48).
+    return stays[id]?.station ?? (c.stations + nearest).first { $0.id == id }
   }
 
   private func beginMode(_ m: Mode, timeout: TimeInterval, onTimeout: @escaping () -> Void) {
@@ -1047,21 +1231,122 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   }
 
   func locationManager(_ m: CLLocationManager, didEnterRegion region: CLRegion) {
+    if region.identifier.hasPrefix(GeofenceRules.touchPrefix) { return touchInside(region) }
     enteredStation(region)
   }
 
   func locationManager(_ m: CLLocationManager, didDetermineState state: CLRegionState, for region: CLRegion) {
+    if let c = config, premisesOn(c) {
+      // Every answer is logged: „never fired" and „iOS said unknown" must not look the same.
+      if state != .inside, region.identifier.hasPrefix(Self.stationPrefix) || region.identifier.hasPrefix(GeofenceRules.touchPrefix) {
+        let name = station(for: region)?.name ?? region.identifier
+        if state == .outside, let s = station(for: region) {
+          noteOutside(s.id)
+          if stays[s.id] != nil { endStay(s.id, c, why: "iOS sagt draußen") }
+        } else if state == .unknown {
+          lastEvent = "\(name): Zustand unbekannt"
+        }
+        return
+      }
+      guard state == .inside else { return }
+      if region.identifier.hasPrefix(GeofenceRules.touchPrefix) { return touchInside(region) }
+      if region.identifier.hasPrefix(Self.stationPrefix) { enteredStation(region, fromState: true) }
+      return
+    }
     guard state == .inside, region.identifier.hasPrefix(Self.stationPrefix) else { return }
     if case .dwell = mode { return } // one dwell window at a time
     enteredStation(region)
+  }
+
+  // MARK: station premises events (issue #64, docs/48)
+
+  /// A station's ring was entered: open a stay and put its touch points up — or, for a station
+  /// without a premise, the ring itself is the nudge (the 300 m guard).
+  private func premiseEnter(_ s: GeofenceStation, _ c: GeofenceConfig, fromState: Bool) {
+    expireStays(c)
+    if c.riding { lastEvent = "Fahrt läuft, \(s.name) ohne Tastpunkte"; return }
+    if stays[s.id] != nil { return }
+    if fromState && !seenOutside.contains(s.id) {
+      lastEvent = "\(s.name): beim Anmelden schon drin, vorher kein Verlassen — kein Aufenthalt"
+      return
+    }
+    if closedStays.contains(s.id) { lastEvent = "\(s.name): nach 90 min geschlossen, erst Verlassen"; return }
+    if stays.count >= GeofenceRules.maxStays { lastEvent = "\(s.name): schon zwei Aufenthalte offen"; return }
+    let entry = premiseTable(c)?.entry(forStation: s.id)
+    seenOutside.removeAll { $0 == s.id }
+    var stay = PremiseStay(station: s, entry: entry, enteredAt: Date(), nudged: false)
+    let centre = entry.map { $0.ring.location } ?? s.location
+    bumpCounter("stays")
+    guard let e = entry else {
+      stay.nudged = premiseNudge(s, c, via: "Ring (300 m, kein Gelände)")
+      stays[s.id] = stay
+      lastEvent = "am Bahnhof \(s.name) (300 m) · \(positionNote(from: centre))"
+      return
+    }
+    stays[s.id] = stay
+    lastEvent = "Ring \(s.name) betreten · \(e.touch.count) Tastpunkte · \(positionNote(from: centre))"
+    let task = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
+    registerStations(c)
+    if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+  }
+
+  /// A touch point reports „inside": the nudge, once per stay.
+  private func touchInside(_ region: CLRegion) {
+    guard let c = config, c.enabled, premisesOn(c),
+          let id = GeofenceRules.stationId(ofTouch: region.identifier), var stay = stays[id] else { return }
+    expireStays(c)
+    guard stays[id] != nil, !stay.nudged else { return }
+    let k = region.identifier.split(separator: ":").last.map(String.init) ?? "?"
+    if c.riding { lastEvent = "Fahrt läuft, kein Nudge in \(stay.station.name)"; return }
+    stay.nudged = premiseNudge(stay.station, c, via: "Tastpunkt \(k)")
+    stays[id] = stay
+  }
+
+  /// The nudge of a stay, at once (docs/48: no waiting time). Not while the app is open: the
+  /// Bahnsteig says it there, and a swallowed nudge must not count as ignored (docs/25 §4).
+  /// True when the stay has had its nudge — sent, or shown in the open app.
+  private func premiseNudge(_ s: GeofenceStation, _ c: GeofenceConfig, via: String) -> Bool {
+    let centre = stays[s.id]?.entry?.ring.location ?? s.location
+    if UIApplication.shared.applicationState == .active {
+      lastEvent = "\(s.name) · \(via) · App offen, kein Nudge"
+      return true
+    }
+    let sent = scheduleNudge(s, c, delay: 0)
+    if sent { lastEvent = "Nudge \(s.name) · \(via) · \(positionNote(from: centre))" }
+    return sent
+  }
+
+  /// The stay is over: its touch points go, the rest of the set comes back.
+  private func endStay(_ id: String, _ c: GeofenceConfig, why: String, close: Bool = false) {
+    guard let stay = stays[id] else { return }
+    stays[id] = nil
+    if close, !closedStays.contains(id) { closedStays.append(id) }
+    let minutes = Int(Date().timeIntervalSince(stay.enteredAt) / 60)
+    lastEvent = "Aufenthalt \(stay.station.name) vorbei · \(why) · nach \(minutes) min"
+    let task = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
+    registerStations(c)
+    if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+  }
+
+  /// The 90-minute cap, checked on every event rather than on a timer nobody would run.
+  private func expireStays(_ c: GeofenceConfig) {
+    for (id, st) in stays where Date().timeIntervalSince(st.enteredAt) > GeofenceRules.premiseStayCap {
+      endStay(id, c, why: "90 min", close: true)
+    }
+  }
+
+  private func noteOutside(_ id: String) {
+    if !seenOutside.contains(id) { seenOutside.append(id) }
+    closedStays.removeAll { $0 == id }
   }
 
   /// Entry: the nudge is scheduled three minutes out and iOS delivers it on its own, so nothing
   /// depends on the app staying alive (docs/25 §3). A train passing through has left the region
   /// long before it fires, and the exit cancels it. Nothing else watches: the old 25 s
   /// vehicle-speed window was a guess at the same thing and cancelled real arrivals.
-  private func enteredStation(_ region: CLRegion) {
+  private func enteredStation(_ region: CLRegion, fromState: Bool = false) {
     guard let c = config, c.enabled, let s = station(for: region) else { return }
+    if premisesOn(c) { return premiseEnter(s, c, fromState: fromState) }
     // `didDetermineState` reports every monitored region at once after a configure, and the
     // phone is usually inside more than one of them. Without this, one configure writes a dozen
     // enter/cooldown pairs and a few of those flush the log ring of everything worth reading
@@ -1116,6 +1401,13 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   }
 
   func locationManager(_ m: CLLocationManager, didExitRegion region: CLRegion) {
+    if let c = config, premisesOn(c), let s = station(for: region) {
+      // The exit fence. It ends the stay and nothing else: the cooldown and a sent nudge stand —
+      // deleting them, as the old path does, would let a flap at the ring's edge nudge twice.
+      noteOutside(s.id)
+      if stays[s.id] != nil { endStay(s.id, c, why: "Ring verlassen") }
+      return
+    }
     if let s = station(for: region) {
       if case .dwell(let d) = mode, d.id == s.id { endMode() }
       cancelNudge(s, reason: "left the region")
@@ -1242,15 +1534,23 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
           self.defaults.set(l.coordinate.latitude, forKey: "geofence.nearest.lat")
           self.defaults.set(l.coordinate.longitude, forKey: "geofence.nearest.lon")
           self.nearest = answer.stations
-          self.stopAllRegions()
+          // With premises on the set is changed by comparison, never torn down (docs/48).
+          if !self.premisesOn(c) { self.stopAllRegions() }
           // The umbrella goes on FIRST. It used to be registered after the stations, so under the
           // twenty-region cap the one iOS refused was the umbrella itself — the mechanism every
           // other trigger hangs off. That never bit only because the server capped the inputs.
+          // With premises a station's ring reaches up to 1 km, not 300 m. The umbrella stops short
+          // of the nearest unwatched station by its ring, or it could be stood at unwatched
+          // (docs/48); the largest ring nearby is the cautious stand-in for that one station's.
+          let table = self.premiseTable(c)
+          let ringRadius = self.premisesOn(c)
+            ? max(c.stationRadiusM, answer.stations.compactMap { table?.entry(forStation: $0.id)?.ring.radius }.max() ?? 0)
+            : c.stationRadiusM
           let sized = GeofenceRules.umbrellaRadius(
             registered: GeofenceRules.regionSet(frequent: c.stations, nearest: answer.stations, here: l),
             answer: answer,
             here: l,
-            stationRadius: c.stationRadiusM,
+            stationRadius: ringRadius,
             cautious: c.umbrellaRadiusM,
             deviceMax: self.manager.maximumRegionMonitoringDistance)
           self.umbrellaRadius = sized.radius
@@ -1326,7 +1626,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     }
     defaults.set(Date(), forKey: "geofence.nudged.\(s.id)")
     defaults.set(Date(), forKey: Self.pendingKey)
-    lastEvent = "nudge scheduled \(s.name) in \(Int(delay)) s"
+    lastEvent = delay > 0 ? "nudge scheduled \(s.name) in \(Int(delay)) s" : "nudge \(s.name) now"
     let content = UNMutableNotificationContent()
     content.title = "Am \(s.name)?"
     content.body = "Einchecken, bevor der Zug kommt."
@@ -1334,7 +1634,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     content.threadIdentifier = "nudge"
     content.categoryIdentifier = Self.nudgeCategory
     content.userInfo = ["stationId": s.id, "stationName": s.name]
-    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+    // Zero is „now" (docs/48): nil, because a time-interval trigger must be greater than zero.
+    let trigger: UNNotificationTrigger? = delay > 0 ? UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false) : nil
     center.add(UNNotificationRequest(identifier: "nudge-\(s.id)", content: content, trigger: trigger))
     bumpCounter("scheduled")
     // Counted as unanswered from the moment it is scheduled; a tap or a check-in clears it.
