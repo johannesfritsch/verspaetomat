@@ -143,105 +143,98 @@ Neue, **eigene Tabelle** `station_outlines` (nicht Spalten in `stations`, siehe 
 | Feld | Inhalt |
 |---|---|
 | `station_id` | unser Bahnhof |
-| `outline` | das Gelände als Polygon, WGS84, ≤ 24 Ecken |
-| `ring_lat`, `ring_lon`, `ring_radius_m` | **Außenring**: kleinster umschließender Kreis des Geländes + 150 m, mindestens 300 m, höchstens 1.000 m |
-| `cover` | **Geländekreise**: bis zu 6 Kreise (`lat`, `lon`, `r`), jeder mindestens 120 m, die das Gelände zusammen abdecken |
+| `outline` | das Gelände als Polygon, WGS84, ≤ 24 Ecken (für die Veröffentlichung und die Entwicklungsseite) |
+| `ring_lat`, `ring_lon`, `ring_radius_m` | **Bahnhofsring**: Mitte des Geländes, Radius bis zum äußersten Punkt des Geländes + 100 m, mindestens 300 m, höchstens 1.000 m |
+| `touch` | **Tastpunkte**: bis zu 6 Kreise (`lat`, `lon`, `r`), jeder mindestens 120 m, die das Gelände zusammen abdecken |
 | `osm_ids`, `osm_timestamp` | woraus und aus welchem Stand es gebaut ist |
 
-Die Kreise rechnet der **Server** beim Import aus, nicht das Telefon: gleiche Kreise auf iOS und
-Android, im Import prüfbar, und der native Code bleibt ohne Geometrie bis auf einen
-Punkt-in-Polygon-Test.
+Ring und Tastpunkte rechnet der **Server** beim Import aus: gleiche Kreise auf iOS und Android, im
+Import prüfbar, und der native Code bleibt ohne Geometrie.
 
-## Auf dem Telefon: zwei Zustände
+## Auf dem Telefon: die einfache Fassung
 
-Johannes' Idee, 29. September: Sobald man den Außenring eines Bahnhofs betritt, hört die Suche
-nach anderen Bahnhöfen auf, und die Plätze gehen an diesen einen Bahnhof — Kreise, die sein
-Gelände nachzeichnen. Gesucht wird erst wieder, wenn man den Außenring verlässt.
+Entschieden mit Johannes, 29. September: **nur Geofences, kein GPS.** Keine Wache, kein
+Kontroll-Fix, keine Wartezeit. Das ist bewusst die einfachste Fassung, die wir auf echten Fahrten
+testen; was sie nicht kann, sagt der Test, nicht eine Vermutung.
 
-### Warum nicht mehr die GPS-Wache
+### Außerhalb eines Bahnhofs: wie heute
 
-Heute schaltet iOS beim Betreten des 300-m-Kreises für höchstens sechs Minuten GPS ein und sucht
-einen Fix in 50 m. Läuft die Zeit ab, während man noch im Kreis ist (Kaffee holen, dann zu Gleis
-11), passiert **nichts mehr**, bis man den Kreis verlässt und wieder betritt — iOS meldet ein
-Betreten genau einmal. Dazu kostet die Wache sechs Minuten GPS bei jedem, der nur vorbeigeht.
-Das neue Verfahren hat keine Uhr, die ablaufen kann: Es wartet auf Ereignisse, so lange man im
-Außenring ist.
+Regenschirm, Abdeckungsscheibe, das Neuzeichnen beim Verlassen des Regenschirms, häufige und
+nächste Bahnhöfe — alles bleibt. Zwei Stellen ändern sich:
 
-### Zustand „Suchen" (wie heute)
+- Jeder Bahnhof wird mit seinem **Bahnhofsring** registriert statt mit 300 m um den Feed-Punkt.
+  (München: Der Feed-Punkt liegt 292 m neben den Bahnsteigen, der 300-m-Kreis bewacht die falsche
+  Stelle.)
+- Der Regenschirm zieht beim nächsten *nicht* bewachten Bahnhof dessen **Ringradius** ab statt
+  pauschal 300 m (`umbrellaRadius`, `Geofence.swift`). Sonst wäre er bei großen Ringen bis zu
+  700 m zu groß, und man könnte an einem unbewachten Bahnhof stehen.
 
-Regenschirm, häufige Bahnhöfe, die nächsten Bahnhöfe — jeder mit seinem **Außenring** statt 300 m
-um den Punkt. Ohne Gelände ist der Außenring der alte 300-m-Kreis.
+### Einen Bahnhof betreten
 
-### Zustand „Am Bahnhof"
+1. **Ring betreten** → die App merkt sich „am Bahnhof X" (gespeichert, übersteht Neustart und
+   App-Öffnen).
+2. Sie registriert die **Tastpunkte** von X. Die Plätze nimmt sie den unwichtigsten fernen
+   Bahnhöfen weg; **Regenschirm, der Ring von X und die Ringe der Nachbarn** (deren Ring den von X
+   berührt) bleiben. Sie fragt jeden Tastpunkt sofort `requestState` — wer beim Anmelden schon
+   drin ist, bekommt sonst kein Ereignis.
+3. **Ein Tastpunkt meldet „drin"** → **Nudge sofort.** Wer im Zug sitzt, ist eingecheckt (kein
+   Nudge) oder tippt „Später" (docs/24 §3). Die üblichen Regeln bleiben: keine Fahrt offen, kein
+   Ruhe-Fenster, kein Cooldown, nicht stummgeschaltet; ein Nudge pro Aufenthalt.
 
-Betritt man einen Außenring:
+### Einen Bahnhof verlassen
 
-1. Alle Regionen außer **Regenschirm** und **diesem Außenring** werden abgemeldet.
-2. Seine **Geländekreise** werden angemeldet (höchstens 6), und für jeden wird sofort
-   `requestState` gefragt — iOS meldet ein Betreten nur beim Überqueren der Grenze, nicht, wenn
-   man beim Anmelden schon drin ist (Apple, Region Monitoring).
-3. **Ein Geländekreis meldet „drin"** → die App holt **einen** Standort-Fix (`requestLocation`,
-   wenige Sekunden) und prüft ihn gegen das Gelände-Polygon:
-   - im Gelände → Nudge **sofort**, unter den Regeln unten;
-   - nicht im Gelände → nichts; das nächste Ereignis eines Geländekreises fragt wieder. Nichts läuft ab.
-4. **Außenring verlassen** → Geländekreise ab, zurück zu „Suchen" mit einem frischen Satz um den
-   Ort, an dem man jetzt ist.
+1. **Ring verlassen** → Tastpunkte ab, der normale Satz wird mit dem heutigen Code neu gezeichnet,
+   „am Bahnhof" ist vorbei.
+2. Der Ring bleibt die ganze Zeit **registriert und wird nicht angefasst**: iOS verliert kein
+   Verlassen einer Region, die registriert bleibt; es meldet es womöglich spät (rund 200 m hinter
+   der Grenze, 20 s), aber es meldet es. Gefährlich war nur das Neu-Registrieren nach dem
+   Verlassen — für eine Region, außerhalb derer man beim Anmelden schon ist, kommt kein Verlassen.
+3. **Netz darunter:** Jeder Weg, der heute alle Regionen neu setzt (`configure` beim Öffnen der
+   App, `refreshNearest`, der Berechtigungswechsel), geht durch **eine** Funktion, die „am Bahnhof"
+   kennt und den Ring stehen lässt. Und nach **90 Minuten** oder bei einer Standortmeldung
+   außerhalb des Rings ist „am Bahnhof" ebenfalls vorbei — jeder dieser Ausgänge steht im
+   Protokoll.
 
-Liegen Außenringe zweier Bahnhöfe übereinander (Köln Hbf und Köln Messe/Deutz, 1 km auseinander)
-und man ist in beiden, teilen sich beide die Plätze: je Bahnhof höchstens 6 Geländekreise, beide
-Außenringe, der Regenschirm — höchstens 15 von 20.
+### Ohne Gelände
 
-**Warum nicht 19 kleine Kreise.** iOS meldet ein Ereignis erst, wenn man die Grenze um eine
-Mindeststrecke überschritten hat und 20 Sekunden dort bleibt; Apple sagt, man solle zum Testen
-von **rund 200 m** ausgehen, und ohne WLAN wird es deutlich ungenauer
-(https://developer.apple.com/library/archive/documentation/UserExperience/Conceptual/LocationAwarenessPG/RegionMonitoring/RegionMonitoring.html).
-Android empfiehlt **mindestens 100–150 m** (https://developer.android.com/develop/sensors-and-location/location/geofencing).
-Ein 50-m-Kreis wird schlicht nicht gemeldet — das steht schon heute im Code. Kreise, die das
-Gelände genau nachzeichnen, wären also zu klein, um verlässlich zu feuern. Die Kreise sind
-deshalb grob (mindestens 120 m) und nur der **Wecker**; die **Genauigkeit** kommt aus dem einen
-Fix gegen das Polygon. Große Bahnhöfe bekommen mehrere Kreise (Köln, 10 ha: rechnerisch 4–6),
-ein kleiner Halt einen einzigen, der fast mit dem Außenring zusammenfällt.
+Ein Bahnhof ohne Gelände (3 % in NRW) hat als Ring die 300 m um seinen Punkt und **keinen**
+Tastpunkt: Das Betreten des Rings ist dann selbst der Nudge. Das ist der 300-m-Wächter.
 
-### Die Regeln für „sofort"
+### Was wegfällt
 
-- Kein Nudge während einer Fahrt, im Ruhe-Fenster, im Cooldown, an stummgeschalteten Bahnhöfen —
-  wie heute.
-- **Fix-Güte:** nur ein Fix mit `horizontalAccuracy` ≤ 50 m zählt; ein schlechterer gilt als
-  „nicht im Gelände" und löst nichts aus.
-- **Angekommen mit dem Zug:** Wer in einem Zug sitzt, der drei Minuten in Köln Hbf hält, ist auch
-  im Gelände. Heute filtert die Verzögerung nur durchfahrende Züge, nicht haltende. Vorschlag: Die
-  Zeit zwischen „Außenring betreten" und „im Gelände" ist die Annäherung. Unter 60 Sekunden für
-  mindestens 150 m (schneller als 2,5 m/s, also kein Fußweg) gilt als **Ankunft mit einem
-  Fahrzeug**: kein Nudge beim ersten Mal; erst ein weiteres Ereignis eines Geländekreises mehr als fünf
-  Minuten später (umsteigen, zurück zum Bahnsteig) darf nudgen.
-- Ein Nudge pro Aufenthalt: Nach einem Nudge meldet dieser Bahnhof bis zum Verlassen des
-  Außenrings nichts mehr.
-
-### Ohne Gelände: der 300-m-Wächter
-
-Hat ein Bahnhof kein Gelände (3 % in NRW), bleibt es beim Kreis von 300 m. „Am Bahnhof" hat dann
-keine Geländekreise, und der Nudge kommt, wenn man drei Minuten im Kreis bleibt: auf Android per
-Dwell und einem bestätigenden Fix (genau das heutige Verhalten), auf iOS als Mitteilung, die beim
-Betreten für drei Minuten später geplant und beim Verlassen zurückgenommen wird (docs/25 §3). Auf
-iOS entfallen damit die 50-m-Schwelle und die GPS-Wache.
+- Die GPS-Wache nach dem Betreten (`beginNearWatch`, sechs Minuten, 50-m-Schwelle) — samt dem
+  Fehler, dass nach ihrem Ablauf bis zum nächsten Betreten nichts mehr kommt.
+- Die 45 Sekunden bis zum Nudge und auf Android die drei Minuten Dwell.
 
 ### Android
 
-Android erlaubt 100 Geofences statt 20; die Zustände sind dieselben, nur der Platz ist nicht knapp.
-`GEOFENCE_TRANSITION_ENTER` für die Geländekreise, `EXIT` für den Außenring; der eine Fix wie auf
-iOS. Die Latenz liegt laut Google meist unter zwei Minuten, nach langem Stillstand bis zu sechs.
+Android erlaubt 100 Geofences statt 20. Es registriert deshalb zu jedem Bahnhof im Satz **Ring
+und Tastpunkte dauerhaft**, ohne Tauschen und ohne Zustand: Tastpunkt `ENTER` (mit
+`INITIAL_TRIGGER_ENTER`) → Nudge. Bahnhöfe ohne Gelände: Ring `ENTER` → Nudge. Google nennt eine
+Latenz von meist unter zwei, nach langem Stillstand bis zu sechs Minuten.
 
-### Was sich messen lässt
+### Die Daten fürs Telefon
 
-Die Entwicklungsseite zeichnet Gelände, Außenring und Geländekreise, und das Protokoll zeigt jeden
-Zustandswechsel mit Zeit: „Außenring Köln Hbf betreten", „Geländekreis 3 drin", „Fix 12 m,
-im Gelände", „Nudge". So sagt eine Probefahrt, wie lange iOS für einen 120-m-Kreis wirklich
-braucht — das ist die eine Zahl, die dieses Konzept trägt und die wir noch nicht kennen.
+Eine **zweite Datei** neben dem Bahnhofsauszug (docs/45): `bahnhofsumrisse.bin`, nach unseren Ids,
+mit Ring, Tastpunkten und Gelände. Nicht aus Kompatibilitätsgründen — wir sind nicht live —,
+sondern wegen der Lizenz: So ist die ODbL-Datenbank eine eigene Datei, getrennt von den Namen und
+Ids aus DELFI (unten). Ohne diese Datei (älterer Server, Download fehlgeschlagen) gilt für alle
+Bahnhöfe der 300-m-Wächter.
 
-### Draht
+### Was der Test zeigen muss
 
-Nur neue, optionale Felder und ein neuer Block im Auszug. Ids bleiben unsere (`vs:…`); OSM-Ids
-stehen nur in der Veröffentlichung (unten), nicht im Auszug fürs Telefon.
+Die Entwicklungsseite zeichnet Ring, Tastpunkte und Gelände, und das Protokoll nennt jeden
+Schritt mit Zeit: „Ring Köln Hbf betreten", „Tastpunkt 3 drin", „Nudge", „Ring verlassen
+(nach 14 min)". Auf Probefahrten zählen vier Zahlen:
+
+1. **Wie lange** vom Betreten des Geländes bis zum Nudge (iOS liefert einen 120-m-Kreis wann?).
+2. **Wie oft** ein Tastpunkt an einem kleinen Halt gar nicht feuert (dort ist der Kreis kaum
+   größer als das Gelände).
+3. **Wie oft** ein Nudge neben dem Bahnhof kommt statt darauf.
+4. **Wie spät** das Verlassen des Rings kommt, und ob einer der Notausgänge je gebraucht wird.
+
+Erst diese Zahlen entscheiden, ob etwas dazukommt (eine kurze GPS-Wache, ein Kontroll-Fix, eine
+Wartezeit). Vorher nicht.
 
 ## Veröffentlichung und Namensnennung
 
@@ -251,8 +244,8 @@ stehen nur in der Veröffentlichung (unten), nicht im Auszug fürs Telefon.
   jeder App). Also: Namensnennung, und die abgeleitete Tabelle muss unter ODbL **angeboten**
   werden (ODbL 4.3, 4.4, 4.6).
 - Share-Alike gilt für die **Gelände-Tabelle**, nicht für die App, nicht für die Stationsnamen
-  und Ids aus DELFI und nicht für den Rest der Datenbank. Darum eine eigene Tabelle und ein eigener
-  Block im Auszug: Sie ist mit unseren übrigen Daten *zusammengestellt* (Collective Database),
+  und Ids aus DELFI und nicht für den Rest der Datenbank. Darum eine eigene Tabelle und eine eigene
+  Datei fürs Telefon (`bahnhofsumrisse.bin`): Sie ist mit unseren übrigen Daten *zusammengestellt* (Collective Database),
   nicht mit ihnen *vermengt*. Die Umrisse nie in die Spalten von `stations` schreiben.
 - Die OSM Foundation beschreibt das in den Community Guidelines, u. a. „Collective Database" und
   „Produced Work": https://osmfoundation.org/wiki/Licence/Community_Guidelines, Attribution:
@@ -278,17 +271,18 @@ stehen nur in der Veröffentlichung (unten), nicht im Auszug fürs Telefon.
 | App, Entwicklungsseite, wo das Gelände gezeichnet wird | „Gelände © OpenStreetMap-Mitwirkende" unter der Zeichnung |
 | Website, Seite `daten` und Fußzeile | wie oben |
 | `bahnhofsumrisse.geojson` | Lizenz und Quelle im Kopf |
-| Bahnhofsauszug für das Telefon | Quelle und Lizenz im Kopf des Gelände-Blocks |
+| `bahnhofsumrisse.bin` fürs Telefon | Quelle und Lizenz im Kopf der Datei |
 
 Die Texte in `app/lib/content/legal.dart` (Datenherkunft) und `docs/13` werden ergänzt; wie immer
 gilt: kein Satz, den die Implementierung nicht hält.
 
 ## Reihenfolge
 
-1. Prototyp als `stellwerk stations outlines --dry-run`: ganz Deutschland, Zählung wie oben pro
-   Rang und Bundesland, Liste der Verworfenen. Dazu 30 Gelände als Bild in `docs/assets` (10 große,
-   10 mittlere, 10 ländliche) gegen den heutigen Punkt und die zwei Kreise.
-2. Tabelle, Import in Produktion, Kopie nach Staging (wie die Stationen).
-3. Auszug mit Gelände-Block; iOS und Android prüfen „im Gelände", sonst 300 m.
-4. Veröffentlichung und Namensnennung — **vor** dem ersten Build, der das Gelände ausliefert.
-5. Probefahrt: München Hbf Gleis 26, Köln Hbf Gleis 11, ein ländlicher Halt.
+1. Prototyp als `stellwerk stations outlines --dry-run`: ganz Deutschland, Zählung pro Rang und
+   Bundesland, Liste der Verworfenen, dazu 30 Gelände mit Ring und Tastpunkten als Bild in
+   `docs/assets` (10 große, 10 mittlere, 10 ländliche).
+2. Tabelle und Import in Produktion, Kopie nach Staging (wie die Stationen).
+3. `bahnhofsumrisse.bin` und die Seite `verspaetomat.de/daten` mit Namensnennung.
+4. iOS: Ringe, Tastpunkte, „am Bahnhof", die eine Registrierungsfunktion, die Notausgänge;
+   Android: Ringe und Tastpunkte dauerhaft. Entwicklungsseite und Protokoll.
+5. Staging-Build, Probefahrten: München Hbf, Köln Hbf, ein ländlicher Halt; die vier Zahlen.
