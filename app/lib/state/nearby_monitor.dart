@@ -117,6 +117,8 @@ class NearbyMonitor extends ChangeNotifier with WidgetsBindingObserver {
       // A borrowed trigger: this class's job is something else, but it is the one thing that
       // reliably fires when the app is used, and the interval gate lives in the store.
       unawaited(session.stationsUpdateCheck());
+      // The station premises (#64) ride along, by the same weekly gate.
+      unawaited(session.premisesUpdateCheck());
     }
   }
 

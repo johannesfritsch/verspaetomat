@@ -248,7 +248,9 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
   /// A newly installed file notifies, so the geofence sync sends native its version and the
   /// regions are drawn again.
   Future<void> premisesUpdateCheck() async {
-    if (!isLocal) return;
+    // Only with the flag on: off, nothing reads the file, and a phone should not fetch a megabyte
+    // for nothing (review of bafc9bf).
+    if (!isLocal || !flags.on(Flag.stationPremises)) return;
     try {
       final before = await _http.premises.load();
       await _http.premises.maybeCheckForUpdate();

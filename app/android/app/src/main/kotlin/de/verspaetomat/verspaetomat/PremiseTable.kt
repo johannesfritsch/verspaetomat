@@ -76,12 +76,19 @@ class PremiseTable(val version: Long, val generated: Long, val entries: Map<Long
             return PremiseTable(u32(24), u32(20), out)
         }
 
-        /** The file on disk, or null: none there, or not one we can trust. Nothing is deleted. */
-        fun load(ctx: Context): PremiseTable? = try {
+        private var cached: Pair<Long, PremiseTable?>? = null
+
+        /** The file on disk, or null: none there, or not one we can trust. Nothing is deleted.
+         * Read and checked once per file (by its modification time), not on every re-register. */
+        @Synchronized
+        fun load(ctx: Context): PremiseTable? {
             val f = File(ctx.filesDir, FILE)
-            if (!f.isFile) null else parse(f.readBytes()).takeIf { it.count >= MIN_PLAUSIBLE }
-        } catch (e: Exception) {
-            null
+            if (!f.isFile) return null
+            val stamp = f.lastModified() xor f.length()
+            cached?.let { (s, t) -> if (s == stamp) return t }
+            val t = try { parse(f.readBytes()).takeIf { it.count >= MIN_PLAUSIBLE } } catch (e: Exception) { null }
+            cached = stamp to t
+            return t
         }
     }
 }

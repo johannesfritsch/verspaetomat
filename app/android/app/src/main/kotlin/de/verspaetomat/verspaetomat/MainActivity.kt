@@ -84,8 +84,9 @@ class MainActivity : FlutterActivity() {
         // `optBoolean` with a default is why an older build ignores the key instead of failing.
         m["stationsLocal"] = GeofenceManager.config(this)?.optBoolean("stationsLocal", false) ?: false
         // #64: premises on, and which file the fences were drawn from.
-        m["stationPremises"] = GeofenceManager.config(this)?.optBoolean("stationPremises", false) ?: false
-        PremiseTable.load(this)?.let {
+        val premises = GeofenceManager.config(this)?.optBoolean("stationPremises", false) ?: false
+        m["stationPremises"] = premises
+        if (premises) PremiseTable.load(this)?.let {
             m["premisesVersion"] = it.version
             m["premisesCount"] = it.count
         }

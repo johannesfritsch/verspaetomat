@@ -45,6 +45,11 @@ struct PremiseStay: Codable, Equatable {
   let entry: PremiseEntry?
   let enteredAt: Date
   var nudged: Bool
+  /// Opened without an entry that proves arriving — a `requestState` „inside" with no exit seen
+  /// before (a launch at home next to the station), or a ring entered while riding in. Its touch
+  /// points are up, but only walking into one nudges; their own state answer does not. Optional:
+  /// a stay persisted by the build before reads as not quiet.
+  var quiet: Bool? = nil
 }
 
 /// Pure rules, kept free of CoreLocation state so they can be unit-tested.
@@ -798,6 +803,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     get { defaults.stringArray(forKey: "geofence.premise.closed") ?? [] }
     set { defaults.set(newValue, forKey: "geofence.premise.closed") }
   }
+  /// Touch points already asked a second time after an `.unknown`; in memory, once per launch.
+  private var unknownRetried = Set<String>()
   private var premiseTableCache: PremiseTable?
   private var premiseTableVersion: Int?
 
@@ -1102,6 +1109,10 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
       manager.startMonitoring(for: r)
       manager.requestState(for: r)
     }
+    // Whether `monitoredRegions` follows start and stop at once is not documented; if it lags, a
+    // region can be counted as kept and be missing. Say so when the numbers disagree.
+    let listed = manager.monitoredRegions.filter { $0.identifier != Self.umbrellaId }.count
+    if listed != want.count { lastEvent = "Regionen: \(want.count) geplant, iOS führt \(listed)" }
   }
 
   /// The coarse "where am I roughly" trigger (docs/25 §1). Significant location changes cost
@@ -1245,11 +1256,20 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
           if stays[s.id] != nil { endStay(s.id, c, why: "iOS sagt draußen") }
         } else if state == .unknown {
           lastEvent = "\(name): Zustand unbekannt"
+          // Right after `startMonitoring` iOS often does not know yet, and it sends no entry for a
+          // region the phone was already inside. Ask a touch point of an open stay once more.
+          if region.identifier.hasPrefix(GeofenceRules.touchPrefix), !unknownRetried.contains(region.identifier) {
+            unknownRetried.insert(region.identifier)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+              guard let self = self, self.manager.monitoredRegions.contains(where: { $0.identifier == region.identifier }) else { return }
+              self.manager.requestState(for: region)
+            }
+          }
         }
         return
       }
       guard state == .inside else { return }
-      if region.identifier.hasPrefix(GeofenceRules.touchPrefix) { return touchInside(region) }
+      if region.identifier.hasPrefix(GeofenceRules.touchPrefix) { return touchInside(region, fromState: true) }
       if region.identifier.hasPrefix(Self.stationPrefix) { enteredStation(region, fromState: true) }
       return
     }
@@ -1258,47 +1278,66 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     enteredStation(region)
   }
 
+  /// iOS has taken the region on: now its state means something. Asking only right after
+  /// `startMonitoring` often gets `.unknown` (review of 8467d03).
+  func locationManager(_ m: CLLocationManager, didStartMonitoringFor region: CLRegion) {
+    guard let c = config, premisesOn(c) else { return }
+    manager.requestState(for: region)
+  }
+
   // MARK: station premises events (issue #64, docs/48)
 
   /// A station's ring was entered: open a stay and put its touch points up — or, for a station
   /// without a premise, the ring itself is the nudge (the 300 m guard).
   private func premiseEnter(_ s: GeofenceStation, _ c: GeofenceConfig, fromState: Bool) {
     expireStays(c)
-    if c.riding { lastEvent = "Fahrt läuft, \(s.name) ohne Tastpunkte"; return }
     if stays[s.id] != nil { return }
-    if fromState && !seenOutside.contains(s.id) {
-      lastEvent = "\(s.name): beim Anmelden schon drin, vorher kein Verlassen — kein Aufenthalt"
-      return
-    }
     if closedStays.contains(s.id) { lastEvent = "\(s.name): nach 90 min geschlossen, erst Verlassen"; return }
     if stays.count >= GeofenceRules.maxStays { lastEvent = "\(s.name): schon zwei Aufenthalte offen"; return }
+    // Quiet: arrived by train, or already inside when the ring was drawn with no exit seen
+    // before. The touch points still go up — the walk from home to the platform must nudge —
+    // but nothing nudges until one of them is actually walked into.
+    let quiet = c.riding || (fromState && !seenOutside.contains(s.id))
     let entry = premiseTable(c)?.entry(forStation: s.id)
     seenOutside.removeAll { $0 == s.id }
-    var stay = PremiseStay(station: s, entry: entry, enteredAt: Date(), nudged: false)
+    var stay = PremiseStay(station: s, entry: entry, enteredAt: Date(), nudged: false, quiet: quiet)
     let centre = entry.map { $0.ring.location } ?? s.location
     bumpCounter("stays")
+    let how = quiet ? (c.riding ? "still (Fahrt läuft)" : "still (beim Anmelden schon drin)") : "betreten"
     guard let e = entry else {
-      stay.nudged = premiseNudge(s, c, via: "Ring (300 m, kein Gelände)")
+      // The 300 m guard: the ring is the nudge — unless the stay is quiet.
+      if !quiet { stay.nudged = premiseNudge(s, c, via: "Ring (300 m, kein Gelände)") }
       stays[s.id] = stay
-      lastEvent = "am Bahnhof \(s.name) (300 m) · \(positionNote(from: centre))"
+      lastEvent = "Ring \(s.name) (300 m) \(how) · \(positionNote(from: centre))"
       return
     }
     stays[s.id] = stay
-    lastEvent = "Ring \(s.name) betreten · \(e.touch.count) Tastpunkte · \(positionNote(from: centre))"
-    let task = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
+    lastEvent = "Ring \(s.name) \(how) · \(e.touch.count) Tastpunkte · \(positionNote(from: centre))"
     registerStations(c)
-    if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
   }
 
-  /// A touch point reports „inside": the nudge, once per stay.
-  private func touchInside(_ region: CLRegion) {
+  /// A touch point reports „inside": the nudge, once per stay. `fromState` is iOS answering a
+  /// `requestState` rather than the phone crossing into it; a quiet stay ignores those.
+  private func touchInside(_ region: CLRegion, fromState: Bool = false) {
     guard let c = config, c.enabled, premisesOn(c),
           let id = GeofenceRules.stationId(ofTouch: region.identifier), var stay = stays[id] else { return }
-    expireStays(c)
-    guard stays[id] != nil, !stay.nudged else { return }
     let k = region.identifier.split(separator: ":").last.map(String.init) ?? "?"
-    if c.riding { lastEvent = "Fahrt läuft, kein Nudge in \(stay.station.name)"; return }
+    if Date().timeIntervalSince(stay.enteredAt) > GeofenceRules.premiseStayCap {
+      // Past the cap, but walking into a touch point is real movement, not a registration
+      // artefact: the stay starts over, and this is its nudge. Without this, someone in the ring
+      // all day (office, home) lost the evening nudge — the cap closed the stay on the very event
+      // that should have nudged (review of 8467d03).
+      guard !fromState else { return }
+      stay = PremiseStay(station: stay.station, entry: stay.entry, enteredAt: Date(), nudged: false, quiet: false)
+    }
+    if stay.nudged { return }
+    if fromState && stay.quiet == true {
+      lastEvent = "\(stay.station.name): Tastpunkt \(k) beim Anmelden drin, stiller Aufenthalt — kein Hinweis"
+      return
+    }
+    if c.riding { lastEvent = "Fahrt läuft, kein Nudge in \(stay.station.name)"; stays[id] = stay; return }
     stay.nudged = premiseNudge(stay.station, c, via: "Tastpunkt \(k)")
+    stay.quiet = false
     stays[id] = stay
   }
 
@@ -1323,9 +1362,14 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     if close, !closedStays.contains(id) { closedStays.append(id) }
     let minutes = Int(Date().timeIntervalSince(stay.enteredAt) / 60)
     lastEvent = "Aufenthalt \(stay.station.name) vorbei · \(why) · nach \(minutes) min"
-    let task = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
     registerStations(c)
-    if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+    // A ring whose entry was turned away while two stays were open is not entered again while
+    // the phone stays inside it; ask every ring without a stay where the phone is (the
+    // `seenOutside` rule still decides what that answer may open).
+    for r in manager.monitoredRegions where r.identifier.hasPrefix(Self.stationPrefix) {
+      let sid = String(r.identifier.dropFirst(Self.stationPrefix.count))
+      if stays[sid] == nil { manager.requestState(for: r) }
+    }
   }
 
   /// The 90-minute cap, checked on every event rather than on a timer nobody would run.

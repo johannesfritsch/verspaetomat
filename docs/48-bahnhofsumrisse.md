@@ -223,6 +223,14 @@ nächste Bahnhöfe — alles bleibt. Zwei Stellen ändern sich:
    Nudge) oder tippt „Später" (docs/24 §3). Die üblichen Regeln bleiben: keine Fahrt offen, kein
    Ruhe-Fenster, kein Cooldown, nicht stummgeschaltet; ein Nudge pro Aufenthalt.
 
+**Stiller Aufenthalt** (aus dem Code-Review, 30. September): Ist man beim Anmelden schon im
+Ring, ohne dass vorher ein Verlassen gesehen wurde (App-Start zu Hause neben dem Bahnhof), oder
+fährt man mit dem Zug in den Ring ein, öffnet sich ein **stiller** Aufenthalt. Seine Tastpunkte
+werden angemeldet, aber nur das wirkliche Betreten eines Tastpunkts nudgt, nicht die Antwort auf
+`requestState`. So bekommt der Weg von zu Hause zum Bahnsteig seinen Hinweis, ohne dass jeder
+App-Start die Anwohner nudgt. Wer nach mehr als 90 Minuten im Ring einen Tastpunkt betritt, bekommt
+einen neuen Aufenthalt und seinen Hinweis (abends vom Büro zum Bahnsteig).
+
 ### Einen Bahnhof verlassen
 
 1. **Ring verlassen** → Tastpunkte ab, der normale Satz wird mit dem heutigen Code neu gezeichnet,

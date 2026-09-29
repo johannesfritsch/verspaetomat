@@ -23,7 +23,11 @@ class GeofenceReceiver : BroadcastReceiver() {
         val transition = event.geofenceTransition
         val ids = event.triggeringGeofences?.map(Geofence::getRequestId) ?: return
         val pending = goAsync()
-        var open = 0
+        // Starts at one — the loop's own hold — and the loop lets go of it at the end. A handler
+        // that calls `done()` synchronously (every premise ENTER, and a dwell whose station is
+        // gone) used to drop the count to zero inside the loop, finish the broadcast, and then
+        // finish it again below: `IllegalStateException`, one crash per nudge.
+        var open = 1
         val finish = { if (--open == 0) pending.finish() }
 
         val premises = GeofenceManager.config(context)?.optBoolean("stationPremises", false) == true
@@ -47,7 +51,7 @@ class GeofenceReceiver : BroadcastReceiver() {
                 // ENTER is registered so the platform starts the loitering timer; nothing to do yet.
             }
         }
-        if (open == 0) pending.finish()
+        finish()
     }
 }
 
