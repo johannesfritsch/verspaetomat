@@ -188,7 +188,8 @@ stehen nur in der Veröffentlichung (unten), nicht im Auszug fürs Telefon.
   der Name, das Polygon, die OSM-Ids, der OSM-Stand. Lizenz ODbL 1.0, im Kopf der Datei genannt.
   Erwartete Größe um 2 MB. Die Website erzeugt sie beim Bauen aus der Tabelle (`site/`), neu nach
   jedem Stationsimport.
-- **Der Weg dorthin:**   Skalierung"); die Datei nennt den Commit, der sie gebaut hat. Das erfüllt 4.6 doppelt.
+- **Der Weg dorthin:** Der Import-Code wird mit dem Repo öffentlich, bevor die App erscheint; die
+  Datei nennt den Commit, der sie gebaut hat. Das erfüllt 4.6 doppelt.
 - **Eine Seite dazu:** `verspaetomat.de/daten` — was die Datei ist, woher sie kommt, Lizenz,
   Stand, und ein Satz: Wer einen Umriss falsch findet, verbessert ihn am besten in OSM; der
   nächste Import übernimmt es.
