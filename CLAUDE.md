@@ -1,6 +1,6 @@
 # Verspätomat — working notes for Claude and humans
 
-Gamified train check-in app for Germany. Delays earn Geduldspunkte; delays of 60 minutes or more become statutory Fahrgastrechte claims whose payee is a partner NGO. The app is a messenger, never a representative: it fills and relays, it never writes to a railway on its own. Product docs live in `docs/` (start at `docs/README.md`); the design language is `app/STYLE.md` (paper white, ink, one red, Archivo, the Bahnhofsuhr).
+Gamified train check-in app for Germany. Every minute of delay counts — minutes are the one figure, there are no points (docs/47); delays of 60 minutes or more become statutory Fahrgastrechte claims whose payee is a partner NGO. The app is a messenger, never a representative: it fills and relays, it never writes to a railway on its own. Product docs live in `docs/` (start at `docs/README.md`); the design language is `app/STYLE.md` (paper white, ink, one red, Archivo, the Bahnhofsuhr).
 
 ## Layout
 
@@ -72,7 +72,7 @@ Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (stri
 
 - **Code is English.** Identifiers, comments, doc comments — all of them. German belongs in the
   product: UI strings, copy, the docs in `docs/`, commit messages. A German term inside an English
-  sentence is fine where it names a thing that has no English name (`Geduldspunkte`, `aufgegeben`
+  sentence is fine where it names a thing that has no English name (`Fahrgastrechte`, `aufgegeben`
   as an API value).
 - **Talk to Johannes in English.**
 - **A visual change in the app is not finished until the website's screenshots are.** They live in
@@ -88,6 +88,9 @@ Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (stri
 ## Rules that are easy to break
 
 - The backend owns every money rule (`backend/src/rules.rs`); the app never recomputes amounts or readiness.
+- **Only minutes, never points** (docs/47). What a ride counts is `rules::counted_minutes`; the
+  `points` columns hold exactly that under their old name. No UI, push, website or doc text says
+  „Punkte" or „Geduldspunkte".
 - The server never guesses a location; no default station (docs/14). The native geofence layer never talks to the admin API (docs/15).
 - Station ids on the wire are ours (`vs:4711`, `backend/src/stations/`), and the MOTIS ids they
   stand for never leave the server. An id we have given out is never reused, and an id from a build

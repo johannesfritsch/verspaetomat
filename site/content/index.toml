@@ -66,7 +66,7 @@ title = "Einchecken, warten, zahlen lassen."
 # steht, ist nachprüfbar.
 [fahrplan.karte]
 title = "Deine Verspätung bewirkt etwas."
-text = "Unter 60 Minuten gibt es Geduldspunkte. Ab 60 Minuten einen gesetzlichen Anspruch — und der geht an einen Verein, nicht an uns."
+text = "Jede Minute zählt für dich. Ab 60 Minuten entsteht ein gesetzlicher Anspruch — und der geht an einen Verein, nicht an uns."
 
 [[fahrplan.halt]]
 label = "Einchecken"
@@ -81,7 +81,7 @@ text = "Leg das Handy weg. Die Verspätung holt unser Server aus den öffentlich
 [[fahrplan.halt]]
 label = "Ankommen"
 icon = "halt"
-text = "Jede Minute wird gezählt. Unter 60 Minuten gibt es Geduldspunkte. Ab 60 Minuten einen Anspruch."
+text = "Jede Minute wird gezählt. Ab 60 Minuten entsteht ein Anspruch."
 
 [[fahrplan.halt]]
 label = "Antrag stellen"
@@ -104,7 +104,7 @@ title = "Die ganze App."
 
 [[bilder.schuss]]
 src = "shots/bahnsteig.webp"
-alt = "Der Home-Screen: 1.298 Minuten, die du selbst gewartet hast, auf einer dunklen Tafel mit einem Knopf „Teilen“, darunter der rote Knopf „Einchecken“ mit den drei Fragen „Von wo, wohin, welcher Zug“ und die Geduldspunkte dieser Woche, +96, als sieben Balken von Montag bis Sonntag."
+alt = "Der Home-Screen: 1.298 Minuten, die du selbst gewartet hast, auf einer dunklen Tafel mit einem Knopf „Teilen“, darunter der rote Knopf „Einchecken“ mit den drei Fragen „Von wo, wohin, welcher Zug“ und die Minuten dieser Woche, +96, als sieben Balken von Montag bis Sonntag."
 caption = "Ein Knopf, drei Fragen"
 width = 640
 height = 1387
@@ -125,7 +125,7 @@ height = 1387
 
 [[bilder.schuss]]
 src = "shots/karte.webp"
-alt = "Eine Fahrkarte zum Teilen: 68 Minuten Verspätung als große rote Zahl, darunter die Strecke Köln Hbf → Rheine, das Datum und der Satz „68 Minuten zu spät nach Rheine. Immerhin zählt das jetzt für etwas.“"
+alt = "Eine Fahrkarte zum Teilen: oben die Strecke Köln Hbf → Rheine und das Datum, darunter 68 Minuten Verspätung als große rote Zahl und der Satz „68 Minuten zu spät nach Rheine. Immerhin zählt das jetzt für etwas.“"
 caption = "Die Fahrkarte zum Teilen"
 width = 640
 height = 1387
@@ -185,7 +185,7 @@ a = "Der Verein, den du in der App wählst. Auf dem Antrag steht seine Kontoverb
 
 [[fragen.frage]]
 q = "Ab wann gibt es überhaupt Geld?"
-a = "Ab 60 Minuten Verspätung am Ziel: 25 % des Fahrpreises. Ab 120 Minuten: 50 %. Darunter gibt es keinen gesetzlichen Anspruch — dafür Geduldspunkte."
+a = "Ab 60 Minuten Verspätung am Ziel: 25 % des Fahrpreises. Ab 120 Minuten: 50 %. Darunter gibt es keinen gesetzlichen Anspruch — gezählt werden deine Minuten trotzdem."
 
 [[fragen.frage]]
 q = "Und mit dem Deutschlandticket?"

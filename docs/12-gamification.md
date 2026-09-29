@@ -1,19 +1,23 @@
 # 12 — Gamification
 
-## Two currencies
+## Two figures: minutes and euros
 
-| Currency | Who earns it | How | Shown where |
+Since 29 September 2026 (#74, docs/47) there are no Geduldspunkte. There were never more than
+minutes under a second name.
+
+| Figure | Who earns it | How | Shown where |
 |---|---|---|---|
-| **Geduldspunkte** | Everyone, on every delayed ride | 1 point per minute late at the exit stop, from minute 1. A cancellation that costs you the hour counts as 60. Full points only when checked in before or during the ride; a later "Nachtrag" earns 1 point. | Home, profile, boards, community |
+| **Minuten** | Everyone, on every delayed ride | The delay at the destination, from minute 1, once per journey (docs/17). A cancellation counts at least 60. A journey given up counts the waiting (docs/22 §1). A ride entered afterwards ("Nachtrag") counts its minutes, marked „selbst eingetragen", and never ranks. | Home, profile, boards, community, sharing |
 | **Euro** | Few, on 60+ minute delays and on ordinary-ticket claims | The statutory claim amount, shown as "Anspruch" until sent, "eingereicht" after sending, "bestätigt" after the railway's reply | Ledger, NGO page, community |
 
-Minutes are the loud metric. Euros are the true metric. The community screen shows both, never blended.
+Minutes are the loud metric. Euros are the true metric. The community screen shows both, never
+blended. The rule is `rules::counted_minutes`; the backend owns it.
 
 ## Levels
 
 Named after where the customer is standing. Purely for the profile; no unlocks gated behind them.
 
-| Level | Points | Name |
+| Level | Minutes | Name |
 |---|---|---|
 | 1 | 0 | Frischer Fahrgast |
 | 2 | 60 | Bahnsteigkante |
@@ -41,7 +45,7 @@ Named after real causes and situations. Each badge names a thing that actually h
 | Bestätigt | first railway reply uploaded |
 | Deutschlandreise | check-ins in five different Bundesländer |
 | Stammgleis | 50 rides on the same line |
-| Geduld ist eine Tugend | 1,000 Geduldspunkte |
+| 1.000 Minuten … 64.000 Minuten | 1,000 minutes counted, then doubling |
 
 Badges are shown once, on the arrival screen, then live quietly on the profile. They can be shared as a card.
 
@@ -52,12 +56,12 @@ Badges that depend on the operator's stated cause (Stellwerksstörung, Personen 
 - **Meine Linie**: the seven-day patience board for one line, e.g. "RE 7 Krefeld–Rheine". Winnable, recognisable, the one people screenshot.
 - **Meine Stadt**: seven-day board per city.
 - **Deutschland**: for the curious. Never the default.
-- Boards rank only rides verified by a location fix at the station. Unverified rides still earn points and euros for the customer; they just do not rank.
+- Boards rank the counted minutes of the last seven days, and only rides verified by a location fix at the station. Unverified rides (and every Nachtrag) still count their minutes and euros for the customer; they just do not rank.
 - Everyone can hide themselves from boards with one switch.
 
 ## What we deliberately do not do
 
-- No buying points, no premium tiers, no boosts.
+- No buying minutes, no premium tiers, no boosts.
 - No teams for now. Nothing in the product points at them, not even the statistics; they can come back when there are enough customers on one line to make one.
 - No NGO campaigns with goals and deadlines. The confirmed total per NGO is the story; a finish line would need NGO-side tooling and invites fake urgency.
 - No employer matching. A sponsor's promise would be a second kind of money in a ledger that is honest precisely because it holds only one.

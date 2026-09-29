@@ -51,7 +51,7 @@ number wins.
 | [19-ride-sheet.md](19-ride-sheet.md) | build 8 | The ride as a draggable sheet with a persistent bar, the Wir block, Welcher Zug? hierarchy |
 | [20-riding-home-zweck-ich.md](20-riding-home-zweck-ich.md) | build 9 | Riding on Home, no second check-in, the Zweck up front, Ich owns the level |
 | [21-abbruch-und-antraege.md](21-abbruch-und-antraege.md) | build 11 | Abbrechen asks why, a self-chosen pause is capped out of the claim, cases can leave a bundle |
-| [22-aufgeben-zaehlt-und-aufraeumen.md](22-aufgeben-zaehlt-und-aufraeumen.md) | build 12 | Giving up still earns Geduldspunkte, and four bits of tidying |
+| [22-aufgeben-zaehlt-und-aufraeumen.md](22-aufgeben-zaehlt-und-aufraeumen.md) | build 12 | Giving up still counts the waiting (then called Geduldspunkte, docs/47), and four bits of tidying |
 | [23-standort-und-loeschen.md](23-standort-und-loeschen.md) | build 13 | Stations ranked by what departs there, deleting a ride, noticing a forgotten one |
 | [24-einchecken-flow-und-ruhe.md](24-einchecken-flow-und-ruhe.md) | build 13 | One live station source, the check-in asks where you are, Zug wechseln, a snooze |
 | [25-geofence-v2-und-diagnose.md](25-geofence-v2-und-diagnose.md) | build 13 | Significant Location Change, a coverage disc, a 3-minute dwell, the Entwicklung page |
@@ -77,6 +77,8 @@ series later walked into the same numbers. In prose and in code comments a bare 
 | [40-store-listing.md](40-store-listing.md) | App Store privacy label, review notes, Play Data safety form, derived from the in-app Datenschutz text |
 | [41-launch-checklist.md](41-launch-checklist.md) | Launch checklist: what only Johannes can do (domain, mail provider, NGO, Apple, Google, server), ordered by lead time |
 | [42-runbook-vps-testflight.md](42-runbook-vps-testflight.md) | Step-by-step: Hetzner VPS with Docker and Caddy, then the iOS build into TestFlight, then APNs |
+| [46-staging-und-freigabe.md](46-staging-und-freigabe.md) | Staging and production: two servers, two apps, promotion only after Johannes has tested staging |
+| [47-nur-minuten.md](47-nur-minuten.md) | Only minutes: Geduldspunkte are gone, the one rule for what a ride counts |
 
 [sources.md](sources.md) lists the URLs behind the research.
 
