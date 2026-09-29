@@ -26,6 +26,15 @@ enum Flag {
     about: 'Die native Hintergrund-Schicht beantwortet „welche Bahnhöfe sind nah" aus der '
         'Auszugsdatei statt über GET /v1/stations/nearby.',
     readBy: null,
+  ),
+
+  /// `STATION_PREMISES` in `backend/src/flags.rs` (#64, docs/48). Reaches the native layer as
+  /// the `station_premises` field of GET /v1/me/geofence, like `stations_local`.
+  stationPremises(
+    'station_premises',
+    about: 'Der Hintergrund überwacht Bahnhofsring und Tastpunkte aus der Gelände-Datei statt '
+        '300 m um den Bahnhof mit der 50-m-Wache.',
+    readBy: null,
   );
 
   const Flag(this.wire, {required this.about, this.readBy});

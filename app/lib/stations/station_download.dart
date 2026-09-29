@@ -36,10 +36,13 @@ class StationDownload {
   /// 200 with the whole file instead of a 304 with nothing. Nothing here sets `Accept-Encoding`,
   /// so every request this class makes carries the platform's default and the pair stays
   /// consistent — which is the reason not to start setting it.
-  Future<StationPointerResult> fetchPointer({String? etag}) async {
+  ///
+  /// [path] is the extract's pointer unless another file's is named: the station premises
+  /// (`premise_store.dart`) use the same two-step download with a pointer of their own.
+  Future<StationPointerResult> fetchPointer({String? etag, String path = pointerPath}) async {
     try {
       final res = await _inner.get(
-        Uri.parse('$siteUrl$pointerPath'),
+        Uri.parse('$siteUrl$path'),
         headers: {
           'accept': 'application/json',
           if (etag != null) 'if-none-match': etag,

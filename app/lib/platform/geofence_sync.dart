@@ -175,13 +175,15 @@ class GeofenceSync with WidgetsBindingObserver {
         quietFrom: geo.quietFrom,
         quietTo: geo.quietTo,
         stationsLocal: geo.stationsLocal,
+        stationPremises: geo.stationPremises,
+        premisesVersion: geo.stationPremises ? await session.premisesVersion() : null,
       );
       // Identical config → no round trip to native (it re-registers regions on every configure).
       // `stationsLocal` belongs in here: it is #40's kill switch, and without it a flip that
       // changes nothing else would be skipped — the switch would test green on a cold start and
       // do nothing at exactly the moment somebody is trying to kill something.
       final fp =
-          '${config.enabled}|${config.riding}|${config.stationsLocal}|${config.quietFrom}|${config.quietTo}|${config.stations.map((s) => s.id).join(',')}|${config.token?.length}';
+          '${config.enabled}|${config.riding}|${config.stationsLocal}|${config.stationPremises}|${config.premisesVersion}|${config.quietFrom}|${config.quietTo}|${config.stations.map((s) => s.id).join(',')}|${config.token?.length}';
       if (fp == _lastFingerprint) return;
       // `configure` first, then the fingerprint. [Geofence.configure] swallows
       // `MissingPluginException` and `PlatformException` and returns 0, so committing the

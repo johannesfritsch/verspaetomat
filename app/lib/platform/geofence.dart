@@ -513,6 +513,8 @@ class GeofenceConfig {
     this.quietFrom,
     this.quietTo,
     this.stationsLocal = false,
+    this.stationPremises = false,
+    this.premisesVersion,
   });
   // The three radii the whole layer is made of. `GeofenceSync` never overrides them, so these
   // are the numbers in force on every phone — and the debug page names them, because they are
@@ -541,6 +543,14 @@ class GeofenceConfig {
   /// what every layer falls back to when the key is missing.
   final bool stationsLocal;
 
+  /// #64, docs/48: rings and touch points from `umrisse.bin` instead of 300 m and the 50 m watch.
+  /// Server-owned (`station_premises` on /v1/me/geofence).
+  final bool stationPremises;
+
+  /// The version of the premise file on disk, or null. Native reads the file itself; the number
+  /// is here so a new file changes the config and re-registers the regions.
+  final int? premisesVersion;
+
   Map<String, dynamic> toChannel() => {
         'apiUrl': apiUrl,
         'token': token,
@@ -551,6 +561,8 @@ class GeofenceConfig {
         'stationRadiusM': stationRadiusM,
         'nudgeRadiusM': nudgeRadiusM,
         'stationsLocal': stationsLocal,
+        'stationPremises': stationPremises,
+        'premisesVersion': premisesVersion,
         'quietFrom': quietFrom,
         'quietTo': quietTo,
       };

@@ -508,6 +508,7 @@ class ApiGeofence {
     this.idle = false,
     this.lastCheckin,
     this.stationsLocal = false,
+    this.stationPremises = false,
     this.flags,
   });
   final bool enabled;
@@ -530,6 +531,10 @@ class ApiGeofence {
   /// what an older backend and [ApiGeofence.empty] both give.
   final bool stationsLocal;
 
+  /// #64, docs/48: watch each station's ring and touch points instead of a 300 m circle with
+  /// the 50 m GPS watch. Absent means false — the behaviour of every build before it.
+  final bool stationPremises;
+
   /// The same resolved map as [ApiCustomer.flags], on the payload the app refetches on **every
   /// resume** (issue #41). `/v1/me` is not refetched on resume, so this is the carrier that keeps
   /// a warm app current. Null when the server sent no such key.
@@ -549,6 +554,7 @@ class ApiGeofence {
         idle: _b(j['idle']),
         lastCheckin: DateTime.tryParse(_s(j['last_checkin']))?.toLocal(),
         stationsLocal: _b(j['stations_local']),
+        stationPremises: _b(j['station_premises']),
         flags: _flagMap(j['flags']),
       );
 }

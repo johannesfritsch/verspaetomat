@@ -17,7 +17,7 @@ import 'support/vst_fixture.dart';
 /// reached the server would fail loudly instead of passing quietly.
 class _NoDownload extends StationDownload {
   @override
-  Future<StationPointerResult> fetchPointer({String? etag}) async => const StationDownloadFailed('no network in a unit test');
+  Future<StationPointerResult> fetchPointer({String? etag, String path = StationDownload.pointerPath}) async => const StationDownloadFailed('no network in a unit test');
   @override
   Future<StationDownloadResult> fetchExtract(String url) async => const StationDownloadFailed('no network in a unit test');
 }

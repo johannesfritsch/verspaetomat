@@ -6,18 +6,23 @@ import '../api/client.dart';
 import '../api/token_store.dart';
 import '../platform/diagnose_log.dart';
 import '../stations/station_store.dart';
+import '../stations/premise_store.dart';
 import 'app_repository.dart';
 
 /// The real thing: every call goes to the backend — except the two that no longer have to.
 class HttpRepository implements AppRepository {
-  HttpRepository({required this.client, required this.tokens, StationStore? stations})
-      : stations = stations ?? StationStore();
+  HttpRepository({required this.client, required this.tokens, StationStore? stations, PremiseStore? premises})
+      : stations = stations ?? StationStore(),
+        premises = premises ?? PremiseStore();
 
   final ApiClient client;
   final TokenStore tokens;
 
   /// The phone's own copy of the station table (issue #39).
   final StationStore stations;
+
+  /// The station premises on disk, which the native layer reads (issue #64, docs/48).
+  final PremiseStore premises;
 
   /// Where Stellwerk says this customer is.
   ///

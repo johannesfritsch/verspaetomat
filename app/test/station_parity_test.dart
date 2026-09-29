@@ -12,7 +12,7 @@ import 'package:verspaetomat/stations/station_store.dart';
 /// No network in a unit test: any rung that tried would fail loudly rather than pass quietly.
 class _NoDownload extends StationDownload {
   @override
-  Future<StationPointerResult> fetchPointer({String? etag}) async => const StationDownloadFailed('no network in a unit test');
+  Future<StationPointerResult> fetchPointer({String? etag, String path = StationDownload.pointerPath}) async => const StationDownloadFailed('no network in a unit test');
   @override
   Future<StationDownloadResult> fetchExtract(String url) async => const StationDownloadFailed('no network in a unit test');
 }
@@ -23,7 +23,7 @@ class _CannedDownload extends StationDownload {
   final StationPointer pointer;
   final Uint8List bytes;
   @override
-  Future<StationPointerResult> fetchPointer({String? etag}) async =>
+  Future<StationPointerResult> fetchPointer({String? etag, String path = StationDownload.pointerPath}) async =>
       StationPointerFresh(pointer: pointer, etag: '"dlketfybpe2t35ls"');
   @override
   Future<StationDownloadResult> fetchExtract(String url) async {

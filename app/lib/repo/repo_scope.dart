@@ -199,6 +199,7 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
     // rides along for the same reason — the value in hand is the one the first frame drew with.
     unawaited(Future<void>.delayed(const Duration(seconds: 10), () async {
       await stationsUpdateCheck();
+      await premisesUpdateCheck();
       await flagsUpdateCheck();
     }));
     if (me?.settings.onboardingDone == true) await prefs.setBool(onboardingDoneKey, true);
@@ -242,6 +243,24 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
       // The website was unreachable. The extract in hand still answers.
     }
   }
+
+  /// The station premises (issue #64, docs/48), checked with the extract and by the same rules.
+  /// A newly installed file notifies, so the geofence sync sends native its version and the
+  /// regions are drawn again.
+  Future<void> premisesUpdateCheck() async {
+    if (!isLocal) return;
+    try {
+      final before = await _http.premises.load();
+      await _http.premises.maybeCheckForUpdate();
+      if (_http.premises.version != before) notifyListeners();
+    } catch (_) {
+      // The website was unreachable. The file in hand, or the 300 m guard, still stands.
+    }
+  }
+
+  /// The version of the premise file on disk, for the geofence config. Null in Demo and without
+  /// a file.
+  Future<int?> premisesVersion() async => isLocal ? _http.premises.load() : null;
 
   /// The local dev backend keeps the original, unprefixed slot so existing dev accounts survive.
   static String _namespaceFor(String apiUrl) {

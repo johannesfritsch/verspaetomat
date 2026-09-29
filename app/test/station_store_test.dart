@@ -25,7 +25,7 @@ class _FakeDownload extends StationDownload {
   int extractCalls = 0;
 
   @override
-  Future<StationPointerResult> fetchPointer({String? etag}) async {
+  Future<StationPointerResult> fetchPointer({String? etag, String path = StationDownload.pointerPath}) async {
     pointerCalls++;
     if (pointerFails) return const StationDownloadFailed('offline');
     if (notModified) return const StationPointerNotModified();
