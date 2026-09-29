@@ -31,6 +31,11 @@ backend/target/debug/stellwerk stations import --dry-run # what it would change
 backend/target/debug/stellwerk stations                  # count, feed version, last runs
 backend/target/debug/stellwerk backdate <who> --delay 70 --days 3 --count 3   # rides that already happened, with their cases
 
+# station premises from OSM (#64, docs/48): premise, ring and touch points per station; production
+# only, like the stations — staging gets them through deploy/stations-to-staging.sh
+backend/target/debug/stellwerk --prod stations outlines --from germany-latest.osm.pbf           # builds and sends
+backend/target/debug/stellwerk --prod stations outlines --from germany-latest.osm.pbf --dry-run # report, GeoJSON, drawings
+
 # app on the iOS simulator, local mode
 cd app && flutter run -d <simulator udid> --dart-define=API_URL=http://127.0.0.1:8080 --dart-define=BACKEND=local --dart-define=INITIAL_ROUTE=/home
 flutter analyze                                              # must be clean
