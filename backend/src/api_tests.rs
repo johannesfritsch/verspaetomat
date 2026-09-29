@@ -38,6 +38,7 @@ async fn app(pool: PgPool, transitous: Option<String>) -> Router {
         push: Arc::new(crate::push::PushSender::from_env().expect("push sender")),
         stations,
         flags: Arc::new(std::sync::RwLock::new(Arc::new(crate::flags::Table::default()))),
+        outline_files: Arc::new(std::sync::RwLock::new(None)),
     };
     crate::router(state)
 }
@@ -665,6 +666,17 @@ async fn a_bounce_marks_the_claim_whoever_sends_it(pool: PgPool) {
 // Station premises (#64, docs/48)
 // ---------------------------------------------------------------------------
 
+/// A GET with extra headers; status, headers and the raw body.
+async fn raw_get(app: &Router, path: &str, headers: &[(&str, &str)]) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let mut b = Request::builder().method("GET").uri(path);
+    for (k, v) in headers {
+        b = b.header(*k, *v);
+    }
+    let res = app.clone().oneshot(b.body(Body::empty()).unwrap()).await.unwrap();
+    let (status, h) = (res.status(), res.headers().clone());
+    (status, h, axum::body::to_bytes(res.into_body(), 64 * 1024 * 1024).await.unwrap().to_vec())
+}
+
 async fn outline_count(pool: &PgPool) -> i64 {
     sqlx::query_scalar("select count(*) from station_outlines").fetch_one(pool).await.unwrap()
 }
@@ -723,12 +735,38 @@ async fn outlines_replace_the_table_whole_or_not_at_all(pool: PgPool) {
     assert_eq!(v["outlines"]["count"], 3);
     assert_eq!(v["outlines"]["osm_timestamp"], "2026-09-29");
 
-    // What the phone file and the GeoJSON are made from: the rows back, with names.
-    let (st, v) = admin(&app, "GET", "/admin/stations/outlines", Value::Null).await;
+    // The files, from memory, on the public paths the website passes through (docs/48).
+    let (st, h, body) = raw_get(&app, "/stations/umrisse-latest.json", &[]).await;
     assert_eq!(st, StatusCode::OK);
-    assert_eq!(v["outlines"].as_array().unwrap().len(), 3);
-    assert_eq!(v["names"][ids[0].to_string()], "Köln Hbf");
-    let set: crate::stations::outlines::OutlineSet = serde_json::from_value(json!({"osm_timestamp": v["osm_timestamp"], "outlines": v["outlines"]})).unwrap();
-    let bytes = crate::stations::outlines::render_file(&set, 0, 1).unwrap();
-    assert_eq!(crate::stations::outlines::parse_file(&bytes).unwrap().rows.len(), 3);
+    assert_eq!(h["cache-control"], "public, max-age=3600");
+    let pointer: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(pointer["count"], 3);
+    assert_eq!(pointer["license"], "ODbL-1.0");
+    let url = pointer["url"].as_str().unwrap().to_string();
+    let (st, h, body) = raw_get(&app, &url, &[]).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(h["content-type"], "application/octet-stream");
+    assert!(h["cache-control"].to_str().unwrap().contains("immutable"));
+    let read = crate::stations::outlines::parse_file(&body).unwrap();
+    assert_eq!(read.rows.len(), 3);
+    assert_eq!(read.version, pointer["version"].as_u64().unwrap() as u32);
+    // The same ETag is a 304; another version is a 404, so a phone reads the pointer again.
+    let etag = h["etag"].to_str().unwrap().to_string();
+    let (st, _, _) = raw_get(&app, &url, &[("if-none-match", &etag)]).await;
+    assert_eq!(st, StatusCode::NOT_MODIFIED);
+    let (st, _, _) = raw_get(&app, "/stations/umrisse-1.bin", &[]).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+
+    let (st, h, body) = raw_get(&app, "/daten/bahnhofsumrisse.geojson", &[]).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(h["content-type"], "application/geo+json");
+    let g: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(g["license"], "ODbL-1.0");
+    assert_eq!(g["features"].as_array().unwrap().len(), 3);
+    assert_eq!(g["features"][0]["properties"]["name"], "Köln Hbf");
+    let (_, h, gz) = raw_get(&app, "/daten/bahnhofsumrisse.geojson", &[("accept-encoding", "gzip, br")]).await;
+    assert_eq!(h["content-encoding"], "gzip");
+    let mut plain = Vec::new();
+    std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&gz[..]), &mut plain).unwrap();
+    assert_eq!(plain, body);
 }

@@ -1746,31 +1746,11 @@ pub async fn stations_outlines(
         .map_err(internal)?;
         tx.commit().await.map_err(internal)?;
         tracing::info!(outlines = n, before = have, "station outlines imported");
+        if let Err(e) = s.reload_outline_files().await {
+            tracing::error!(error = %e, "station outline files could not be rendered after the import");
+        }
     }
     Ok(Json(json!({ "committed": committed, "total": n, "before": have, "note": note })))
-}
-
-/// `GET /admin/stations/outlines` — the premises as `stellwerk stations outlines-file` turns them
-/// into the phone file and the published GeoJSON (docs/48). The names ride along for the GeoJSON;
-/// `imported_at` becomes the file's version.
-pub async fn stations_outlines_get(State(s): State<AppState>, _a: Admin) -> ApiResult {
-    let rows: Vec<(i32, String, Value, f64, f64, f32, Value, Vec<String>, Option<chrono::NaiveDate>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
-        "select o.station_id, s.name, o.outline, o.ring_lat, o.ring_lon, o.ring_radius_m, o.touch, o.osm_ids, o.osm_timestamp, o.imported_at \
-         from station_outlines o join stations s on s.id = o.station_id where s.retired_at is null order by o.station_id",
-    )
-    .fetch_all(&s.pool)
-    .await
-    .map_err(internal)?;
-    let imported_at = rows.iter().map(|r| r.9).max();
-    let osm_timestamp = rows.iter().filter_map(|r| r.8).max();
-    Ok(Json(json!({
-        "osm_timestamp": osm_timestamp,
-        "imported_at": imported_at,
-        "names": rows.iter().map(|r| (r.0.to_string(), json!(r.1))).collect::<serde_json::Map<_, _>>(),
-        "outlines": rows.iter().map(|r| json!({
-            "station": r.0, "outline": r.2, "ring": {"lat": r.3, "lon": r.4, "r": r.5}, "touch": r.6, "osm": r.7,
-        })).collect::<Vec<_>>(),
-    })))
 }
 
 /// `GET /admin/stations` — what is in the table and how it got there.

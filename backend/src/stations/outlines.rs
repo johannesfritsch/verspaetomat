@@ -935,6 +935,72 @@ pub fn public_geojson(set: &OutlineSet, names: &HashMap<u32, String>, commit: Op
         "osm_timestamp": set.osm_timestamp, "commit": commit, "features": features})
 }
 
+// -- served by the API ---------------------------------------------------------------------------
+
+/// The phone file, its pointer and the published GeoJSON, rendered from the table once — at
+/// startup and after every import — and served from memory (docs/48). Not files in the repo:
+/// they are a few megabytes per import, and git would keep every one of them for good.
+#[derive(Debug)]
+pub struct Files {
+    pub version: u32,
+    pub bin: Vec<u8>,
+    pub bin_gz: Vec<u8>,
+    pub pointer: Vec<u8>,
+    pub geojson: Vec<u8>,
+    pub geojson_gz: Vec<u8>,
+}
+
+pub type SharedFiles = std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<Files>>>>;
+
+fn gzip(b: &[u8], mtime: u32) -> Result<Vec<u8>> {
+    use std::io::Write;
+    let mut e = flate2::GzBuilder::new().mtime(mtime).write(Vec::new(), flate2::Compression::best());
+    e.write_all(b)?;
+    Ok(e.finish()?)
+}
+
+/// Every live station's premise from the table, and the names for the GeoJSON. `None` while the
+/// table is empty: then there is nothing to serve, and the phone keeps its 300 m guard.
+pub async fn load_files(pool: &sqlx::PgPool, commit: Option<&str>) -> Result<Option<Files>> {
+    let rows: Vec<(i32, String, serde_json::Value, f64, f64, f32, serde_json::Value, Vec<String>, Option<chrono::NaiveDate>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "select o.station_id, s.name, o.outline, o.ring_lat, o.ring_lon, o.ring_radius_m, o.touch, o.osm_ids, o.osm_timestamp, o.imported_at \
+         from station_outlines o join stations s on s.id = o.station_id where s.retired_at is null order by o.station_id",
+    )
+    .fetch_all(pool)
+    .await?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    let version = rows.iter().map(|r| r.9.timestamp()).max().unwrap_or(0).clamp(0, u32::MAX as i64) as u32;
+    let osm_day = rows.iter().filter_map(|r| r.8).max();
+    let generated = osm_day.and_then(|d| d.and_hms_opt(0, 0, 0)).map(|t| t.and_utc().timestamp() as u32).unwrap_or(0);
+    let mut names = HashMap::new();
+    let mut outlines = Vec::with_capacity(rows.len());
+    for r in rows {
+        names.insert(r.0 as u32, r.1);
+        outlines.push(OutlineRow {
+            station: r.0 as u32,
+            outline: serde_json::from_value(r.2)?,
+            ring: Circle { lat: r.3, lon: r.4, r: r.5 as f64 },
+            touch: serde_json::from_value(r.6)?,
+            osm: r.7,
+        });
+    }
+    let set = OutlineSet { osm_timestamp: osm_day.map(|d| d.to_string()), outlines };
+    let bin = render_file(&set, generated, version)?;
+    let read = parse_file(&bin)?;
+    let mut pointer = serde_json::to_vec_pretty(&serde_json::json!({
+        "version": version, "format": FILE_FORMAT, "count": read.rows.len(), "bytes": bin.len(),
+        "crc32": read.crc32, "osm_timestamp": set.osm_timestamp,
+        "license": "ODbL-1.0", "attribution": "© OpenStreetMap-Mitwirkende",
+        "url": format!("/stations/umrisse-{version}.bin"),
+    }))?;
+    pointer.push(b'\n');
+    let mut geojson = serde_json::to_vec(&public_geojson(&set, &names, commit))?;
+    geojson.push(b'\n');
+    Ok(Some(Files { version, bin_gz: gzip(&bin, version)?, bin, pointer, geojson_gz: gzip(&geojson, version)?, geojson }))
+}
+
 // -- report -------------------------------------------------------------------------------------
 
 /// How many other stations' rings reach into this one's — what iOS has to keep registered next to

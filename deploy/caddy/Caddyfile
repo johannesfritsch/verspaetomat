@@ -24,6 +24,12 @@
 	# Staging: "noindex, nofollow", so its copy of the site never competes with the real one.
 	header X-Robots-Tag "{$SITE_ROBOTS}"
 	root * /srv/site
+	# Die Bahnhofsgelände (#64, docs/48): Telefon-Datei, Zeiger und die offene GeoJSON rendert
+	# die API aus ihrer Tabelle und hält sie im Speicher — sie liegen nicht im Repo, das sonst
+	# mit jedem Import um Megabytes wüchse. Gleiche Pfade hier wie dort. `reverse_proxy` steht
+	# in Caddys Reihenfolge vor `file_server`, der Matcher genügt.
+	@gelaende path /stations/umrisse-* /daten/bahnhofsumrisse.geojson
+	reverse_proxy @gelaende api:8080
 	file_server {
 		# `encode` komprimiert nur die Content-Types aus seiner eingebauten Liste (text/*,
 		# application/json*, application/javascript*, application/xhtml+xml*, atom, rss,

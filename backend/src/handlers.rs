@@ -3294,3 +3294,73 @@ mod claim_address_tests {
         assert_eq!(week_buckets(&rows).iter().sum::<i64>(), 50);
     }
 }
+
+// ---------------------------------------------------------------------------
+// The station premises as files (issue #64, docs/48)
+// ---------------------------------------------------------------------------
+
+fn wants_gzip(h: &axum::http::HeaderMap) -> bool {
+    h.get(axum::http::header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(',').any(|e| e.trim().starts_with("gzip")))
+}
+
+/// One of the rendered files, gzip when the client takes it. `Vary` because the same URL answers
+/// with two bodies.
+fn file_response(h: &axum::http::HeaderMap, plain: &[u8], gz: &[u8], content_type: &str, cache: &str, etag: String) -> axum::response::Response {
+    use axum::http::header;
+    use axum::response::IntoResponse;
+    if h.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
+        return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
+    }
+    let mut headers = vec![
+        (header::CONTENT_TYPE, content_type.to_string()),
+        (header::CACHE_CONTROL, cache.to_string()),
+        (header::ETAG, etag),
+        (header::VARY, "Accept-Encoding".to_string()),
+    ];
+    if wants_gzip(h) {
+        headers.push((header::CONTENT_ENCODING, "gzip".to_string()));
+        let mut r = gz.to_vec().into_response();
+        for (k, v) in headers {
+            r.headers_mut().insert(k, v.parse().unwrap());
+        }
+        return r;
+    }
+    let mut r = plain.to_vec().into_response();
+    for (k, v) in headers {
+        r.headers_mut().insert(k, v.parse().unwrap());
+    }
+    r
+}
+
+fn no_outlines() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (StatusCode::NOT_FOUND, "keine Bahnhofsgelände").into_response()
+}
+
+/// `GET /stations/umrisse-latest.json` — which phone file is current. May be an hour old.
+pub async fn outline_pointer(State(s): State<AppState>, h: axum::http::HeaderMap) -> axum::response::Response {
+    match s.outline_files() {
+        Some(f) => file_response(&h, &f.pointer, &f.pointer, "application/json", "public, max-age=3600", format!("\"p{}\"", f.version)),
+        None => no_outlines(),
+    }
+}
+
+/// `GET /stations/umrisse-<version>.bin` — the phone file. A version never changes, so it caches
+/// for good; only the current one is kept, and an older one is a 404 the phone answers by
+/// reading the pointer again.
+pub async fn outline_file(State(s): State<AppState>, h: axum::http::HeaderMap, Path(file): Path<String>) -> axum::response::Response {
+    let Some(f) = s.outline_files() else { return no_outlines() };
+    let want = file.strip_prefix("umrisse-").and_then(|r| r.strip_suffix(".bin")).and_then(|v| v.parse::<u32>().ok());
+    if want != Some(f.version) {
+        return no_outlines();
+    }
+    file_response(&h, &f.bin, &f.bin_gz, "application/octet-stream", "public, max-age=31536000, immutable", format!("\"b{}\"", f.version))
+}
+
+/// `GET /daten/bahnhofsumrisse.geojson` — the published database (ODbL, docs/48).
+pub async fn outline_geojson(State(s): State<AppState>, h: axum::http::HeaderMap) -> axum::response::Response {
+    match s.outline_files() {
+        Some(f) => file_response(&h, &f.geojson, &f.geojson_gz, "application/geo+json", "public, max-age=3600", format!("\"g{}\"", f.version)),
+        None => no_outlines(),
+    }
+}

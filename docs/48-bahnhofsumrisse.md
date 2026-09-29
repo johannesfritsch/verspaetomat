@@ -330,10 +330,17 @@ wegen der Lizenz: So ist die ODbL-Datenbank eine eigene Datei, getrennt von den 
 DELFI. Ohne diese Datei (älterer Server, Download fehlgeschlagen) gilt für alle Bahnhöfe der
 300-m-Wächter.
 
-`site/static/stations/umrisse-<version>.bin` (mit `.gz` daneben) und `umrisse-latest.json`, der
-Zeiger, den das Telefon zuerst liest — gebaut wie der Auszug: `stellwerk stations outlines-file`
-holt die Tabelle (`GET /admin/stations/outlines`), rendert, **liest die Datei mit dem Leser des
-Telefons zurück** (`outlines::parse_file`) und schreibt erst dann. Alles little-endian:
+**Aus dem Speicher der API, nicht aus dem Repo** (Johannes, 29. September): Der Server rendert beim
+Start und nach jedem Gelände-Import die Datei fürs Telefon, ihren Zeiger und die offene GeoJSON aus
+der Tabelle, prüft die Datei mit dem Leser des Telefons (`outlines::parse_file`) und hält alle drei
+im Speicher. Im Repo lägen sie mit jedem Import um ein paar Megabyte mehr in der Geschichte, für
+immer. Caddy reicht die Pfade vom Website-Host an die API durch, also bleiben die Adressen dieselben:
+`/stations/umrisse-latest.json` (Zeiger, eine Stunde Cache), `/stations/umrisse-<version>.bin`
+(unveränderlich; eine ältere Version ist ein 404, dann liest das Telefon den Zeiger neu) und
+`/daten/bahnhofsumrisse.geojson`. Mit ETag und gzip. Jeder Server liefert seine eigene Tabelle —
+Produktion ihre, Staging seine Kopie.
+
+Alles little-endian:
 
 | Teil | Bytes | Inhalt |
 |---|---|---|
@@ -344,11 +351,6 @@ Telefons zurück** (`outlines::parse_file`) und schreibt erst dann. Alles little
 Dieselben Wachstumsregeln wie beim Auszug: Ein längerer Kopf oder Satz wird von einem älteren
 Leser übersprungen, nur eine geänderte Bedeutung erhöht das Format. Stand 29. September: 6.129
 Bahnhöfe, 1,2 MB (gepackt 700 KB).
-
-`stellwerk` schreibt in den Baum nur mit `--prod`, oder mit `--staging`, wenn Staging
-**nachweislich** die Kopie der Produktion hält (Anzahl, OSM-Stand und Importzeit in
-`/admin/stations` gleich — `stations-to-staging.sh` übernimmt die Importzeit). Dann sind die
-Dateien Byte für Byte die der Produktion und fahren im Commit mit, den Johannes auf Staging testet.
 
 ### Was der Test zeigen muss
 
@@ -384,10 +386,10 @@ Wartezeit). Vorher nicht.
 
 - **Die Datei:** `https://verspaetomat.de/daten/bahnhofsumrisse.geojson` — pro Bahnhof unsere Id,
   der Name, das Polygon, die OSM-Ids, der OSM-Stand. Lizenz ODbL 1.0, im Kopf der Datei genannt.
-  Stand 29. September 4,5 MB (gepackt 1,2 MB). `stellwerk stations outlines-file` schreibt sie
-  nach `site/static/daten`, neu nach jedem Gelände-Import.
+  Stand 29. September 4,5 MB (gepackt 1,2 MB). Die API rendert sie nach jedem Gelände-Import neu
+  (siehe „Die Daten fürs Telefon").
 - **Der Weg dorthin:** Der Import-Code wird mit dem Repo öffentlich, bevor die App erscheint; die
-  Datei nennt den Commit, der sie gebaut hat. Das erfüllt 4.6 doppelt.
+  Datei nennt den Commit des Servers, der sie gebaut hat. Das erfüllt 4.6 doppelt.
 - **Eine Seite dazu:** `verspaetomat.de/daten` — was die Datei ist, woher sie kommt, Lizenz,
   Stand, und ein Satz: Wer einen Umriss falsch findet, verbessert ihn am besten in OSM; der
   nächste Import übernimmt es.

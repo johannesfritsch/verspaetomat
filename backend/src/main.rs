@@ -60,6 +60,10 @@ pub struct AppState {
     /// request path. Behind the same lock as `stations`, and for the same reason: an admin write
     /// swaps a whole new table in and no reader waits for it.
     pub flags: flags::Shared,
+    /// The station premises as files (issue #64, docs/48): the phone file, its pointer and the
+    /// published GeoJSON, rendered at startup and after every outline import and served from
+    /// here — never from the repo, where every import would add megabytes for good.
+    pub outline_files: stations::outlines::SharedFiles,
 }
 
 impl AppState {
@@ -73,6 +77,19 @@ impl AppState {
         let n = index.len();
         *self.stations.write().expect("stations lock") = Arc::new(index);
         Ok(n)
+    }
+
+    /// Render the premises into files again; whether there are any. A failure keeps the files
+    /// that were being served.
+    pub async fn reload_outline_files(&self) -> anyhow::Result<bool> {
+        let files = stations::outlines::load_files(&self.pool, Some(stage::commit())).await?;
+        let any = files.is_some();
+        *self.outline_files.write().expect("outline files lock") = files.map(Arc::new);
+        Ok(any)
+    }
+
+    pub fn outline_files(&self) -> Option<Arc<stations::outlines::Files>> {
+        self.outline_files.read().expect("outline files lock").clone()
     }
 
     pub fn flags(&self) -> Arc<flags::Table> {
@@ -114,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
         push: push_sender,
         stations,
         flags: Arc::new(std::sync::RwLock::new(Arc::new(flags::Table::default()))),
+        outline_files: Arc::new(std::sync::RwLock::new(None)),
     };
     // The stations are the only reference data the app cannot be served without: with an empty
     // table the Bahnsteig has nothing to offer and the search finds nothing. Say so loudly at
@@ -122,6 +140,13 @@ async fn main() -> anyhow::Result<()> {
         Ok(0) => tracing::warn!("no stations in the table — run `stellwerk stations import` (issue #37)"),
         Ok(n) => tracing::info!(stations = n, "stations loaded"),
         Err(e) => tracing::error!(error = %e, "stations could not be loaded"),
+    }
+    // The premises (#64) are not needed to serve anything else: without them the phone keeps
+    // its 300 m guard, so a failure is logged and the server starts anyway.
+    match state.reload_outline_files().await {
+        Ok(false) => tracing::info!("no station outlines yet — `stellwerk stations outlines` (docs/48)"),
+        Ok(true) => tracing::info!("station outline files rendered"),
+        Err(e) => tracing::error!(error = %e, "station outline files could not be rendered"),
     }
     // Flags (#41): give every descriptor in `flags.rs` a row, mark every row the registry has
     // stopped claiming, then read the lot into memory. A failure here is not fatal — an empty
@@ -201,6 +226,11 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/stations/nearby", get(handlers::stations_nearby))
         .route("/v1/stations/search", get(handlers::stations_search))
         .route("/v1/stations/{id}/departures", get(handlers::departures))
+        // The premises as files (docs/48): public, no token, the same paths the website serves
+        // them under (Caddy passes these three to here).
+        .route("/stations/umrisse-latest.json", get(handlers::outline_pointer))
+        .route("/stations/{file}", get(handlers::outline_file))
+        .route("/daten/bahnhofsumrisse.geojson", get(handlers::outline_geojson))
         .route("/v1/trips", get(handlers::trip))
         .route("/v1/operators", get(handlers::operators))
         .route("/v1/ngos", get(handlers::ngos))
@@ -305,10 +335,7 @@ pub fn router(state: AppState) -> Router {
         // default body limit — and it arrives in one piece because the matching has to see the
         // whole country at once to know what is missing from it.
         .route("/admin/stations/import", post(admin::stations_import).layer(DefaultBodyLimit::max(32 * 1024 * 1024)))
-        .route(
-            "/admin/stations/outlines",
-            get(admin::stations_outlines_get).post(admin::stations_outlines).layer(DefaultBodyLimit::max(32 * 1024 * 1024)),
-        )
+        .route("/admin/stations/outlines", post(admin::stations_outlines).layer(DefaultBodyLimit::max(32 * 1024 * 1024)))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
