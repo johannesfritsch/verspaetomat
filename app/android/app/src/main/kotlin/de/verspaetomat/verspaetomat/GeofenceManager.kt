@@ -235,7 +235,27 @@ object GeofenceManager {
         val radius = cfg.optDouble("stationRadiusM", 300.0).toFloat()
         val umbrellaRadius = cfg.optDouble("umbrellaRadiusM", 8000.0).toFloat()
         val fences = ArrayList<Geofence>()
-        for (s in stations + extra) {
+        val premises = cfg.optBoolean("stationPremises", false)
+        if (premises) {
+            // #64, docs/48: touch points (or the 300 m ring without a premise), ENTER only, for good.
+            val table = PremiseTable.load(ctx)
+            val specs = PremiseFences.plan(stations + extra, { table?.entry(it) }, radius)
+            // Kept for the receiver: a touch point names its station only by id, and the nearby list
+            // may have moved on by the time it fires.
+            prefs(ctx).edit().putString("premiseStations", JSONArray((stations + extra).map { it.toJson() }).toString()).apply()
+            for (sp in specs) {
+                fences.add(
+                    Geofence.Builder()
+                        .setRequestId(sp.id)
+                        .setCircularRegion(sp.lat, sp.lon, sp.radius)
+                        .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER)
+                        .setExpirationDuration(Geofence.NEVER_EXPIRE)
+                        .build()
+                )
+            }
+            setLastEvent(ctx, "Gelände: ${specs.size} Zäune für ${specs.map { it.stationId }.distinct().size} Bahnhöfe, Datei ${table?.version ?: "keine"}")
+        }
+        for (s in if (premises) emptyList() else stations + extra) {
             fences.add(
                 Geofence.Builder()
                     .setRequestId(STATION_PREFIX + s.id)
@@ -261,7 +281,11 @@ object GeofenceManager {
             done(0)
             return
         }
-        val request = GeofencingRequest.Builder().setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_DWELL).addGeofences(fences).build()
+        // With premises, no initial trigger at all: every re-registration (every app launch, every
+        // boot) would otherwise report „inside" to whoever lives next to a station and nudge them.
+        // A stay begins by entering, as on iOS (docs/48, Umsetzungsregeln).
+        val initial = if (premises) 0 else GeofencingRequest.INITIAL_TRIGGER_DWELL
+        val request = GeofencingRequest.Builder().setInitialTrigger(initial).addGeofences(fences).build()
         client(ctx).addGeofences(request, pendingIntent(ctx))
             .addOnSuccessListener {
                 prefs(ctx).edit().putInt("registered", fences.size).apply()
@@ -292,18 +316,50 @@ object GeofenceManager {
         }
     }
 
-    private fun nudgeIfAllowed(ctx: Context, cfg: JSONObject, station: Station) {
-        if (cfg.optBoolean("riding", false)) return setLastEvent(ctx, "skip riding")
-        if (inQuietHours(cfg.optString("quietFrom", ""), cfg.optString("quietTo", ""))) return setLastEvent(ctx, "skip quiet")
+    /** One nudge stands at a time across all stations, as iOS's `pendingKey` (issue #11). */
+    private const val ONE_NUDGE_WINDOW_MS = 10L * 60 * 1000
+
+    /**
+     * #64, docs/48: a touch point was entered — or the 300 m ring of a station without a premise.
+     * The nudge, at once. No confirming fix: the old one measured from the feed point and would
+     * suppress exactly the stations whose point lies beside their platforms (München Hbf).
+     */
+    fun onPremiseEnter(ctx: Context, fenceId: String, where: Location?, done: () -> Unit) {
+        val cfg = config(ctx)
+        if (cfg == null || !cfg.optBoolean("enabled", false) || !cfg.optBoolean("stationPremises", false)) return done()
+        val stationId = PremiseFences.stationId(fenceId) ?: fenceId.removePrefix(STATION_PREFIX)
+        val known = Station.list(prefs(ctx).getString("premiseStations", null)?.let { JSONArray(it) }) +
+            Station.list(cfg.optJSONArray("stations")) + nearest(ctx)
+        val station = known.firstOrNull { it.id == stationId } ?: return done()
+        val via = if (fenceId.startsWith(PremiseFences.TOUCH_PREFIX)) "Tastpunkt ${fenceId.substringAfterLast(':')}" else "Ring (300 m, kein Gelände)"
+        // What the phone already knew about where it was — distance and accuracy, never
+        // coordinates (docs/48, „Was der Test braucht").
+        val note = where?.let { "Standort ${distance(it, station).toInt()} m vom Bahnhofspunkt, ±${it.accuracy.toInt()} m" } ?: "kein Standort"
+        val last = prefs(ctx).getLong("lastNudgeAt", 0)
+        if (System.currentTimeMillis() - last < ONE_NUDGE_WINDOW_MS) {
+            setLastEvent(ctx, "${station.name} · $via · schon ein Nudge in den letzten 10 min")
+            return done()
+        }
+        if (nudgeIfAllowed(ctx, cfg, station)) {
+            prefs(ctx).edit().putLong("lastNudgeAt", System.currentTimeMillis()).apply()
+            setLastEvent(ctx, "Nudge ${station.name} · $via · $note")
+        }
+        done()
+    }
+
+    private fun nudgeIfAllowed(ctx: Context, cfg: JSONObject, station: Station): Boolean {
+        if (cfg.optBoolean("riding", false)) { setLastEvent(ctx, "skip riding"); return false }
+        if (inQuietHours(cfg.optString("quietFrom", ""), cfg.optString("quietTo", ""))) { setLastEvent(ctx, "skip quiet"); return false }
         val key = "cooldown:" + station.id
         val last = prefs(ctx).getLong(key, 0)
         val now = System.currentTimeMillis()
-        if (now - last < COOLDOWN_MS) return setLastEvent(ctx, "skip cooldown ${station.name}")
+        if (now - last < COOLDOWN_MS) { setLastEvent(ctx, "skip cooldown ${station.name}"); return false }
         prefs(ctx).edit().putLong(key, now).apply()
         NudgeNotification.show(ctx, station)
         // Counted as unanswered until a tap or a check-in says otherwise (docs/25 §4).
         noteNudgeFired(ctx, station.id)
         setLastEvent(ctx, "nudge ${station.name}")
+        return true
     }
 
     /** Left the umbrella: one fix, nearest stations from the API, re-register around the new position. */

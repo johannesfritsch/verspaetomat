@@ -83,6 +83,12 @@ class MainActivity : FlutterActivity() {
         // #40: which source the background lookup is on, read back out of the persisted config.
         // `optBoolean` with a default is why an older build ignores the key instead of failing.
         m["stationsLocal"] = GeofenceManager.config(this)?.optBoolean("stationsLocal", false) ?: false
+        // #64: premises on, and which file the fences were drawn from.
+        m["stationPremises"] = GeofenceManager.config(this)?.optBoolean("stationPremises", false) ?: false
+        PremiseTable.load(this)?.let {
+            m["premisesVersion"] = it.version
+            m["premisesCount"] = it.count
+        }
         GeofenceManager.takePendingNudge(this)?.let {
             m["pendingNudge"] = mapOf("stationId" to it.optString("stationId"), "stationName" to it.optString("stationName"))
         }

@@ -26,8 +26,16 @@ class GeofenceReceiver : BroadcastReceiver() {
         var open = 0
         val finish = { if (--open == 0) pending.finish() }
 
+        val premises = GeofenceManager.config(context)?.optBoolean("stationPremises", false) == true
         for (id in ids) {
             when {
+                // #64, docs/48: with premises, entering a touch point — or the 300 m ring of a
+                // station without a premise — is the nudge.
+                premises && transition == Geofence.GEOFENCE_TRANSITION_ENTER &&
+                    (id.startsWith(PremiseFences.TOUCH_PREFIX) || id.startsWith(GeofenceManager.STATION_PREFIX)) -> {
+                    open++
+                    GeofenceManager.onPremiseEnter(context, id, event.triggeringLocation, finish)
+                }
                 id == GeofenceManager.UMBRELLA_ID && transition == Geofence.GEOFENCE_TRANSITION_EXIT -> {
                     open++
                     GeofenceManager.onUmbrellaExit(context, finish)
