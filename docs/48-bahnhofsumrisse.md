@@ -213,6 +213,74 @@ und Tastpunkte dauerhaft**, ohne Tauschen und ohne Zustand: Tastpunkt `ENTER` (m
 `INITIAL_TRIGGER_ENTER`) → Nudge. Bahnhöfe ohne Gelände: Ring `ENTER` → Nudge. Google nennt eine
 Latenz von meist unter zwei, nach langem Stillstand bis zu sechs Minuten.
 
+### Umsetzungsregeln (aus der zweiten Kritik, 29. September)
+
+Die einfache Fassung bleibt, wie sie ist; diese Regeln sorgen dafür, dass der heutige Code sie
+nicht untergräbt und der Test verwertbare Zahlen liefert.
+
+**iOS**
+
+- **Eine Funktion setzt Regionen** (`applySet`): Sie vergleicht mit `monitoredRegions` und rührt
+  Ring und Tastpunkte eines Bahnhofs, an dem man ist, nie an. Heute rufen sieben Wege
+  `stopAllRegions`/`registerStations` auf, und `registerStations` meldet jeden Ring neu an
+  (`startMonitoring` + `requestState`, `Geofence.swift:926`) — das ist genau das Neu-Registrieren,
+  bei dem ein Verlassen verloren geht. Alle sieben gehen durch `applySet`: `configure` (:736,
+  :756), sein Timeout (:786), der Konfigurations-Fix (:1140), `refreshNearest` (:1245, :1259), der
+  Berechtigungswechsel (:1034), `stop` (:885).
+- **Beim Öffnen der App** fragt `configure` den bestehenden Ring mit `requestState`; „draußen"
+  beendet den Aufenthalt — ein kostenloser Abgleich.
+- **Der Aufenthalt speichert den ganzen Bahnhof** (Id, Name, Ring, Tastpunkte). Heute findet
+  `didExitRegion` den Bahnhof nur in der aktuellen Liste (`station(for:)`, :983); fällt er bei
+  einer Aktualisierung heraus, wird sein Verlassen verworfen.
+- **Bis zu zwei Bahnhöfe gleichzeitig** (Köln Hbf und Messe/Deutz): der Aufenthalt ist eine
+  Zuordnung Bahnhof → Tastpunkte. 2 × 6 Tastpunkte + 2 Ringe + Regenschirm = 15 von 20. Ein
+  Ring-Verlassen nimmt nur die eigenen Tastpunkte; neu gezeichnet wird erst, wenn keiner mehr offen
+  ist.
+- **Ring-Verlassen beendet den Aufenthalt und sonst nichts.** Heute löscht es Cooldown und
+  offenen Nudge (`cancelNudge`, :1096–1099) — das passte zur Wartezeit; mit sofortigem Nudge gäbe
+  ein Flattern am Ringrand einen zweiten. Cooldown und das 10-Minuten-Fenster bleiben.
+- **Während einer Fahrt** tauscht das Betreten eines Rings keine Tastpunkte ein.
+- **Sofort heißt `trigger: nil`**, nicht eine Wartezeit von 0 — die lässt
+  `UNTimeIntervalNotificationTrigger` nicht zu. `nudgeDelayS` fällt aus `configure`.
+- Der Tausch beim Ring-Betreten läuft in `beginBackgroundTask` (das Aufwecken gibt nur Sekunden).
+- **Jeder Zustand ins Protokoll**, auch `.unknown` und `.outside` von `requestState` — heute wird
+  alles außer `.inside` still verworfen (:1054), und „nie gefeuert" sähe aus wie „unbekannt".
+
+**Android**
+
+- **Grenze 100:** 20 Bahnhöfe × (Ring + 6 Tastpunkte) wären 141 — `addGeofences` scheitert dann
+  ganz. Bahnhöfe mit Gelände bekommen **nur Tastpunkte**, ohne Gelände nur den Ring; insgesamt
+  höchstens 99 plus Regenschirm, die nächsten Bahnhöfe zuerst.
+- Der Kontroll-Fix „innerhalb 300 m vom Feed-Punkt" (`onStationDwell`, `GeofenceManager.kt:289`)
+  fällt weg — er unterdrückt genau den Münchner Fall.
+- `ENTER` für Tastpunkt-Ids (`touch:X:n`) statt `DWELL` für `station:` (`GeofenceReceiver.kt:35`);
+  das 10-Minuten-Fenster über alle Bahnhöfe wie auf iOS.
+
+**Beide**
+
+- **Kein Nudge und kein Zählen im Vordergrund.** Heute zählt ein Nudge als „ignoriert", auch wenn
+  die App offen war und ihn verschluckt hat (`Geofence.swift:1355`).
+- **Ein „drin" beim Anmelden** (`requestState`, Android `INITIAL_TRIGGER_ENTER`) beginnt nur dann
+  einen neuen Aufenthalt, wenn vorher ein Verlassen gesehen wurde. Sonst nudgt jedes App-Öffnen und
+  jeder Neustart die Leute, die neben einem Bahnhof wohnen, und nach drei Mal ist ihr Bahnhof
+  30 Tage stumm (docs/25 §4).
+- **Test-Telefone:** Ein Schalter „Stummschalten aus" auf der Entwicklungsseite, damit der Test
+  nicht still abreißt, und jedes Stummschalten im Protokoll.
+
+**Import**
+
+- **Jeder OSM-Anker gehört genau einem unserer Bahnhöfe.** Frankfurt (Main) Hauptbahnhof und
+  „… tief" sind bei uns zwei Einträge unter einem Gelände; der zweite bekommt keine eigenen
+  Tastpunkte, sondern gilt als Teil des ersten. Der Importbericht nennt jeden solchen Fall.
+
+**Was der Test braucht**
+
+- Zu jedem Ereignis die Position, die das System ohnehin hat — iOS `manager.location` mit Alter und
+  Genauigkeit, Android `triggeringLocation` —, ohne GPS einzuschalten.
+- Ein Knopf „Jetzt auf dem Gelände" auf der Entwicklungsseite: der Zeitpunkt, an dem man es
+  wirklich war. Erst damit lassen sich die Zahlen 1 und 3 messen, und „spät" von „falscher Ort"
+  trennen.
+
 ### Die Daten fürs Telefon
 
 Eine **zweite Datei** neben dem Bahnhofsauszug (docs/45): `bahnhofsumrisse.bin`, nach unseren Ids,
