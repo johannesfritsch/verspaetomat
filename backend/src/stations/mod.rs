@@ -159,6 +159,8 @@ pub struct Index {
     all: Vec<Station>,
     by_id: HashMap<i32, usize>,
     by_source: HashMap<String, usize>,
+    /// Built on first use by [`Index::name_for_headsign`].
+    by_bare_name: std::sync::OnceLock<HashMap<String, Option<usize>>>,
 }
 
 impl Index {
@@ -186,6 +188,54 @@ impl Index {
     /// keeps working: it holds MOTIS ids, it sends them, and they are still the ids MOTIS wants.
     pub fn upstream_id(&self, id: &str) -> String {
         self.get(id).and_then(Station::upstream).unwrap_or(id).to_string()
+    }
+
+    /// Our name for a stop that came back from MOTIS, when the stop is one of our stations
+    /// (issue #65). The feeds name stops the way their own network map does: VVS calls Stuttgart's
+    /// main station „Hauptbahnhof (oben)", which on an ICE from Hamburg names no city at all. Our
+    /// table has the city in front (#60), so a live name is replaced by ours wherever we know it.
+    ///
+    /// A platform id the table does not list falls back to its station: DELFI ids are
+    /// `de:<district>:<stop>` with `:<area>:<platform>` after them, and a trip calls at the
+    /// platform.
+    pub fn name_for_stop(&self, stop_id: &str) -> Option<&str> {
+        let mut id = stop_id;
+        loop {
+            if let Some(&at) = self.by_source.get(id) {
+                return Some(&self.all[at].name);
+            }
+            let (parent, _) = id.rsplit_once(':')?;
+            if parent.matches(':').count() < 2 {
+                return None;
+            }
+            id = parent;
+        }
+    }
+
+    /// Our name for a headsign, which is text without an id: „Hauptbahnhof (oben)" becomes
+    /// „Stuttgart, Hauptbahnhof (oben)". Only a name that belongs to exactly one station is
+    /// replaced — „Hauptbahnhof" alone is half the country and stays as it came. Matched exactly,
+    /// ignoring case: the search fold drops what is in brackets, and „(oben)" is the whole point.
+    pub fn name_for_headsign(&self, headsign: &str) -> Option<&str> {
+        let bare = self.by_bare_name.get_or_init(|| {
+            let mut m: HashMap<String, Option<usize>> = HashMap::new();
+            for (at, s) in self.all.iter().enumerate() {
+                if let Some((_, rest)) = s.name.split_once(", ") {
+                    m.entry(rest.trim().to_lowercase()).and_modify(|v| *v = None).or_insert(Some(at));
+                }
+            }
+            // A bare name that is also some other station's full name is not ours to rewrite.
+            for s in &self.all {
+                if let Some(v) = m.get_mut(&s.plain) {
+                    if v.is_some_and(|at| self.all[at].id != s.id) {
+                        *v = None;
+                    }
+                }
+            }
+            m
+        });
+        let at = (*bare.get(&headsign.trim().to_lowercase())?)?;
+        Some(&self.all[at].name)
     }
 
     /// Every id a trip's stops might carry for this station, for matching a stored station against
@@ -602,6 +652,37 @@ mod tests {
             ix.all.push(s);
         }
         ix
+    }
+
+    /// #65: an ICE from Hamburg arrives at „Hauptbahnhof (oben)", VVS's name for Stuttgart Hbf.
+    /// The trip calls at a platform id the table does not list; its station is ours all the same.
+    #[test]
+    fn a_live_stop_takes_our_name_with_its_city() {
+        let mut stuttgart = station(1, "Stuttgart, Hauptbahnhof (oben)", 48.784, 9.182, 3);
+        stuttgart.sources = vec!["de-DELFI_de:08111:6115".into()];
+        let ix = index(vec![stuttgart, station(2, "Hamburg Hbf", 53.55, 10.006, 3)]);
+        assert_eq!(ix.name_for_stop("de-DELFI_de:08111:6115:8:15"), Some("Stuttgart, Hauptbahnhof (oben)"));
+        assert_eq!(ix.name_for_stop("de-DELFI_de:08111:6115"), Some("Stuttgart, Hauptbahnhof (oben)"));
+        assert_eq!(ix.name_for_stop("de-DELFI_de:08111:9999:1:1"), None, "another stop in Stuttgart is not the Hauptbahnhof");
+        assert_eq!(ix.name_for_stop("de-DELFI_test:2"), Some("Hamburg Hbf"));
+        assert_eq!(ix.name_for_stop("be-sncb_8015458"), None);
+    }
+
+    /// A headsign has no id. Only a bare name one station owns is rewritten.
+    #[test]
+    fn a_headsign_is_rewritten_only_when_it_is_unambiguous() {
+        let ix = index(vec![
+            station(1, "Stuttgart, Hauptbahnhof (oben)", 48.784, 9.182, 3),
+            station(2, "Karlsruhe, Hauptbahnhof", 49.0, 8.4, 3),
+            station(3, "Mannheim, Hauptbahnhof", 49.48, 8.47, 3),
+            station(4, "Köln, Mitte", 50.9, 6.9, 1),
+            station(5, "Mitte", 52.5, 13.4, 1),
+        ]);
+        assert_eq!(ix.name_for_headsign("Hauptbahnhof (oben)"), Some("Stuttgart, Hauptbahnhof (oben)"));
+        assert_eq!(ix.name_for_headsign("hauptbahnhof (oben)"), Some("Stuttgart, Hauptbahnhof (oben)"));
+        assert_eq!(ix.name_for_headsign("Hauptbahnhof"), None, "two cities have one");
+        assert_eq!(ix.name_for_headsign("Mitte"), None, "a station of that very name exists");
+        assert_eq!(ix.name_for_headsign("München Hbf"), None);
     }
 
     /// docs/23 §1: standing at the entrance of München Hbf, the Hauptbahnhof is offered, not the

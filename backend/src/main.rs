@@ -101,7 +101,9 @@ async fn main() -> anyhow::Result<()> {
     let pool = db::connect().await?;
     db::seed(&pool).await?;
     clock::load(&pool).await?;
-    let train = Arc::new(TrainSource::new(TransitousClient::new()));
+    // One station table for the handlers and for the train source, which names live stops from it.
+    let stations: stations::Shared = Arc::new(std::sync::RwLock::new(Arc::new(stations::Index::default())));
+    let train = Arc::new(TrainSource::new(TransitousClient::new(), stations.clone()));
     train.load_overrides(&pool).await?;
     let events = Arc::new(events::EventHub::default());
     let push_sender = Arc::new(push::PushSender::from_env()?);
@@ -110,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
         train: train.clone(),
         events: events.clone(),
         push: push_sender,
-        stations: Arc::new(std::sync::RwLock::new(Arc::new(stations::Index::default()))),
+        stations,
         flags: Arc::new(std::sync::RwLock::new(Arc::new(flags::Table::default()))),
     };
     // The stations are the only reference data the app cannot be served without: with an empty

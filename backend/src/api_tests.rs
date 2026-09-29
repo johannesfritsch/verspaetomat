@@ -30,12 +30,13 @@ use crate::AppState;
 async fn app(pool: PgPool, transitous: Option<String>) -> Router {
     crate::db::seed(&pool).await.expect("seed");
     let client = TransitousClient::with_base(transitous.unwrap_or_else(|| "http://127.0.0.1:9".into()));
+    let stations: crate::stations::Shared = Arc::new(std::sync::RwLock::new(Arc::new(crate::stations::Index::default())));
     let state = AppState {
         pool,
-        train: Arc::new(TrainSource::new(client)),
+        train: Arc::new(TrainSource::new(client, stations.clone())),
         events: Arc::new(crate::events::EventHub::default()),
         push: Arc::new(crate::push::PushSender::from_env().expect("push sender")),
-        stations: Arc::new(std::sync::RwLock::new(Arc::new(crate::stations::Index::default()))),
+        stations,
         flags: Arc::new(std::sync::RwLock::new(Arc::new(crate::flags::Table::default()))),
     };
     crate::router(state)

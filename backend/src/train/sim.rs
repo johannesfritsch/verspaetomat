@@ -25,11 +25,30 @@ pub struct TripOverride {
 pub struct TrainSource {
     inner: TransitousClient,
     overrides: RwLock<HashMap<String, TripOverride>>,
+    /// Our station table, the same handle the state holds: live stops are named from it (#65).
+    stations: crate::stations::Shared,
 }
 
 impl TrainSource {
-    pub fn new(inner: TransitousClient) -> Self {
-        Self { inner, overrides: RwLock::new(HashMap::new()) }
+    pub fn new(inner: TransitousClient, stations: crate::stations::Shared) -> Self {
+        Self { inner, overrides: RwLock::new(HashMap::new()), stations }
+    }
+
+    /// Issue #65: a stop MOTIS names the way its feed does gets the name our table gives it, with
+    /// the city in front. „Hauptbahnhof (oben)" on an ICE from Hamburg is Stuttgart's, and the
+    /// passenger — and the Fahrgastrechte form the ride ends up on — has to be able to tell.
+    fn our_name(ix: &crate::stations::Index, id: &str, name: &mut String) {
+        if let Some(ours) = ix.name_for_stop(id) {
+            if ours != name.as_str() {
+                *name = ours.to_string();
+            }
+        }
+    }
+
+    fn our_headsign(ix: &crate::stations::Index, headsign: &mut String) {
+        if let Some(ours) = ix.name_for_headsign(headsign) {
+            *headsign = ours.to_string();
+        }
     }
 
     pub async fn load_overrides(&self, pool: &PgPool) -> Result<()> {
@@ -97,6 +116,12 @@ impl TrainSource {
 
     pub async fn departures(&self, stop_id: &str, n: usize) -> Result<Vec<DepartureInfo>> {
         let mut deps = self.inner.departures(stop_id, n).await?;
+        {
+            let ix = crate::stations::snapshot(&self.stations);
+            for d in deps.iter_mut() {
+                Self::our_headsign(&ix, &mut d.headsign);
+            }
+        }
         let map = self.overrides.read().unwrap();
         if map.is_empty() {
             return Ok(deps);
@@ -117,6 +142,14 @@ impl TrainSource {
     /// Itineraries with the Stellwerk's per-trip delays and cancellations applied to their legs.
     pub async fn plan(&self, from: &str, to: &str, time: DateTime<Utc>, n: usize) -> Result<Vec<Itinerary>> {
         let mut its = self.inner.plan(from, to, time, n).await?;
+        {
+            let ix = crate::stations::snapshot(&self.stations);
+            for l in its.iter_mut().flat_map(|it| it.legs.iter_mut()) {
+                Self::our_name(&ix, &l.from_station_id, &mut l.from_station_name);
+                Self::our_name(&ix, &l.to_station_id, &mut l.to_station_name);
+                Self::our_headsign(&ix, &mut l.headsign);
+            }
+        }
         let map = self.overrides.read().unwrap();
         if map.is_empty() {
             return Ok(its);
@@ -139,6 +172,20 @@ impl TrainSource {
 
     pub async fn trip(&self, trip_id: &str) -> Result<TripInfo> {
         let mut t = self.inner.trip(trip_id).await?;
+        {
+            let ix = crate::stations::snapshot(&self.stations);
+            // The headsign is usually the last stop's feed name; then it takes the last stop's name.
+            let last = t.stops.last().map(|s| s.name.clone());
+            for s in t.stops.iter_mut() {
+                if let Some(id) = s.stop_id.as_deref() {
+                    Self::our_name(&ix, id, &mut s.name);
+                }
+            }
+            match (last, t.stops.last()) {
+                (Some(before), Some(after)) if before == t.headsign && after.name != before => t.headsign = after.name.clone(),
+                _ => Self::our_headsign(&ix, &mut t.headsign),
+            }
+        }
         let o = match self.get_override(trip_id) {
             Some(o) => o,
             None => return Ok(t),
