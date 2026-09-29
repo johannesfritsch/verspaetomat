@@ -746,12 +746,8 @@ class Mock {
     VBadge(id: 'minuten-64000', name: '64.000 Minuten', rule: '64.000 Verspätungsminuten gesammelt', earned: false),
   ];
 
-  static const minutesTotal = 1372;
-
-  /// Minutes this passenger waited — the figure on Home's first board (#47).
-  /// Not the same number as [minutesTotal] and never larger: a ride given up earns its
-  /// points but has no final delay to add (docs/22).
-  static const myMinutes = 1298;
+  /// Minutes this passenger has counted — one figure on Home, Ich and the share card (docs/47).
+  static const minutesTotal = 1298;
   static const minutesThisWeek = 96;
   static const levelName = 'Gleis 7';
   static const nextLevelName = 'Bahnhofsmission';

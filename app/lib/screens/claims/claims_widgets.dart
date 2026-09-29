@@ -285,7 +285,7 @@ const discardReasons = <String, String>{
   'sonst': 'Anderer Grund',
 };
 
-/// "Fahrt löschen": the ride, its points and its claim go, and nothing comes back (docs/23 §2).
+/// "Fahrt löschen": the ride, its minutes and its claim go, and nothing comes back (docs/23 §2).
 /// Returns true when the passenger confirmed.
 Future<bool> confirmDeleteRide(BuildContext context) async {
   final yes = await showVSheet<bool>(

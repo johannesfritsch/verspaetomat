@@ -106,7 +106,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
     if (mounted) setState(() {});
   }
 
-  /// The account changed (points after an arrival, a new NGO, a nickname): the numbers follow.
+  /// The account changed (minutes after an arrival, a new NGO, a nickname): the numbers follow.
   void _onSession() {
     if (!mounted) return;
     final me = _session.me;

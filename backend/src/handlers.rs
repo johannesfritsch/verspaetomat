@@ -216,7 +216,7 @@ pub async fn badges(State(s): State<AppState>, c: Customer) -> ApiResult {
 async fn customer_json(pool: &PgPool, flags: &crate::flags::Table, c: &CustomerRow) -> anyhow::Result<Value> {
     let week_ago = crate::clock::now() - Duration::days(7);
     let (points_total, points_week): (i64, i64) = sqlx::query_as(
-        // docs/22 §1: an abandoned leg keeps the patience it earned, so points count it too.
+        // docs/22 §1: an abandoned leg keeps the waiting it counted, so the minutes include it.
         // Money and bundles never do — those stay on 'arrived' (see rules.rs and the ledger).
         "select coalesce(sum(points),0)::bigint, coalesce(sum(points) filter (where finalised_at >= $2),0)::bigint from rides where customer_id = $1 and status in ('arrived','abandoned')",
     )
@@ -260,7 +260,7 @@ async fn customer_json(pool: &PgPool, flags: &crate::flags::Table, c: &CustomerR
     }))
 }
 
-fn level_for(points: i64) -> (&'static str, &'static str, i64) {
+fn level_for(minutes: i64) -> (&'static str, &'static str, i64) {
     const LEVELS: [(&str, i64); 6] = [
         ("Frischer Fahrgast", 0),
         ("Bahnsteigkante", 60),
@@ -269,7 +269,7 @@ fn level_for(points: i64) -> (&'static str, &'static str, i64) {
         ("Bahnhofsmission", 1500),
         ("Bahnsteig-Buddha", 4000),
     ];
-    let idx = LEVELS.iter().rposition(|(_, at)| points >= *at).unwrap_or(0);
+    let idx = LEVELS.iter().rposition(|(_, at)| minutes >= *at).unwrap_or(0);
     let next = LEVELS.get(idx + 1).unwrap_or(&LEVELS[idx]);
     (LEVELS[idx].0, next.0, next.1)
 }
@@ -928,7 +928,7 @@ pub async fn award_badges(pool: &PgPool, customer_id: Uuid, ride_id: Uuid, delay
     Ok(new_badge)
 }
 
-/// The minute milestones reached with `total` points: 1.000 · 2.000 · … · 64.000.
+/// The minute milestones reached with `total` minutes: 1.000 · 2.000 · … · 64.000.
 fn minute_milestones(total: i64) -> Vec<i64> {
     (0..7).map(|i| 1000_i64 << i).filter(|m| total >= *m).collect()
 }
@@ -2575,7 +2575,7 @@ pub struct BoardQuery {
     pub scope: Option<String>,
 }
 
-/// Seven-day boards: points of location-verified rides finalised in the last seven days, per customer,
+/// Seven-day boards: counted minutes of location-verified rides finalised in the last seven days, per customer,
 /// only customers with `show_on_boards`. Scope `line` = rides on my most frequent line of the last 30 days,
 /// `city` = rides starting at a station that shares the first word with my home station, `germany` = all;
 /// a scope with nothing to narrow on falls back to all. The list is filled from `board_seed` (marked `seed`)
@@ -2677,8 +2677,8 @@ pub fn week_buckets(rows: &[(i32, i64)]) -> [i64; 7] {
     out
 }
 
-/// Level name, next level, points still missing, and progress 0..1 within the current band.
-pub fn level_progress(points: i64) -> (&'static str, &'static str, i64, f64) {
+/// Level name, next level, minutes still missing, and progress 0..1 within the current band.
+pub fn level_progress(minutes: i64) -> (&'static str, &'static str, i64, f64) {
     const LEVELS: [(&str, i64); 6] = [
         ("Frischer Fahrgast", 0),
         ("Bahnsteigkante", 60),
@@ -2687,12 +2687,12 @@ pub fn level_progress(points: i64) -> (&'static str, &'static str, i64, f64) {
         ("Bahnhofsmission", 1500),
         ("Bahnsteig-Buddha", 4000),
     ];
-    let idx = LEVELS.iter().rposition(|(_, at)| points >= *at).unwrap_or(0);
+    let idx = LEVELS.iter().rposition(|(_, at)| minutes >= *at).unwrap_or(0);
     let (name, at) = LEVELS[idx];
     match LEVELS.get(idx + 1) {
         Some((next, next_at)) => {
             let band = (next_at - at).max(1) as f64;
-            (name, next, (next_at - points).max(0), ((points - at) as f64 / band).clamp(0.0, 1.0))
+            (name, next, (next_at - minutes).max(0), ((minutes - at) as f64 / band).clamp(0.0, 1.0))
         }
         None => (name, name, 0, 1.0),
     }
@@ -2723,7 +2723,7 @@ impl NextThing {
         match self {
             NextThing::Mail { claim_id, body } => json!({ "kind": "mail", "title": "Post von der Bahn", "body": body, "claim_id": claim_id }),
             NextThing::Deadline { incident_id, days_left, body } => json!({ "kind": "deadline", "title": "Verfällt bald", "body": body, "incident_id": incident_id, "days_left": days_left }),
-            NextThing::Nachtrag => json!({ "kind": "nachtrag", "title": "Gestern vergessen einzuchecken?", "body": "Fahrt nachtragen, Punkte gibt es trotzdem." }),
+            NextThing::Nachtrag => json!({ "kind": "nachtrag", "title": "Gestern vergessen einzuchecken?", "body": "Fahrt nachtragen, deine Minuten zählen trotzdem." }),
             NextThing::Badge { badge_id, name } => json!({ "kind": "badge", "title": "Neues Abzeichen", "body": name, "badge_id": badge_id }),
         }
     }
@@ -2815,7 +2815,7 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
     }
 
     // Community with my share. `my_minutes` is minutes, out of the same column and the same set of
-    // rides as the total it is a share of — it used to be the points total, so Home's dark
+    // rides as the total it is a share of — it used to be the points total (before #74), so Home's dark
     // board said „N davon deine" under a label that says minutes and the two numbers were counted
     // by different rules (a ride given up carries points but no final delay).
     let (minutes, my_minutes, my_confirmed): (i64, i64, i64) = sqlx::query_as(

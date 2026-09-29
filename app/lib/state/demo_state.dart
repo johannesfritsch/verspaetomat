@@ -294,7 +294,7 @@ class DemoState extends ChangeNotifier {
     _board(j.current, locationVerified: true);
   }
 
-  /// "Ich fahre später weiter" (docs/21 §2): the leg ends here, no points, and the journey
+  /// "Ich fahre später weiter" (docs/21 §2): the leg ends here, no minutes, and the journey
   /// waits at this station for a train the passenger picks. The planned arrival stays.
   void replanJourney({String? at}) {
     final j = journey;
@@ -508,14 +508,14 @@ class DemoState extends ChangeNotifier {
   // -- Rides and Nachtrag ---------------------------------------------------
   final List<RideRecord> rides = List.of(Mock.rides);
 
-  /// Points earned in this session on top of the mocked weekly figure.
-  int bonusPoints = 0;
+  /// Minutes counted in this session on top of the mocked figures.
+  int bonusMinutes = 0;
 
-  /// E4: a ride entered after the fact. One point, claimable, never ranks.
+  /// E4: a ride entered after the fact. Counts its minutes, claimable, never ranks (docs/47).
   void addNachtrag({required Departure departure, required Stop exitStop, required DateTime date}) {
     final delay = departure.cancelled ? 60 : departure.delay;
     rides.insert(0, RideRecord(date: date, line: departure.line, from: Mock.homeStation, to: exitStop.name, delay: delay, cancelled: departure.cancelled, verified: false));
-    bonusPoints += 1;
+    bonusMinutes += delay;
     if (delay >= 60) {
       incidents.insert(
         0,
@@ -586,7 +586,7 @@ class DemoState extends ChangeNotifier {
   }
 
   /// docs/23 §2: a ride logged by accident. The journey (or the seeded record), its case and
-  /// its points go; nothing comes back. The id is a journey id, a seeded ride's id, or the
+  /// its minutes go; nothing comes back. The id is a journey id, a seeded ride's id, or the
   /// id of the case the ride produced.
   void deleteRide(String id) {
     incidents.removeWhere((i) => i.id == id);
@@ -786,7 +786,7 @@ class DemoState extends ChangeNotifier {
     personalEmail = null;
     personalTicketNumber = null;
     signaturePng = null;
-    bonusPoints = 0;
+    bonusMinutes = 0;
     unreadMails = 2;
     noHistory = false;
     locatingStation = false;

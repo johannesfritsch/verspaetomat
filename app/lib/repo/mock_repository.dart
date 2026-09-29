@@ -303,7 +303,7 @@ class MockRepository implements AppRepository {
       final t = state.trip;
       return ApiJourneyLive(
         journey: api,
-        ride: t == null ? null : _ride(t, status: ApiRideStatus.arrived, finalDelay: j.current.finalDelay, cancelled: j.current.cancelled, points: j.current.finalDelay ?? 0),
+        ride: t == null ? null : _ride(t, status: ApiRideStatus.arrived, finalDelay: j.current.finalDelay, cancelled: j.current.cancelled, countedMinutes: j.current.finalDelay ?? 0),
         stops: t == null ? const [] : t.departure.stops.map((s) => _stop(s, delay: j.current.finalDelay ?? 0)).toList(),
         nextLeg: api.nextLeg,
       );
@@ -408,7 +408,7 @@ class MockRepository implements AppRepository {
     return list;
   }
 
-  ApiRide _ride(Trip t, {required ApiRideStatus status, int? finalDelay, bool cancelled = false, bool selfEntered = false, int points = 0}) => ApiRide(
+  ApiRide _ride(Trip t, {required ApiRideStatus status, int? finalDelay, bool cancelled = false, bool selfEntered = false, int countedMinutes = 0}) => ApiRide(
         id: 'ride-${t.checkedInAt.millisecondsSinceEpoch}',
         tripId: t.departure.id,
         line: t.departure.line,
@@ -429,7 +429,7 @@ class MockRepository implements AppRepository {
         finalDelayMinutes: finalDelay,
         cancelled: cancelled,
         selfEntered: selfEntered,
-        countedMinutes: points,
+        countedMinutes: countedMinutes,
         date: Mock.today,
       );
 
@@ -569,8 +569,8 @@ class MockRepository implements AppRepository {
           quietTo: state.quietHours ? '06:00' : null,
           nudgeSnoozeUntil: state.nudgeSnoozeUntil,
         ),
-        minutesTotal: Mock.minutesTotal + state.bonusPoints,
-        minutesThisWeek: Mock.minutesThisWeek + state.bonusPoints,
+        minutesTotal: Mock.minutesTotal + state.bonusMinutes,
+        minutesThisWeek: Mock.minutesThisWeek + state.bonusMinutes,
         levelName: Mock.levelName,
         nextLevelName: Mock.nextLevelName,
         nextLevelAt: Mock.nextLevelAt,
@@ -730,7 +730,7 @@ class MockRepository implements AppRepository {
     // Like the backend: the arrived ride stays current until it is dismissed.
     if (state.phase == TripPhase.arrived) {
       return ApiRideLive(
-        ride: _ride(t, status: ApiRideStatus.arrived, finalDelay: state.finalDelay, cancelled: state.finalCancelled, selfEntered: state.finalSelfEntered, points: state.finalDelay ?? 0),
+        ride: _ride(t, status: ApiRideStatus.arrived, finalDelay: state.finalDelay, cancelled: state.finalCancelled, selfEntered: state.finalSelfEntered, countedMinutes: state.finalDelay ?? 0),
         stops: t.departure.stops.map((s) => _stop(s, delay: state.finalDelay ?? 0)).toList(),
       );
     }
@@ -754,7 +754,7 @@ class MockRepository implements AppRepository {
     final inc = state.lastLiveIncidentId == null ? null : state.incidents.where((i) => i.id == state.lastLiveIncidentId).firstOrNull;
     final badge = state.newBadge;
     return ApiArrivalResult(
-      ride: _ride(t, status: ApiRideStatus.arrived, finalDelay: state.finalDelay, cancelled: state.finalCancelled, selfEntered: state.finalSelfEntered, points: state.finalDelay ?? 0),
+      ride: _ride(t, status: ApiRideStatus.arrived, finalDelay: state.finalDelay, cancelled: state.finalCancelled, selfEntered: state.finalSelfEntered, countedMinutes: state.finalDelay ?? 0),
       incident: inc == null ? null : _incident(inc),
       bundleReady: inc != null && state.bundleReady(inc.desk),
       newBadge: badge == null ? null : ApiBadge(id: badge.id, name: badge.name, rule: badge.rule, earnedOn: Mock.today),
@@ -1005,7 +1005,7 @@ class MockRepository implements AppRepository {
     }
     final line = byLine.entries.fold<MapEntry<String, (int, int)>?>(null, (m, e) => m == null || e.value.$1 > m.value.$1 ? e : m);
     return ApiShareFacts(
-      minutesTotal: Mock.myMinutes + state.bonusPoints,
+      minutesTotal: Mock.minutesTotal + state.bonusMinutes,
       ridesTotal: 41,
       confirmedCents: 1200,
       record: top == null ? null : ApiShareRecord(rideId: top.id, line: top.line, to: top.exitStationName, minutes: top.finalDelayMinutes ?? 0, at: top.plannedArrival ?? top.date),
@@ -1020,7 +1020,7 @@ class MockRepository implements AppRepository {
   /// Demo: the same shape the backend computes, from the mock and the demo state.
   @override
   Future<ApiStanding> standing() async {
-    final minutesTotal = Mock.minutesTotal + state.bonusPoints;
+    final minutesTotal = Mock.minutesTotal + state.bonusMinutes;
     final open = state.openIncidents;
     final openCents = _cents(open.fold(0.0, (s, i) => s + i.amount));
     final readyDesk = state.readyDesk;
@@ -1046,9 +1046,9 @@ class MockRepository implements AppRepository {
     } else if (state.newBadge != null) {
       next = ApiStandingNext(kind: 'badge', title: 'Neues Abzeichen', body: state.newBadge!.name, badgeId: state.newBadge!.id);
     }
-    final weekPoints = Mock.minutesThisWeek + state.bonusPoints;
+    final weekMinutes = Mock.minutesThisWeek + state.bonusMinutes;
     return ApiStanding(
-      minutesThisWeek: weekPoints,
+      minutesThisWeek: weekMinutes,
       minutesLastWeek: 41,
       ridesThisWeek: 3,
       // Three of the week's days carry the whole total, the way a real week does — nobody is late
@@ -1058,14 +1058,14 @@ class MockRepository implements AppRepository {
       // website, and a lit bar that followed the real weekday would make the committed shot
       // depend on which day the tour was run.
       todayIndex: 4,
-      minutesByDay: weekPoints == 0
+      minutesByDay: weekMinutes == 0
           ? const [0, 0, 0, 0, 0, 0, 0]
           : [
               0,
-              (weekPoints * 0.45).round(),
+              (weekMinutes * 0.45).round(),
               0,
-              (weekPoints * 0.2).round(),
-              weekPoints - (weekPoints * 0.45).round() - (weekPoints * 0.2).round(),
+              (weekMinutes * 0.2).round(),
+              weekMinutes - (weekMinutes * 0.45).round() - (weekMinutes * 0.2).round(),
               0,
               0,
             ],
@@ -1081,7 +1081,7 @@ class MockRepository implements AppRepository {
           : ApiStandingBoard(scope: 'line', key: 'RE 7', rank: me.rank, size: Mock.boardLine.length, minutes: me.minutes, gapToNext: above == null ? null : above.minutes - me.minutes + 1),
       community: ApiStandingCommunity(
         minutesTotal: Mock.communityMinutes,
-        myMinutes: Mock.myMinutes + state.bonusPoints,
+        myMinutes: Mock.minutesTotal + state.bonusMinutes,
         confirmedCents: _cents(Mock.communityConfirmed + state.confirmedTotal - Mock.incidents.where((i) => i.status == IncidentStatus.bestaetigt).fold(0.0, (s, i) => s + i.amount)),
         myConfirmedCents: _cents(state.confirmedTotal),
       ),

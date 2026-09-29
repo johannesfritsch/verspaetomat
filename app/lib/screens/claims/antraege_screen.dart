@@ -113,7 +113,7 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
     }
   }
 
-  /// docs/23 §2: the ride behind a case, deleted for good. The case, its points and any
+  /// docs/23 §2: the ride behind a case, deleted for good. The case, its minutes and any
   /// draft that held it follow; the backend owns the rules and the refusal.
   Future<void> _deleteRide(BuildContext context, ApiIncident i) async {
     final session = RepoScope.read(context);

@@ -381,6 +381,9 @@ void main() {
     demo.simulateArrival(minutes: 68);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.arrived);
     await wait(tester, 1000);
+    // The arrival scene puts the button below the fold, and a tap off screen lands on the tab bar.
+    await tester.ensureVisible(find.widgetWithText(VOutlineButton, 'Teilen').first);
+    await wait(tester, 400);
     await tester.tap(find.widgetWithText(VOutlineButton, 'Teilen').first, warnIfMissed: false);
     await shot('karte-angekommen');
     await dismissSheet(tester);
@@ -390,6 +393,8 @@ void main() {
     demo.simulateArrival(minutes: 0);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.arrived);
     await wait(tester, 1000);
+    await tester.ensureVisible(find.widgetWithText(VOutlineButton, 'Teilen').first);
+    await wait(tester, 400);
     await tester.tap(find.widgetWithText(VOutlineButton, 'Teilen').first, warnIfMissed: false);
     await shot('karte-puenktlich');
     await dismissSheet(tester);

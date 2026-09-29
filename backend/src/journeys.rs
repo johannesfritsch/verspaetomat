@@ -607,7 +607,7 @@ async fn remove_cases(s: &AppState, incidents: &[IncidentRow], reason: &str) -> 
 }
 
 /// `DELETE /v1/journeys/{id}` — a journey logged by accident goes, with its legs and its
-/// case (docs/23 §2). Points, standing and the boards follow, because the rows are gone.
+/// case (docs/23 §2). Minutes, standing and the boards follow, because the rows are gone.
 pub async fn delete(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
     let j = journey_of(&s.pool, c.0.id, id).await?;
     let incidents = cases_of_journey(&s.pool, j.id).await.map_err(internal)?;
@@ -1384,8 +1384,8 @@ pub async fn finalise_journey(
     .fetch_one(&s.pool)
     .await?;
     rules::audit(&s.pool, "journey", j.id, Some(if j.status == JourneyStatus::Transfer { "transfer" } else { "riding" }), "arrived", reason).await?;
-    // Points live on the last leg's ride so boards and levels keep summing rides; the journey's
-    // delay replaces the leg's own points.
+    // The counted minutes live on the last leg's ride so boards and levels keep summing rides; the journey's
+    // delay replaces the leg's own minutes.
     let rides: Vec<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 order by leg_no").bind(j.id).fetch_all(&s.pool).await?;
     let last_ride = rides.iter().filter(|r| r.status == RideStatus::Arrived).max_by_key(|r| r.leg_no).cloned();
     if rides.len() > 1 {

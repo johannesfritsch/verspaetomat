@@ -56,7 +56,7 @@ pub struct JourneyFacts {
     pub origin: String,
     pub destination: String,
     pub delay_min: i64,
-    pub points: i64,
+    pub minutes: i64,
     pub cancelled: bool,
     pub missed_connection: bool,
     pub incomplete: bool,
@@ -69,7 +69,7 @@ pub struct RideFacts {
     pub line: String,
     pub exit_station: String,
     pub delay_min: i64,
-    pub points: i64,
+    pub minutes: i64,
     pub cancelled: bool,
     pub claim_cents: Option<i64>,
 }
@@ -145,11 +145,11 @@ pub fn compose(kind: &str, payload: &Value, facts: &Facts) -> Option<Notificatio
             let (title, mut body) = if j.incomplete {
                 ("Fahrt beendet".to_string(), format!("Ohne Ankunft am Ziel gewertet: +{} bis {}. {}", j.delay_min, j.transfer_station.clone().unwrap_or_else(|| "zum letzten Halt".into()), claim_line(j.claim_cents, &ngo)))
             } else if j.cancelled {
-                (format!("Ausfall · {route}"), format!("{} Minuten angerechnet. {}", j.points, claim_line(j.claim_cents, &ngo)))
+                (format!("Ausfall · {route}"), format!("{} Minuten angerechnet. {}", j.minutes, claim_line(j.claim_cents, &ngo)))
             } else if j.delay_min <= 0 {
                 (format!("Pünktlich · {route}"), format!("Angekommen in {}. Keine Minute gewartet, dafür kein Ärger.", j.destination))
             } else {
-                (format!("+{} · {route}", j.delay_min), format!("{} Minuten gewartet. {}", j.points, claim_line(j.claim_cents, &ngo)))
+                (format!("+{} · {route}", j.delay_min), format!("{} Minuten gewartet. {}", j.minutes, claim_line(j.claim_cents, &ngo)))
             };
             if j.missed_connection && !j.incomplete {
                 body = format!("{} Anschluss in {} verpasst.", body.trim(), j.transfer_station.clone().unwrap_or_else(|| "unterwegs".into()));
@@ -159,11 +159,11 @@ pub fn compose(kind: &str, payload: &Value, facts: &Facts) -> Option<Notificatio
         "ride" if s("status").as_deref() == Some("arrived") => {
             let r = facts.ride.as_ref()?;
             let (title, body) = if r.cancelled {
-                (format!("Ausfall · {}", r.line), format!("{} Minuten angerechnet. {}", r.points, claim_line(r.claim_cents, &ngo)))
+                (format!("Ausfall · {}", r.line), format!("{} Minuten angerechnet. {}", r.minutes, claim_line(r.claim_cents, &ngo)))
             } else if r.delay_min <= 0 {
                 (format!("Pünktlich · {}", r.line), format!("Angekommen in {}. Keine Minute gewartet, dafür kein Ärger.", r.exit_station))
             } else {
-                (format!("+{} · {}", r.delay_min, r.line), format!("{} Minuten gewartet. {}", r.points, claim_line(r.claim_cents, &ngo)))
+                (format!("+{} · {}", r.delay_min, r.line), format!("{} Minuten gewartet. {}", r.minutes, claim_line(r.claim_cents, &ngo)))
             };
             Some(Notification { title, body: body.trim().to_string(), kind: "ride", data: json!({ "ride_id": s("ride_id") }) })
         }
@@ -252,7 +252,7 @@ pub async fn facts(pool: &PgPool, customer: Uuid, kind: &str, payload: &Value) -
                 line,
                 exit_station,
                 delay_min: delay.unwrap_or(0) as i64,
-                points: points as i64,
+                minutes: points as i64,
                 cancelled,
                 claim_cents: cents,
             });
@@ -277,7 +277,7 @@ pub async fn facts(pool: &PgPool, customer: Uuid, kind: &str, payload: &Value) -
                 origin,
                 destination,
                 delay_min: delay.unwrap_or(0) as i64,
-                points: points as i64,
+                minutes: points as i64,
                 cancelled,
                 missed_connection: missed,
                 incomplete,
@@ -602,7 +602,7 @@ mod tests {
     #[test]
     fn arrival_with_claim() {
         let mut f = facts_with("Bahnhofsmission Köln");
-        f.ride = Some(RideFacts { line: "RE 7".into(), exit_station: "Münster".into(), delay_min: 68, points: 68, cancelled: false, claim_cents: Some(150) });
+        f.ride = Some(RideFacts { line: "RE 7".into(), exit_station: "Münster".into(), delay_min: 68, minutes: 68, cancelled: false, claim_cents: Some(150) });
         let n = compose("ride", &json!({ "ride_id": "r1", "status": "arrived" }), &f).unwrap();
         assert_eq!(n.title, "+68 · RE 7");
         assert_eq!(n.body, "68 Minuten gewartet. Anspruch entstanden: 1,50 € für Bahnhofsmission Köln.");
@@ -621,16 +621,16 @@ mod tests {
         let n = compose("journey", &json!({ "journey_id": "j1", "transfer": true, "next_leg": { "line": "RE 10", "headsign": "Kleve", "planned_departure": "2026-09-10T15:07:00Z", "replanned": true } }), &f).unwrap();
         assert!(n.body.starts_with("Anschluss verpasst. Nächste Möglichkeit 17:07 · "));
         // Arrival with a missed connection.
-        f.journey = Some(JourneyFacts { origin: "Köln Hbf".into(), destination: "Kleve".into(), delay_min: 70, points: 70, cancelled: false, missed_connection: true, incomplete: false, transfer_station: Some("Düsseldorf Hbf".into()), claim_cents: Some(150) });
+        f.journey = Some(JourneyFacts { origin: "Köln Hbf".into(), destination: "Kleve".into(), delay_min: 70, minutes: 70, cancelled: false, missed_connection: true, incomplete: false, transfer_station: Some("Düsseldorf Hbf".into()), claim_cents: Some(150) });
         let n = compose("journey", &json!({ "journey_id": "j1", "finished": true, "arrived": true, "status": "arrived" }), &f).unwrap();
         assert_eq!(n.title, "+70 · Köln Hbf → Kleve");
         assert_eq!(n.body, "70 Minuten gewartet. Anspruch entstanden: 1,50 € für Bahnhofsmission Köln. Anschluss in Düsseldorf Hbf verpasst.");
         // A leg of a multi-leg journey is silent; an abandoned journey too.
-        f.ride = Some(RideFacts { line: "RE 7".into(), exit_station: "Hagen".into(), delay_min: 25, points: 0, cancelled: false, claim_cents: None });
+        f.ride = Some(RideFacts { line: "RE 7".into(), exit_station: "Hagen".into(), delay_min: 25, minutes: 0, cancelled: false, claim_cents: None });
         assert!(compose("ride", &json!({ "ride_id": "r1", "status": "arrived", "silent": true }), &f).is_none());
         assert!(compose("journey", &json!({ "journey_id": "j1", "finished": true, "status": "abandoned" }), &f).is_none());
         // docs/23 §3: the journey nobody closed asks one question.
-        f.journey = Some(JourneyFacts { origin: "Köln Hbf".into(), destination: "Rheine".into(), delay_min: 0, points: 0, cancelled: false, missed_connection: false, incomplete: false, transfer_station: None, claim_cents: None });
+        f.journey = Some(JourneyFacts { origin: "Köln Hbf".into(), destination: "Rheine".into(), delay_min: 0, minutes: 0, cancelled: false, missed_connection: false, incomplete: false, transfer_station: None, claim_cents: None });
         let n = compose("journey", &json!({ "journey_id": "j1", "stale": true }), &f).unwrap();
         assert_eq!(n.title, "Bist du angekommen?");
         assert_eq!(n.body, "Deine Fahrt nach Rheine läuft noch. Sag kurz Bescheid.");
@@ -640,13 +640,13 @@ mod tests {
     #[test]
     fn arrival_variants() {
         let mut f = facts_with("X");
-        f.ride = Some(RideFacts { line: "S 6".into(), exit_station: "".into(), delay_min: 14, points: 14, cancelled: false, claim_cents: None });
+        f.ride = Some(RideFacts { line: "S 6".into(), exit_station: "".into(), delay_min: 14, minutes: 14, cancelled: false, claim_cents: None });
         let n = compose("ride", &json!({ "status": "arrived" }), &f).unwrap();
         assert_eq!((n.title.as_str(), n.body.as_str()), ("+14 · S 6", "14 Minuten gewartet."));
-        f.ride = Some(RideFacts { line: "RB 48".into(), exit_station: "".into(), delay_min: 0, points: 60, cancelled: true, claim_cents: Some(150) });
+        f.ride = Some(RideFacts { line: "RB 48".into(), exit_station: "".into(), delay_min: 0, minutes: 60, cancelled: true, claim_cents: Some(150) });
         let n = compose("ride", &json!({ "status": "arrived" }), &f).unwrap();
         assert!(n.title.starts_with("Ausfall"));
-        f.ride = Some(RideFacts { line: "RE 1".into(), exit_station: "Aachen Hbf".into(), delay_min: 0, points: 0, cancelled: false, claim_cents: None });
+        f.ride = Some(RideFacts { line: "RE 1".into(), exit_station: "Aachen Hbf".into(), delay_min: 0, minutes: 0, cancelled: false, claim_cents: None });
         let n = compose("ride", &json!({ "status": "arrived" }), &f).unwrap();
         assert_eq!(n.title, "Pünktlich · RE 1");
         assert!(n.body.starts_with("Angekommen in Aachen Hbf."));
