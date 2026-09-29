@@ -394,11 +394,10 @@ gilt: kein Satz, den die Implementierung nicht hält.
 1. ✅ Prototyp als `stellwerk stations outlines --dry-run` (29. September, oben): ganz Deutschland,
    Zählung pro Rang, eine Deutschlandkarte statt einer Tabelle je Bundesland, die Verworfenen und
    30 Zeichnungen in `docs/assets/48`.
-2. ◐ Tabelle `station_outlines` (Migration 0043), `POST /admin/stations/outlines` (ganz oder gar
-   nicht, Prüfung jeder Zeile, unter 80 % nur mit `--force`) und `stellwerk stations outlines`
-   ohne `--dry-run` — gebaut und auf Staging erprobt (29. September: 6.129 Gelände übernommen).
-   Offen: `stellwerk --prod stations outlines` nach der nächsten Freigabe, dann
-   `deploy/stations-to-staging.sh`, das die Gelände mitnimmt.
+2. ✅ Tabelle `station_outlines` (Migration 0043), `POST /admin/stations/outlines` (ganz oder gar
+   nicht, Prüfung jeder Zeile, unter 80 % nur mit `--force`) und `stellwerk stations outlines`.
+   In Produktion seit 29. September (ab7c5f2): 6.129 Gelände, OSM-Stand 29. September; mit
+   `deploy/stations-to-staging.sh` auf Staging.
 3. `bahnhofsumrisse.bin` und die Seite `verspaetomat.de/daten` mit Namensnennung.
 4. iOS: Ringe, Tastpunkte, „am Bahnhof", die eine Registrierungsfunktion, die Notausgänge;
    Android: Ringe und Tastpunkte dauerhaft. Entwicklungsseite und Protokoll.

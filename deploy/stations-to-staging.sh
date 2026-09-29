@@ -30,7 +30,9 @@ main() {
     TABLES+=(-t station_outlines)
   fi
   truncate+=", station_outlines"
-  echo "== production → staging: ${TABLES[*]//-t /}"
+  local names=()
+  for t in "${TABLES[@]}"; do [[ "$t" == -t ]] || names+=("$t"); done
+  echo "== production → staging: ${names[*]}"
   ssh "$PROD" "cd /opt/verspaetomat/deploy && docker compose exec -T db pg_dump -U verspaetomat -d verspaetomat --data-only ${TABLES[*]}" \
     | ssh "$STAGING" "cd /opt/verspaetomat/deploy && docker compose exec -T db psql -q -U verspaetomat -d verspaetomat -v ON_ERROR_STOP=1 -1 \
         -c 'truncate $truncate' -f -" >/dev/null
