@@ -51,56 +51,67 @@
 Pfarrer-Eggart-Str. 5
 88085 Langenargen
 E-Mail: info@zoom7.de. Siehe Impressum.</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Kein Konto, aber ein Gerät</h2>
     <p>Verspätomat hat kein Benutzerkonto. Beim ersten Start erzeugt die App eine zufällige Gerätekennung und einen Zugangsschlüssel. Der Schlüssel bleibt im Schlüsselbund deines Telefons; bei uns liegt nur ein Prüfwert. Alles, was wir über dich speichern, hängt an dieser Kennung, nicht an deinem Namen.</p><p>Der Wiederherstellungscode (Einstellungen → Konto) ist der einzige Weg, dein Konto auf ein anderes Gerät zu holen. Wir können ihn nicht wiederherstellen.</p><p>Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Nutzung der App).</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Was wir speichern</h2>
     <p>Beim Fahren: den Bahnhof, an dem du eingecheckt hast, die Position, mit der du das bestätigt hast, den Zug, den Ausstieg, die Zeiten laut Fahrplan und Live-Daten, die daraus gezählten Minuten und Abzeichen. Optional einen Anzeigenamen, den du selbst wählst.</p><p>Beim ersten Antrag, nicht früher: Name, Anschrift, deine private E-Mail-Adresse und bei Zeitkarten die Ticketnummer. Name, Anschrift und Ticketnummer stehen auf dem Antragsformular, weil das Eisenbahnunternehmen sie verlangt. Deine private E-Mail-Adresse steht nicht darauf: Im Formular steht die Verspätomat-Adresse dieses Antrags, damit die Antwort dorthin geht. Deine eigene Adresse benutzen wir nur, um dir jede Mail in Kopie zu schicken.</p><p>Pro Antrag: das Bild deines Tickets für die betroffenen Monate und deine Unterschrift (getippt oder gezeichnet). Beides landet nur im PDF und in der Mail an das Unternehmen.</p><p>Der Schriftverkehr über deine Verspätomat-Adresse: die Anträge, die du abschickst, und die Antworten des Unternehmens. Dazu unten mehr.</p><p>Einstellungen wie Ticketart, gewählter Verein, Standortmodus, stumme Bahnhöfe.</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Standort</h2>
     <p>Solange die App offen ist und du nicht gerade auf einer Fahrt bist, lässt sie sich von deinem Telefon melden, wenn du dich um mehr als 500 Meter bewegt hast — grob, nicht metergenau. Nach einer frischen Position fragt sie beim Start, bei der Rückkehr in den Vordergrund und immer dann, wenn sich für sie etwas geändert hat. Welche Bahnhöfe in der Nähe liegen und was hinter einem Namen im Suchfeld steckt, beantwortet die App auf dem Telefon, aus einem Bahnhofsverzeichnis, das sie selbst dabeihat; diese Positionen schickt sie uns nicht. Was die Hintergrund-Schicht tut, steht weiter unten.</p><p>Dieses Verzeichnis ist in der App schon eingebaut; etwa einmal pro Woche sieht sie auf verspaetomat.de nach, ob es eine neuere Fassung gibt. Dabei geht keine Kennung, kein Schlüssel und keine Position mit — unser Webserver sieht dabei deine IP-Adresse, wie bei jedem Aufruf einer Webseite.</p><p>Beim Einchecken schickst du uns eine Position mit. Sie bestätigt, dass du wirklich am Abfahrtsbahnhof stehst; nur dann zählt die Fahrt in den Ranglisten. Sie hängt an dieser einen Fahrt und verschwindet mit ihr — und aus den Positionen deiner Fahrten entstehen die Zonen, um die es gleich geht.</p><p>Hinweis am Bahnhof im Hintergrund (Standard, abschaltbar): Mit der Freigabe „Immer“ merkt sich dein Telefon bis zu 19 Bahnhöfe als Zonen — bis zu 15 Bahnhöfe, an denen du in den letzten 30 Tagen eingecheckt hast, dein Stammbahnhof ist immer darunter, dazu die vier nächsten in deiner Umgebung. Weiter als 50 Kilometer von all diesen Bahnhöfen entfernt zählen nur noch die nächsten um dich herum; auf Android können es dann bis zu 20 sein. Dazu kommt ein weiterer Kreis um deinen Aufenthaltsort: Auf dem iPhone reicht er bis kurz vor den nächsten Bahnhof, den dein Telefon nicht ohnehin beobachtet — mindestens ein Kilometer, auf freier Strecke bis zu 200 Kilometer; auf Android sind es immer 8 Kilometer. Das Betriebssystem weckt die App nur, wenn du eine dieser Zonen betrittst oder verlässt.</p><p>Beim Betreten einer Bahnhofszone sieht die App nach, ob du wirklich dort stehst. Auf dem iPhone schaltet sie dafür bis zu sechs Minuten lang ihre eigene Ortung ein und meldet sich etwa 45 Sekunden, nachdem eine Position auf 50 Meter herangekommen ist; kommt keine so nah, geht die Ortung ohne Hinweis wieder aus. Auf Android nimmt sie nach drei Minuten in der Zone eine einzelne Position und meldet sich, wenn die höchstens 300 Meter entfernt ist oder gar nicht erst zustande kommt. Diese Positionen verlassen das Telefon nicht.</p><p>Auch im Hintergrund fragt die App niemanden, welche Bahnhöfe hier sind: Sie schlägt in demselben Verzeichnis nach, das sie ohnehin dabeihat. Für den Hinweis am Bahnhof verlässt damit nichts dein Telefon — keine Position, keine Kennung, keine Anfrage. Auch nicht während einer Fahrt, und auch nicht, wenn dein Telefon neu sortiert, welche Bahnhöfe es beobachtet. Früher ging diese Frage an unseren Server, auf einer längeren Fahrt mehrmals in der Stunde; seit das Verzeichnis auf dem Telefon liegt, entfällt sie.</p><p>Während der Fahrt folgen wir dem Zug in den Fahrplandaten, nicht deinem Telefon.</p><p>Bei Dritten landet davon nichts: Seit das Bahnhofsverzeichnis bei uns liegt, bekommt kein anderer Dienst deine Koordinaten zu sehen. Bei uns landet eine Position nur noch an einer einzigen Stelle: beim Einchecken, wo sie an dieser Fahrt hängt und mit ihr verschwindet. Standortverläufe führen wir nicht.</p><p>Ohne Standortfreigabe funktioniert die App vollständig; du wählst den Bahnhof dann selbst. Abschalten: Einstellungen → „Hinweis am Bahnhof“ oder Standortmodus „Nur wenn die App offen ist“; in den Systemeinstellungen die Freigabe „Immer“ entziehen.</p><p>Rechtsgrundlage: deine Einwilligung über die Standortfreigabe des Betriebssystems (Art. 6 Abs. 1 lit. a DSGVO), jederzeit in den Systemeinstellungen widerrufbar.</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Deine Verspätomat-Adresse</h2>
     <p>Für Anträge bekommst du eine persönliche E-Mail-Adresse auf unserer Domain, zum Beispiel fahrgast-a1b2c3d4@users.verspaetomat.de. Jeder einzelne Antrag bekommt zusätzlich eine eigene Adresse, zum Beispiel antrag-9c31af02@users.verspaetomat.de: von ihr geht dieser Antrag an das Eisenbahnunternehmen, in Kopie an deine private E-Mail-Adresse, und sie steht auch als Kontaktadresse im Formular. Antworten des Unternehmens kommen dort an, werden sofort und unverändert an deine private E-Mail-Adresse weitergeleitet und in der App unter „Antwort“ angezeigt.</p><p>Wir behandeln diese Adressen als deine. Das Fernmeldegeheimnis (§ 3 TDDDG) gilt. Eine Software liest jede eingehende Mail nur, um drei Dinge zu erkennen: welche Fahrten das Unternehmen bezahlt oder ablehnt, den Betrag, den es dafür nennt, und ob es eine Rückfrage stellt. Dafür lesen Sprachmodelle von OpenAI den Text der Antwort; bezahlt oder abgelehnt ist eine Fahrt nur, wenn zwei von ihnen dasselbe lesen. Vorher entfernen wir deinen Namen, deine Anschrift, E-Mail-Adressen, Ticketnummer, IBAN und Telefonnummern, soweit eine Software sie erkennen kann, und den zitierten Verlauf (siehe Dienstleister). Mehr wird nicht ausgewertet, nichts wird zu anderen Zwecken verwendet, niemand bei uns liest mit. Antworten auf Rückfragen schreibst du selbst in der App; wir schicken nichts, was du nicht abgeschickt hast.</p><p>Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO; für die Adresse und die Auswertung deine Einwilligung beim ersten Antrag (Art. 6 Abs. 1 lit. a DSGVO).</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Wer was bekommt</h2>
     <p>Das Eisenbahnunternehmen, genauer seine Fahrgastrechte-Stelle, bekommt das ausgefüllte Formular mit deinen Angaben, Ticketbild und Unterschrift, weil du es dorthin schickst. Was es damit tut, regelt seine eigene Datenschutzerklärung.</p><p>Der Verein, den du als Zweck gewählt hast, bekommt Geld vom Eisenbahnunternehmen, nicht von uns. Er erfährt von uns nicht, wer du bist, und schickt uns nichts. Ob Geld fließt, entnehmen wir allein der Antwort des Eisenbahnunternehmens.</p><p>Wir selbst geben deine Daten an niemanden weiter und verkaufen nichts.</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Dienstleister</h2>
     <p>Fahrplan- und Verspätungsdaten: Transitous (transitous.org), ein offener Dienst auf Basis öffentlicher Fahrplandaten. Er bekommt die Zugabfragen unseres Servers, keine Kennung von dir und keine Position. Das Verzeichnis der Bahnhöfe liegt bei uns: Wir übernehmen es aus den Fahrplandaten von DELFI e.V. und des VBB (Lizenz CC BY 4.0, bezogen über Transitous) und halten es selbst vor. Die App hat dieses Verzeichnis dabei und beantwortet „Bahnhöfe in der Nähe“ und die Bahnhofssuche damit auf dem Telefon — im Vordergrund wie im Hintergrund. Wo du bist, erfährt außer dir nur unser Server, und nur die eine Position, die du beim Einchecken selbst mitschickst.</p><p>E-Mail: Postmark, ein Dienst der ActiveCampaign, LLC, Chicago, USA, stellt deine Anträge zu und übergibt Antworten an uns. Damit verlassen diese Mails die EU; Grundlage sind ein Auftragsverarbeitungsvertrag und die Standardvertragsklauseln der EU-Kommission.</p><p>Antworten lesen: OpenAI, San Francisco, USA. Sprachmodelle lesen eingehende Antworten der Eisenbahnunternehmen, um zu erkennen, ob und wie viel sie zahlen. Sie bekommen den Text ohne zitierten Verlauf und, soweit eine Software sie erkennen kann, ohne Namen, Anschrift, E-Mail-Adressen, Ticketnummer, IBAN und Telefonnummern, dazu Datum, Zug, Strecke und Verspätung der beantragten Fahrten. OpenAI verwendet diese Daten nicht zum Training und bewahrt sie höchstens 30 Tage zur Missbrauchserkennung auf. Grundlage sind ein Auftragsverarbeitungsvertrag und die Standardvertragsklauseln der EU-Kommission.</p><p>Mitteilungen: Apple (APNs) und Google (Firebase Cloud Messaging) stellen Push-Nachrichten zu, wenn du Mitteilungen erlaubst. Sie sehen einen Zustellschlüssel und den Text der Mitteilung („Angekommen, +14“), sonst nichts.</p><p>Server: Hetzner Online GmbH, Gunzenhausen. Der Dienst läuft auf Servern in der Europäischen Union.</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Wie lange</h2>
     <p>Fahrten, Minuten, Abzeichen und die Einträge im Konto bleiben, bis du sie löschst.</p><p>Ticketbilder, Unterschrift und die Anhänge der Antworten löschen wir, sobald ein Antrag abgeschlossen ist (bestätigt, abgelehnt oder verfallen). Wenn du unter Einstellungen „Korrespondenz nach Abschluss behalten“ einschaltest, bleiben sie, bis du es ausschaltest oder alles löschst.</p><p>Offene Ansprüche verfallen drei Monate nach der Fahrt; danach steht nur noch der Eintrag „verfallen“ im Konto.</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Ranglisten und Community</h2>
     <p>Die Zahlen unter „Wir“ sind Summen über alle Fahrgäste ohne Namen. In den Ranglisten erscheinst du nur mit deinem Anzeigenamen und nur, wenn „Mich in Ranglisten zeigen“ eingeschaltet ist.</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Kein Tracking, keine Werbung</h2>
     <p>Die App enthält keine Werbung, keine Analyse-SDKs und keine Tracker. Wir messen nicht, wie du die App nutzt. Unser Server schreibt technische Protokolle: Zeitpunkt, angefragte Adresse, Fehler. Seit die Bahnhofsfrage auf dem Telefon beantwortet wird, steht in keiner dieser Adressen mehr eine Position. Wir werten diese Protokolle nicht aus und geben sie nicht weiter; sie liegen auf unserem Server in der Europäischen Union.</p>
+    
   </section>
   
   <section class="doc-abschnitt">
     <h2>Deine Rechte</h2>
     <p>Auskunft und Übertragbarkeit: Schreib an info@zoom7.de. Wir schicken dir alles, was wir über dich gespeichert haben, als Datei (JSON), spätestens innerhalb eines Monats.</p><p>Löschung: Einstellungen → Deine Daten → „Alles löschen“ entfernt Konto, Fahrten, Anträge, Anhänge und deine Verspätomat-Adresse sofort und endgültig. Ein bereits abgeschickter Antrag liegt beim Eisenbahnunternehmen weiter; seine Antwort sehen wir dann nicht mehr.</p><p>Berichtigung: Name, Anschrift, E-Mail-Adresse und Ticketnummer änderst oder löschst du unter Einstellungen → Anträge. Deinen Anzeigenamen unter Einstellungen → Konto.</p><p>Widerspruch, Beschwerde: schreib an info@zoom7.de. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, für uns ist das der Landesbeauftragte für den Datenschutz und die Informationsfreiheit Baden-Württemberg.</p>
+    
   </section>
   
 
@@ -120,12 +131,14 @@ E-Mail: info@zoom7.de. Siehe Impressum.</p>
         <p class="fuss-zeile">Verspätungen sammeln. Gutes tun.</p>
       </div>
       <nav class="fuss-zeilen">
-        <a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><a href="/bote">Wie wir Anträge weiterleiten</a><a href="/loeschen">Daten löschen</a>
+        <a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><a href="/bote">Wie wir Anträge weiterleiten</a><a href="/loeschen">Daten löschen</a><a href="/daten">Bahnhofsgelände</a>
         <a href="mailto:info@zoom7.de">Kontakt</a>
       </nav>
     </div>
     
     <p class="fuss-unten">Gebaut in Deutschland. Kein Tracking, keine Anfrage an Dritte.</p>
+    
+    <p class="fuss-unten">Bahnhofsgelände: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap-Mitwirkende</a>, <a href="/daten">ODbL</a>.</p>
   </footer>
 
 </div>

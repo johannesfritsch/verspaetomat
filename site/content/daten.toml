@@ -1,0 +1,43 @@
+# Die offenen Daten, die Verspätomat veröffentlicht (Issue #64, docs/48). Die Bahnhofsgelände
+# stammen aus OpenStreetMap und stehen deshalb unter der ODbL: Wer sie veröffentlicht, nennt ihre
+# Herkunft und bietet die abgeleitete Datenbank unter derselben Lizenz an. Diese Seite tut beides.
+# Keine eckigen Klammern im Text — die Prüfung auf Platzhalter hält sie für einen.
+id = "daten"
+eyebrow = "Offene Daten"
+title = "Bahnhofsgelände"
+lead = "Wo ein Bahnhof anfängt und aufhört — für rund 6.100 Bahnhöfe in Deutschland, aus OpenStreetMap, zum Herunterladen."
+
+[[sections]]
+heading = "Was es ist"
+paragraphs = [
+  "Für jeden Bahnhof, den Verspätomat kennt und den OpenStreetMap gut genug beschreibt, ein Gelände: die Bahnsteige, das Empfangsgebäude und die Bahnhofsfläche, zusammengefasst zu einer Fläche, die 20 Meter weiter reicht. Dazu ein Ring um das ganze Gelände und bis zu sechs kleinere Kreise, die es abdecken.",
+  "Dafür ist es gebaut: Dein Telefon soll erkennen, dass du auf einem Bahnhof bist, und nicht bloß in seiner Nähe. Das Telefon kann nur Kreise überwachen, keine Flächen; die Kreise sind deshalb so gewählt, dass sie das Gelände nachzeichnen, ohne kleiner zu werden, als ein Telefon sie verlässlich meldet.",
+  "Wo OpenStreetMap einen Bahnhof nicht oder zu dünn beschreibt, gibt es kein Gelände. Das betrifft etwa jeden zwanzigsten Bahnhof.",
+]
+
+[[sections]]
+heading = "Herunterladen"
+paragraphs = [
+  "Eine GeoJSON-Datei, ein Feature pro Bahnhof: das Gelände als Fläche, dazu Name, unsere Kennung, der Ring, die Kreise und die OpenStreetMap-Objekte, aus denen das Gelände gebaut ist. Im Kopf der Datei stehen Lizenz, Quelle, der Stand der OpenStreetMap-Daten und der Stand des Programms, das sie gebaut hat.",
+  "Gebaut wird sie von einem Teil von Verspätomat (stellwerk stations outlines) aus dem Deutschland-Auszug von OpenStreetMap, jedes Mal neu und vollständig.",
+]
+links = [
+  { label = "bahnhofsumrisse.geojson (rund 4,5 MB, gepackt 1,2 MB)", href = "/daten/bahnhofsumrisse.geojson" },
+]
+
+[[sections]]
+heading = "Lizenz und Herkunft"
+paragraphs = [
+  "Die Bahnhofsgelände sind aus OpenStreetMap abgeleitet und stehen unter der Open Database License (ODbL) 1.0. Du darfst sie nutzen, verändern und weitergeben, solange du die Herkunft nennst und eine veränderte Datenbank unter derselben Lizenz anbietest.",
+  "Quelle: © OpenStreetMap-Mitwirkende. Die Lizenz gilt für diese Gelände-Datei, nicht für die übrigen Inhalte dieser Website und nicht für die App.",
+]
+links = [
+  { label = "OpenStreetMap: Urheberrecht und Lizenz", href = "https://www.openstreetmap.org/copyright" },
+  { label = "Open Database License 1.0", href = "https://opendatacommons.org/licenses/odbl/1-0/" },
+]
+
+[[sections]]
+heading = "Ein Gelände stimmt nicht?"
+paragraphs = [
+  "Dann steht es in OpenStreetMap so. Am besten verbesserst du es dort: Bahnsteige als railway=platform, das Empfangsgebäude als building=train_station. Beim nächsten Neubau übernehmen wir es. Oder schreib uns, welcher Bahnhof es ist.",
+]

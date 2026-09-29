@@ -15,6 +15,7 @@
   <section class="doc-abschnitt">
     <h2>{{ s.heading }}</h2>
     {% for p in s.paragraphs %}<p>{{ p }}</p>{% endfor %}
+    {% if s.links %}<ul class="doc-links">{% for l in s.links %}<li><a href="{{ l.href }}">{{ l.label }}</a></li>{% endfor %}</ul>{% endif %}
   </section>
   {% endfor %}
 

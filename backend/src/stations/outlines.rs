@@ -801,6 +801,140 @@ pub fn check_row(r: &OutlineRow) -> Result<(), String> {
     Ok(())
 }
 
+// -- the phone file ----------------------------------------------------------------------------
+
+/// `bahnhofsumrisse.bin` (docs/48, „Die Datei fürs Telefon"): the premises as the phone reads
+/// them, beside the station extract (docs/45) and built the same way. A 32-byte header, `count`
+/// records of 20 bytes sorted by station id, then a blob. All little-endian.
+///
+/// Header: `VSOL`, format u16, header_len u16, count u32, record_len u32, blob_len u32,
+/// generated u32 (the OSM day, unix), version u32 (the import, unix), crc32 u32 over records and
+/// blob. Record: station id u32, ring lat i32 and lon i32 (micro-degrees), ring radius u16 (m),
+/// touch count u8, corner count u8, blob offset u32. At the offset: every touch point as lat i32,
+/// lon i32, r u16, then every corner as lat i32, lon i32.
+///
+/// The same growth rules as the station extract: a longer header or record is skipped by an older
+/// reader, and only a changed meaning bumps the format.
+pub const FILE_MAGIC: [u8; 4] = *b"VSOL";
+pub const FILE_FORMAT: u16 = 1;
+pub const FILE_HEADER_LEN: u16 = 32;
+pub const FILE_RECORD_LEN: u32 = 20;
+
+fn micro(x: f64) -> i32 {
+    (x * 1_000_000.0).round() as i32
+}
+
+pub fn render_file(set: &OutlineSet, generated: u32, version: u32) -> Result<Vec<u8>> {
+    let mut rows: Vec<&OutlineRow> = set.outlines.iter().collect();
+    rows.sort_by_key(|r| r.station);
+    anyhow::ensure!(!rows.is_empty(), "a file of no premises is not a file");
+    let mut recs = Vec::with_capacity(rows.len() * FILE_RECORD_LEN as usize);
+    let mut blob = Vec::new();
+    let mut last = None;
+    for r in rows {
+        check_row(r).map_err(|e| anyhow::anyhow!(e))?;
+        anyhow::ensure!(last != Some(r.station), "vs:{} twice", r.station);
+        last = Some(r.station);
+        recs.extend_from_slice(&r.station.to_le_bytes());
+        recs.extend_from_slice(&micro(r.ring.lat).to_le_bytes());
+        recs.extend_from_slice(&micro(r.ring.lon).to_le_bytes());
+        recs.extend_from_slice(&(r.ring.r.round() as u16).to_le_bytes());
+        recs.push(r.touch.len() as u8);
+        recs.push(r.outline.len() as u8);
+        recs.extend_from_slice(&u32::try_from(blob.len())?.to_le_bytes());
+        for t in &r.touch {
+            blob.extend_from_slice(&micro(t.lat).to_le_bytes());
+            blob.extend_from_slice(&micro(t.lon).to_le_bytes());
+            blob.extend_from_slice(&(t.r.round().min(u16::MAX as f64) as u16).to_le_bytes());
+        }
+        for [la, lo] in &r.outline {
+            blob.extend_from_slice(&micro(*la).to_le_bytes());
+            blob.extend_from_slice(&micro(*lo).to_le_bytes());
+        }
+    }
+    let mut h = crc32fast::Hasher::new();
+    h.update(&recs);
+    h.update(&blob);
+    let mut out = Vec::with_capacity(FILE_HEADER_LEN as usize + recs.len() + blob.len());
+    out.extend_from_slice(&FILE_MAGIC);
+    out.extend_from_slice(&FILE_FORMAT.to_le_bytes());
+    out.extend_from_slice(&FILE_HEADER_LEN.to_le_bytes());
+    out.extend_from_slice(&u32::try_from(recs.len() / FILE_RECORD_LEN as usize)?.to_le_bytes());
+    out.extend_from_slice(&FILE_RECORD_LEN.to_le_bytes());
+    out.extend_from_slice(&u32::try_from(blob.len())?.to_le_bytes());
+    out.extend_from_slice(&generated.to_le_bytes());
+    out.extend_from_slice(&version.to_le_bytes());
+    out.extend_from_slice(&h.finalize().to_le_bytes());
+    out.extend_from_slice(&recs);
+    out.extend_from_slice(&blob);
+    Ok(out)
+}
+
+/// The file read back, as the phone will: every check refuses the whole file.
+#[derive(Debug)]
+pub struct ParsedFile {
+    pub generated: u32,
+    pub version: u32,
+    pub crc32: u32,
+    pub rows: Vec<OutlineRow>,
+}
+
+pub fn parse_file(b: &[u8]) -> Result<ParsedFile> {
+    let u16_at = |o: usize| u16::from_le_bytes([b[o], b[o + 1]]);
+    let u32_at = |o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+    let i32_at = |o: usize| i32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+    anyhow::ensure!(b.len() >= 32, "{} bytes is no header", b.len());
+    anyhow::ensure!(b[0..4] == FILE_MAGIC, "not a VSOL file");
+    anyhow::ensure!(u16_at(4) == FILE_FORMAT, "format {}", u16_at(4));
+    let (hl, count, rl, bl) = (u16_at(6) as usize, u32_at(8) as usize, u32_at(12) as usize, u32_at(16) as usize);
+    anyhow::ensure!(hl >= 32 && rl >= FILE_RECORD_LEN as usize, "header {hl}, record {rl}");
+    anyhow::ensure!(hl as u64 + (rl as u64) * (count as u64) + bl as u64 == b.len() as u64, "length does not add up");
+    let blob0 = hl + rl * count;
+    let crc = crc32fast::hash(&b[hl..]);
+    anyhow::ensure!(crc == u32_at(28), "crc32 does not match");
+    let mut rows = Vec::with_capacity(count);
+    let mut last = 0u32;
+    for i in 0..count {
+        let o = hl + i * rl;
+        let station = u32_at(o);
+        anyhow::ensure!(station > last, "record {i} out of order");
+        last = station;
+        let (nt, nc, off) = (b[o + 14] as usize, b[o + 15] as usize, u32_at(o + 16) as usize);
+        anyhow::ensure!(off + nt * 10 + nc * 8 <= bl, "record {i} points past the blob");
+        let at = blob0 + off;
+        let touch = (0..nt).map(|k| Circle { lat: i32_at(at + k * 10) as f64 / 1e6, lon: i32_at(at + k * 10 + 4) as f64 / 1e6, r: u16_at(at + k * 10 + 8) as f64 }).collect();
+        let c0 = at + nt * 10;
+        let outline = (0..nc).map(|k| [i32_at(c0 + k * 8) as f64 / 1e6, i32_at(c0 + k * 8 + 4) as f64 / 1e6]).collect();
+        let row = OutlineRow { station, outline, ring: Circle { lat: i32_at(o + 4) as f64 / 1e6, lon: i32_at(o + 8) as f64 / 1e6, r: u16_at(o + 12) as f64 }, touch, osm: Vec::new() };
+        check_row(&row).map_err(|e| anyhow::anyhow!("record {i}: {e}"))?;
+        rows.push(row);
+    }
+    Ok(ParsedFile { generated: u32_at(20), version: u32_at(24), crc32: crc, rows })
+}
+
+/// The published database (docs/48, „Was wir veröffentlichen"): one feature per station, the
+/// premise as its geometry, ring and touch points as properties. ODbL, named in the file.
+pub fn public_geojson(set: &OutlineSet, names: &HashMap<u32, String>, commit: Option<&str>) -> serde_json::Value {
+    use serde_json::json;
+    let mut rows: Vec<&OutlineRow> = set.outlines.iter().collect();
+    rows.sort_by_key(|r| r.station);
+    let features: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            let ring: Vec<(f64, f64)> = r.outline.iter().map(|[a, b]| (*a, *b)).collect();
+            json!({"type": "Feature", "id": format!("vs:{}", r.station),
+                "geometry": {"type": "Polygon", "coordinates": [coords_json(&ring)]},
+                "properties": {"name": names.get(&r.station), "ring": r.ring, "touch": r.touch, "osm": r.osm}})
+        })
+        .collect();
+    json!({"type": "FeatureCollection",
+        "name": "Verspätomat Bahnhofsgelände",
+        "license": "ODbL-1.0", "license_url": "https://opendatacommons.org/licenses/odbl/1-0/",
+        "attribution": "© OpenStreetMap-Mitwirkende, https://www.openstreetmap.org/copyright",
+        "description": "Bahnhofsgelände aus OpenStreetMap: Bahnsteige, Empfangsgebäude und Bahnhofsflächen je Bahnhof, ihre konvexe Hülle 20 m weiter; dazu der Ring und die Tastpunkte, die die App überwacht. Gebaut von `stellwerk stations outlines` (backend/src/stations/outlines.rs).",
+        "osm_timestamp": set.osm_timestamp, "commit": commit, "features": features})
+}
+
 // -- report -------------------------------------------------------------------------------------
 
 /// How many other stations' rings reach into this one's — what iOS has to keep registered next to
@@ -1086,6 +1220,32 @@ mod tests {
     fn the_level_word_does_not_split_a_station() {
         assert_eq!(group_key("Köln Messe/Deutz (tief)"), group_key("Köln Messe/Deutz"));
         assert_eq!(group_key("Frankfurt (Main) Hauptbahnhof tief"), group_key("Frankfurt (Main) Hbf"));
+    }
+
+    /// The phone file reads back to the rows it was made from, to the micro-degree, and a single
+    /// flipped byte is refused.
+    #[test]
+    fn the_phone_file_reads_back_and_refuses_a_damaged_copy() {
+        let row = |station: u32| OutlineRow {
+            station,
+            outline: vec![[50.9425, 6.9575], [50.9425, 6.9595], [50.944, 6.9595]],
+            ring: Circle { lat: 50.943, lon: 6.9587, r: 429.0 },
+            touch: vec![Circle { lat: 50.9431, lon: 6.9581, r: 150.0 }, Circle { lat: 50.9428, lon: 6.9592, r: 135.0 }],
+            osm: vec!["n1".into()],
+        };
+        let set = OutlineSet { osm_timestamp: Some("2026-09-29".into()), outlines: vec![row(7), row(3)] };
+        let bytes = render_file(&set, 1_790_640_000, 1_790_700_000).unwrap();
+        let back = parse_file(&bytes).unwrap();
+        assert_eq!((back.generated, back.version), (1_790_640_000, 1_790_700_000));
+        assert_eq!(back.rows.iter().map(|r| r.station).collect::<Vec<_>>(), vec![3, 7]);
+        assert_eq!(back.rows[0].ring, row(3).ring);
+        assert_eq!(back.rows[0].touch, row(3).touch);
+        assert_eq!(back.rows[0].outline, row(3).outline);
+        let mut bad = bytes.clone();
+        let last = bad.len() - 1;
+        bad[last] ^= 1;
+        assert!(parse_file(&bad).is_err());
+        assert!(parse_file(&bytes[..bytes.len() - 1]).is_err());
     }
 
     fn st(id: u32, name: &str, lat: f64, lon: f64, rank: u8) -> ExtractStation {

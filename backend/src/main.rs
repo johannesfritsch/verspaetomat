@@ -305,7 +305,10 @@ pub fn router(state: AppState) -> Router {
         // default body limit — and it arrives in one piece because the matching has to see the
         // whole country at once to know what is missing from it.
         .route("/admin/stations/import", post(admin::stations_import).layer(DefaultBodyLimit::max(32 * 1024 * 1024)))
-        .route("/admin/stations/outlines", post(admin::stations_outlines).layer(DefaultBodyLimit::max(32 * 1024 * 1024)))
+        .route(
+            "/admin/stations/outlines",
+            get(admin::stations_outlines_get).post(admin::stations_outlines).layer(DefaultBodyLimit::max(32 * 1024 * 1024)),
+        )
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

@@ -221,6 +221,16 @@ pub struct Doc {
 pub struct Section {
     pub heading: String,
     pub paragraphs: Vec<String>,
+    /// Links under the paragraphs. Paragraphs are text, never markup; a page that has to point
+    /// somewhere (the data download, a licence) says so here. The app's texts have none.
+    #[serde(default)]
+    pub links: Vec<Link>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Link {
+    pub label: String,
+    pub href: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -242,6 +252,8 @@ pub struct Site {
     pub index: Index,
     pub legal: Legal,
     pub loeschen: Doc,
+    /// The open data we publish and its licence (issue #64, docs/48).
+    pub daten: Doc,
 }
 
 impl Site {
@@ -250,12 +262,13 @@ impl Site {
         let index: Index = toml::from_str(&read(&c.join("index.toml"))?).context("content/index.toml")?;
         let legal: Legal = serde_json::from_str(&read(&c.join("legal.json"))?).context("content/legal.json")?;
         let loeschen: Doc = toml::from_str(&read(&c.join("loeschen.toml"))?).context("content/loeschen.toml")?;
-        Ok(Site { index, legal, loeschen })
+        let daten: Doc = toml::from_str(&read(&c.join("daten.toml"))?).context("content/daten.toml")?;
+        Ok(Site { index, legal, loeschen, daten })
     }
 
-    /// Every document the site publishes: the app's three, plus the deletion page.
+    /// Every document the site publishes: the app's three, the deletion page, the open data.
     pub fn docs(&self) -> Vec<&Doc> {
-        self.legal.docs.iter().chain(std::iter::once(&self.loeschen)).collect()
+        self.legal.docs.iter().chain([&self.loeschen, &self.daten]).collect()
     }
 
     /// `legal.dart` still carries `[Name]`, `[Straße Nr]`, `[PLZ Ort]`. An Impressum that says

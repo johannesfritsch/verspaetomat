@@ -722,4 +722,13 @@ async fn outlines_replace_the_table_whole_or_not_at_all(pool: PgPool) {
     let (_, v) = admin(&app, "GET", "/admin/stations", Value::Null).await;
     assert_eq!(v["outlines"]["count"], 3);
     assert_eq!(v["outlines"]["osm_timestamp"], "2026-09-29");
+
+    // What the phone file and the GeoJSON are made from: the rows back, with names.
+    let (st, v) = admin(&app, "GET", "/admin/stations/outlines", Value::Null).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["outlines"].as_array().unwrap().len(), 3);
+    assert_eq!(v["names"][ids[0].to_string()], "Köln Hbf");
+    let set: crate::stations::outlines::OutlineSet = serde_json::from_value(json!({"osm_timestamp": v["osm_timestamp"], "outlines": v["outlines"]})).unwrap();
+    let bytes = crate::stations::outlines::render_file(&set, 0, 1).unwrap();
+    assert_eq!(crate::stations::outlines::parse_file(&bytes).unwrap().rows.len(), 3);
 }

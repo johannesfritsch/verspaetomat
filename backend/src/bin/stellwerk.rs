@@ -20,6 +20,7 @@
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
 //!   stellwerk stations outlines [--from germany-latest.osm.pbf] [--out <dir>] [--dry-run] [--force]
+//!   stellwerk stations outlines-file [--out <dir>] [--keep 1] [--dry-run]
 //!   stellwerk switch …                     (alter Name für flags)
 //!   stellwerk flags [<key> [on|off|<wert>]] [--for <kunde>] [--pct N|off] [--clear] [--reason "…"] [--dry-run] [--yes]
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
@@ -401,6 +402,20 @@ enum StationsCmd {
         /// Send even when the run would leave fewer than 80 % of the premises the table holds
         #[arg(long)]
         force: bool,
+    },
+    /// The premises as files (#64, docs/48): the phone file under site/static/stations and the
+    /// published GeoJSON under site/static/daten, both from the table
+    OutlinesFile {
+        /// Write here instead of the repo. Required for any target but prod, and staging holding
+        /// production's copy
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// How many older phone files to leave beside the new one
+        #[arg(long, default_value_t = 1)]
+        keep: usize,
+        /// Fetch, render, check, write nothing
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
 }
 
@@ -1616,6 +1631,124 @@ async fn main() -> anyhow::Result<()> {
                         println!("  {note}");
                     }
                 }
+            }
+            StationsCmd::OutlinesFile { out, keep, dry_run } => {
+                let root = repo_root();
+                // Same rule as the extract: only production's table goes into the tree. The file is
+                // keyed by station ids, and those are production's.
+                let (stations_dir, daten_dir) = match out {
+                    Some(d) => (d.clone(), d),
+                    None => {
+                        // Staging may write too, when what it holds is production's copy
+                        // (deploy/stations-to-staging.sh keeps the import time): then the files
+                        // are the ones production would render, byte for byte, and they can ride
+                        // in the commit staging is tested with. Checked, not assumed.
+                        if name == "staging" {
+                            let p = cfg.targets.get("prod").ok_or_else(|| anyhow::anyhow!("kein Ziel prod in der Konfiguration"))?;
+                            let prod = Api {
+                                http: reqwest::Client::builder().timeout(Duration::from_secs(60)).build()?,
+                                url: p.url.clone().unwrap_or_default().trim_end_matches('/').to_string(),
+                                token: p.token.clone().unwrap_or_default(),
+                            };
+                            let (a, b) = (api.get("/admin/stations").await?["outlines"].clone(), prod.get("/admin/stations").await?["outlines"].clone());
+                            anyhow::ensure!(
+                                a == b && a["count"].as_i64().unwrap_or(0) > 0,
+                                "Staging hält nicht die Kopie der Produktion (Staging {a}, Produktion {b}). Erst deploy/stations-to-staging.sh."
+                            );
+                            println!("Staging hält die Gelände der Produktion ({} Stück, importiert {}).", a["count"], a["imported_at"]);
+                        } else {
+                            anyhow::ensure!(name == "prod", "in den Baum schreibt nur --prod oder ein Staging mit der Kopie der Produktion (die Gelände hängen an ihren Ids). Sonst --out <dir>.");
+                        }
+                        (root.join("site/static/stations"), root.join("site/static/daten"))
+                    }
+                };
+                let v = api.patient(120)?.get("/admin/stations/outlines").await?;
+                let set: outlines::OutlineSet = serde_json::from_value(json!({"osm_timestamp": v["osm_timestamp"], "outlines": v["outlines"]}))?;
+                anyhow::ensure!(!set.outlines.is_empty(), "keine Gelände in der Tabelle. Erst `stellwerk stations outlines`.");
+                let names: std::collections::HashMap<u32, String> = v["names"]
+                    .as_object()
+                    .map(|m| m.iter().filter_map(|(k, n)| Some((k.parse().ok()?, n.as_str()?.to_string()))).collect())
+                    .unwrap_or_default();
+                let version = v["imported_at"]
+                    .as_str()
+                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                    .map(|t| t.timestamp() as u32)
+                    .ok_or_else(|| anyhow::anyhow!("imported_at fehlt"))?;
+                let generated = set
+                    .osm_timestamp
+                    .as_deref()
+                    .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+                    .and_then(|d| d.and_hms_opt(0, 0, 0))
+                    .map(|t| t.and_utc().timestamp() as u32)
+                    .unwrap_or(0);
+                let bytes = outlines::render_file(&set, generated, version)?;
+                // The laptop reads what the phone will read before anything is written.
+                let read = outlines::parse_file(&bytes)?;
+                anyhow::ensure!(read.rows.len() == set.outlines.len(), "gelesen {} statt {}", read.rows.len(), set.outlines.len());
+                let commit = Command::new("git").args(["rev-parse", "--short=12", "HEAD"]).current_dir(&root).output().ok()
+                    .filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+                let mut geo = serde_json::to_vec(&outlines::public_geojson(&set, &names, commit.as_deref()))?;
+                geo.push(b'\n');
+                let gz = |b: &[u8]| -> anyhow::Result<Vec<u8>> {
+                    use std::io::Write;
+                    let mut e = flate2::GzBuilder::new().mtime(version).write(Vec::new(), flate2::Compression::best());
+                    e.write_all(b)?;
+                    Ok(e.finish()?)
+                };
+                let (bin_gz, geo_gz) = (gz(&bytes)?, gz(&geo)?);
+                let mut pointer = serde_json::to_vec_pretty(&json!({
+                    "version": version, "format": outlines::FILE_FORMAT, "count": read.rows.len(), "bytes": bytes.len(),
+                    "crc32": read.crc32, "osm_timestamp": set.osm_timestamp,
+                    "license": "ODbL-1.0", "attribution": "© OpenStreetMap-Mitwirkende",
+                    "url": format!("/stations/umrisse-{version}.bin"),
+                }))?;
+                pointer.push(b'\n');
+                println!(
+                    "Gelände {version}  ·  {} Bahnhöfe  ·  {}  ·  GeoJSON {}  ·  OSM {}  ·  CRC {:08x}",
+                    read.rows.len(),
+                    kb(bytes.len(), bin_gz.len()),
+                    kb(geo.len(), geo_gz.len()),
+                    set.osm_timestamp.as_deref().unwrap_or("–"),
+                    read.crc32
+                );
+                if dry_run {
+                    println!("Trockenlauf: nichts geschrieben.");
+                    return Ok(());
+                }
+                let planned: Vec<(PathBuf, &[u8])> = vec![
+                    (stations_dir.join(format!("umrisse-{version}.bin")), &bytes),
+                    (stations_dir.join(format!("umrisse-{version}.bin.gz")), &bin_gz),
+                    (stations_dir.join("umrisse-latest.json"), &pointer),
+                    (daten_dir.join("bahnhofsumrisse.geojson"), &geo),
+                    (daten_dir.join("bahnhofsumrisse.geojson.gz"), &geo_gz),
+                ];
+                let todo: Vec<(PathBuf, &[u8])> = planned.into_iter().filter(|(p, want)| std::fs::read(p).map(|old| old != *want).unwrap_or(true)).collect();
+                if todo.is_empty() {
+                    println!("Unverändert: Gelände {version} liegen vollständig im Baum.");
+                    return Ok(());
+                }
+                for (p, content) in &todo {
+                    if let Some(parent) = p.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(p, content)?;
+                    println!("Geschrieben: {}", rel(&root, p));
+                }
+                let mut old: Vec<(u32, PathBuf)> = std::fs::read_dir(&stations_dir)?
+                    .filter_map(|e| e.ok())
+                    .filter_map(|e| {
+                        let n = e.file_name().to_string_lossy().to_string();
+                        let v: u32 = n.strip_prefix("umrisse-")?.strip_suffix(".bin")?.parse().ok()?;
+                        (v != version).then(|| (v, e.path()))
+                    })
+                    .collect();
+                old.sort_by(|a, b| b.0.cmp(&a.0));
+                for (v, path) in old.into_iter().skip(keep) {
+                    std::fs::remove_file(&path).ok();
+                    std::fs::remove_file(path.with_extension("bin.gz")).ok();
+                    println!("Entfernt: umrisse-{v}.bin und umrisse-{v}.bin.gz");
+                }
+                println!("Weiter: cd site && cargo run  ·  site/dist committen  ·  deployen.");
             }
             StationsCmd::Extract { out, keep, asset, dry_run } => {
                 let root = repo_root();
