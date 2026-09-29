@@ -1314,6 +1314,47 @@ mod tests {
         assert!(parse_file(&bytes[..bytes.len() - 1]).is_err());
     }
 
+    /// The rows behind `app/test/fixtures/umrisse-fixture.bin`: three stations, one to six touch
+    /// points, a premise at the corner limit. Dart, Swift and Kotlin read that file and assert
+    /// these numbers, so the four readers agree byte for byte.
+    fn fixture_set() -> OutlineSet {
+        let corners = |n: usize, lat: f64, lon: f64| -> Vec<[f64; 2]> {
+            (0..n).map(|k| {
+                let a = k as f64 * std::f64::consts::TAU / n as f64;
+                [lat + 0.001 * a.sin(), lon + 0.0015 * a.cos()]
+            }).map(|[a, b]| [round6(a), round6(b)]).collect()
+        };
+        let c = |lat: f64, lon: f64, r: f64| Circle { lat, lon, r };
+        OutlineSet {
+            osm_timestamp: Some("2026-09-29".into()),
+            outlines: vec![
+                OutlineRow { station: 3, outline: corners(3, 50.0, 7.0), ring: c(50.0, 7.0, 300.0), touch: vec![c(50.0, 7.0, 120.0)], osm: vec![] },
+                OutlineRow { station: 17, outline: corners(24, 50.943, 6.9587), ring: c(50.943, 6.9587, 429.0),
+                    touch: vec![c(50.9435, 6.958, 150.0), c(50.943, 6.959, 139.0), c(50.9425, 6.96, 135.0)], osm: vec![] },
+                OutlineRow { station: 4711, outline: corners(8, 48.1403, 11.5596), ring: c(48.1403, 11.5596, 1000.0),
+                    touch: (0..6).map(|k| c(48.14 + k as f64 * 0.001, 11.559, 120.0 + k as f64)).collect(), osm: vec![] },
+            ],
+        }
+    }
+
+    const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app/test/fixtures/umrisse-fixture.bin");
+
+    /// The committed fixture is what `render_file` writes today. If this fails after a format
+    /// change, regenerate with `cargo test --lib write_the_premise_fixture -- --ignored` and fix
+    /// the other three readers' tests with it.
+    #[test]
+    fn the_premise_fixture_is_current() {
+        let want = render_file(&fixture_set(), 1_790_640_000, 1_790_700_677).unwrap();
+        let have = std::fs::read(FIXTURE).expect("app/test/fixtures/umrisse-fixture.bin");
+        assert_eq!(have, want, "the fixture is stale");
+    }
+
+    #[test]
+    #[ignore]
+    fn write_the_premise_fixture() {
+        std::fs::write(FIXTURE, render_file(&fixture_set(), 1_790_640_000, 1_790_700_677).unwrap()).unwrap();
+    }
+
     fn st(id: u32, name: &str, lat: f64, lon: f64, rank: u8) -> ExtractStation {
         ExtractStation { id, name: name.into(), lat, lon, rank, flags: 0 }
     }

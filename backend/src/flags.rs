@@ -76,6 +76,16 @@ pub static STATIONS_LOCAL: BoolFlag = BoolFlag {
            those phones on whatever they last heard.",
 };
 
+pub static STATION_PREMISES: BoolFlag = BoolFlag {
+    key: "station_premises",
+    wire: true,
+    note: "#64, docs/48. Whether the native layer watches each station's ring and touch points \
+           from umrisse-<version>.bin instead of a 300 m circle with the 50 m GPS watch. Read by \
+           handlers::geofence, which puts it on the `station_premises` field of \
+           GET /v1/me/geofence. Off is what every build before it does; on without a premise \
+           file on the phone is the 300 m guard. The switch for the test trips, and the way back.",
+};
+
 pub enum Spec {
     Bool(&'static BoolFlag),
     Int(&'static IntFlag),
@@ -84,7 +94,7 @@ pub enum Spec {
 
 /// Every flag that exists. A key not in here is an orphan: it is never loaded, never served, and
 /// an admin write naming it is a 404 rather than an implicit create.
-pub static ALL: &[Spec] = &[Spec::Bool(&STATIONS_LOCAL)];
+pub static ALL: &[Spec] = &[Spec::Bool(&STATIONS_LOCAL), Spec::Bool(&STATION_PREMISES)];
 
 impl Spec {
     pub fn key(&self) -> &'static str {

@@ -446,6 +446,7 @@ pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
     // exactly the person somebody was targeting.
     let flags = s.flags();
     let stations_local = flags.bool(&crate::flags::STATIONS_LOCAL, Some((&c.0).into()));
+    let station_premises = flags.bool(&crate::flags::STATION_PREMISES, Some((&c.0).into()));
     Ok(Json(json!({
         "enabled": nudges_enabled(&c.0) && !idle,
         "idle": idle,
@@ -458,6 +459,9 @@ pub async fn geofence(State(s): State<AppState>, c: Customer) -> ApiResult {
         // the flag map reads this field, and the field is what the native layer is configured
         // from. It stays until no build that reads it is installable.
         "stations_local": stations_local,
+        // #64, docs/48: watch rings and touch points instead of 300 m and the 50 m watch. Absent
+        // means false, which is what every build before it does.
+        "station_premises": station_premises,
         // #41, and the reason it is here rather than only on the public document: the public one
         // is unauthenticated and cacheable, so it can carry nothing that depends on who is
         // asking — which is every per-customer override and every rollout. Without this, both
