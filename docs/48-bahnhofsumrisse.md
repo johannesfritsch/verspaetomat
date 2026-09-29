@@ -419,6 +419,11 @@ gilt: kein Satz, den die Implementierung nicht hält.
 3. ✅ `umrisse-<version>.bin`, die offene `bahnhofsumrisse.geojson` und die Seite
    `verspaetomat.de/daten`, dazu die Namensnennung in der Fußzeile jeder Seite (29. September).
    In der App kommt die Namensnennung mit Schritt 4, wenn sie die Daten benutzt.
-4. iOS: Ringe, Tastpunkte, „am Bahnhof", die eine Registrierungsfunktion, die Notausgänge;
-   Android: Ringe und Tastpunkte dauerhaft. Entwicklungsseite und Protokoll.
-5. Staging-Build, Probefahrten: München Hbf, Köln Hbf, ein ländlicher Halt; die vier Zahlen.
+4. ✅ Gebaut (29./30. September), hinter dem Flag `station_premises` (aus): Dart lädt
+   `umrisse-<version>.bin` wie den Auszug und gibt Flag und Version an den nativen Teil; iOS
+   überwacht Ringe, öffnet Aufenthalte und meldet deren Tastpunkte an, Android meldet Tastpunkte
+   dauerhaft an; alle Umsetzungsregeln oben. Alle vier Leser prüfen denselben Prüfling
+   (`app/test/fixtures/umrisse-fixture.bin`). Entwicklungsseite: Abschnitt „Gelände", der Knopf
+   „Jetzt auf dem Gelände" und der Schalter „Stummschalten aus"; „Woher kommen die Daten?" nennt
+   OpenStreetMap und die ODbL. Ohne Flag bleibt jeder Weg, wie er war.
+5. Staging-Build, Flag für die Testtelefone an (`stellwerk --staging flags station_premises on --for <kunde>`), Probefahrten: München Hbf, Köln Hbf, ein ländlicher Halt; die vier Zahlen.

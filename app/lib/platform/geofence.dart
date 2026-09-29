@@ -123,6 +123,20 @@ class Geofence {
         umbrellaComputed: m['umbrellaComputed'] == true,
         umbrellaWhy: m['umbrellaWhy']?.toString(),
         stationsLocal: m['stationsLocal'] == true,
+        stationPremises: m['stationPremises'] == true,
+        premisesVersion: (m['premisesVersion'] as num?)?.toInt(),
+        premisesCount: (m['premisesCount'] as num?)?.toInt() ?? 0,
+        stays: [
+          for (final st in (m['stays'] as List? ?? const []).whereType<Map>())
+            GeofenceStay(
+              id: '${st['id'] ?? ''}',
+              name: '${st['name'] ?? st['id'] ?? ''}',
+              enteredAt: _at(st['enteredAt']),
+              nudged: st['nudged'] == true,
+              touch: (st['touch'] as num?)?.toInt() ?? 0,
+              ringM: (st['ringM'] as num?)?.toDouble() ?? 0,
+            ),
+        ],
         regions: [
           for (final r in (m['regions'] as List? ?? const []).whereType<Map>())
             GeofenceRegion(
@@ -314,6 +328,10 @@ class GeofenceStatus {
     this.umbrellaComputed = false,
     this.umbrellaWhy,
     this.stationsLocal = false,
+    this.stationPremises = false,
+    this.premisesVersion,
+    this.premisesCount = 0,
+    this.stays = const [],
   });
   const GeofenceStatus.unavailable()
       : permission = GeofencePermission.notDetermined,
@@ -338,7 +356,11 @@ class GeofenceStatus {
         maxRegionRadiusM = 0,
         umbrellaComputed = false,
         umbrellaWhy = null,
-        stationsLocal = false;
+        stationsLocal = false,
+        stationPremises = false,
+        premisesVersion = null,
+        premisesCount = 0,
+        stays = const [];
   final GeofencePermission permission;
   final bool notifications;
   final int registered;
@@ -406,6 +428,13 @@ class GeofenceStatus {
   /// path it guards, so that flipping the switch from a laptop and watching this change is the
   /// proof that the switch works in both directions. False is the old path.
   final bool stationsLocal;
+
+  /// #64, docs/48: rings and touch points on, the premise file native reads (null: none — the
+  /// 300 m guard), and the stays open right now. iOS keeps stays; Android has none.
+  final bool stationPremises;
+  final int? premisesVersion;
+  final int premisesCount;
+  final List<GeofenceStay> stays;
 }
 
 /// One registered region as the debug page lists it (docs/25 §5).
@@ -497,6 +526,19 @@ class GeofenceStationConfig {
   final double lat;
   final double lon;
   Map<String, dynamic> toChannel() => {'id': id, 'name': name, 'lat': lat, 'lon': lon};
+}
+
+/// A stay at a station (docs/48): from entering its ring until leaving it.
+class GeofenceStay {
+  const GeofenceStay({required this.id, required this.name, this.enteredAt, this.nudged = false, this.touch = 0, this.ringM = 0});
+  final String id;
+  final String name;
+  final DateTime? enteredAt;
+  final bool nudged;
+
+  /// How many touch points are up for it; 0 is the 300 m guard.
+  final int touch;
+  final double ringM;
 }
 
 /// Everything native needs. Sent whole on every change; native persists it.

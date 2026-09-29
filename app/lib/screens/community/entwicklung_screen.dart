@@ -11,9 +11,10 @@ import '../../flags/flags.dart';
 import '../../platform/diagnose_log.dart';
 import '../../platform/geofence.dart';
 import '../../platform/geofence_replay.dart';
+import '../../platform/geofence_sync.dart' show noAutoMuteKey;
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
-import 'community_widgets.dart' show SegmentTabs;
+import 'community_widgets.dart' show SegmentTabs, SwitchRow;
 import '../../theme/tokens.dart';
 import '../../widgets/geofence_map.dart';
 import '../../widgets/kit.dart';
@@ -484,6 +485,42 @@ class _EntwicklungScreenState extends State<EntwicklungScreen> {
               _Row('Pause bis', fmtLocal(_geofence.snoozeUntil)),
             if (_geofence.idle)
               _Row('Ruhend', 'seit 30 Tagen kein Check-in'),
+            const VGap.m(),
+
+            // #64, docs/48: the premises, and the two things a test trip needs — the moment one
+            // really stood on the premises, and a phone that does not mute itself mid-test.
+            const VSection('Gelände'),
+            _Row('Ring und Tastpunkte', s.stationPremises ? 'an' : 'aus (300 m und 50-m-Wache)'),
+            if (s.stationPremises)
+              _Row('Datei', s.premisesVersion == null ? 'keine — 300 m für alle' : 'v${s.premisesVersion} · ${s.premisesCount} Gelände'),
+            for (final st in s.stays)
+              _Row(
+                'Am Bahnhof',
+                '${st.name} · ${st.touch == 0 ? '300 m' : '${st.touch} Tastpunkte, Ring ${st.ringM.round()} m'}'
+                    '${st.enteredAt == null ? '' : ' · seit ${_stamp(st.enteredAt)}'}${st.nudged ? ' · Hinweis gegeben' : ''}',
+              ),
+            const VGap.s(),
+            VOutlineButton(
+              label: 'Jetzt auf dem Gelände',
+              icon: Icons.flag_outlined,
+              onTap: () {
+                DiagnoseLog.instance.add('gelaende', 'Jetzt auf dem Gelände (Knopf)');
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Im Protokoll vermerkt')));
+                _load();
+              },
+            ),
+            SwitchRow(
+              title: 'Stummschalten aus',
+              subtitle: 'Nicht beantwortete Hinweise schalten keinen Bahnhof stumm. Für Testfahrten.',
+              value: session.prefs.getBool(noAutoMuteKey) == true,
+              onChanged: (v) async {
+                await session.prefs.setBool(noAutoMuteKey, v);
+                DiagnoseLog.instance.add('gelaende', 'Stummschalten ${v ? 'aus' : 'wieder an'}');
+                if (mounted) setState(() {});
+              },
+            ),
+            if (s.stationPremises)
+              Text('Gelände © OpenStreetMap-Mitwirkende, ODbL', style: VText.caption),
             const VGap.m(),
 
             // The set, drawn (issue #29). A picture finds in a second what a list of coordinates

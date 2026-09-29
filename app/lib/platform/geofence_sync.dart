@@ -13,6 +13,9 @@ import 'geofence.dart';
 /// Syncs after the session loads, on every session change (settings, muted
 /// stations, mode switch), when the app returns to the foreground and after a
 /// check-in or arrival. Debounced, so a burst of changes is one `configure`.
+/// The Entwicklung page's switch: ignored nudges do not mute a station (#64, test phones only).
+const noAutoMuteKey = 'debug.noAutoMute';
+
 class GeofenceSync with WidgetsBindingObserver {
   GeofenceSync({required this.session, required this.onNudge, Geofence? geofence}) : _geofence = geofence ?? Geofence.instance;
 
@@ -195,7 +198,11 @@ class GeofenceSync with WidgetsBindingObserver {
       // docs/25 §4: stations whose nudges nobody answered three times running go quiet for a
       // month. The tally is native, because it is counted while the app is not running.
       final status = await _geofence.status();
-      if (status.ignored.isNotEmpty) {
+      // The Entwicklung page's „Stummschalten aus" (#64): on a test phone three ignored nudges
+      // must not quietly end the test at that station for a month.
+      if (status.ignored.isNotEmpty && session.prefs.getBool(noAutoMuteKey) == true) {
+        DiagnoseLog.instance.add('geofence', 'Stummschalten aus · ${status.ignored.length} Bahnhöfe nicht stummgeschaltet');
+      } else if (status.ignored.isNotEmpty) {
         await session.muteIgnoredStations(status.ignored, known: geo.stations);
         for (final id in status.ignored.keys) {
           await _geofence.clearIgnored(id);
