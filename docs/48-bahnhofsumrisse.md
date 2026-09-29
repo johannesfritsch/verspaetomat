@@ -143,24 +143,100 @@ Neue, **eigene Tabelle** `station_outlines` (nicht Spalten in `stations`, siehe 
 | Feld | Inhalt |
 |---|---|
 | `station_id` | unser Bahnhof |
-| `outline` | das Polygon, WGS84, ≤ 24 Ecken |
-| `osm_ids` | die OSM-Objekte, aus denen es gebaut ist (für Nachvollziehbarkeit und Korrekturen) |
-| `osm_timestamp` | Stand des OSM-Auszugs |
-| `wake_lat`, `wake_lon`, `wake_radius_m` | Weckkreis: kleinster umschließender Kreis des Geländes + 100 m, mindestens 300 m, höchstens 1.000 m |
+| `outline` | das Gelände als Polygon, WGS84, ≤ 24 Ecken |
+| `ring_lat`, `ring_lon`, `ring_radius_m` | **Außenring**: kleinster umschließender Kreis des Geländes + 150 m, mindestens 300 m, höchstens 1.000 m |
+| `cover` | **Geländekreise**: bis zu 6 Kreise (`lat`, `lon`, `r`), jeder mindestens 120 m, die das Gelände zusammen abdecken |
+| `osm_ids`, `osm_timestamp` | woraus und aus welchem Stand es gebaut ist |
 
-### Auf dem Telefon
+Die Kreise rechnet der **Server** beim Import aus, nicht das Telefon: gleiche Kreise auf iOS und
+Android, im Import prüfbar, und der native Code bleibt ohne Geometrie bis auf einen
+Punkt-in-Polygon-Test.
 
-- Das Gelände kommt mit dem Bahnhofsauszug aufs Gerät (docs/45), als eigener Block im Auszug, den
-  ältere Builds überspringen.
-- iOS und Android überwachen weiter **Kreise** (Polygone können sie nicht): den Weckkreis statt
-  300 m um den Punkt.
-- **iOS:** Der Nudge kommt beim ersten Fix **im Gelände** statt beim ersten Fix in 50 m. Punkt-in-
-  Polygon auf dem Gerät; der Standort verlässt das Telefon nicht (docs/14), der native Layer
-  spricht nicht mit der Admin-API (docs/15).
-- **Android:** Der Kontroll-Fix nach den drei Minuten Dwell prüft „im Gelände" statt „in 300 m".
-- **Kein Gelände:** der 300-m-Kreis ist die Grenze, auf beiden Plattformen gleich. Auf iOS heißt
-  das: die 50-m-Schwelle entfällt ganz — ein Fix im Kreis genügt, wie heute auf Android.
-- Die Entwicklungsseite (docs/25) zeichnet das Gelände mit ein.
+## Auf dem Telefon: zwei Zustände
+
+Johannes' Idee, 29. September: Sobald man den Außenring eines Bahnhofs betritt, hört die Suche
+nach anderen Bahnhöfen auf, und die Plätze gehen an diesen einen Bahnhof — Kreise, die sein
+Gelände nachzeichnen. Gesucht wird erst wieder, wenn man den Außenring verlässt.
+
+### Warum nicht mehr die GPS-Wache
+
+Heute schaltet iOS beim Betreten des 300-m-Kreises für höchstens sechs Minuten GPS ein und sucht
+einen Fix in 50 m. Läuft die Zeit ab, während man noch im Kreis ist (Kaffee holen, dann zu Gleis
+11), passiert **nichts mehr**, bis man den Kreis verlässt und wieder betritt — iOS meldet ein
+Betreten genau einmal. Dazu kostet die Wache sechs Minuten GPS bei jedem, der nur vorbeigeht.
+Das neue Verfahren hat keine Uhr, die ablaufen kann: Es wartet auf Ereignisse, so lange man im
+Außenring ist.
+
+### Zustand „Suchen" (wie heute)
+
+Regenschirm, häufige Bahnhöfe, die nächsten Bahnhöfe — jeder mit seinem **Außenring** statt 300 m
+um den Punkt. Ohne Gelände ist der Außenring der alte 300-m-Kreis.
+
+### Zustand „Am Bahnhof"
+
+Betritt man einen Außenring:
+
+1. Alle Regionen außer **Regenschirm** und **diesem Außenring** werden abgemeldet.
+2. Seine **Geländekreise** werden angemeldet (höchstens 6), und für jeden wird sofort
+   `requestState` gefragt — iOS meldet ein Betreten nur beim Überqueren der Grenze, nicht, wenn
+   man beim Anmelden schon drin ist (Apple, Region Monitoring).
+3. **Ein Geländekreis meldet „drin"** → die App holt **einen** Standort-Fix (`requestLocation`,
+   wenige Sekunden) und prüft ihn gegen das Gelände-Polygon:
+   - im Gelände → Nudge **sofort**, unter den Regeln unten;
+   - nicht im Gelände → nichts; das nächste Ereignis eines Geländekreises fragt wieder. Nichts läuft ab.
+4. **Außenring verlassen** → Geländekreise ab, zurück zu „Suchen" mit einem frischen Satz um den
+   Ort, an dem man jetzt ist.
+
+Liegen Außenringe zweier Bahnhöfe übereinander (Köln Hbf und Köln Messe/Deutz, 1 km auseinander)
+und man ist in beiden, teilen sich beide die Plätze: je Bahnhof höchstens 6 Geländekreise, beide
+Außenringe, der Regenschirm — höchstens 15 von 20.
+
+**Warum nicht 19 kleine Kreise.** iOS meldet ein Ereignis erst, wenn man die Grenze um eine
+Mindeststrecke überschritten hat und 20 Sekunden dort bleibt; Apple sagt, man solle zum Testen
+von **rund 200 m** ausgehen, und ohne WLAN wird es deutlich ungenauer
+(https://developer.apple.com/library/archive/documentation/UserExperience/Conceptual/LocationAwarenessPG/RegionMonitoring/RegionMonitoring.html).
+Android empfiehlt **mindestens 100–150 m** (https://developer.android.com/develop/sensors-and-location/location/geofencing).
+Ein 50-m-Kreis wird schlicht nicht gemeldet — das steht schon heute im Code. Kreise, die das
+Gelände genau nachzeichnen, wären also zu klein, um verlässlich zu feuern. Die Kreise sind
+deshalb grob (mindestens 120 m) und nur der **Wecker**; die **Genauigkeit** kommt aus dem einen
+Fix gegen das Polygon. Große Bahnhöfe bekommen mehrere Kreise (Köln, 10 ha: rechnerisch 4–6),
+ein kleiner Halt einen einzigen, der fast mit dem Außenring zusammenfällt.
+
+### Die Regeln für „sofort"
+
+- Kein Nudge während einer Fahrt, im Ruhe-Fenster, im Cooldown, an stummgeschalteten Bahnhöfen —
+  wie heute.
+- **Fix-Güte:** nur ein Fix mit `horizontalAccuracy` ≤ 50 m zählt; ein schlechterer gilt als
+  „nicht im Gelände" und löst nichts aus.
+- **Angekommen mit dem Zug:** Wer in einem Zug sitzt, der drei Minuten in Köln Hbf hält, ist auch
+  im Gelände. Heute filtert die Verzögerung nur durchfahrende Züge, nicht haltende. Vorschlag: Die
+  Zeit zwischen „Außenring betreten" und „im Gelände" ist die Annäherung. Unter 60 Sekunden für
+  mindestens 150 m (schneller als 2,5 m/s, also kein Fußweg) gilt als **Ankunft mit einem
+  Fahrzeug**: kein Nudge beim ersten Mal; erst ein weiteres Ereignis eines Geländekreises mehr als fünf
+  Minuten später (umsteigen, zurück zum Bahnsteig) darf nudgen.
+- Ein Nudge pro Aufenthalt: Nach einem Nudge meldet dieser Bahnhof bis zum Verlassen des
+  Außenrings nichts mehr.
+
+### Ohne Gelände: der 300-m-Wächter
+
+Hat ein Bahnhof kein Gelände (3 % in NRW), bleibt es beim Kreis von 300 m. „Am Bahnhof" hat dann
+keine Geländekreise, und der Nudge kommt, wenn man drei Minuten im Kreis bleibt: auf Android per
+Dwell und einem bestätigenden Fix (genau das heutige Verhalten), auf iOS als Mitteilung, die beim
+Betreten für drei Minuten später geplant und beim Verlassen zurückgenommen wird (docs/25 §3). Auf
+iOS entfallen damit die 50-m-Schwelle und die GPS-Wache.
+
+### Android
+
+Android erlaubt 100 Geofences statt 20; die Zustände sind dieselben, nur der Platz ist nicht knapp.
+`GEOFENCE_TRANSITION_ENTER` für die Geländekreise, `EXIT` für den Außenring; der eine Fix wie auf
+iOS. Die Latenz liegt laut Google meist unter zwei Minuten, nach langem Stillstand bis zu sechs.
+
+### Was sich messen lässt
+
+Die Entwicklungsseite zeichnet Gelände, Außenring und Geländekreise, und das Protokoll zeigt jeden
+Zustandswechsel mit Zeit: „Außenring Köln Hbf betreten", „Geländekreis 3 drin", „Fix 12 m,
+im Gelände", „Nudge". So sagt eine Probefahrt, wie lange iOS für einen 120-m-Kreis wirklich
+braucht — das ist die eine Zahl, die dieses Konzept trägt und die wir noch nicht kennen.
 
 ### Draht
 
