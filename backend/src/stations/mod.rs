@@ -26,6 +26,7 @@
 pub mod cities;
 pub mod extract;
 pub mod gtfs;
+pub mod outlines;
 
 use std::collections::HashMap;
 

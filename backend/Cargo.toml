@@ -47,7 +47,19 @@ csv = "1.4.0"
 # so naming them here adds nothing to Cargo.lock.
 crc32fast = "1"
 flate2 = "1"
+osmpbf = "0.3.8"
 
 [dev-dependencies]
 # `#[sqlx::test]` for the API tests: a fresh database per test (src/api_tests.rs).
 sqlx = { version = "0.8.6", features = ["macros"] }
+
+# `stellwerk stations outlines` reads a 4.8 GB OSM extract (#64). Unoptimised, decoding it takes
+# the better part of an hour; these are the crates that do the decoding.
+[profile.dev.package.osmpbf]
+opt-level = 3
+[profile.dev.package.protobuf]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3

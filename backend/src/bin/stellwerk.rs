@@ -19,6 +19,7 @@
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
+//!   stellwerk stations outlines --dry-run [--from germany-latest.osm.pbf] [--out <dir>]
 //!   stellwerk switch …                     (alter Name für flags)
 //!   stellwerk flags [<key> [on|off|<wert>]] [--for <kunde>] [--pct N|off] [--clear] [--reason "…"] [--dry-run] [--yes]
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
@@ -39,7 +40,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use verspaetomat_api::stations::{extract, gtfs};
+use verspaetomat_api::stations::{extract, gtfs, outlines};
 
 #[derive(Parser)]
 #[command(name = "stellwerk", about = "Verspätomat Stellwerk: simulate delays, arrivals, replies and time for one customer.")]
@@ -114,6 +115,64 @@ fn config_path() -> PathBuf {
 /// The repo this binary was built from. `site/src/main.rs` does the same with
 /// `env!("CARGO_MANIFEST_DIR")`: a tool that writes into the working tree should not depend on
 /// which directory it was started in.
+/// A download directory that goes when the command does.
+struct ScratchDir(PathBuf);
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+async fn download_to(url: &str, to: &Path) -> anyhow::Result<()> {
+    use std::io::Write;
+    let mut r = reqwest::Client::new().get(url).send().await?.error_for_status()?;
+    let mut f = std::io::BufWriter::new(std::fs::File::create(to)?);
+    while let Some(chunk) = r.chunk().await? {
+        f.write_all(&chunk)?;
+    }
+    f.flush()?;
+    Ok(())
+}
+
+/// The 30 drawings docs/48 asks for: named large stations first, then the largest remaining
+/// long-distance ones, ten regional ones across the range of sizes, and the ten smallest.
+fn pick_samples(ps: &[outlines::Premise]) -> Vec<&outlines::Premise> {
+    use outlines::Outcome;
+    let built: Vec<usize> = (0..ps.len()).filter(|&i| ps[i].outcome == Outcome::Premise).collect();
+    let by_area = |mut v: Vec<usize>| {
+        v.sort_by(|&a, &b| ps[a].area_m2.partial_cmp(&ps[b].area_m2).unwrap());
+        v
+    };
+    let mut out: Vec<usize> = Vec::new();
+    let take = |i: usize, out: &mut Vec<usize>| {
+        if !out.contains(&i) {
+            out.push(i);
+        }
+    };
+    for name in ["Köln Hbf", "München Hbf", "Frankfurt (Main) Hauptbahnhof", "Hamburg Hbf", "Stuttgart, Hauptbahnhof (oben)", "Köln Messe/Deutz Bf", "Leipzig Hbf"] {
+        if let Some(i) = ps.iter().position(|p| p.station.name == name) {
+            take(i, &mut out);
+        }
+    }
+    for i in by_area(built.iter().copied().filter(|&i| ps[i].station.rank == 3).collect()).into_iter().rev() {
+        if out.len() >= 10 {
+            break;
+        }
+        take(i, &mut out);
+    }
+    let mid = by_area(built.iter().copied().filter(|&i| ps[i].station.rank == 2).collect());
+    for k in 0..10 {
+        if let Some(&i) = mid.get(mid.len().saturating_sub(1) * (k * 2 + 1) / 20) {
+            take(i, &mut out);
+        }
+    }
+    for i in by_area(built.iter().copied().filter(|&i| ps[i].station.rank <= 2).collect()).into_iter().take(10) {
+        take(i, &mut out);
+    }
+    out.into_iter().map(|i| &ps[i]).collect()
+}
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
@@ -324,6 +383,19 @@ enum StationsCmd {
         #[arg(long)]
         asset: bool,
         /// Fetch it, check it, write nothing
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+    /// Station premises from OpenStreetMap (#64, docs/48): premise, ring and touch points per
+    /// station. For now only --dry-run: a report, a GeoJSON and drawings, nothing sent
+    Outlines {
+        /// A Geofabrik extract (germany-latest.osm.pbf) instead of downloading one (about 4.4 GB)
+        #[arg(long)]
+        from: Option<PathBuf>,
+        /// Where the report, GeoJSON and drawings go
+        #[arg(long, default_value = "gelaende-probelauf")]
+        out: PathBuf,
+        /// Required for now: the table and the phone file come in a later step
         #[arg(long = "dry-run")]
         dry_run: bool,
     },
@@ -1486,6 +1558,48 @@ async fn main() -> anyhow::Result<()> {
                     println!("  (laut und richtig benannt, nie still falsch). Neu erzeugen:");
                     println!("    cd backend && cargo test --release --lib write_the_nearby_probe_fixture -- --ignored");
                 }
+            }
+            StationsCmd::Outlines { from, out, dry_run } => {
+                anyhow::ensure!(dry_run, "Nur --dry-run: Tabelle und Telefon-Datei kommen in einem späteren Schritt (docs/48).");
+                let progress = |line: &str| eprintln!("  {line}");
+                // The stations as the phones know them, with their real ids.
+                let bytes = api.patient(120)?.get_bytes("/admin/stations/extract").await?;
+                let stations = extract::parse(&bytes)?.stations;
+                progress(&format!("{} Stationen vom Server", stations.len()));
+                let (pbf, _scratch) = match from {
+                    Some(p) => (p, None),
+                    None => {
+                        let dir = std::env::temp_dir().join(format!("verspaetomat-osm-{}", std::process::id()));
+                        std::fs::create_dir_all(&dir)?;
+                        let path = dir.join("germany-latest.osm.pbf");
+                        progress("Lade den Geofabrik-Auszug Deutschland (rund 4,4 GB) …");
+                        download_to("https://download.geofabrik.de/europe/germany-latest.osm.pbf", &path).await?;
+                        (path, Some(ScratchDir(dir)))
+                    }
+                };
+                let stamp = std::fs::metadata(&pbf)?.modified().ok().map(|t| chrono::DateTime::<chrono::Utc>::from(t).format("%Y-%m-%d").to_string());
+                let osm = tokio::task::spawn_blocking({
+                    let pbf = pbf.clone();
+                    move || outlines::read(&pbf, &|l| eprintln!("  {l}"))
+                })
+                .await??;
+                let premises = outlines::build(&stations, &osm);
+                let report = outlines::report(&premises);
+                // Last run's drawings go: the names carry a number, and a stale one would sit
+                // beside this run's under the same number.
+                let _ = std::fs::remove_dir_all(out.join("proben"));
+                std::fs::create_dir_all(out.join("proben"))?;
+                std::fs::write(out.join("bericht.txt"), &report)?;
+                std::fs::write(out.join("gelaende.geojson"), serde_json::to_vec(&outlines::geojson(&premises, stamp.as_deref()))?)?;
+                std::fs::write(out.join("abdeckung.svg"), outlines::coverage_svg(&premises))?;
+                let samples = pick_samples(&premises);
+                for (i, p) in samples.iter().enumerate() {
+                    let slug: String = p.station.name.chars().map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+                    std::fs::write(out.join("proben").join(format!("{:02}-{}.svg", i + 1, slug.trim_matches('-'))), outlines::svg(p))?;
+                }
+                print!("{report}");
+                println!("\nGeschrieben: {} (bericht.txt, gelaende.geojson, abdeckung.svg, {} Proben)", out.display(), samples.len());
+                println!("Nur angeschaut, nichts gesendet (--dry-run).");
             }
             StationsCmd::Extract { out, keep, asset, dry_run } => {
                 let root = repo_root();

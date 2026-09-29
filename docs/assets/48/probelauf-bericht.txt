@@ -1,0 +1,63 @@
+7632 Stationen
+
+Rang 3, Fernverkehr: 649
+  außerhalb des Auszugs (Ausland)      333  ( 51 %)
+  Gelände                              297  ( 45 %)
+  kein OSM-Bahnhof in 400 m             19  (  2 %)
+  Ring: Median 328 m, 90 % 438 m, größter 621 m; über 300 m: 67 %
+  Tastpunkte: 1× 34, 2× 168, 3× 63, 4× 13, 5× 10, 6× 9
+
+Rang 2, Nahverkehr: 5886
+  Gelände                             4897  ( 83 %)
+  außerhalb des Auszugs (Ausland)      721  ( 12 %)
+  kein OSM-Bahnhof in 400 m            197  (  3 %)
+  Teil eines anderen Geländes           47  (  0 %)
+  OSM-Bahnhof ohne Zug-Bahnsteig        24  (  0 %)
+  Ring: Median 300 m, 90 % 300 m, größter 579 m; über 300 m: 7 %
+  Tastpunkte: 1× 3987, 2× 847, 3× 50, 4× 9, 6× 4
+
+Rang 1, nur S-Bahn: 1097
+  Gelände                              935  ( 85 %)
+  außerhalb des Auszugs (Ausland)       87  (  7 %)
+  kein OSM-Bahnhof in 400 m             54  (  4 %)
+  Teil eines anderen Geländes           11  (  1 %)
+  OSM-Bahnhof ohne Zug-Bahnsteig         9  (  0 %)
+  verworfen                              1  (  0 %)
+  Ring: Median 300 m, 90 % 300 m, größter 544 m; über 300 m: 6 %
+  Tastpunkte: 1× 792, 2× 112, 3× 20, 4× 7, 5× 3, 6× 1
+
+iOS am Bahnhof (Regenschirm + Ring + Tastpunkte + Ringe der Nachbarn, 20 Plätze):
+  über 20: 0 Bahnhöfe. Die meisten Nachbarn:
+    Nordhausen Ricarda-Huch-Straße           3 Nachbarringe, 1 Tastpunkte → 6 Plätze
+    Kassel Hauptbahnhof                      3 Nachbarringe, 3 Tastpunkte → 8 Plätze
+    Nordhausen-Altentor                      2 Nachbarringe, 1 Tastpunkte → 5 Plätze
+    Niebüll                                  2 Nachbarringe, 6 Tastpunkte → 10 Plätze
+    Düsseldorf, D-Volksgarten S              2 Nachbarringe, 5 Tastpunkte → 9 Plätze
+    Düsseldorf, D-Friedrichstadt S           2 Nachbarringe, 1 Tastpunkte → 5 Plätze
+    Konz, Bahnhof Mitte                      2 Nachbarringe, 1 Tastpunkte → 5 Plätze
+    Rheinzabern Rappengasse                  2 Nachbarringe, 1 Tastpunkte → 5 Plätze
+
+Verworfen: 1
+  Offenbach (Main)-Offenbach Ost Ostbahnhof Fläche 61 ha
+
+Teil eines anderen Geländes: 58 (erste 20)
+  Hirschfelde Am Markt                     → Hirschfelde, Bahnhof
+  Nordhausen Nord                          → Nordhausen
+  Ilfeld Ifn_If 001                        → Ilfeld
+  Niedersachswerfen Nds_Ndb 001            → Niedersachswerfen
+  Niedersachswerfen Ndb_Nhk 001            → Niedersachswerfen Herkulesmarkt
+  Nordhausen Nhr_Nha 001                   → Nordhausen Ricarda-Huch-Straße
+  Niebüll neg                              → Niebüll
+  Westerland(Sylt) Autoverladung           → Westerland(Sylt) ZOB/Bahnhof
+  Hamburg, Altona                          → Hamburg-Altona
+  Düsseldorf, D-Sonnenstraße               → Düsseldorf, D-Friedrichstadt S
+  Kassel Scheidemannplatz                  → Kassel Hauptbahnhof
+  Bretten Rechberg                         → Bretten Wannenweg
+  Amstetten Lokalbahnhof                   → Amstetten Bahnhof
+  N Frankenstadion Sonderbstg.             → Nürnberg-Frankenstadion
+  Seligenstadt Mainschleifenbahn           → Seligenstadt (b Würzburg)
+  Malchow, Inselstadt                      → Inselstadt Malchow
+  Wüstenfelde b Grimmen Bahnhof            → Wüstenfelde, Bahnhof
+  Ückeritz (Usedom) Neu Pudagla            → Neu Pudagla
+  Wolgast Wolgaster Fähre                  → Wolgaster Fähre, Bahnhof
+  Mölschow Bannemin                        → Bannemin-Mölschow, Bahnhof

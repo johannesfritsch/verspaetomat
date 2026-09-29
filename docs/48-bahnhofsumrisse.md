@@ -123,7 +123,49 @@ Nächster-Anker-Regel gibt unserem einen Bahnhof nur die Bahnsteige des einen. D
 mehrere OSM-Bahnhöfe gleichen Namens zu einem von uns zusammenlegen können.
 
 NRW ist dicht gemappt; im ländlichen Osten und Süden kann die Quote niedriger liegen. Die Zählung
-für ganz Deutschland ist der erste Lauf des Prototyps.
+für ganz Deutschland steht im nächsten Abschnitt.
+
+### Probelauf ganz Deutschland (29. September)
+
+`stellwerk --staging stations outlines --dry-run --from germany-latest.osm.pbf` — die Stationen
+mit ihren echten Ids vom Server, der Geofabrik-Auszug Deutschland (4,8 GB) in Rust gelesen, kein
+`osmium`. 2 Minuten 13 Sekunden, 570 MB Speicher. Aus dem Auszug: 6.786 OSM-Bahnhöfe, 19.368
+Bahnsteige und Gebäude.
+
+| Rang | Stationen in Deutschland | mit Gelände | Teil eines anderen | 300-m-Wächter |
+|---|---|---|---|---|
+| 3, Fernverkehr | 316 | 297 (94 %) | – | 19 |
+| 2, Regional | 5.165 | 4.897 (95 %) | 47 | 221 |
+| 1, nur S-Bahn | 1.010 | 935 (93 %) | 11 | 64 |
+
+Die übrigen 1.141 Stationen der Tabelle liegen im Ausland (kein OSM-Bahnhof in 5 km, also außerhalb
+des Auszugs); unter den „300-m-Wächtern" stecken zudem Schweizer und österreichische Grenzhalte,
+die näher als 5 km an einem deutschen Bahnhof liegen. Verworfen wurde eine einzige Station
+(Offenbach Ost, 61 ha — die Grenze liegt bei 50).
+
+- **Ringe:** im Fernverkehr Median 328 m, 90 % unter 438 m, größter 621 m; zwei Drittel sind
+  größer als die heutigen 300 m. Im Regional- und S-Bahn-Verkehr fast überall 300 m.
+- **Tastpunkte:** 4.813 von 6.129 Geländen haben genau einen; große Bahnhöfe drei bis sechs
+  (Köln Hbf 3, München Hbf 4, Frankfurt Hbf 5, Stuttgart 6).
+- **iOS-Plätze am Bahnhof** (Regenschirm + Ring + Tastpunkte + Ringe der Nachbarn): nirgends
+  mehr als 20; am meisten braucht Niebüll mit 10.
+- **Zwei Fehler, die der Lauf gefunden hat:** OSM taggt die S-Bahn in Hamburg und Berlin als
+  `station=light_rail` — das anfängliche Filter hielt sie für Straßenbahnen (Rang 1 stieg nach der
+  Korrektur von 74 % auf 93 %). Und der Rang durfte über die Nähe entscheiden, wenn die Namen
+  nicht passten: Düsseldorf-Sonnenstraße sammelte die Anker von Volksgarten und Friedrichstadt ein.
+  Jetzt entscheidet der Rang nur zwischen gleichnamigen Stationen (Frankfurt Hbf und „tief"),
+  sonst die nächste.
+- **Teil eines anderen Geländes** (58) sind vor allem Doppeleinträge unserer Tabelle
+  („Hamburg, Altona" → „Hamburg-Altona", „Niebüll neg" → „Niebüll") und Straßenbahn-Halte neben
+  einem Bahnhof („Kassel Scheidemannplatz" → „Kassel Hauptbahnhof").
+
+Die 30 Zeichnungen und die Deutschlandkarte liegen in [`docs/assets/48/`](assets/48/), der
+Bericht in [`probelauf-bericht.txt`](assets/48/probelauf-bericht.txt): zehn große Bahnhöfe, zehn
+regionale quer durch die Größen, die zehn kleinsten. Grau die Bahnsteige, schwarz das Gelände,
+rot die Tastpunkte, gestrichelt der Ring, der rote Punkt ist unser Punkt aus dem Feed. In Triangel
+liegt er gut 300 m neben dem Bahnsteig — der Ring sitzt jetzt auf dem Gelände.
+
+![Deutschland: grau Gelände, blau Teil eines anderen, rot 300-m-Wächter](assets/48/abdeckung.svg)
 
 ## Der Plan
 
@@ -283,6 +325,8 @@ nicht untergräbt und der Test verwertbare Zahlen liefert.
 
 ### Die Daten fürs Telefon
 
+**Entschieden (Johannes, 29. September): eine eigene Datei.**
+
 Eine **zweite Datei** neben dem Bahnhofsauszug (docs/45): `bahnhofsumrisse.bin`, nach unseren Ids,
 mit Ring, Tastpunkten und Gelände. Nicht aus Kompatibilitätsgründen — wir sind nicht live —,
 sondern wegen der Lizenz: So ist die ODbL-Datenbank eine eigene Datei, getrennt von den Namen und
@@ -323,7 +367,8 @@ Wartezeit). Vorher nicht.
 
 - **Die Datei:** `https://verspaetomat.de/daten/bahnhofsumrisse.geojson` — pro Bahnhof unsere Id,
   der Name, das Polygon, die OSM-Ids, der OSM-Stand. Lizenz ODbL 1.0, im Kopf der Datei genannt.
-  Erwartete Größe um 2 MB. Die Website erzeugt sie beim Bauen aus der Tabelle (`site/`), neu nach
+  Erwartete Größe um 4 MB (das Gelände als Polygon, Ring und Tastpunkte als Mittelpunkt und Radius;
+  die Probelauf-GeoJSON mit gezeichneten Kreisen hat 19 MB). Die Website erzeugt sie beim Bauen aus der Tabelle (`site/`), neu nach
   jedem Stationsimport.
 - **Der Weg dorthin:** Der Import-Code wird mit dem Repo öffentlich, bevor die App erscheint; die
   Datei nennt den Commit, der sie gebaut hat. Das erfüllt 4.6 doppelt.
@@ -346,9 +391,9 @@ gilt: kein Satz, den die Implementierung nicht hält.
 
 ## Reihenfolge
 
-1. Prototyp als `stellwerk stations outlines --dry-run`: ganz Deutschland, Zählung pro Rang und
-   Bundesland, Liste der Verworfenen, dazu 30 Gelände mit Ring und Tastpunkten als Bild in
-   `docs/assets` (10 große, 10 mittlere, 10 ländliche).
+1. ✅ Prototyp als `stellwerk stations outlines --dry-run` (29. September, oben): ganz Deutschland,
+   Zählung pro Rang, eine Deutschlandkarte statt einer Tabelle je Bundesland, die Verworfenen und
+   30 Zeichnungen in `docs/assets/48`.
 2. Tabelle und Import in Produktion, Kopie nach Staging (wie die Stationen).
 3. `bahnhofsumrisse.bin` und die Seite `verspaetomat.de/daten` mit Namensnennung.
 4. iOS: Ringe, Tastpunkte, „am Bahnhof", die eine Registrierungsfunktion, die Notausgänge;
