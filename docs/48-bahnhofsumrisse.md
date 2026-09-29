@@ -1,164 +1,217 @@
 # 48 — Bahnhofsumrisse: wo ein Bahnhof anfängt
 
-Recherche und Prototyp-Beschreibung zu Issue #64, 29. September 2026. Noch keine Entscheidung und
-kein Code. Johannes' Auftrag: „Let's first write a prototype description how this could look like!
-Maybe we get the polygon outline of a trainstation from OSM? Or from the Bahn Open Data stuff?"
+Recherche und Plan zu Issue #64, 29. September 2026. Johannes' Auftrag: „Let's first write a
+prototype description how this could look like! Maybe we get the polygon outline of a
+trainstation from OSM? Or from the Bahn Open Data stuff?"
+
+**Entschieden (Johannes, 29. September):**
+
+- **OSM unter ODbL ist in Ordnung.** Veröffentlichung der Umrisse und Namensnennung werden geplant
+  (unten).
+- **Keine Anfrage an DB InfraGO**; offene DB-Daten ja, wenn sie etwas hergeben.
+- **„Am Bahnhof" heißt: irgendwo auf dem Gelände.** Läden, Halle, Vorplatz, Wege gehören dazu.
+- **Erst zählen, wie weit wir kommen.** Wo es keinen Umriss gibt, bleibt der 300-m-Kreis die
+  Grenze.
 
 ## Was heute gilt
 
 Ein Bahnhof ist für die App ein **Punkt** — die Koordinate, die unsere Tabelle aus dem Feed
-übernimmt (docs/44). Um ihn liegen zwei Kreise (`Geofence.swift`, `GeofenceManager.kt`, docs/25):
+übernimmt (docs/44). Darum liegt ein fester Kreis von 300 m, der die App weckt
+(`Geofence.swift`, `GeofenceManager.kt`, docs/25). Was danach passiert, ist auf den beiden
+Plattformen verschieden:
 
-| Kreis | Radius | Aufgabe |
+**iOS: die 50-m-Schwelle.** Beim Betreten des 300-m-Kreises (`didEnterRegion`) schaltet die App
+das GPS ein — laufende Standortmeldungen mit 10 m Genauigkeit, auch im Hintergrund
+(`beginNearWatch`). Es wird nicht geschlafen und nachgesehen: Jede Meldung, die iOS liefert, wird
+sofort geprüft (`didUpdateLocations`, Fall `.dwell`). Die Beobachtung endet beim ersten dieser
+vier Ereignisse:
+
+| Ereignis | Folge |
+|---|---|
+| ein Fix liegt höchstens 50 m vom Bahnhofspunkt | Nudge in 45 s, GPS aus |
+| ein Fix liegt außerhalb der 300 m | kein Nudge, GPS aus („left before getting close") |
+| iOS meldet das Verlassen des 300-m-Kreises (`didExitRegion`) | kein Nudge, GPS aus, ein geplanter Nudge wird zurückgenommen |
+| sechs Minuten vergangen (`nearWatchWindow`) | kein Nudge, GPS aus |
+
+**Android: keine 50-m-Schwelle.** Der Kreis ist als Geofence mit *Dwell* registriert: Wer drei
+Minuten im 300-m-Kreis bleibt, bekommt nach einem einzigen Kontroll-Fix (ebenfalls „innerhalb
+300 m") den Nudge (`onStationDwell`). Android prüft also schon heute nur den 300-m-Kreis — genau
+das, was als Rückfall ohne Umriss gewollt ist.
+
+Die 50 m sind die Schwachstelle: Sie messen den Abstand zu einem Punkt, nicht, ob man auf dem
+Gelände steht.
+
+## Gemessen
+
+### Zehn Bahnhöfe gegen die 50 m (Overpass, 29. September)
+
+Zug-Bahnsteige aus OSM (`railway=platform` im Umkreis von 450 m, ohne Tram-, Bus- und
+U-Bahn-Steige) gegen den Punkt unserer Tabelle:
+
+| Bahnhof | weitester Bahnsteigpunkt | Anteil der Bahnsteige innerhalb 50 m |
 |---|---|---|
-| Stationskreis | 300 m, fest | weckt die App; iOS liefert kleinere Kreise spät oder gar nicht |
-| Nudge-Schwelle | 50 m um den Punkt | erst wenn ein eigener Standort-Fix so nah am Punkt liegt, kommt „Am Bahnhof?" |
+| München Hbf | 688 m | 0 % |
+| Hamburg Hbf | 468 m | 8 % |
+| Stuttgart, Hauptbahnhof (oben) | 355 m | 0 % |
+| Rheine, Bahnhof | 281 m | 0 % |
+| Kißlegg Bahnhof | 191 m | 36 % |
+| Hagen Hbf | 178 m | 0 % |
+| Langenargen Bahnhof | 166 m | 53 % |
+| Leichlingen Bf | 138 m | 17 % |
 
-Die 50 m sind die Schwachstelle: Sie messen den Abstand zu einem Punkt, nicht, ob man im Bahnhof
-steht. Wo der Punkt am Rand liegt oder der Bahnhof groß ist, steht man auf dem Bahnsteig und ist
-trotzdem „nicht am Bahnhof".
+In München, Stuttgart, Rheine und Hagen liegt **kein einziger Bahnsteigpunkt** innerhalb der 50 m.
+Wer dort am Gleis wartet, bekommt auf dem iPhone keinen Nudge, außer er geht am Punkt vorbei. Und
+München reicht 688 m weit: weiter, als der 300-m-Kreis wacht.
 
-## Gemessen: zehn Bahnhöfe
+### Stufe 1, die Steige aus unseren Feeds: gezählt, reicht nicht
 
-Bahnsteige aus OpenStreetMap (Overpass, `railway=platform` im Umkreis von 450 m, ohne Tram-, Bus-
-und U-Bahn-Steige) gegen den Punkt unserer Tabelle. Abgefragt am 29. September 2026.
+Der Import liest jede Zeile von `stops.txt`, auch jeden Steig mit Koordinate. Gezählt über den
+ganzen DELFI-Feed (550.000 Zeilen) gegen unsere 7.632 Bahnhöfe, deutsche Bahnhöfe allein (die
+übrigen sind polnische und andere Auslandsbahnhöfe ohne deutsche DHID):
 
-| Bahnhof | weitester Bahnsteigpunkt | Anteil der Bahnsteige innerhalb 50 m | umschließender Kreis | sein Mittelpunkt liegt vom Punkt |
+| Rang | Bahnhöfe | mit ≥ 3 Steigpunkten |
+|---|---|---|
+| 3, Fernverkehr | 308 | 240 (78 %) |
+| 2, Regional | rund 5.070 | 3.287 (65 %) |
+| 1, nur S-Bahn | rund 830 | 590 (71 %) |
+
+Die Abdeckung wäre ordentlich, **die Form ist es nicht**: Köln Hbf hat 11 Steigpunkte auf 104 m,
+die echten Bahnsteige messen rund 410 m. Hamburg Hbf hat 3 Punkte auf 87 m. Umgekehrt zieht die
+DHID in kleinen Orten Bushaltestellen mit hinein (Langenargen: 252 m Spanne gegen 98 m
+Bahnsteig), und einzelne Gruppen sind kaputt (eine reicht 260 km weit). Die Feed-Steige sind
+Haltepunkte für die Fahrplanauskunft, keine Vermessung. **Stufe 1 fällt weg.**
+
+### DB Open Data: OpenStation, keine Umrisse
+
+DB InfraGO veröffentlicht **OpenStation**, einen NeTEx-Datensatz aller Personenbahnhöfe, frei
+herunterladbar über die Mobilithek
+(https://mobilithek.info/offers/879076212433727488, Doku https://github.com/dbinfrago/openstation-docs).
+Geladen und ausgezählt (Stand 29. September, 304 MB): 5.393 Bahnhöfe, 21.784 Bahnsteigkanten,
+5.346 Zugangsbereiche, 1.761 Eingänge — und **kein einziges Polygon**. Koordinaten tragen nur
+2.485 Ausstattungsorte (Aufzüge, Rolltreppen); Bahnhöfe und Steige haben keine. Reich an
+Beschreibung (Adresse, Barrierefreiheit, Ausstattung), aber ohne Geometrie. Das Streckennetz von
+DB InfraGO (WFS, CC BY 4.0) führt Bahnhöfe als Punkte; sein Endpunkt antwortete am 29. September
+mit 404.
+
+Für die Umrisse bleibt **OpenStreetMap**. OpenStation bleibt als Quelle für Aufzüge und
+Barrierefreiheit interessant — ein eigenes Thema.
+
+### Stufe 2, OSM: gezählt für Nordrhein-Westfalen
+
+Aus dem Geofabrik-Auszug NRW (914 MB) mit `osmium tags-filter` die Bahnhofs-Objekte gezogen
+(7 MB) und für jeden unserer 782 Bahnhöfe in NRW ein **Gelände** gebildet:
+
+1. **Anker:** der nächste OSM-Bahnhof (`railway=station`/`halt`, ohne U-, Stadt- und
+   Museumsbahn) höchstens 400 m von unserem Punkt.
+2. **Glieder:** Zug-Bahnsteige, Empfangsgebäude (`building=train_station`) und Bahnhofsflächen
+   (`public_transport=station`) höchstens 500 m vom Anker, die diesem Anker näher sind als jedem
+   anderen Bahnhof.
+3. **Gelände:** die konvexe Hülle der Glieder, 20 m gepuffert. Die Hülle schließt ein, was
+   zwischen Gebäude und Gleisen liegt — Halle, Läden, Wege, Vorplatz — und das ist gewollt.
+
+| Rang | Bahnhöfe | mit Gelände | Rückfall 300 m | Gelände reicht weiter als 300 m |
 |---|---|---|---|---|
-| München Hbf | 688 m | 0 % | r 399 m | 292 m |
-| Hamburg Hbf | 468 m | 8 % | r 409 m | 89 m |
-| Stuttgart, Hauptbahnhof (oben) | 355 m | 0 % | r 292 m | 70 m |
-| Rheine, Bahnhof | 281 m | 0 % | r 149 m | 162 m |
-| Kißlegg Bahnhof | 191 m | 36 % | r 169 m | 23 m |
-| Hagen Hbf | 178 m | 0 % | r 73 m | 148 m |
-| Langenargen Bahnhof | 166 m | 53 % | r 98 m | 70 m |
-| Leichlingen Bf | 138 m | 17 % | r 110 m | 28 m |
+| 3 | 46 | 44 (95 %) | 2 | 43 % |
+| 2 | 567 | 554 (97 %) | 13 | 5 % |
+| 1 | 169 | 164 (97 %) | 5 | 9 % |
 
-Was das heißt:
+Beispiele: Köln Hbf 6 Bahnsteige, 10 ha, reicht 358 m weit; Düsseldorf Hbf 15 Bahnsteige, 23 ha,
+467 m; Dortmund Hbf 10 Bahnsteige, 15 ha, 587 m; Leichlingen 1 Bahnsteig, 0,2 ha, 137 m.
 
-- **Die 50-m-Schwelle trifft fast nie den Bahnsteig.** In München, Stuttgart, Rheine und Hagen
-  liegt kein einziger Bahnsteigpunkt innerhalb 50 m unseres Punkts. Wer dort auf Gleis 26 wartet,
-  bekommt keinen Nudge — es sei denn, er geht durch die Halle am Punkt vorbei.
-- **Der 300-m-Kreis reicht nicht überall.** München reicht 688 m weit, Hamburg 468 m. Das Wecken
-  klappt trotzdem meist, weil man auf dem Weg hinein durch den Kreis läuft; wer vom Holzkirchner
-  Flügelbahnhof kommt, womöglich nicht.
-- **Der Punkt ist oft nicht die Mitte.** 292 m in München, 162 m in Rheine: Die Feed-Koordinate
-  ist ein Eingang, ein Empfangsgebäude oder der Schwerpunkt der Halte, nicht der Bahnhof.
-- Kleine Halte (Leichlingen, Langenargen) sind 100–170 m lang. Ein Bahnsteig ist länger als die
-  Schwelle, auch dort.
+**Fallstrick:** Köln Messe/Deutz ist in OSM zwei Bahnhöfe, „hoch" und „tief". Die
+Nächster-Anker-Regel gibt unserem einen Bahnhof nur die Bahnsteige des einen. Die Zuordnung muss
+mehrere OSM-Bahnhöfe gleichen Namens zu einem von uns zusammenlegen können.
 
-Grenzen der Messung, ehrlich: **Köln Hbf fehlt**, weil seine Bahnsteige als Multipolygon-Relationen
-gemappt sind und mein Skript die Relationen in diesem Lauf nicht zu fassen bekam (eine erste
-Abfrage hat sie gefunden: sieben Bahnsteige, rund 410 × 320 m). **Hagen** zeigt nur einen
-Bahnsteig — die anderen sind vermutlich nur als `public_transport=platform` getaggt. **Berlin Hbf**
-ist nicht gelaufen. Die Messung zeigt die Richtung, keine fertige Statistik.
+NRW ist dicht gemappt; im ländlichen Osten und Süden kann die Quote niedriger liegen. Die Zählung
+für ganz Deutschland ist der erste Lauf des Prototyps.
 
-## Woher ein Umriss kommen kann
+## Der Plan
 
-### 1. Unsere eigenen Feeds: die Steige (sofort, ohne neue Lizenz)
+### Im Import
 
-Der Import liest schon heute **jede Zeile** von `stops.txt`, auch jeden Steig (`location_type = 0`)
-mit `stop_lat`/`stop_lon` und `parent_station` (`backend/src/stations/gtfs.rs`). DELFI führt für
-große Bahnhöfe einen Steig pro Gleisabschnitt: Stuttgart `de:08111:6115:1:1` bis `…:8:16`. Die
-konvexe Hülle dieser Punkte, gepuffert, ist ein grober Umriss **der Gleise** — genau der Teil, auf
-dem man steht, wenn man auf einen Zug wartet.
+Einmal pro Stationsimport (in Produktion, wie die Ids — docs/46):
 
-- Vorteil: keine neue Quelle, keine neue Lizenz (dieselbe wie heute), gleiche Ids.
-- Schwäche: Punkte, keine Flächen; ein Halt mit einem einzigen Steig hat keine Hülle, nur den Punkt.
-  Wie viele Steige ein Bahnhof im Mittel hat, ist noch nicht gezählt — das ist die erste Frage an
-  den Prototypen.
+1. Geofabrik-Auszug Deutschland laden (rund 4,4 GB), mit `osmium tags-filter` auf Bahnhöfe,
+   Bahnsteige, Empfangsgebäude und Bahnhofsflächen reduzieren (erwartet unter 50 MB). Kein
+   Overpass: Der öffentliche Server lieferte schon beim Prototypen über Minuten nur Timeouts.
+2. Pro Bahnhof das Gelände wie oben, mit der Zusammenlegung gleichnamiger OSM-Bahnhöfe.
+3. Vereinfachen auf höchstens 24 Ecken; Plausibilität: Fläche unter 50 ha, unser Punkt höchstens
+   400 m entfernt, sonst verworfen und im Importbericht genannt.
 
-### 2. OpenStreetMap: Bahnsteige und Bahnhofsgebäude (genau, mit Lizenzpflicht)
-
-Wie Bahnhöfe gemappt sind (verifiziert an Köln, München, Hamburg, Stuttgart und fünf kleineren):
-
-- `railway=platform` (und/oder `public_transport=platform` + `train=yes`) als Fläche oder als
-  Linie, bei großen Bahnhöfen oft als Multipolygon-Relation, mit `ref` = Gleisnummern („9;10").
-- `building=train_station` für Empfangsgebäude und Hallen.
-- `public_transport=stop_area`-Relationen, die Station, Steige und Eingänge zusammenfassen. In
-  Köln gibt es drei davon (Hauptbahnhof, Dom/Hbf, Breslauer Platz) — Tram und Bus inklusive, also
-  **nicht** ohne Filter brauchbar.
-- Tram- und Bussteige tragen oft `tram=yes`/`bus=yes`, aber nicht immer; der Filter muss auch am
-  Namen und an der Nähe zu `railway=station` festmachen.
-
-Beschaffung: nicht über die öffentliche Overpass-API — die hat heute schon beim Prototypen über
-Minuten nur Timeouts geliefert. Sondern einmal pro Import aus dem **Geofabrik-Auszug Deutschland**
-(`germany-latest.osm.pbf`, rund 4 GB) mit `osmium tags-filter` auf die paar Tags, die wir brauchen.
-
-**Lizenz: ODbL.** Meine Einschätzung (keine Rechtsberatung): Eine Tabelle „Umriss pro Bahnhof",
-die wir aus OSM ableiten und an Telefone ausliefern, ist eine *abgeleitete Datenbank*, die
-öffentlich genutzt wird. Dann gilt Share-Alike **für diese abgeleitete Tabelle** — nicht für die
-App und nicht für unsere übrigen Daten —, und „© OpenStreetMap-Mitwirkende" muss sichtbar genannt
-werden (Datenherkunft, Website). Da das Repo ohnehin öffentlich wird, ist das billig: Die
-Umriss-Tabelle wird unter ODbL mit veröffentlicht. Vor dem Start mit Johannes klären.
-Quelle: https://www.openstreetmap.org/copyright, https://osmfoundation.org/wiki/Licence/Community_Guidelines
-
-### 3. DB Open Data (Punkte, keine Umrisse — nicht verifiziert)
-
-DB InfraGO veröffentlicht ihr Streckennetz mit Betriebsstellen als WFS/WMS unter CC BY 4.0
-(Geodatenkatalog: https://gdk.gdi-de.org/geonetwork/srv/api/records/ec0237d0-37b7-11e6-bdf4-0800200c9a66).
-Nach allem, was die Suche zeigt, sind Bahnhöfe dort **Punkte**; Bahnsteigdaten gibt es als
-Attribute (Länge, Höhe), nicht als Fläche. **Nicht verifiziert:** Der WFS-Endpunkt
-`geovdbn.deutschebahn.com/geoserver/tn-ra/ows` antwortete am 29. September mit 404; die
-Feature-Typen konnte ich nicht lesen. Wenn es dort doch Flächen gibt, wäre CC BY die angenehmere
-Lizenz als ODbL — eine Anfrage an Geodaten.DBInfraGO@deutschebahn.com klärt das.
-
-### Nicht weiter verfolgt
-
-ALKIS-Gebäudeumrisse (Ländersache, 16 Lizenzen, zeigt Gebäude, nicht Bahnsteige) und INSPIRE
-Transport Networks (Linien, keine Bahnhofsflächen).
-
-## Prototyp: wie es aussehen könnte
-
-**Zwei Stufen, beide im Import, beide fallen auf heute zurück.**
-
-1. **Stufe 1, Steige aus dem Feed.** Pro Bahnhof die Punkte seiner Steige sammeln; ab drei
-   Punkten die konvexe Hülle, 25 m gepuffert, auf höchstens 24 Ecken vereinfacht.
-2. **Stufe 2, OSM.** Zug-Bahnsteige (Filter oben) im Umkreis von 700 m um den Bahnhofspunkt,
-   zugeordnet über den Namen oder die `stop_area` des nächsten `railway=station`; ihre
-   Vereinigung, 25 m gepuffert, vereinfacht. Wo OSM einen Umriss hat, gewinnt er.
-
-Daraus pro Bahnhof, neu in der Tabelle (`stations`, additiv):
+Neue, **eigene Tabelle** `station_outlines` (nicht Spalten in `stations`, siehe Lizenz):
 
 | Feld | Inhalt |
 |---|---|
-| `outline` | das Polygon, vereinfacht (≤ 24 Ecken) |
-| `outline_source` | `feed` oder `osm`, für die Namensnennung und die Diagnose |
-| `wake_lat`, `wake_lon`, `wake_radius_m` | Kreis zum Wecken: kleinster umschließender Kreis des Umrisses + 100 m, mindestens 300 m, höchstens 1.000 m |
+| `station_id` | unser Bahnhof |
+| `outline` | das Polygon, WGS84, ≤ 24 Ecken |
+| `osm_ids` | die OSM-Objekte, aus denen es gebaut ist (für Nachvollziehbarkeit und Korrekturen) |
+| `osm_timestamp` | Stand des OSM-Auszugs |
+| `wake_lat`, `wake_lon`, `wake_radius_m` | Weckkreis: kleinster umschließender Kreis des Geländes + 100 m, mindestens 300 m, höchstens 1.000 m |
 
-**Auf dem Telefon.** Der Umriss kommt mit dem Bahnhofsauszug aufs Gerät (docs/45), nicht über
-eine neue Abfrage. Der native Layer registriert wie heute Kreise — iOS und Android können keine
-Polygone überwachen —, nur eben den `wake`-Kreis statt 300 m um den Punkt. Die Nudge-Schwelle wird
-**„ein Fix liegt im Umriss"** statt „ein Fix liegt 50 m am Punkt": ein Punkt-in-Polygon-Test auf
-dem Gerät. Der Standort verlässt das Telefon dafür nicht (docs/14); der Server rät nichts, und der
-native Layer spricht nicht mit der Admin-API (docs/15).
+### Auf dem Telefon
 
-**Fallback.** Ohne Umriss (ein Halt mit einem Steig und nichts in OSM) bleibt alles, wie es ist:
-300 m wecken, 50 m um den Punkt. Ein älteres Build ignoriert die neuen Felder.
+- Das Gelände kommt mit dem Bahnhofsauszug aufs Gerät (docs/45), als eigener Block im Auszug, den
+  ältere Builds überspringen.
+- iOS und Android überwachen weiter **Kreise** (Polygone können sie nicht): den Weckkreis statt
+  300 m um den Punkt.
+- **iOS:** Der Nudge kommt beim ersten Fix **im Gelände** statt beim ersten Fix in 50 m. Punkt-in-
+  Polygon auf dem Gerät; der Standort verlässt das Telefon nicht (docs/14), der native Layer
+  spricht nicht mit der Admin-API (docs/15).
+- **Android:** Der Kontroll-Fix nach den drei Minuten Dwell prüft „im Gelände" statt „in 300 m".
+- **Kein Gelände:** der 300-m-Kreis ist die Grenze, auf beiden Plattformen gleich. Auf iOS heißt
+  das: die 50-m-Schwelle entfällt ganz — ein Fix im Kreis genügt, wie heute auf Android.
+- Die Entwicklungsseite (docs/25) zeichnet das Gelände mit ein.
 
-**Draht.** Nur neue, optionale Felder im Auszug und in `stations/nearby`; die Ids bleiben unsere
-(`vs:…`), MOTIS- und OSM-Ids verlassen den Server nicht.
+### Draht
 
-## Wie wir es prüfen, bevor es gebaut wird
+Nur neue, optionale Felder und ein neuer Block im Auszug. Ids bleiben unsere (`vs:…`); OSM-Ids
+stehen nur in der Veröffentlichung (unten), nicht im Auszug fürs Telefon.
 
-1. Den Prototyp-Import als `stellwerk stations outlines --dry-run` laufen lassen: wie viele
-   Bahnhöfe bekommen einen Umriss aus dem Feed, wie viele aus OSM, wie viele keinen.
-2. 30 Bahnhöfe von Hand ansehen: 10 große (Köln, München, Hamburg, Berlin, Frankfurt, Leipzig …),
-   10 mittlere, 10 ländliche Halte. Umriss auf einer Karte gegen den heutigen Punkt und die zwei
-   Kreise, als Bild in docs/assets.
-3. Die Entwicklungsseite (docs/25) zeichnet den Umriss mit ein — dort sieht man auf der Reise, ob
-   der Nudge am Bahnsteig gekommen wäre.
-4. Eine echte Probefahrt mit einem Release-Build: München Hbf Gleis 26, Köln Hbf Gleis 11,
-   ein ländlicher Halt.
+## Veröffentlichung und Namensnennung
 
-## Offene Fragen an Johannes
+### Was die ODbL verlangt (Einschätzung, keine Rechtsberatung)
 
-1. **ODbL ja oder nein?** OSM ist die genaueste Quelle, bringt aber Share-Alike für die
-   Umriss-Tabelle und eine sichtbare Namensnennung. Alternative: nur Stufe 1 (Feed-Steige), grober,
-   aber ohne neue Lizenz.
-2. **Soll ich DB InfraGO anschreiben**, ob es Bahnsteigflächen unter CC BY gibt?
-3. **Wie streng soll „am Bahnhof" sein?** Im Umriss heißt: auch auf dem Bahnhofsvorplatz, wenn wir
-   das Gebäude mitnehmen; nur Bahnsteige heißt: erst am Gleis. Ich würde nur Bahnsteige + 25 m
-   nehmen — der Nudge soll kommen, wenn man auf den Zug wartet.
-4. **Reihenfolge:** erst die Zählung aus Stufe 1 (ein Nachmittag, keine neue Quelle), dann
-   entscheiden, ob Stufe 2 den Aufwand wert ist?
+- Die Gelände-Tabelle ist aus OSM **abgeleitet** und wird **öffentlich genutzt** (sie steckt in
+  jeder App). Also: Namensnennung, und die abgeleitete Tabelle muss unter ODbL **angeboten**
+  werden (ODbL 4.3, 4.4, 4.6).
+- Share-Alike gilt für die **Gelände-Tabelle**, nicht für die App, nicht für die Stationsnamen
+  und Ids aus DELFI und nicht für den Rest der Datenbank. Darum eine eigene Tabelle und ein eigener
+  Block im Auszug: Sie ist mit unseren übrigen Daten *zusammengestellt* (Collective Database),
+  nicht mit ihnen *vermengt*. Die Umrisse nie in die Spalten von `stations` schreiben.
+- Die OSM Foundation beschreibt das in den Community Guidelines, u. a. „Collective Database" und
+  „Produced Work": https://osmfoundation.org/wiki/Licence/Community_Guidelines, Attribution:
+  https://osmfoundation.org/wiki/Licence/Attribution_Guidelines.
+
+### Was wir veröffentlichen
+
+- **Die Datei:** `https://verspaetomat.de/daten/bahnhofsumrisse.geojson` — pro Bahnhof unsere Id,
+  der Name, das Polygon, die OSM-Ids, der OSM-Stand. Lizenz ODbL 1.0, im Kopf der Datei genannt.
+  Erwartete Größe um 2 MB. Die Website erzeugt sie beim Bauen aus der Tabelle (`site/`), neu nach
+  jedem Stationsimport.
+- **Der Weg dorthin:**   Skalierung"); die Datei nennt den Commit, der sie gebaut hat. Das erfüllt 4.6 doppelt.
+- **Eine Seite dazu:** `verspaetomat.de/daten` — was die Datei ist, woher sie kommt, Lizenz,
+  Stand, und ein Satz: Wer einen Umriss falsch findet, verbessert ihn am besten in OSM; der
+  nächste Import übernimmt es.
+
+### Wo die Namensnennung steht
+
+| Ort | Text |
+|---|---|
+| App, „Woher kommen die Daten?" (Einstellungen) | „Bahnhofsgelände: © OpenStreetMap-Mitwirkende, ODbL" mit Link auf openstreetmap.org/copyright |
+| App, Entwicklungsseite, wo das Gelände gezeichnet wird | „Gelände © OpenStreetMap-Mitwirkende" unter der Zeichnung |
+| Website, Seite `daten` und Fußzeile | wie oben |
+| `bahnhofsumrisse.geojson` | Lizenz und Quelle im Kopf |
+| Bahnhofsauszug für das Telefon | Quelle und Lizenz im Kopf des Gelände-Blocks |
+
+Die Texte in `app/lib/content/legal.dart` (Datenherkunft) und `docs/13` werden ergänzt; wie immer
+gilt: kein Satz, den die Implementierung nicht hält.
+
+## Reihenfolge
+
+1. Prototyp als `stellwerk stations outlines --dry-run`: ganz Deutschland, Zählung wie oben pro
+   Rang und Bundesland, Liste der Verworfenen. Dazu 30 Gelände als Bild in `docs/assets` (10 große,
+   10 mittlere, 10 ländliche) gegen den heutigen Punkt und die zwei Kreise.
+2. Tabelle, Import in Produktion, Kopie nach Staging (wie die Stationen).
+3. Auszug mit Gelände-Block; iOS und Android prüfen „im Gelände", sonst 300 m.
+4. Veröffentlichung und Namensnennung — **vor** dem ersten Build, der das Gelände ausliefert.
+5. Probefahrt: München Hbf Gleis 26, Köln Hbf Gleis 11, ein ländlicher Halt.

@@ -79,7 +79,7 @@ series later walked into the same numbers. In prose and in code comments a bare 
 | [42-runbook-vps-testflight.md](42-runbook-vps-testflight.md) | Step-by-step: Hetzner VPS with Docker and Caddy, then the iOS build into TestFlight, then APNs |
 | [46-staging-und-freigabe.md](46-staging-und-freigabe.md) | Staging and production: two servers, two apps, promotion only after Johannes has tested staging |
 | [47-nur-minuten.md](47-nur-minuten.md) | Only minutes: Geduldspunkte are gone, the one rule for what a ride counts |
-| [48-bahnhofsumrisse.md](48-bahnhofsumrisse.md) | Research (#64): station outlines from feed quays or OSM, measured against today's 50 m nudge; prototype and open questions |
+| [48-bahnhofsumrisse.md](48-bahnhofsumrisse.md) | Station premises (#64): today's 50 m check measured, feed quays and DB OpenStation ruled out, OSM counted for NRW (97 %), the plan, publishing and ODbL attribution |
 
 [sources.md](sources.md) lists the URLs behind the research.
 
