@@ -31,9 +31,10 @@ main() {
   (
     cd "$WT/app"
     flutter pub get >/dev/null
+    # stdin is /dev/null: flutter test reads it and would swallow the answer promote.sh asks for next.
     flutter test integration_test/workflow_test.dart -d "$SIM" \
       --dart-define=API_URL="$API" --dart-define=BACKEND=local --dart-define=NO_LOCATION=1 \
-      --dart-define=E2E=true --dart-define=ADMIN_TOKEN="$token" --dart-define=INITIAL_ROUTE=/home >"$LOG" 2>&1 || true
+      --dart-define=E2E=true --dart-define=ADMIN_TOKEN="$token" --dart-define=INITIAL_ROUTE=/home </dev/null >"$LOG" 2>&1 || true
     grep -E "^[0-9:]+ \+[0-9]+.*(passed|failed)|EXCEPTION|Expected|Actual|Timed out|══" "$LOG" | tail -20
     echo "== full log: $LOG"
   )
