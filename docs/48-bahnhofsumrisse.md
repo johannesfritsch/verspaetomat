@@ -325,13 +325,30 @@ nicht untergräbt und der Test verwertbare Zahlen liefert.
 
 ### Die Daten fürs Telefon
 
-**Entschieden (Johannes, 29. September): eine eigene Datei.**
+**Entschieden (Johannes, 29. September): eine eigene Datei** neben dem Bahnhofsauszug (docs/45),
+wegen der Lizenz: So ist die ODbL-Datenbank eine eigene Datei, getrennt von den Namen und Ids aus
+DELFI. Ohne diese Datei (älterer Server, Download fehlgeschlagen) gilt für alle Bahnhöfe der
+300-m-Wächter.
 
-Eine **zweite Datei** neben dem Bahnhofsauszug (docs/45): `bahnhofsumrisse.bin`, nach unseren Ids,
-mit Ring, Tastpunkten und Gelände. Nicht aus Kompatibilitätsgründen — wir sind nicht live —,
-sondern wegen der Lizenz: So ist die ODbL-Datenbank eine eigene Datei, getrennt von den Namen und
-Ids aus DELFI (unten). Ohne diese Datei (älterer Server, Download fehlgeschlagen) gilt für alle
-Bahnhöfe der 300-m-Wächter.
+`site/static/stations/umrisse-<version>.bin` (mit `.gz` daneben) und `umrisse-latest.json`, der
+Zeiger, den das Telefon zuerst liest — gebaut wie der Auszug: `stellwerk stations outlines-file`
+holt die Tabelle (`GET /admin/stations/outlines`), rendert, **liest die Datei mit dem Leser des
+Telefons zurück** (`outlines::parse_file`) und schreibt erst dann. Alles little-endian:
+
+| Teil | Bytes | Inhalt |
+|---|---|---|
+| Kopf | 32 | `VSOL`, Format u16 (1), Kopflänge u16 (32), Anzahl u32, Satzlänge u32 (20), Bloblänge u32, OSM-Tag u32 (Unix), Version u32 (Importzeit, Unix), CRC32 u32 über Sätze und Blob |
+| Satz, je Bahnhof, nach Id sortiert | 20 | Id u32, Ring Breite i32 und Länge i32 (Mikrograd), Ringradius u16 (m), Anzahl Tastpunkte u8, Anzahl Ecken u8, Versatz in den Blob u32 |
+| Blob, am Versatz | 10 je Tastpunkt, 8 je Ecke | erst jeder Tastpunkt (Breite i32, Länge i32, Radius u16), dann jede Ecke (Breite i32, Länge i32) |
+
+Dieselben Wachstumsregeln wie beim Auszug: Ein längerer Kopf oder Satz wird von einem älteren
+Leser übersprungen, nur eine geänderte Bedeutung erhöht das Format. Stand 29. September: 6.129
+Bahnhöfe, 1,2 MB (gepackt 700 KB).
+
+`stellwerk` schreibt in den Baum nur mit `--prod`, oder mit `--staging`, wenn Staging
+**nachweislich** die Kopie der Produktion hält (Anzahl, OSM-Stand und Importzeit in
+`/admin/stations` gleich — `stations-to-staging.sh` übernimmt die Importzeit). Dann sind die
+Dateien Byte für Byte die der Produktion und fahren im Commit mit, den Johannes auf Staging testet.
 
 ### Was der Test zeigen muss
 
@@ -357,7 +374,7 @@ Wartezeit). Vorher nicht.
   werden (ODbL 4.3, 4.4, 4.6).
 - Share-Alike gilt für die **Gelände-Tabelle**, nicht für die App, nicht für die Stationsnamen
   und Ids aus DELFI und nicht für den Rest der Datenbank. Darum eine eigene Tabelle und eine eigene
-  Datei fürs Telefon (`bahnhofsumrisse.bin`): Sie ist mit unseren übrigen Daten *zusammengestellt* (Collective Database),
+  Datei fürs Telefon (`umrisse-<version>.bin`): Sie ist mit unseren übrigen Daten *zusammengestellt* (Collective Database),
   nicht mit ihnen *vermengt*. Die Umrisse nie in die Spalten von `stations` schreiben.
 - Die OSM Foundation beschreibt das in den Community Guidelines, u. a. „Collective Database" und
   „Produced Work": https://osmfoundation.org/wiki/Licence/Community_Guidelines, Attribution:
@@ -367,9 +384,8 @@ Wartezeit). Vorher nicht.
 
 - **Die Datei:** `https://verspaetomat.de/daten/bahnhofsumrisse.geojson` — pro Bahnhof unsere Id,
   der Name, das Polygon, die OSM-Ids, der OSM-Stand. Lizenz ODbL 1.0, im Kopf der Datei genannt.
-  Erwartete Größe um 4 MB (das Gelände als Polygon, Ring und Tastpunkte als Mittelpunkt und Radius;
-  die Probelauf-GeoJSON mit gezeichneten Kreisen hat 19 MB). Die Website erzeugt sie beim Bauen aus der Tabelle (`site/`), neu nach
-  jedem Stationsimport.
+  Stand 29. September 4,5 MB (gepackt 1,2 MB). `stellwerk stations outlines-file` schreibt sie
+  nach `site/static/daten`, neu nach jedem Gelände-Import.
 - **Der Weg dorthin:** Der Import-Code wird mit dem Repo öffentlich, bevor die App erscheint; die
   Datei nennt den Commit, der sie gebaut hat. Das erfüllt 4.6 doppelt.
 - **Eine Seite dazu:** `verspaetomat.de/daten` — was die Datei ist, woher sie kommt, Lizenz,
@@ -384,7 +400,7 @@ Wartezeit). Vorher nicht.
 | App, Entwicklungsseite, wo das Gelände gezeichnet wird | „Gelände © OpenStreetMap-Mitwirkende" unter der Zeichnung |
 | Website, Seite `daten` und Fußzeile | wie oben |
 | `bahnhofsumrisse.geojson` | Lizenz und Quelle im Kopf |
-| `bahnhofsumrisse.bin` fürs Telefon | Quelle und Lizenz im Kopf der Datei |
+| `umrisse-latest.json`, der Zeiger auf die Datei fürs Telefon | `license` und `attribution` |
 
 Die Texte in `app/lib/content/legal.dart` (Datenherkunft) und `docs/13` werden ergänzt; wie immer
 gilt: kein Satz, den die Implementierung nicht hält.
@@ -398,7 +414,9 @@ gilt: kein Satz, den die Implementierung nicht hält.
    nicht, Prüfung jeder Zeile, unter 80 % nur mit `--force`) und `stellwerk stations outlines`.
    In Produktion seit 29. September (ab7c5f2): 6.129 Gelände, OSM-Stand 29. September; mit
    `deploy/stations-to-staging.sh` auf Staging.
-3. `bahnhofsumrisse.bin` und die Seite `verspaetomat.de/daten` mit Namensnennung.
+3. ✅ `umrisse-<version>.bin`, die offene `bahnhofsumrisse.geojson` und die Seite
+   `verspaetomat.de/daten`, dazu die Namensnennung in der Fußzeile jeder Seite (29. September).
+   In der App kommt die Namensnennung mit Schritt 4, wenn sie die Daten benutzt.
 4. iOS: Ringe, Tastpunkte, „am Bahnhof", die eine Registrierungsfunktion, die Notausgänge;
    Android: Ringe und Tastpunkte dauerhaft. Entwicklungsseite und Protokoll.
 5. Staging-Build, Probefahrten: München Hbf, Köln Hbf, ein ländlicher Halt; die vier Zahlen.
