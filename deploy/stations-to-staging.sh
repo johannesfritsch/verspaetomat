@@ -9,7 +9,8 @@
 # production's ids to a server that means other stations by them. Production is the one place
 # ids are made; staging takes its copy and never imports on its own.
 #
-# Only public timetable data crosses: the three station tables, nothing that names a person.
+# Only public data crosses: the station tables and the station premises from OSM (#64), nothing
+# that names a person.
 set -euo pipefail
 
 PROD="${PROD:-verspaetomat}"
@@ -21,15 +22,23 @@ main() {
     echo "refused: $STAGING does not say ENVIRONMENT=staging" >&2
     exit 1
   fi
-  echo "== production → staging: stations, station_sources, station_imports"
+  local truncate="stations, station_sources, station_imports"
+  # The premises (migration 0043) cross once production has the table. Staging always has it
+  # first (it runs main), and the truncate below empties it either way: premises keyed to the
+  # ids being replaced mean nothing.
+  if ssh "$PROD" "cd /opt/verspaetomat/deploy && docker compose exec -T db psql -At -U verspaetomat -d verspaetomat -c \"select to_regclass('station_outlines') is not null\"" | grep -qx t; then
+    TABLES+=(-t station_outlines)
+  fi
+  truncate+=", station_outlines"
+  echo "== production → staging: ${TABLES[*]//-t /}"
   ssh "$PROD" "cd /opt/verspaetomat/deploy && docker compose exec -T db pg_dump -U verspaetomat -d verspaetomat --data-only ${TABLES[*]}" \
     | ssh "$STAGING" "cd /opt/verspaetomat/deploy && docker compose exec -T db psql -q -U verspaetomat -d verspaetomat -v ON_ERROR_STOP=1 -1 \
-        -c 'truncate stations, station_sources, station_imports' -f -" >/dev/null
+        -c 'truncate $truncate' -f -" >/dev/null
   # The API holds the table in memory; a restart reads the copy.
   ssh "$STAGING" "cd /opt/verspaetomat/deploy && docker compose restart api >/dev/null 2>&1"
   sleep 6
   ssh "$STAGING" "cd /opt/verspaetomat/deploy && docker compose exec -T db psql -At -U verspaetomat -d verspaetomat -c \
-    \"select count(*) || ' stations, highest id ' || max(id) from stations\""
+    \"select count(*) || ' stations, highest id ' || max(id) || ', ' || (select count(*) from station_outlines) || ' premises' from stations\""
 }
 
 main "$@"

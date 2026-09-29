@@ -19,7 +19,7 @@
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
-//!   stellwerk stations outlines --dry-run [--from germany-latest.osm.pbf] [--out <dir>]
+//!   stellwerk stations outlines [--from germany-latest.osm.pbf] [--out <dir>] [--dry-run] [--force]
 //!   stellwerk switch …                     (alter Name für flags)
 //!   stellwerk flags [<key> [on|off|<wert>]] [--for <kunde>] [--pct N|off] [--clear] [--reason "…"] [--dry-run] [--yes]
 //!   stellwerk mail-test Johannes j@example.org [--claim <id>]
@@ -395,9 +395,12 @@ enum StationsCmd {
         /// Where the report, GeoJSON and drawings go
         #[arg(long, default_value = "gelaende-probelauf")]
         out: PathBuf,
-        /// Required for now: the table and the phone file come in a later step
+        /// Build and write the files, send nothing
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Send even when the run would leave fewer than 80 % of the premises the table holds
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -1559,8 +1562,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("    cd backend && cargo test --release --lib write_the_nearby_probe_fixture -- --ignored");
                 }
             }
-            StationsCmd::Outlines { from, out, dry_run } => {
-                anyhow::ensure!(dry_run, "Nur --dry-run: Tabelle und Telefon-Datei kommen in einem späteren Schritt (docs/48).");
+            StationsCmd::Outlines { from, out, dry_run, force } => {
                 let progress = |line: &str| eprintln!("  {line}");
                 // The stations as the phones know them, with their real ids.
                 let bytes = api.patient(120)?.get_bytes("/admin/stations/extract").await?;
@@ -1599,7 +1601,21 @@ async fn main() -> anyhow::Result<()> {
                 }
                 print!("{report}");
                 println!("\nGeschrieben: {} (bericht.txt, gelaende.geojson, abdeckung.svg, {} Proben)", out.display(), samples.len());
-                println!("Nur angeschaut, nichts gesendet (--dry-run).");
+                if dry_run {
+                    println!("Nur angeschaut, nichts gesendet (--dry-run).");
+                } else {
+                    let set = outlines::to_set(&premises, stamp.clone());
+                    let v = api.patient(300)?.post(&format!("/admin/stations/outlines?force={force}"), serde_json::to_value(&set)?).await?;
+                    println!(
+                        "{}: {} Gelände (vorher {})",
+                        if v["committed"].as_bool().unwrap_or(false) { "Übernommen" } else { "Nicht übernommen" },
+                        s(&v, "total"),
+                        s(&v, "before")
+                    );
+                    if let Some(note) = v["note"].as_str() {
+                        println!("  {note}");
+                    }
+                }
             }
             StationsCmd::Extract { out, keep, asset, dry_run } => {
                 let root = repo_root();

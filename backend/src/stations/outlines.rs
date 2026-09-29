@@ -531,7 +531,7 @@ pub enum Outcome {
     Rejected(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct Circle {
     pub lat: f64,
     pub lon: f64,
@@ -744,6 +744,61 @@ pub fn build(stations: &[ExtractStation], osm: &Osm) -> Vec<Premise> {
             }
         })
         .collect()
+}
+
+// -- what goes to the server ----------------------------------------------------------------
+
+/// The body of `POST /admin/stations/outlines`: every premise of one run. The server replaces its
+/// table with exactly this, so a run is always whole.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OutlineSet {
+    /// The day of the OSM extract, `YYYY-MM-DD`.
+    pub osm_timestamp: Option<String>,
+    pub outlines: Vec<OutlineRow>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OutlineRow {
+    /// Our station id, the number behind `vs:`.
+    pub station: u32,
+    /// `[lat, lon]`, counter-clockwise.
+    pub outline: Vec<[f64; 2]>,
+    pub ring: Circle,
+    pub touch: Vec<Circle>,
+    /// The OSM objects it is built from.
+    pub osm: Vec<String>,
+}
+
+pub fn to_set(ps: &[Premise], osm_timestamp: Option<String>) -> OutlineSet {
+    OutlineSet {
+        osm_timestamp,
+        outlines: ps
+            .iter()
+            .filter(|p| p.outcome == Outcome::Premise)
+            .map(|p| OutlineRow {
+                station: p.station.id,
+                outline: p.outline.iter().map(|(la, lo)| [round6(*la), round6(*lo)]).collect(),
+                ring: Circle { lat: round6(p.ring.lat), lon: round6(p.ring.lon), r: p.ring.r.round() },
+                touch: p.touch.iter().map(|t| Circle { lat: round6(t.lat), lon: round6(t.lon), r: t.r.round() }).collect(),
+                osm: p.anchors.iter().cloned().chain(p.members.iter().map(|m| m.osm.clone())).collect(),
+            })
+            .collect(),
+    }
+}
+
+/// What the server refuses, whoever sent it: the shape docs/48 promises the phone.
+pub fn check_row(r: &OutlineRow) -> Result<(), String> {
+    let ok = |c: &Circle| (-90.0..=90.0).contains(&c.lat) && (-180.0..=180.0).contains(&c.lon);
+    if r.outline.len() < 3 || r.outline.len() > MAX_CORNERS {
+        return Err(format!("vs:{}: {} Ecken", r.station, r.outline.len()));
+    }
+    if !ok(&r.ring) || !(RING_MIN_M..=RING_MAX_M).contains(&r.ring.r) {
+        return Err(format!("vs:{}: Ring {:.0} m", r.station, r.ring.r));
+    }
+    if r.touch.is_empty() || r.touch.len() > TOUCH_MAX || r.touch.iter().any(|t| !ok(t) || t.r < TOUCH_MIN_M) {
+        return Err(format!("vs:{}: Tastpunkte {:?}", r.station, r.touch.iter().map(|t| t.r).collect::<Vec<_>>()));
+    }
+    Ok(())
 }
 
 // -- report -------------------------------------------------------------------------------------

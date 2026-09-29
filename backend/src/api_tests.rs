@@ -660,3 +660,66 @@ async fn a_bounce_marks_the_claim_whoever_sends_it(pool: PgPool) {
     // (`guard_sender`): the claim did not arrive, and the passenger has to hear that.
     assert_eq!(claim_status(&pool, sent.claim).await, "bounced");
 }
+
+// ---------------------------------------------------------------------------
+// Station premises (#64, docs/48)
+// ---------------------------------------------------------------------------
+
+async fn outline_count(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("select count(*) from station_outlines").fetch_one(pool).await.unwrap()
+}
+
+fn outline_row(station: i64) -> Value {
+    json!({"station": station, "outline": [[50.9425, 6.9575], [50.9425, 6.9595], [50.9440, 6.9595]],
+           "ring": {"lat": 50.943, "lon": 6.9587, "r": 420.0}, "touch": [{"lat": 50.943, "lon": 6.9587, "r": 150.0}], "osm": ["n1", "w2"]})
+}
+
+/// A run replaces the table whole; a broken row refuses all of it; a run that shrinks the table
+/// below 80 % waits for `force`; the status says what is there.
+#[sqlx::test]
+async fn outlines_replace_the_table_whole_or_not_at_all(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let mut ids = Vec::new();
+    for (i, name) in ["Köln Hbf", "Köln Messe/Deutz Bf", "Köln Süd", "Köln West", "Köln-Ehrenfeld"].iter().enumerate() {
+        let id: i32 = sqlx::query_scalar("insert into stations (name, lat, lon, rank) values ($1, $2, 6.95, 2) returning id")
+            .bind(name)
+            .bind(50.94 + i as f64 * 0.01)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        ids.push(id as i64);
+    }
+    let set = |rows: Vec<Value>| json!({"osm_timestamp": "2026-09-29", "outlines": rows});
+
+    let (st, v) = admin(&app, "POST", "/admin/stations/outlines", set(ids.iter().map(|i| outline_row(*i)).collect())).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert_eq!(v["committed"], true);
+    assert_eq!(outline_count(&pool).await, 5);
+    let osm: Vec<String> = sqlx::query_scalar("select unnest(osm_ids) from station_outlines where station_id = $1").bind(ids[0] as i32).fetch_all(&pool).await.unwrap();
+    assert_eq!(osm, vec!["n1", "w2"]);
+
+    // One touch point too small: nothing changes.
+    let mut rows: Vec<Value> = ids.iter().map(|i| outline_row(*i)).collect();
+    rows[1]["touch"][0]["r"] = json!(50.0);
+    rows.truncate(4);
+    let (st, _) = admin(&app, "POST", "/admin/stations/outlines", set(rows)).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert_eq!(outline_count(&pool).await, 5);
+
+    // An unknown station: nothing changes either.
+    let (st, _) = admin(&app, "POST", "/admin/stations/outlines", set(vec![outline_row(999_999)])).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    // Three of five is under 80 %: refused, then taken with force.
+    let three = || set(ids[..3].iter().map(|i| outline_row(*i)).collect());
+    let (_, v) = admin(&app, "POST", "/admin/stations/outlines", three()).await;
+    assert_eq!(v["committed"], false, "{v}");
+    assert!(v["note"].as_str().unwrap().contains("80 %"));
+    let (_, v) = admin(&app, "POST", "/admin/stations/outlines?force=true", three()).await;
+    assert_eq!(v["committed"], true);
+    assert_eq!(outline_count(&pool).await, 3);
+
+    let (_, v) = admin(&app, "GET", "/admin/stations", Value::Null).await;
+    assert_eq!(v["outlines"]["count"], 3);
+    assert_eq!(v["outlines"]["osm_timestamp"], "2026-09-29");
+}

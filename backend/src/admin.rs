@@ -1697,6 +1697,59 @@ pub async fn stations_import(
     Ok(Json(json!(report)))
 }
 
+/// `POST /admin/stations/outlines` — replace the station premises with one run of `stellwerk
+/// stations outlines` (issue #64, docs/48). Whole or nothing: every row is checked first, and a
+/// run that would leave clearly fewer premises than the table holds (under 80 %) is refused
+/// without `force` — that is what a broken extract or filter looks like, not a change in the
+/// world.
+pub async fn stations_outlines(
+    State(s): State<AppState>,
+    _a: Admin,
+    Query(q): Query<ImportQ>,
+    Json(set): Json<crate::stations::outlines::OutlineSet>,
+) -> ApiResult {
+    let live: std::collections::HashSet<i32> =
+        sqlx::query_scalar("select id from stations where retired_at is null").fetch_all(&s.pool).await.map_err(internal)?.into_iter().collect();
+    let mut bad: Vec<String> = set.outlines.iter().filter_map(|r| crate::stations::outlines::check_row(r).err()).collect();
+    bad.extend(set.outlines.iter().filter(|r| !live.contains(&(r.station as i32))).map(|r| format!("vs:{}: keine lebende Station", r.station)));
+    let mut seen = std::collections::HashSet::new();
+    bad.extend(set.outlines.iter().filter(|r| !seen.insert(r.station)).map(|r| format!("vs:{}: doppelt", r.station)));
+    if !bad.is_empty() {
+        bad.truncate(20);
+        return Err(err(StatusCode::BAD_REQUEST, &format!("{} fehlerhafte Zeilen, nichts übernommen: {}", bad.len(), bad.join("; "))));
+    }
+    let have: i64 = sqlx::query_scalar("select count(*) from station_outlines").fetch_one(&s.pool).await.map_err(internal)?;
+    let n = set.outlines.len() as i64;
+    let shrinks = have > 0 && n * 10 < have * 8;
+    let note = shrinks.then(|| format!("{n} statt {have} Gelände — weniger als 80 %; mit --force übernehmen, wenn das stimmt"));
+    let committed = !q.dry_run && (!shrinks || q.force);
+    if committed {
+        let rows: Vec<Value> = set
+            .outlines
+            .iter()
+            .map(|r| {
+                json!({"station_id": r.station, "outline": r.outline, "ring_lat": r.ring.lat, "ring_lon": r.ring.lon,
+                    "ring_radius_m": r.ring.r, "touch": r.touch, "osm_ids": r.osm, "osm_timestamp": set.osm_timestamp})
+            })
+            .collect();
+        let mut tx = s.pool.begin().await.map_err(internal)?;
+        sqlx::query("delete from station_outlines").execute(&mut *tx).await.map_err(internal)?;
+        sqlx::query(
+            "insert into station_outlines (station_id, outline, ring_lat, ring_lon, ring_radius_m, touch, osm_ids, osm_timestamp) \
+             select station_id, outline, ring_lat, ring_lon, ring_radius_m, touch, osm_ids, osm_timestamp \
+             from jsonb_to_recordset($1) as x(station_id int, outline jsonb, ring_lat float8, ring_lon float8, ring_radius_m real, \
+                                               touch jsonb, osm_ids text[], osm_timestamp date)",
+        )
+        .bind(Value::Array(rows))
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+        tracing::info!(outlines = n, before = have, "station outlines imported");
+    }
+    Ok(Json(json!({ "committed": committed, "total": n, "before": have, "note": note })))
+}
+
 /// `GET /admin/stations` — what is in the table and how it got there.
 pub async fn stations_status(State(s): State<AppState>, _a: Admin) -> ApiResult {
     let ix = s.stations();
@@ -1713,7 +1766,11 @@ pub async fn stations_status(State(s): State<AppState>, _a: Admin) -> ApiResult 
             .fetch_optional(&s.pool)
             .await
             .map_err(internal)?;
+    // The premises (issue #64): how many, from which OSM day, imported when. Additive.
+    let outlines: (i64, Option<chrono::NaiveDate>, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as("select count(*), max(osm_timestamp), max(imported_at) from station_outlines").fetch_one(&s.pool).await.map_err(internal)?;
     Ok(Json(json!({
+        "outlines": { "count": outlines.0, "osm_timestamp": outlines.1, "imported_at": outlines.2 },
         "live": ix.len(),
         "retired": retired.0,
         // Which extract the table would render as, and the Fahrplanstand behind it (issue #39), so
