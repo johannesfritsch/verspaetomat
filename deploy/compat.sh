@@ -20,7 +20,7 @@ LOG="${TMPDIR:-/tmp}/compat-$TAG.log"
 main() {
   git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || { echo "no tag $TAG" >&2; exit 1; }
   local token
-  token="$(ssh verspaetomat-staging "grep -m1 '^ADMIN_TOKEN=' /opt/verspaetomat/deploy/.env" | cut -d= -f2)"
+  token="$(ssh -n verspaetomat-staging "grep -m1 '^ADMIN_TOKEN=' /opt/verspaetomat/deploy/.env" | cut -d= -f2)"
   echo "== $TAG (the app) against $API ($(curl -sf "$API/health" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p'))"
   git worktree add -q --detach "$WT" "$TAG"
   trap 'git worktree remove --force "$WT" >/dev/null 2>&1 || true' EXIT
