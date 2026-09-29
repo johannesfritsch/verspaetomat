@@ -3303,31 +3303,26 @@ fn wants_gzip(h: &axum::http::HeaderMap) -> bool {
     h.get(axum::http::header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(',').any(|e| e.trim().starts_with("gzip")))
 }
 
-/// One of the rendered files, gzip when the client takes it. `Vary` because the same URL answers
-/// with two bodies.
-fn file_response(h: &axum::http::HeaderMap, plain: &[u8], gz: &[u8], content_type: &str, cache: &str, etag: String) -> axum::response::Response {
+/// One of the rendered files; gzip when there is a gzip copy and the client takes it. `Vary` only
+/// then: the pointer has no gzip copy, and sent through Caddy a small body that carried
+/// `Vary: Accept-Encoding` arrived empty (measured on staging, 29 September).
+fn file_response(h: &axum::http::HeaderMap, plain: &[u8], gz: Option<&[u8]>, content_type: &str, cache: &str, etag: String) -> axum::response::Response {
     use axum::http::header;
     use axum::response::IntoResponse;
     if h.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
     }
-    let mut headers = vec![
-        (header::CONTENT_TYPE, content_type.to_string()),
-        (header::CACHE_CONTROL, cache.to_string()),
-        (header::ETAG, etag),
-        (header::VARY, "Accept-Encoding".to_string()),
-    ];
-    if wants_gzip(h) {
-        headers.push((header::CONTENT_ENCODING, "gzip".to_string()));
-        let mut r = gz.to_vec().into_response();
-        for (k, v) in headers {
-            r.headers_mut().insert(k, v.parse().unwrap());
-        }
-        return r;
+    let gzipped = gz.filter(|_| wants_gzip(h));
+    let mut r = gzipped.unwrap_or(plain).to_vec().into_response();
+    let hs = r.headers_mut();
+    hs.insert(header::CONTENT_TYPE, content_type.parse().unwrap());
+    hs.insert(header::CACHE_CONTROL, cache.parse().unwrap());
+    hs.insert(header::ETAG, etag.parse().unwrap());
+    if gz.is_some() {
+        hs.insert(header::VARY, "Accept-Encoding".parse().unwrap());
     }
-    let mut r = plain.to_vec().into_response();
-    for (k, v) in headers {
-        r.headers_mut().insert(k, v.parse().unwrap());
+    if gzipped.is_some() {
+        hs.insert(header::CONTENT_ENCODING, "gzip".parse().unwrap());
     }
     r
 }
@@ -3340,7 +3335,7 @@ fn no_outlines() -> axum::response::Response {
 /// `GET /stations/umrisse-latest.json` — which phone file is current. May be an hour old.
 pub async fn outline_pointer(State(s): State<AppState>, h: axum::http::HeaderMap) -> axum::response::Response {
     match s.outline_files() {
-        Some(f) => file_response(&h, &f.pointer, &f.pointer, "application/json", "public, max-age=3600", format!("\"p{}\"", f.version)),
+        Some(f) => file_response(&h, &f.pointer, None, "application/json", "public, max-age=3600", format!("\"p{}\"", f.version)),
         None => no_outlines(),
     }
 }
@@ -3354,13 +3349,13 @@ pub async fn outline_file(State(s): State<AppState>, h: axum::http::HeaderMap, P
     if want != Some(f.version) {
         return no_outlines();
     }
-    file_response(&h, &f.bin, &f.bin_gz, "application/octet-stream", "public, max-age=31536000, immutable", format!("\"b{}\"", f.version))
+    file_response(&h, &f.bin, Some(&f.bin_gz), "application/octet-stream", "public, max-age=31536000, immutable", format!("\"b{}\"", f.version))
 }
 
 /// `GET /daten/bahnhofsumrisse.geojson` — the published database (ODbL, docs/48).
 pub async fn outline_geojson(State(s): State<AppState>, h: axum::http::HeaderMap) -> axum::response::Response {
     match s.outline_files() {
-        Some(f) => file_response(&h, &f.geojson, &f.geojson_gz, "application/geo+json", "public, max-age=3600", format!("\"g{}\"", f.version)),
+        Some(f) => file_response(&h, &f.geojson, Some(&f.geojson_gz), "application/geo+json", "public, max-age=3600", format!("\"g{}\"", f.version)),
         None => no_outlines(),
     }
 }

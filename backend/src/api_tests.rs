@@ -740,6 +740,12 @@ async fn outlines_replace_the_table_whole_or_not_at_all(pool: PgPool) {
     assert_eq!(st, StatusCode::OK);
     assert_eq!(h["cache-control"], "public, max-age=3600");
     let pointer: Value = serde_json::from_slice(&body).unwrap();
+    // The pointer has no gzip copy: asked for gzip, it still comes plain and says so.
+    let (_, h2, body2) = raw_get(&app, "/stations/umrisse-latest.json", &[("accept-encoding", "gzip")]).await;
+    assert!(h2.get("content-encoding").is_none());
+    // The CORS layer adds its own `vary: origin, …`; what must not be there is Accept-Encoding.
+    assert!(!h2.get_all("vary").iter().any(|v| v.to_str().unwrap().to_lowercase().contains("accept-encoding")));
+    assert_eq!(body2, body);
     assert_eq!(pointer["count"], 3);
     assert_eq!(pointer["license"], "ODbL-1.0");
     let url = pointer["url"].as_str().unwrap().to_string();
