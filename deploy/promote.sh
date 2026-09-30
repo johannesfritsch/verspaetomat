@@ -37,11 +37,8 @@ main() {
   fi
 
   if [[ "${SKIP_COMPAT:-0}" != 1 ]]; then
-    deploy/compat.sh
-    # At the end of input (a pipe, a script) `read` fails; that must stop here with the message
-    # below, not silently through `set -e`.
-    read -r -p "== old app build against staging: did it pass? [y/N] " ok || ok=""
-    [[ "$ok" == y ]] || { echo "stopped before production" >&2; exit 1; }
+    # compat.sh decides by its exit status (#76); nobody has to read its log and type y.
+    deploy/compat.sh || { echo "stopped before production" >&2; exit 1; }
   fi
 
   git push -q origin "$want:refs/heads/production"

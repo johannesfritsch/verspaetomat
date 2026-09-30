@@ -38,6 +38,15 @@ main() {
     grep -E "^[0-9:]+ \+[0-9]+.*(passed|failed)|EXCEPTION|Expected|Actual|Timed out|══" "$LOG" | tail -20
     echo "== full log: $LOG"
   )
+  # The verdict is the exit status (#76): passed only when the run said so. A crash before the
+  # summary, a build that never started, a test that failed — all of them are a failure here, and
+  # promote.sh stops on it without anybody having to read the log and type y.
+  if grep -q "All tests passed!" "$LOG"; then
+    echo "== passed"
+  else
+    echo "== FAILED: the old app build does not work against staging" >&2
+    exit 1
+  fi
 }
 
 main "$@"
