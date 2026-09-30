@@ -2,6 +2,8 @@
 
 Legal basis: EU Regulation 2021/782 (applicable in Germany since 7 June 2023) and the German Eisenbahnverkehrsordnung (EVO). Everything below reflects DB's published practice as of September 2026.
 
+> **Superseded in part by [49-fahrkarten-und-ansprueche.md](49-fahrkarten-und-ansprueche.md)** (30 September 2026, from the tariff texts themselves): Zeitkarten including the D-Ticket pool delays **from 20 minutes** (1,50 € per full hour; for the D-Ticket across month boundaries, capped per month); BahnCard 100 pays 10 € / 15 € per case; the limitation period is one year after the ticket's validity ends.
+
 ## Deutschlandticket
 
 The D-Ticket is classed as an "erheblich ermäßigter Fahrausweis" (significantly discounted fare). That is why it gets a flat-rate scheme instead of a percentage refund.
