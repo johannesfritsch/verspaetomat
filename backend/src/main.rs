@@ -22,6 +22,7 @@ mod mail;
 mod model;
 mod openai;
 mod pdf;
+mod pots;
 mod push;
 mod redact;
 mod reply;
@@ -280,6 +281,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/rides/{id}", delete(journeys::delete_ride))
         // ledger and claims
         .route("/v1/incidents", get(handlers::incidents))
+        .route("/v1/incidents/{id}", axum::routing::patch(handlers::incident_patch))
         .route("/v1/incidents/{id}/discard", post(handlers::incident_discard))
         .route("/v1/incidents/{id}/restore", post(handlers::incident_restore))
         .route("/v1/claims", get(handlers::claims))

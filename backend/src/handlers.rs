@@ -1023,22 +1023,37 @@ pub async fn nachtrag(State(s): State<AppState>, c: Customer, Json(n): Json<Nach
 pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
     let today = today();
     let rows = rules::refresh_statuses(&s.pool, c.0.id, today).await.map_err(internal)?;
-    let mut by_desk: BTreeMap<String, Vec<&IncidentRow>> = BTreeMap::new();
-    for i in rows.iter().filter(|i| i.open()) {
-        by_desk.entry(i.desk.clone()).or_default().push(i);
+    let tickets = crate::pots::customer_tickets(&s.pool, c.0.id).await.map_err(internal)?;
+    let pots = crate::pots::evaluate_all(&rows, &tickets, today);
+    // `desks` is what builds before pots read: per desk, the sum of its pots, ready when one of
+    // them can go out, and what is missing to the nearest payout.
+    let mut by_desk: BTreeMap<String, Vec<&crate::pots::LivePot>> = BTreeMap::new();
+    for p in &pots {
+        by_desk.entry(p.key.desk.clone()).or_default().push(p);
     }
     let desks: Vec<Value> = by_desk
         .iter()
         .map(|(desk, list)| {
-            let open: Cents = list.iter().map(|i| i.amount_cents).sum();
-            json!({ "desk": desk, "open_cents": open, "ready": rules::bundle_ready(list), "missing_cents": (rules::MIN_PAYOUT_CENTS - open).max(0), "incident_ids": list.iter().map(|i| i.id).collect::<Vec<_>>() })
+            let open: Cents = list.iter().map(|p| p.pot.amount).sum();
+            let ready = list.iter().any(|p| p.pot.payable);
+            let missing = if ready {
+                0
+            } else {
+                list.iter()
+                    .filter_map(|p| p.pot.blockers.iter().find_map(|b| match b { crate::fares::evaluate::Blocker::BelowMinimum { missing_cents, .. } => Some(*missing_cents), _ => None }))
+                    .min()
+                    .unwrap_or((rules::MIN_PAYOUT_CENTS - open).max(0))
+            };
+            // As before pots: the open cases, not the ones a cap left with nothing.
+            let ids: Vec<Uuid> = list.iter().flat_map(|p| p.incident_ids.iter().copied()).filter(|id| rows.iter().any(|i| i.id == *id && i.open())).collect();
+            json!({ "desk": desk, "open_cents": open, "ready": ready, "missing_cents": missing, "incident_ids": ids })
         })
         .collect();
-    let ready_desk = by_desk.iter().find(|(_, l)| rules::bundle_ready(l)).map(|(d, _)| d.clone());
+    let ready_desk = pots.iter().filter(|p| p.pot.payable).min_by_key(|p| p.oldest).map(|p| p.key.desk.clone());
     let oldest = rows.iter().filter(|i| i.open()).min_by_key(|i| i.ride_date);
     let confirmed: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Bestaetigt).map(|i| i.confirmed_cents.unwrap_or(i.amount_cents)).sum();
     let submitted: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Eingereicht).map(|i| i.amount_cents).sum();
-    let capped: Cents = rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).map(|i| i.amount_cents).sum();
+    let capped: Cents = crate::pots::capped_cents(&pots);
     let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and status <> 'draft' order by sent_at desc nulls last").bind(c.0.id).fetch_all(&s.pool).await.map_err(internal)?;
     let discarded: Vec<&IncidentRow> = rows.iter().filter(|i| i.discarded_at.is_some()).collect();
     Ok(Json(json!({
@@ -1046,6 +1061,8 @@ pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
         "claims": claims,
         "discarded_ids": discarded.iter().map(|i| i.id).collect::<Vec<_>>(),
         "summary": {
+            // One per ticket, window and desk (docs/49 §5.5, #66); what a claim is made of.
+            "pots": pots.iter().map(crate::pots::pot_json).collect::<Vec<_>>(),
             "desks": desks,
             "ready_desk": ready_desk,
             "confirmed_cents": confirmed,
@@ -1094,26 +1111,54 @@ pub async fn incident_discard(State(s): State<AppState>, c: Customer, Path(id): 
     sqlx::query("delete from claim_incidents where incident_id = $1").bind(id).execute(&s.pool).await.map_err(internal)?;
     rules::audit(&s.pool, "incident", id, Some(rules::from_label(inc.status)), "verworfen", reason).await.map_err(internal)?;
 
-    // A draft that held it is recomputed; if what is left no longer reaches the minimum, it goes.
+    // A draft that held it is recomputed; if what is left can no longer go out, it goes.
     let mut claim_deleted = false;
     for cl in &claims {
-        let rest: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1").bind(cl.id).fetch_all(&s.pool).await.map_err(internal)?;
-        let refs: Vec<&IncidentRow> = rest.iter().collect();
-        if rules::draft_after_removal(&refs) == rules::DraftAfterRemoval::Dropped {
-            sqlx::query("delete from claim_attachments where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
-            sqlx::query("delete from claim_incidents where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
-            sqlx::query("update incidents set claim_id = null where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
-            sqlx::query("delete from claims where id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
-            rules::audit(&s.pool, "claim", cl.id, Some("draft"), "deleted", "below the minimum after a case was taken out").await.map_err(internal)?;
-            claim_deleted = true;
-        } else {
-            let amount: Cents = rest.iter().map(|i| i.amount_cents).sum();
-            sqlx::query("update claims set amount_claimed_cents = $2 where id = $1").bind(cl.id).bind(amount).execute(&s.pool).await.map_err(internal)?;
-        }
+        claim_deleted |= crate::pots::shrink_draft(&s.pool, cl, "below the minimum after a case was taken out", today()).await.map_err(internal)?;
     }
     let _ = rules::refresh_statuses(&s.pool, c.0.id, today()).await.map_err(internal)?;
     let inc: IncidentRow = sqlx::query_as("select * from incidents where id = $1").bind(id).fetch_one(&s.pool).await.map_err(internal)?;
     s.events.publish(c.0.id, "incident", json!({ "incident_id": id, "discarded": true }));
+    Ok(Json(json!({ "incident": inc, "claim_deleted": claim_deleted })))
+}
+
+#[derive(Deserialize)]
+pub struct IncidentPatch {
+    pub ticket_id: Uuid,
+}
+
+/// `PATCH /v1/incidents/{id}` `{ticket_id}` — the case was made with another ticket than the one
+/// chosen at check-in (#66, docs/50 phase 4). Allowed until the case has left the house. It leaves
+/// any draft that held it (recomputed as a discard does) and joins the pot of its new ticket.
+pub async fn incident_patch(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(b): Json<IncidentPatch>) -> ApiResult {
+    let inc: Option<IncidentRow> = sqlx::query_as("select * from incidents where id = $1 and customer_id = $2").bind(id).bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(inc) = inc else { return Err(err(StatusCode::NOT_FOUND, "incident not found")) };
+    let claims: Vec<ClaimRow> = sqlx::query_as("select c.* from claims c join claim_incidents ci on ci.claim_id = c.id where ci.incident_id = $1").bind(id).fetch_all(&s.pool).await.map_err(internal)?;
+    if claims.iter().any(|cl| cl.status != ClaimStatus::Draft) || matches!(inc.status, IncidentStatus::Eingereicht | IncidentStatus::Bestaetigt | IncidentStatus::Abgelehnt) {
+        return Err(err(StatusCode::CONFLICT, "der Fall ist schon eingereicht; die Fahrkarte lässt sich nicht mehr ändern"));
+    }
+    let ticket = crate::tickets::owned(&s.pool, c.0.id, b.ticket_id).await?.filter(|t| t.archived_at.is_none()).ok_or_else(|| err(StatusCode::BAD_REQUEST, "no such ticket"))?;
+    if inc.ticket_id == Some(ticket.id) {
+        return Ok(Json(json!({ "incident": inc, "claim_deleted": false })));
+    }
+    sqlx::query("update incidents set ticket_id = $2, ticket = $3, first_class = $4, fare_cents = $5, claim_id = null where id = $1")
+        .bind(id)
+        .bind(ticket.id)
+        .bind(crate::tickets::legacy_type(&ticket.product))
+        .bind(ticket.first_class)
+        .bind(ticket.price_cents)
+        .execute(&s.pool)
+        .await
+        .map_err(internal)?;
+    sqlx::query("delete from claim_incidents where incident_id = $1").bind(id).execute(&s.pool).await.map_err(internal)?;
+    let mut claim_deleted = false;
+    for cl in &claims {
+        claim_deleted |= crate::pots::shrink_draft(&s.pool, cl, "a case moved to another ticket", today()).await.map_err(internal)?;
+    }
+    rules::audit(&s.pool, "incident", id, Some(rules::from_label(inc.status)), rules::from_label(inc.status), &format!("ticket {}", ticket.product)).await.map_err(internal)?;
+    let rows = rules::refresh_statuses(&s.pool, c.0.id, today()).await.map_err(internal)?;
+    let inc = rows.into_iter().find(|i| i.id == id);
+    s.events.publish(c.0.id, "incident", json!({ "incident_id": id, "ticket_changed": true }));
     Ok(Json(json!({ "incident": inc, "claim_deleted": claim_deleted })))
 }
 
@@ -1139,7 +1184,11 @@ pub async fn claims(State(s): State<AppState>, c: Customer) -> ApiResult {
 
 #[derive(Deserialize)]
 pub struct DraftRequest {
-    pub desk: String,
+    /// The pot to claim (`summary.pots[].id`, #66). Builds before pots name a desk instead.
+    #[serde(default)]
+    pub pot: Option<String>,
+    #[serde(default)]
+    pub desk: Option<String>,
     #[serde(default)]
     pub incident_ids: Option<Vec<Uuid>>,
 }
@@ -1241,30 +1290,63 @@ pub(crate) fn draft_action(held: &[Uuid], wanted: Option<&[Uuid]>, still_open: &
 pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<DraftRequest>) -> ApiResult {
     let today = today();
     let rows = rules::refresh_statuses(&s.pool, c.0.id, today).await.map_err(internal)?;
+    let tickets = crate::pots::customer_tickets(&s.pool, c.0.id).await.map_err(internal)?;
+    let pots = crate::pots::evaluate_all(&rows, &tickets, today);
+    // A pot by its id; a desk (a build before pots) means its pot that can go out, oldest first,
+    // else its oldest, so the refusal names what is missing.
+    let chosen = match (d.pot.as_deref(), d.desk.as_deref()) {
+        (Some(id), _) => {
+            let key = crate::pots::PotKey::parse(id).ok_or_else(|| err(StatusCode::BAD_REQUEST, "no such pot"))?;
+            pots.iter().find(|p| p.key == key)
+        }
+        (None, Some(desk)) => {
+            let mut at: Vec<&crate::pots::LivePot> = pots.iter().filter(|p| p.key.desk == desk).collect();
+            at.sort_by_key(|p| (!p.pot.payable, p.oldest));
+            at.first().copied()
+        }
+        (None, None) => return Err(err(StatusCode::BAD_REQUEST, "name a pot or a desk")),
+    };
+    let Some(chosen) = chosen else { return Err(err(StatusCode::BAD_REQUEST, "no open incidents for this desk")) };
+    let desk = chosen.key.desk.clone();
     let selected: Vec<&IncidentRow> = rows
         .iter()
-        .filter(|i| i.open() && i.desk == d.desk && d.incident_ids.as_ref().map(|ids| ids.contains(&i.id)).unwrap_or(true))
+        .filter(|i| chosen.incident_ids.contains(&i.id) && d.incident_ids.as_ref().map(|ids| ids.contains(&i.id)).unwrap_or(true))
         .collect();
     if selected.is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "no open incidents for this desk"));
     }
-    if !rules::bundle_ready(&selected) {
-        return Err(err(StatusCode::PRECONDITION_FAILED, "bundle below the 4 € minimum; keep collecting"));
+    // The selection is its own pot: taking cases out may drop it below what can go out.
+    let facts: Vec<crate::fares::evaluate::CaseFacts> = selected.iter().map(|i| crate::pots::case_facts(i)).collect();
+    let before: Vec<(chrono::NaiveDate, Cents)> = rows
+        .iter()
+        .filter(|i| i.ticket_id == Some(chosen.ticket.id) && i.discarded_at.is_none() && matches!(i.status, IncidentStatus::Eingereicht | IncidentStatus::Bestaetigt))
+        .map(|i| (i.ride_date, i.confirmed_cents.unwrap_or(i.amount_cents)))
+        .collect();
+    let pot = crate::fares::evaluate::evaluate(chosen.product, &crate::pots::ticket_facts(&chosen.ticket, before), &facts, today);
+    if !pot.payable {
+        return Err(err(StatusCode::PRECONDITION_FAILED, &crate::pots::refusal(&pot)));
     }
-    // One open draft per desk. Coming back to the Antrag finds the draft as it was left —
-    // with its ticket and its signature — and only a changed selection of cases replaces it,
-    // because a form whose cases changed is a different form and wants signing again.
-    let existing: Option<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 and desk = $2 and status = 'draft' order by created_at desc limit 1")
-        .bind(c.0.id)
-        .bind(&d.desk)
-        .fetch_optional(&s.pool)
-        .await
-        .map_err(internal)?;
+    // Only cases that count go on the form.
+    let counted: Vec<&IncidentRow> = selected.iter().copied().filter(|i| pot.cases.iter().any(|c| c.id == i.id && c.excluded.is_none())).collect();
+    // One open draft per pot. Coming back to the Antrag finds the draft as it was left — with its
+    // ticket and its signature — and only a changed selection of cases replaces it, because a form
+    // whose cases changed is a different form and wants signing again. Drafts from before pots have
+    // no ticket and count as this desk's.
+    let existing: Option<ClaimRow> = sqlx::query_as(
+        "select * from claims where customer_id = $1 and desk = $2 and status = 'draft' and (ticket_id = $3 or ticket_id is null) order by created_at desc limit 1",
+    )
+    .bind(c.0.id)
+    .bind(&desk)
+    .bind(chosen.ticket.id)
+    .fetch_optional(&s.pool)
+    .await
+    .map_err(internal)?;
     if let Some(old) = existing {
         let held: Vec<Uuid> = sqlx::query_scalar("select incident_id from claim_incidents where claim_id = $1").bind(old.id).fetch_all(&s.pool).await.map_err(internal)?;
-        let still_open: HashSet<Uuid> = rows.iter().filter(|i| i.open() && i.desk == d.desk).map(|i| i.id).collect();
-        if draft_action(&held, d.incident_ids.as_deref(), &still_open) == DraftAction::Resume {
-            return Ok(Json(draft_json(&s, &c.0, &old, &d.desk).await?));
+        let still_open: HashSet<Uuid> = chosen.incident_ids.iter().copied().collect();
+        let wanted: Option<Vec<Uuid>> = d.incident_ids.as_ref().map(|_| counted.iter().map(|i| i.id).collect());
+        if draft_action(&held, wanted.as_deref(), &still_open) == DraftAction::Resume {
+            return Ok(Json(draft_json(&s, &c.0, &old, &desk).await?));
         }
         sqlx::query("delete from claim_attachments where claim_id = $1").bind(old.id).execute(&s.pool).await.map_err(internal)?;
         sqlx::query("delete from claim_incidents where claim_id = $1").bind(old.id).execute(&s.pool).await.map_err(internal)?;
@@ -1273,29 +1355,32 @@ pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<D
         rules::audit(&s.pool, "claim", old.id, Some("draft"), "deleted", "another selection of cases").await.map_err(internal)?;
     }
     let ngo: NgoRow = sqlx::query_as("select * from ngos where id = $1").bind(&c.0.ngo_id).fetch_one(&s.pool).await.map_err(internal)?;
-    let amount: Cents = selected.iter().map(|i| i.amount_cents).sum();
-    let mut months: Vec<String> = selected.iter().map(|i| i.ride_date.format("%Y-%m").to_string()).collect();
+    let mut months: Vec<String> = counted.iter().map(|i| i.ride_date.format("%Y-%m").to_string()).collect();
     months.sort();
     months.dedup();
     let id = Uuid::new_v4();
     let claim: ClaimRow = sqlx::query_as(
-        "insert into claims (id, customer_id, desk, ngo_id, account_holder, iban, ticket_months, amount_claimed_cents) values ($1,$2,$3,$4,$5,$6,$7,$8) returning *",
+        "insert into claims (id, customer_id, desk, ngo_id, account_holder, iban, ticket_months, amount_claimed_cents, ticket_id, window_key, breakdown)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *",
     )
     .bind(id)
     .bind(c.0.id)
-    .bind(&d.desk)
+    .bind(&desk)
     .bind(&ngo.id)
     .bind(&ngo.account_holder)
     .bind(&ngo.iban)
     .bind(&months)
-    .bind(amount)
+    .bind(pot.amount)
+    .bind(chosen.ticket.id)
+    .bind(&chosen.key.window_key)
+    .bind(json!(pot))
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
-    for i in &selected {
+    for i in &counted {
         sqlx::query("insert into claim_incidents (claim_id, incident_id) values ($1, $2)").bind(id).bind(i.id).execute(&s.pool).await.map_err(internal)?;
     }
-    Ok(Json(draft_json(&s, &c.0, &claim, &d.desk).await?))
+    Ok(Json(draft_json(&s, &c.0, &claim, &desk).await?))
 }
 
 /// A draft with everything the Antrag screen needs around it: the desk, the passenger's own
@@ -1506,10 +1591,20 @@ pub async fn claim_sign(State(s): State<AppState>, c: Customer, Path(id): Path<U
     Ok(Json(claim_with_incidents(&s.pool, &claim).await.map_err(internal)?))
 }
 
+/// A claim for one single ticket, rather than a season ticket's collected cases.
+fn single_ticket_claim(incidents: &[IncidentRow]) -> bool {
+    incidents.len() == 1 && incidents[0].ticket == TicketType::Einzelfahrkarte
+}
+
 fn claim_summary_text(claim: &ClaimRow, incidents: &[IncidentRow], name: &str) -> String {
     let mut s = String::new();
     s.push_str("ANTRAGSFORMULAR FÜR ERSTATTUNGEN UND ENTSCHÄDIGUNGEN (VO (EU) 2021/782)\n\n");
-    s.push_str("1. Grund: Verspätung / Ausfall\n4. Entschädigung: wiederholte Verspätungen oder Ausfälle, Inhaber einer Zeitfahrkarte\n\n");
+    if single_ticket_claim(incidents) {
+        let band = if incidents[0].delay_min >= 120 || incidents[0].cancelled { "mindestens 120 Minuten" } else { "60 bis 119 Minuten" };
+        s.push_str(&format!("1. Grund: Verspätung / Ausfall\n4. Entschädigung: {band}\n\n"));
+    } else {
+        s.push_str("1. Grund: Verspätung / Ausfall\n4. Entschädigung: wiederholte Verspätungen oder Ausfälle, Inhaber einer Zeitfahrkarte\n\n");
+    }
     s.push_str("6. Einzelfälle:\n");
     for i in incidents {
         s.push_str(&format!(
@@ -1520,8 +1615,8 @@ fn claim_summary_text(claim: &ClaimRow, incidents: &[IncidentRow], name: &str) -
             i.to_name,
             i.delay_min,
             if i.cancelled { " (Ausfall)" } else { "" },
-            i.amount_cents / 100,
-            i.amount_cents % 100
+            crate::pdf::claimed_cents(claim, i) / 100,
+            crate::pdf::claimed_cents(claim, i) % 100
         ));
     }
     s.push_str(&format!("\nSumme: {},{:02} EUR\n", claim.amount_claimed_cents / 100, claim.amount_claimed_cents % 100));
@@ -1570,10 +1665,20 @@ pub async fn claim_send(State(s): State<AppState>, c: Customer, Path(id): Path<U
     // a stand-in and a stand-in's mail landing in a real inbox must not pass for a claim. Routing
     // has no stand-ins any more: a desk has an address and the mail goes there (#25). What is left
     // is the mail exactly as the Senden step showed it.
-    let body = format!(
-        "Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
-        claim.account_holder, name, name
-    );
+    // Word for word what the app's Senden step shows (`draftMailBody` in claims_widgets.dart): a
+    // single ticket names its journey, collected cases point to the form.
+    let body = if single_ticket_claim(&incidents) {
+        let i = &incidents[0];
+        format!(
+            "Sehr geehrte Damen und Herren,\n\nanbei mein Antrag auf Entschädigung nach VO (EU) 2021/782 für die Fahrt mit {} am {} ({} – {}), Ankunft {} Minuten verspätet.\n\nDie Entschädigung bitte ich auf das im Formular angegebene Konto zu überweisen (Kontoinhaber: {}).\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
+            i.line, i.ride_date.format("%d.%m.%Y"), i.from_name, i.to_name, i.delay_min, claim.account_holder, name, name
+        )
+    } else {
+        format!(
+            "Sehr geehrte Damen und Herren,\n\nanbei mein gesammelter Antrag auf Entschädigung nach VO (EU) 2021/782 (wiederholte Verspätungen, Zeitfahrkarte). Die Einzelfälle sind im Formular unter Punkt 6 aufgeführt.\n\nKontoinhaber: {}\n\nDiese E-Mail wurde über Verspätomat übermittelt, eine Ausfüll- und Weiterleitungshilfe. Antragsteller ist {}.\n\nMit freundlichen Grüßen\n{}",
+            claim.account_holder, name, name
+        )
+    };
     let attachments = json!([
         { "name": "EU-Antrag.pdf", "content_type": "application/pdf", "url": format!("/v1/claims/{}/pdf", claim.id) },
         { "name": "EU-Antrag.txt", "content_type": "text/plain", "text": claim_summary_text(&claim, &incidents, &name) },
@@ -2811,16 +2916,13 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
         now.with_timezone(&chrono_tz::Europe::Berlin).weekday().num_days_from_monday() as i64
     };
 
-    // Money: the desk that is ready, else the one closest to the minimum payout.
+    // Money: a pot that can go out (the oldest), else the one with the most in it.
     let rows = rules::refresh_statuses(pool, c.0.id, today).await.map_err(internal)?;
-    let mut by_desk: BTreeMap<String, Vec<&IncidentRow>> = BTreeMap::new();
-    for i in rows.iter().filter(|i| i.open()) {
-        by_desk.entry(i.desk.clone()).or_default().push(i);
-    }
-    let desks: Vec<(String, Cents, bool)> = by_desk.iter().map(|(d, l)| (d.clone(), l.iter().map(|i| i.amount_cents).sum(), rules::bundle_ready(l))).collect();
-    let chosen = desks.iter().find(|(_, _, ready)| *ready).or_else(|| desks.iter().max_by_key(|(_, open, _)| *open));
+    let tickets = crate::pots::customer_tickets(pool, c.0.id).await.map_err(internal)?;
+    let pots = crate::pots::evaluate_all(&rows, &tickets, today);
+    let chosen = pots.iter().filter(|p| p.pot.payable).min_by_key(|p| p.oldest).or_else(|| pots.iter().max_by_key(|p| p.pot.amount));
     let (open_cents, ready, ready_desk) = match chosen {
-        Some((d, open, ready)) => (*open, *ready, if *ready { Some(d.clone()) } else { None }),
+        Some(p) => (p.pot.amount, p.pot.payable, if p.pot.payable { Some(p.key.desk.clone()) } else { None }),
         None => (0, false, None),
     };
     let missing_cents = if ready { 0 } else { (rules::MIN_PAYOUT_CENTS - open_cents).max(0) };

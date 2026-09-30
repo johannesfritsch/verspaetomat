@@ -95,15 +95,20 @@ async fn ride(pool: &PgPool, customer: Uuid, line: &str, delay: i32, days_ago: i
     id
 }
 
-/// A claimable case at the Servicecenter, worth [cents], from [ride].
+/// A claimable case at the Servicecenter on the customer's D-Ticket, worth [cents] as the ledger
+/// had it, from [ride]. The pots recompute the amount from its 68 minutes (#66).
 async fn incident(pool: &PgPool, customer: Uuid, ride: Option<Uuid>, cents: i64, status: &str) -> Uuid {
     let id = Uuid::new_v4();
     let ngo: String = sqlx::query_scalar("select id from ngos order by id limit 1").fetch_one(pool).await.expect("an ngo from the fixtures");
+    let ticket: Uuid = match sqlx::query_scalar("select id from tickets where customer_id = $1 and product = 'deutschlandticket'").bind(customer).fetch_optional(pool).await.unwrap() {
+        Some(t) => t,
+        None => sqlx::query_scalar("insert into tickets (id, customer_id, product) values ($1, $2, 'deutschlandticket') returning id").bind(Uuid::new_v4()).bind(customer).fetch_one(pool).await.unwrap(),
+    };
     sqlx::query(
         "insert into incidents (id, customer_id, ride_id, ride_date, line, from_name, to_name, delay_min, amount_cents, ticket, operator, desk,
-                                ngo_id, legal_deadline, status)
+                                ngo_id, legal_deadline, status, ticket_id)
          values ($1, $2, $3, current_date - 2, 'RE 1', 'Köln Hbf', 'Düsseldorf Hbf', 68, $4, 'deutschlandticket', 'DB Regio',
-                 'Servicecenter Fahrgastrechte', $5, current_date + 300, $6::incident_status)",
+                 'Servicecenter Fahrgastrechte', $5, current_date + 300, $6::incident_status, $7)",
     )
     .bind(id)
     .bind(customer)
@@ -111,6 +116,7 @@ async fn incident(pool: &PgPool, customer: Uuid, ride: Option<Uuid>, cents: i64,
     .bind(cents)
     .bind(ngo)
     .bind(status)
+    .bind(ticket)
     .execute(pool)
     .await
     .expect("incident");
@@ -910,6 +916,11 @@ async fn old_rows_become_tickets(pool: PgPool) {
     let r = ride(&pool, zk_customer, "ICE 5", 70, 3).await;
     sqlx::query("update rides set ticket = 'zeitkarte', category = 'fern' where id = $1").bind(r).execute(&pool).await.unwrap();
 
+    // As they were before tickets: no ticket anywhere.
+    sqlx::query("update incidents set ticket_id = null").execute(&pool).await.unwrap();
+    sqlx::query("update rides set ticket_id = null").execute(&pool).await.unwrap();
+    sqlx::query("delete from journey_tickets").execute(&pool).await.unwrap();
+    sqlx::query("delete from tickets").execute(&pool).await.unwrap();
     sqlx::raw_sql(include_str!("../migrations/0046_tickets_from_customers.sql")).execute(&pool).await.expect("migration 0046");
 
     let product = |id: Uuid| {
@@ -924,4 +935,118 @@ async fn old_rows_become_tickets(pool: PgPool) {
     assert_eq!(count(&pool, "select count(*) from tickets where customer_id = $1 and product = 'deutschlandticket' and number = 'D-77'", dt_customer).await, 1);
     assert_eq!(count(&pool, "select count(*) from tickets where customer_id = $1 and product_unsure", zk_customer).await, 2, "nobody was asked which Verbund");
     assert_eq!(count(&pool, "select count(*) from rides where id = $1 and ticket_id is not null", r).await, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Pots (#66, docs/49 §5.5)
+// ---------------------------------------------------------------------------
+
+async fn backdated(app: &Router, customer: Uuid, ticket: &str, delay: i64, days_ago: i64, price: Option<i64>) -> Value {
+    let body = json!({ "from": "Köln Hbf", "to": "Düsseldorf Hbf", "delay_minutes": delay, "days_ago": days_ago, "ticket": ticket, "price_cents": price });
+    let (s, v) = admin(app, "POST", &format!("/admin/customers/{customer}/backdate"), body).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    v
+}
+
+/// Minutes from 20 on pool across days and months; the pot goes out once it is above 4 €.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_dticket_pot_collects_minutes_and_goes_out_above_four_euros(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (customer, token) = device(&app).await;
+    let v = backdated(&app, customer, "deutschlandticket", 40, 40, None).await;
+    assert!(v["incident"].is_object(), "40 minutes on a D-Ticket make a case now: {v}");
+    backdated(&app, customer, "deutschlandticket", 40, 30, None).await;
+    let v = backdated(&app, customer, "deutschlandticket", 15, 20, None).await;
+    assert!(v["incident"].is_null(), "under 20 minutes: nothing");
+
+    let (_, v) = call(&app, "GET", "/v1/incidents", Some(&token), None).await;
+    let pots = v["summary"]["pots"].as_array().unwrap().clone();
+    assert_eq!(pots.len(), 1, "{v}");
+    assert_eq!((pots[0]["minutes"].as_i64(), pots[0]["amount_cents"].as_i64(), pots[0]["payable"].as_bool()), (Some(80), Some(150), Some(false)));
+    assert_eq!(pots[0]["blockers"][0]["missing_minutes"], 100, "three full hours are the first amount above 4 €");
+    assert_eq!(v["summary"]["desks"][0]["ready"], false, "older builds see the same through desks");
+    let (s, e) = call(&app, "POST", "/v1/claims/draft", Some(&token), Some(json!({ "pot": pots[0]["id"] }))).await;
+    assert_eq!(s, StatusCode::PRECONDITION_FAILED, "{e}");
+
+    backdated(&app, customer, "deutschlandticket", 100, 10, None).await;
+    let (_, v) = call(&app, "GET", "/v1/incidents", Some(&token), None).await;
+    let pot = &v["summary"]["pots"][0];
+    assert_eq!((pot["minutes"].as_i64(), pot["amount_cents"].as_i64(), pot["payable"].as_bool()), (Some(180), Some(450), Some(true)), "{pot}");
+    let open: i64 = v["incidents"].as_array().unwrap().iter().filter(|i| i["status"] == "bereit").map(|i| i["amount_cents"].as_i64().unwrap()).sum();
+    assert_eq!(open, 450, "the cases' shares add up to the pot");
+
+    // A build before pots names the desk and gets the same claim.
+    let (s, d) = call(&app, "POST", "/v1/claims/draft", Some(&token), Some(json!({ "desk": pot["desk"] }))).await;
+    assert_eq!(s, StatusCode::OK, "{d}");
+    assert_eq!(d["amount_claimed_cents"], 450);
+    assert_eq!(d["incidents"].as_array().unwrap().len(), 3);
+    assert_eq!(d["breakdown"]["minutes"], 180);
+}
+
+/// What the E2E of the build in the store checks against this server (deploy/compat.sh): four
+/// hours make 6,00 €, three still go out, two fall under the floor and are refused.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_selection_is_its_own_pot(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (customer, token) = device(&app).await;
+    let mut ids = Vec::new();
+    for days in 2..=5 {
+        let v = backdated(&app, customer, "deutschlandticket", 70, days, None).await;
+        ids.push(v["incident"]["id"].as_str().unwrap().to_string());
+    }
+    let (_, v) = call(&app, "GET", "/v1/incidents", Some(&token), None).await;
+    let desk = v["summary"]["pots"][0]["desk"].clone();
+    let (s, d) = call(&app, "POST", "/v1/claims/draft", Some(&token), Some(json!({ "desk": desk }))).await;
+    assert_eq!((s, d["amount_claimed_cents"].as_i64()), (StatusCode::OK, Some(600)), "{d}");
+    let (s, d) = call(&app, "POST", "/v1/claims/draft", Some(&token), Some(json!({ "desk": desk, "incident_ids": &ids[..3] }))).await;
+    assert_eq!((s, d["amount_claimed_cents"].as_i64()), (StatusCode::OK, Some(450)), "{d}");
+    let (s, e) = call(&app, "POST", "/v1/claims/draft", Some(&token), Some(json!({ "desk": desk, "incident_ids": &ids[..2] }))).await;
+    assert_eq!(s, StatusCode::PRECONDITION_FAILED, "{e}");
+    assert_eq!(e["error"], "bundle below the 4 € minimum; keep collecting", "the words older builds know");
+}
+
+/// A case moved to another ticket leaves the draft that held it and joins its new ticket's pot.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_case_can_move_to_another_ticket(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (customer, token) = device(&app).await;
+    let mut ids = Vec::new();
+    for days in 2..=4 {
+        let v = backdated(&app, customer, "deutschlandticket", 70, days, None).await;
+        ids.push(v["incident"]["id"].as_str().unwrap().to_string());
+    }
+    let (_, v) = call(&app, "GET", "/v1/incidents", Some(&token), None).await;
+    let desk = v["summary"]["pots"][0]["desk"].clone();
+    let (s, _) = call(&app, "POST", "/v1/claims/draft", Some(&token), Some(json!({ "desk": desk }))).await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (_, bc) = call(&app, "POST", "/v1/me/tickets", Some(&token), Some(json!({ "product": "bahncard100" }))).await;
+    let (s, v) = call(&app, "PATCH", &format!("/v1/incidents/{}", ids[0]), Some(&token), Some(json!({ "ticket_id": bc["id"] }))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["claim_deleted"], true, "two D-Ticket hours are 3,00 €: the draft has nothing left to ask for");
+    assert_eq!(v["incident"]["amount_cents"], 1000, "70 minutes on a BahnCard 100: {v}");
+    assert_eq!(v["incident"]["status"], "bereit");
+
+    let (_, v) = call(&app, "GET", "/v1/incidents", Some(&token), None).await;
+    assert_eq!(v["summary"]["pots"].as_array().unwrap().len(), 2);
+    let (s, _) = call(&app, "PATCH", &format!("/v1/incidents/{}", ids[1]), Some(&token), Some(json!({ "ticket_id": Uuid::new_v4() }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "only a ticket of one's own");
+}
+
+/// A single ticket without a price has no amount and says so; entering the price makes it one.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_single_ticket_waits_for_its_price(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (customer, token) = device(&app).await;
+    let v = backdated(&app, customer, "einzel_db", 95, 3, None).await;
+    let ticket = v["incident"]["ticket_id"].as_str().unwrap().to_string();
+    let (_, v) = call(&app, "GET", "/v1/incidents", Some(&token), None).await;
+    let pot = &v["summary"]["pots"][0];
+    assert_eq!((pot["amount_cents"].as_i64(), pot["payable"].as_bool()), (Some(0), Some(false)), "{pot}");
+    assert_eq!(pot["blockers"][0]["kind"], "price_missing");
+
+    call(&app, "PATCH", &format!("/v1/me/tickets/{ticket}"), Some(&token), Some(json!({ "price_cents": 5990 }))).await;
+    let (_, v) = call(&app, "GET", "/v1/incidents", Some(&token), None).await;
+    let pot = &v["summary"]["pots"][0];
+    assert_eq!((pot["amount_cents"].as_i64(), pot["payable"].as_bool()), (Some(1498), Some(true)), "25 % of 59,90 €: {pot}");
 }

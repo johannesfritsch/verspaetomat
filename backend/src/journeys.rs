@@ -587,25 +587,7 @@ async fn remove_cases(s: &AppState, incidents: &[IncidentRow], reason: &str) -> 
     sqlx::query("delete from claim_incidents where incident_id = any($1)").bind(&ids).execute(&s.pool).await.map_err(internal)?;
     let mut claim_deleted = false;
     for cl in &claims {
-        let rest: Vec<IncidentRow> = sqlx::query_as("select i.* from incidents i join claim_incidents ci on ci.incident_id = i.id where ci.claim_id = $1")
-            .bind(cl.id)
-            .fetch_all(&s.pool)
-            .await
-            .map_err(internal)?;
-        let refs: Vec<&IncidentRow> = rest.iter().collect();
-        match rules::draft_after_removal(&refs) {
-            rules::DraftAfterRemoval::Dropped => {
-                sqlx::query("delete from claim_attachments where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
-                sqlx::query("delete from claim_incidents where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
-                sqlx::query("update incidents set claim_id = null where claim_id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
-                sqlx::query("delete from claims where id = $1").bind(cl.id).execute(&s.pool).await.map_err(internal)?;
-                rules::audit(&s.pool, "claim", cl.id, Some("draft"), "deleted", "below the minimum after a ride was deleted").await.map_err(internal)?;
-                claim_deleted = true;
-            }
-            rules::DraftAfterRemoval::Reduced(amount) => {
-                sqlx::query("update claims set amount_claimed_cents = $2 where id = $1").bind(cl.id).bind(amount).execute(&s.pool).await.map_err(internal)?;
-            }
-        }
+        claim_deleted |= crate::pots::shrink_draft(&s.pool, cl, "below the minimum after a ride was deleted", crate::clock::today()).await.map_err(internal)?;
     }
     sqlx::query("delete from incidents where id = any($1)").bind(&ids).execute(&s.pool).await.map_err(internal)?;
     for i in incidents {
@@ -1420,16 +1402,17 @@ pub async fn finalise_journey(
     Ok((updated, Some((incident, new_badge))))
 }
 
-/// What a case with this delay is worth on this ticket, one case on its own (phase 2a of docs/50:
-/// pots come next), and the fare it was computed from. A single ticket without a price still
-/// assumes `DEFAULT_FARE_CENTS` until pots can say "price missing" instead.
+/// Whether this delay makes a case on this ticket, and the fare it is computed from. A case is made
+/// from the product's threshold on (20 minutes where delays pool, docs/49 §2.2); what it is worth
+/// its pot decides (`rules::refresh_statuses`), so it starts at nothing. A single ticket without a
+/// price makes a case too: its pot says the price is missing instead of guessing one.
 pub(crate) fn case_amount(ticket: &TicketRow, delay: i64) -> (Option<i64>, Option<i64>) {
     let product = crate::tickets::product_of(ticket);
-    let fare = ticket.price_cents.or((product.family == "einzelfahrkarte").then_some(rules::DEFAULT_FARE_CENTS));
-    if delay < rules::MIN_DELAY_MINUTES {
-        return (fare, None);
+    let threshold = product.latest().compensation.threshold() as i64;
+    if delay < threshold {
+        return (ticket.price_cents, None);
     }
-    (fare, crate::fares::legacy_case_cents(product, delay, ticket.first_class, fare))
+    (ticket.price_cents, Some(0))
 }
 
 /// The case a finished journey leaves behind. `source` and `self_entered` say where the

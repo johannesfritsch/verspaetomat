@@ -93,6 +93,41 @@ fn incident_json(i: &IncidentRow) -> Value {
     })
 }
 
+/// The rule a season ticket's amount follows, in one sentence for the form's free text (#66).
+fn rule_note(p: &crate::fares::Product, first_class: bool, claim: &ClaimRow) -> String {
+    use crate::fares::Compensation;
+    let doc = p.sources.iter().rev().find(|s| s.field == "compensation").map(|s| format!(" ({})", s.doc)).unwrap_or_default();
+    match &p.latest().compensation {
+        Compensation::MinutePool { counts_from, unit, per_unit } => {
+            let minutes = claim.breakdown.as_ref().and_then(|b| b.get("minutes")).and_then(|m| m.as_i64());
+            format!(
+                "Verspätungen ab {counts_from} Minuten werden zusammengerechnet, je volle {unit} Minuten {}{doc}.{} ",
+                euro(per_unit.get(first_class)),
+                minutes.map(|m| format!(" Zusammen {m} Minuten, {} volle Stunden.", m / *unit as i64)).unwrap_or_default()
+            )
+        }
+        Compensation::PerCase { steps } => match steps.first() {
+            Some((from, cents)) => format!("{} je Fall ab {from} Minuten{doc}. ", euro(cents.get(first_class))),
+            None => String::new(),
+        },
+        Compensation::ShareOfPrice { .. } | Compensation::NotMoney => String::new(),
+    }
+}
+
+/// A case's amount on this claim: its share of the pot as the claim was built, else what the
+/// ledger has for it.
+pub fn claimed_cents(claim: &ClaimRow, i: &IncidentRow) -> i64 {
+    claim
+        .breakdown
+        .as_ref()
+        .and_then(|b| b.get("cases"))
+        .and_then(|c| c.as_array())
+        .and_then(|cases| cases.iter().find(|c| c.get("id").and_then(|v| v.as_str()) == Some(i.id.to_string().as_str())))
+        .and_then(|c| c.get("cents"))
+        .and_then(|c| c.as_i64())
+        .unwrap_or(i.amount_cents)
+}
+
 /// The data the template reads under `inputs.claim`.
 pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
     let c = doc.customer;
@@ -127,12 +162,17 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
     let signed_on = claim.signed_at.map(|t| berlin(t).format("%d.%m.%Y").to_string()).unwrap_or_default();
     let place = c.postal_address.as_deref().and_then(|a| a.lines().last()).map(|l| l.trim().to_string()).unwrap_or_default();
     let mut notes = String::new();
-    if legacy == TicketType::Deutschlandticket {
-        notes.push_str("Deutschlandticket: Entschädigung 1,50 € je Fall ab 60 Minuten Verspätung, Auszahlung ab 4,00 € (Art. 19 VO (EU) 2021/782, § 8 EVO). ");
-    }
-    // The EU form has no field for the class (DVO 2024/949); the free text carries it.
-    if let Some(t) = doc.ticket {
-        notes.push_str(&format!("Fahrkarte: {ticket_type}, {}. Klasse. ", if t.first_class { 1 } else { 2 }));
+    match (doc.ticket, product) {
+        (Some(t), Some(p)) => {
+            // The EU form has no field for the class (DVO 2024/949); the free text carries it, with
+            // the rule the amount follows and where it is written.
+            notes.push_str(&format!("Fahrkarte: {ticket_type}, {}. Klasse. ", if t.first_class { 1 } else { 2 }));
+            notes.push_str(&rule_note(p, t.first_class, claim));
+        }
+        _ if legacy == TicketType::Deutschlandticket => {
+            notes.push_str("Deutschlandticket: Entschädigung 1,50 € je Fall ab 60 Minuten Verspätung, Auszahlung ab 4,00 € (Art. 19 VO (EU) 2021/782, § 8 EVO). ");
+        }
+        _ => {}
     }
     // docs/21 §2: where a journey was interrupted we claim only the railway's share. The form
     // still carries the true arrival; this line says what was left out and why. Never a false time.
@@ -170,7 +210,11 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
         "ticket_type": ticket_type,
         "ticket_number": ticket_number,
         "first": first,
-        "incidents": doc.incidents.iter().map(incident_json).collect::<Vec<_>>(),
+        "incidents": doc.incidents.iter().map(|i| {
+            let mut v = incident_json(i);
+            v["amount"] = json!(euro(claimed_cents(claim, i)));
+            v
+        }).collect::<Vec<_>>(),
         "person": {
             "name": c.full_name.clone().unwrap_or_default(),
             // 5.3.1 is where the desk writes back, and that is the claim's own address, not the
@@ -280,6 +324,8 @@ mod tests {
             created_at: Utc::now(),
             reply_address: Some("antrag-3d09a883@users.verspaetomat.de".into()),
             ticket_id: None,
+            window_key: None,
+            breakdown: None,
         };
         let incident = |d: u32, delay: i32| IncidentRow {
             id: Uuid::new_v4(),
@@ -406,6 +452,8 @@ mod tests {
             created_at: Utc::now(),
             reply_address: Some("antrag-3d09a883@users.verspaetomat.de".into()),
             ticket_id: None,
+            window_key: None,
+            breakdown: None,
         };
         let inputs = |claim: &ClaimRow| {
             claim_inputs(&ClaimDocument { claim, incidents: &[], customer: &customer, ticket: None, signature_png: None })["person"]["email"]

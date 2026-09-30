@@ -1243,7 +1243,7 @@ async fn main() -> anyhow::Result<()> {
             if let Some(i) = v.get("incident").filter(|i| !i.is_null()) {
                 println!("Anspruch: {} ct  ·  {}  ·  {}", s(i, "amount_cents"), s(i, "status"), s(i, "desk"));
             } else {
-                println!("Kein Anspruch (unter 60 Minuten).");
+                println!("Kein Fall (unter der Schwelle der Fahrkarte: 20 Minuten im Minuten-Topf, sonst 60).");
             }
             if let Some(b) = v.get("new_badge").filter(|b| !b.is_null()) {
                 println!("Abzeichen: {}", s(b, "name"));
@@ -1890,7 +1890,7 @@ async fn main() -> anyhow::Result<()> {
                 );
                 match v.get("incident").filter(|i| !i.is_null()) {
                     Some(inc) => println!("    Anspruch {} ct  ·  {}  ·  {}  ·  Frist {}", s(inc, "amount_cents"), s(inc, "status"), s(inc, "desk"), s(inc, "legal_deadline")),
-                    None => println!("    Kein Anspruch (unter 60 Minuten)."),
+                    None => println!("    Kein Fall (unter der Schwelle der Fahrkarte)."),
                 }
                 if let Some(b) = v.get("new_badge").filter(|b| !b.is_null()) {
                     println!("    Abzeichen: {}", s(b, "name"));

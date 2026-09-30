@@ -1910,7 +1910,7 @@ pub async fn fares_evaluate(State(_s): State<AppState>, _a: Admin, Path(id): Pat
     use crate::fares::evaluate::{evaluate, CaseFacts, TicketFacts};
     let product = crate::fares::catalogue().get(&id).ok_or_else(|| err(StatusCode::NOT_FOUND, "no such fare product"))?;
     let today = b.today.unwrap_or_else(|| clock::now().date_naive());
-    let ticket = TicketFacts { first_class: b.first_class, price_cents: b.price_cents, valid_from: b.valid_from, valid_until: b.valid_until };
+    let ticket = TicketFacts { first_class: b.first_class, price_cents: b.price_cents, valid_from: b.valid_from, valid_until: b.valid_until, claimed_before: Vec::new() };
     let cases: Vec<CaseFacts> = b.cases.iter().map(|c| CaseFacts { id: Uuid::new_v4(), ride_date: c.date.unwrap_or(today), delay_min: c.delay_min }).collect();
     Ok(Json(json!(evaluate(product, &ticket, &cases, today))))
 }

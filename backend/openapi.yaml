@@ -177,14 +177,18 @@ paths:
       responses: { "200": { description: "{ride, incident?}" } }
 
   /v1/incidents:
-    get: { summary: "Ledger: {incidents, claims, summary:{desks:[{desk, open_cents, ready, missing_cents, incident_ids}], ready_desk, confirmed_cents, submitted_cents, capped_cents, oldest_open:{id,line,date,deadline,days_left,warn_from,aim}, min_payout_cents, dticket_monthly_cap_cents}}. Reading refreshes statuses: expiry at the legal deadline (twelve months after the ride; `aim` is three months, what the app asks the passenger to aim for — docs/49 §1), bundle readiness, and the 25 % monthly Deutschlandticket cap (incidents beyond it are `gedeckelt`; capped_cents sums them).", responses: { "200": { description: ledger } } }
+    get: { summary: "Ledger: {incidents, claims, summary:{pots:[{id, ticket_id, ticket_name, product, family, window_key, desk, minutes, next_unit_minutes, amount_cents, gross_cents, capped, payable, blockers:[{kind: empty|price_missing|not_money|below_minimum{missing_cents, missing_minutes}|too_few_cases{missing}|window_open{until}}], ready_from, aim, deadline, incident_ids}] (#66: one per ticket, window and desk; what a claim is made of), desks:[{desk, open_cents, ready, missing_cents, incident_ids}], ready_desk, confirmed_cents, submitted_cents, capped_cents, oldest_open:{id,line,date,deadline,days_left,warn_from,aim}, min_payout_cents, dticket_monthly_cap_cents}}. Reading refreshes statuses (each case's amount is its share of its pot; `desks` sums the pots for builds before pots): expiry at the legal deadline (twelve months after the ride; `aim` is three months, what the app asks the passenger to aim for — docs/49 §1), bundle readiness, and the 25 % monthly Deutschlandticket cap (incidents beyond it are `gedeckelt`; capped_cents sums them).", responses: { "200": { description: ledger } } }
   /v1/claims:
     get: { summary: "Claim: {id, desk, ngo_id, status: draft|sent|question|accepted|rejected|bounced, sent_at, expected_reply_by, amount_claimed_cents, amount_confirmed_cents, closed_at, pdf_url}. The scanner's reply nudge (claims.nudged_at) reaches the app as the SSE event claim {nudge: true}, not as a field.", responses: { "200": { description: "[Claim]" } } }
+  /v1/incidents/{id}:
+    patch:
+      summary: "{ticket_id}: the case was made with another ticket (#66). Until it has left the house; it leaves any draft that held it (recomputed as a discard does) and joins the pot of its new ticket. Returns {incident, claim_deleted}."
+      responses: { "200": { description: "{incident, claim_deleted}" }, "400": { description: not the passenger's ticket }, "409": { description: already submitted } }
   /v1/claims/draft:
     post:
-      summary: Start a claim for one desk (all open incidents there unless incident_ids given). Refused below the 4 € minimum.
-      requestBody: { content: { application/json: { schema: { type: object, required: [desk], properties: { desk: { type: string }, incident_ids: { type: array, items: { type: string, format: uuid } } } } } } }
-      responses: { "200": { description: "claim + incidents + desk_address, desk_email, desk_accepts_email, personal_data_required, relay_address, needs_recovery_code" }, "412": { description: bundle not ready } }
+      summary: "Start a claim for one pot (#66: `pot` = summary.pots[].id), or for a desk (builds before pots: its pot that can go out, oldest first). All its open cases unless incident_ids names some; the selection is evaluated as its own pot and refused (412, with what is missing) when it cannot go out. One draft per pot, resumed when nothing changed. The claim carries ticket_id, window_key and breakdown (the pot as evaluated)."
+      requestBody: { content: { application/json: { schema: { type: object, properties: { pot: { type: string }, desk: { type: string }, incident_ids: { type: array, items: { type: string, format: uuid } } } } } } }
+      responses: { "200": { description: "claim + incidents + desk_address, desk_email, desk_accepts_email, personal_data_required, relay_address, needs_recovery_code" }, "412": { description: "the pot cannot go out yet: below the minimum (\"bundle below the 4 € minimum; keep collecting\"), too few cases, the ticket's period still running, the fare missing" } }
   /v1/claims/{id}:
     patch:
       summary: "Change the NGO for this claim; set attachments [{upload_id, label}] (one ticket image per month covered)."

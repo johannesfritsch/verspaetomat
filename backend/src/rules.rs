@@ -12,8 +12,9 @@ pub type Cents = i64;
 
 pub const MIN_PAYOUT_CENTS: Cents = 400;
 
-/// Below this a delay is worth nothing at all — the one threshold the whole product turns on.
-/// Until pots arrive (docs/50 phase 2) no case is made below it, whatever the ticket.
+/// From here one delay on its own is worth something on every ticket. Where delays pool (the
+/// D-Ticket, docs/49 §2.2) a case is made from 20 minutes; this is still the figure builds before
+/// pots are told (`delay_minutes_threshold`), because it is what one ride alone needs.
 pub const MIN_DELAY_MINUTES: i64 = 60;
 /// Twelve months after the ride: never later than the law's one year after the ticket's validity
 /// ends (CIV Art. 60, BB A.9.5), and it needs no answer to when an open-ended Abo ends. The same
@@ -23,9 +24,6 @@ pub const LEGAL_DEADLINE_MONTHS: u32 = 12;
 pub const AIM_MONTHS: u32 = 3;
 pub const WARN_DAYS_BEFORE_DEADLINE: i64 = 21;
 pub const REPLY_EXPECTED_DAYS: i64 = 28;
-/// The fare a single ticket is assumed to cost until the passenger enters theirs (docs/50 phase 2
-/// removes it: a single ticket without a price has no amount).
-pub const DEFAULT_FARE_CENTS: Cents = 3990;
 
 /// The catalogue product the three legacy ticket types stand for (docs/50 phase 1). A Zeitkarte
 /// is the Verbund standard regionally and DB's Streckenzeitkarte long-distance, which is how the
@@ -99,36 +97,6 @@ pub fn dticket_monthly_cap_cents() -> Cents {
     dt.prices.last().map(|p| p.cents).unwrap_or(0) / 4
 }
 
-/// Is the open bundle for a desk sendable? Ordinary-ticket incidents always are;
-/// season-ticket incidents need the desk's open sum to reach the minimum payout.
-pub fn bundle_ready(open_for_desk: &[&IncidentRow]) -> bool {
-    if open_for_desk.is_empty() {
-        return false;
-    }
-    if open_for_desk.iter().any(|i| i.ticket == TicketType::Einzelfahrkarte) {
-        return true;
-    }
-    open_for_desk.iter().map(|i| i.amount_cents).sum::<Cents>() >= MIN_PAYOUT_CENTS
-}
-
-/// What a draft claim becomes when one of its cases leaves it — discarded (docs/21 §4) or
-/// deleted with its ride (docs/23 §2). Below the minimum the draft has nothing left to ask for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DraftAfterRemoval {
-    /// Nothing sendable is left: the draft goes, and its cases are free again.
-    Dropped,
-    /// The draft stays and asks for this much.
-    Reduced(Cents),
-}
-
-/// The rule both the discard and the delete apply to a draft claim (docs/23 §2).
-pub fn draft_after_removal(rest: &[&IncidentRow]) -> DraftAfterRemoval {
-    if rest.is_empty() || !bundle_ready(rest) {
-        return DraftAfterRemoval::Dropped;
-    }
-    DraftAfterRemoval::Reduced(rest.iter().map(|i| i.amount_cents).sum())
-}
-
 /// What the passenger is told when a ride cannot be deleted (docs/23 §2).
 pub const DELETE_IN_SENT_CLAIM: &str = "Diese Fahrt steckt in einem eingereichten Antrag.";
 
@@ -144,8 +112,10 @@ pub fn delete_refusal(claims: &[ClaimStatus], incidents: &[IncidentStatus]) -> O
     }
 }
 
-/// Recompute `gesammelt` / `bereit` for a customer's open incidents and expire what is
-/// past its deadline. Writes only rows whose status changed, with an audit entry.
+/// Recompute every open case of a customer from its pot (docs/49 §5.5, `crate::pots`): expire
+/// what is past its deadline, then evaluate each pot and write each case's share and status —
+/// `bereit` when its pot can go out, `gesammelt` while it cannot, `gedeckelt` when a cap left it
+/// nothing. Writes only rows that changed; status changes get an audit entry.
 pub async fn refresh_statuses(pool: &PgPool, customer_id: Uuid, today: NaiveDate) -> anyhow::Result<Vec<IncidentRow>> {
     let mut rows: Vec<IncidentRow> = sqlx::query_as("select * from incidents where customer_id = $1 order by ride_date desc, created_at desc")
         .bind(customer_id)
@@ -154,69 +124,42 @@ pub async fn refresh_statuses(pool: &PgPool, customer_id: Uuid, today: NaiveDate
 
     let mut changes: Vec<(Uuid, IncidentStatus, IncidentStatus)> = Vec::new();
     for i in rows.iter_mut() {
-        if i.open() && i.legal_deadline < today {
+        if crate::pots::in_pot(i) && i.legal_deadline < today {
             changes.push((i.id, i.status, IncidentStatus::Verfallen));
             i.status = IncidentStatus::Verfallen;
         }
     }
-    changes.extend(apply_monthly_cap(&mut rows));
-    let mut desks: Vec<String> = rows.iter().filter(|i| i.open()).map(|i| i.desk.clone()).collect();
-    desks.sort();
-    desks.dedup();
-    for desk in desks {
-        let open: Vec<&IncidentRow> = rows.iter().filter(|i| i.open() && i.desk == desk).collect();
-        let target = if bundle_ready(&open) { IncidentStatus::Bereit } else { IncidentStatus::Gesammelt };
-        for i in rows.iter_mut().filter(|i| i.open() && i.desk == desk) {
+    let tickets = crate::pots::customer_tickets(pool, customer_id).await?;
+    let mut amounts: Vec<(Uuid, Cents, String)> = Vec::new();
+    for p in crate::pots::evaluate_all(&rows, &tickets, today) {
+        for share in &p.pot.cases {
+            let Some(i) = rows.iter_mut().find(|i| i.id == share.id) else { continue };
+            let target = crate::pots::status_for(&p.pot, i.id);
             if i.status != target {
                 changes.push((i.id, i.status, target));
                 i.status = target;
             }
+            if i.amount_cents != share.cents || i.window_key.as_deref() != Some(p.key.window_key.as_str()) {
+                i.amount_cents = share.cents;
+                i.window_key = Some(p.key.window_key.clone());
+                amounts.push((i.id, share.cents, p.key.window_key.clone()));
+            }
         }
+    }
+    for (id, cents, window) in amounts {
+        sqlx::query("update incidents set amount_cents = $2, window_key = $3 where id = $1").bind(id).bind(cents).bind(window).execute(pool).await?;
     }
     for (id, from, to) in changes {
         sqlx::query("update incidents set status = $2 where id = $1").bind(id).bind(to).execute(pool).await?;
         let reason = match (from, to) {
-            (_, IncidentStatus::Gedeckelt) => "monthly cap",
+            (_, IncidentStatus::Gedeckelt) => "cap",
             (IncidentStatus::Gedeckelt, _) => "cap released",
+            (_, IncidentStatus::Verfallen) => "deadline",
             _ => "refresh",
         };
         audit(pool, "incident", id, Some(from_label(from)), from_label(to), reason).await?;
     }
     Ok(rows)
-}
-
-/// The 25 % monthly cap for the Deutschlandticket. Per calendar month of the ride, incidents
-/// are summed in ride order (rejected and expired ones do not count); from the incident that
-/// pushes the month over the cap on, open ones become `gedeckelt`. A `gedeckelt` incident
-/// that fits again (an earlier one was rejected or expired) returns to `gesammelt`.
-/// Mutates the rows and returns the transitions; the caller writes and audits them.
-pub fn apply_monthly_cap(rows: &mut [IncidentRow]) -> Vec<(Uuid, IncidentStatus, IncidentStatus)> {
-    let cap = dticket_monthly_cap_cents();
-    let mut order: Vec<usize> = (0..rows.len()).filter(|&k| rows[k].ticket == TicketType::Deutschlandticket).collect();
-    order.sort_by_key(|&k| (rows[k].ride_date, rows[k].created_at));
-    let mut sums: std::collections::BTreeMap<(i32, u32), Cents> = std::collections::BTreeMap::new();
-    let mut changes = Vec::new();
-    for k in order {
-        let i = &mut rows[k];
-        // Rejected, expired and discarded incidents never consume the month's cap.
-        if matches!(i.status, IncidentStatus::Abgelehnt | IncidentStatus::Verfallen) || i.discarded_at.is_some() {
-            continue;
-        }
-        use chrono::Datelike;
-        let sum = sums.entry((i.ride_date.year(), i.ride_date.month())).or_insert(0);
-        *sum += i.amount_cents;
-        let over = *sum > cap;
-        let target = match (i.status, over) {
-            (s, true) if s.is_open() => Some(IncidentStatus::Gedeckelt),
-            (IncidentStatus::Gedeckelt, false) => Some(IncidentStatus::Gesammelt),
-            _ => None,
-        };
-        if let Some(t) = target {
-            changes.push((i.id, i.status, t));
-            i.status = t;
-        }
-    }
-    changes
 }
 
 pub fn from_label(s: IncidentStatus) -> &'static str {
@@ -336,37 +279,6 @@ mod tests {
         }
     }
 
-    /// docs/21 §4: a discarded case counts nowhere — not in a bundle, not against the cap.
-    #[test]
-    fn discarded_incidents_count_nowhere() {
-        let mut i = incident(3, IncidentStatus::Gesammelt, 150);
-        assert!(i.open());
-        i.discarded_at = Some(chrono::Utc::now());
-        assert!(!i.open(), "discarded is never open, whatever the status says");
-
-        // The month's cap: eleven of twelve fit (1575 / 150). Discarding two early ones frees
-        // the two that were capped.
-        let mut rows: Vec<IncidentRow> = (1..=12).map(|d| incident(d, IncidentStatus::Gesammelt, 150)).collect();
-        apply_monthly_cap(&mut rows);
-        assert_eq!(rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).count(), 2);
-        rows[0].discarded_at = Some(chrono::Utc::now());
-        rows[1].discarded_at = Some(chrono::Utc::now());
-        apply_monthly_cap(&mut rows);
-        assert_eq!(rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).count(), 0, "two discarded cases free the two that were over the cap");
-    }
-
-    /// The rule a discard applies to a draft claim: what is left must still reach the minimum.
-    #[test]
-    fn draft_survives_a_discard_only_above_the_minimum() {
-        let three: Vec<IncidentRow> = (1..=3).map(|d| incident(d, IncidentStatus::Bereit, 150)).collect();
-        let refs: Vec<&IncidentRow> = three.iter().collect();
-        assert!(bundle_ready(&refs), "3 × 1,50 € = 4,50 € is above the 4 € minimum");
-        let refs: Vec<&IncidentRow> = three.iter().take(2).collect();
-        assert!(!bundle_ready(&refs), "taking one out drops the rest to 3,00 €: the draft goes");
-        let refs: Vec<&IncidentRow> = Vec::new();
-        assert!(!bundle_ready(&refs), "an empty remainder is never ready");
-    }
-
     /// docs/23 §2: a ride logged by accident can go — unless it is already out of the house.
     #[test]
     fn deleting_a_ride() {
@@ -383,33 +295,6 @@ mod tests {
         assert_eq!(delete_refusal(&[], &[IncidentStatus::Abgelehnt]), None);
         assert_eq!(delete_refusal(&[], &[IncidentStatus::Verfallen]), None);
 
-        // The draft is recomputed exactly as a discard does it: 3 × 1,50 € stays, 2 × 1,50 € goes.
-        let three: Vec<IncidentRow> = (1..=3).map(|d| incident(d, IncidentStatus::Bereit, 150)).collect();
-        let rest: Vec<&IncidentRow> = three.iter().take(2).collect();
-        assert_eq!(draft_after_removal(&rest), DraftAfterRemoval::Dropped, "3,00 € is below the 4 € minimum: the draft goes with it");
-        let four: Vec<IncidentRow> = (1..=4).map(|d| incident(d, IncidentStatus::Bereit, 150)).collect();
-        let rest: Vec<&IncidentRow> = four.iter().take(3).collect();
-        assert_eq!(draft_after_removal(&rest), DraftAfterRemoval::Reduced(450), "what is left still reaches the minimum and asks for less");
-        assert_eq!(draft_after_removal(&[]), DraftAfterRemoval::Dropped, "the last case out empties the draft");
-    }
-
-    #[test]
-    fn monthly_cap() {
-        // 6300 / 4 = 1575: ten incidents of 150 fit, the eleventh is capped.
-        let mut rows: Vec<IncidentRow> = (1..=12).map(|d| incident(d, IncidentStatus::Gesammelt, 150)).collect();
-        let changes = apply_monthly_cap(&mut rows);
-        assert_eq!(changes.len(), 2);
-        assert_eq!(rows.iter().filter(|i| i.status == IncidentStatus::Gedeckelt).count(), 2);
-        assert_eq!(rows[10].status, IncidentStatus::Gedeckelt);
-        assert_eq!(rows[9].status, IncidentStatus::Gesammelt);
-        // A rejection earlier in the month releases one capped incident.
-        rows[0].status = IncidentStatus::Abgelehnt;
-        let changes = apply_monthly_cap(&mut rows);
-        assert_eq!(changes, vec![(rows[10].id, IncidentStatus::Gedeckelt, IncidentStatus::Gesammelt)]);
-        // Other months and other tickets are untouched.
-        let mut other = vec![incident(3, IncidentStatus::Gesammelt, 5000)];
-        other[0].ticket = TicketType::Zeitkarte;
-        assert!(apply_monthly_cap(&mut other).is_empty());
     }
 
     #[test]

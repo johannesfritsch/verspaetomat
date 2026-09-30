@@ -350,6 +350,13 @@ pub struct ClaimRow {
     #[sqlx(default)]
     #[serde(default)]
     pub ticket_id: Option<Uuid>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub window_key: Option<String>,
+    /// The pot as it was evaluated when the claim was built: minutes, amount, each case's share.
+    #[sqlx(default)]
+    #[serde(default)]
+    pub breakdown: Option<serde_json::Value>,
 }
 
 /// A passenger's ticket: one contract of one catalogue product (docs/49 §5.3).

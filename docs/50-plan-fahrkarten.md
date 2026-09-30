@@ -363,3 +363,35 @@ kommen aus dem `blocker` des Servers.
 - **Migration offener Fälle** ändert Beträge, die Menschen schon gesehen haben (39,90 € weg,
   BahnCard 100 höher, Fristen länger). Eine Mitteilung beim ersten Start des neuen Builds erklärt
   das in einem Satz.
+
+---
+
+## Stand
+
+**Phase 1** — auf Produktion seit 30. September 2026 (`ca07e93`). Katalog, `evaluate`, Frist zwölf
+Monate, Erinnerung vor dem Ziel von drei Monaten (`aim_nudged_at`), `stellwerk fares`.
+
+**Phase 2** — Backend, 30. September 2026:
+
+- 2a (`38a36b8`): `tickets`, `journey_tickets`, Migration der bisherigen Einstellungen zu
+  Fahrkarten (0045/0046), `GET /v1/fares`, `/v1/me/tickets`, Fahrkarte beim Einchecken und beim
+  Nachtrag, Satz nach Fahrkarte, PDF nach Fahrkarte, `stellwerk backdate --ticket --price`.
+- 2b: Töpfe (`src/pots.rs`). `refresh_statuses` rechnet jeden offenen Fall als Anteil seines
+  Topfs; Fälle entstehen ab der Schwelle des Produkts (20 Minuten im Minuten-Topf); Anträge je
+  Topf, alte Builds weiter über `desk`; `PATCH /v1/incidents/{id}` wechselt die Fahrkarte eines
+  Falls; eine Einzelfahrkarte ohne Preis wartet auf ihn (`price_missing`), die angenommenen
+  39,90 € sind weg; Freitext des Formulars nennt Fahrkarte, Klasse und die Regel mit Fundstelle;
+  die Mail für eine Einzelfahrkarte sagt jetzt, was die App in ihrer Vorschau schon zeigte.
+
+Abweichungen vom Plan und was offen bleibt:
+
+- **Ältere Builds sehen die Fälle ab 20 Minuten.** Die App schickt keine Build-Nummer, der Server
+  kann sie also nicht zurückhalten. Sie erscheinen dort als gewöhnliche Fälle mit ihrem Anteil
+  (oft 0,00 €); die Summe je Stelle stimmt. Die Mitteilung „Anspruch entstanden" entfällt bei
+  0 €.
+- `delay_minutes_threshold` und `claim_from_minute` bleiben 60: das ist, was eine Fahrt allein
+  braucht, und was die Sätze älterer Builds („Ab hier entsteht ein Anspruch") wahr hält. Der
+  neue Build bekommt die Schwelle je Fahrkarte aus `GET /v1/fares` (Phase 3).
+- Eine Fahrkarte je Reise; `journey_tickets` trägt mehr, die API nimmt noch eine.
+- `incidents.legal_deadline` ist für alle Tarife zwölf Monate nach der Fahrt; die kürzere MVV-Frist
+  (drei Monate nach Ablauf) rechnet der Topf selbst und schließt verfallene Fälle aus.

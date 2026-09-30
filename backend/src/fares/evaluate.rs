@@ -19,6 +19,8 @@ pub struct TicketFacts {
     pub price_cents: Option<Cents>,
     pub valid_from: Option<NaiveDate>,
     pub valid_until: Option<NaiveDate>,
+    /// What this ticket has already claimed, by ride date: sent cases use up a cap too.
+    pub claimed_before: Vec<(NaiveDate, Cents)>,
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +166,9 @@ pub fn evaluate(product: &Product, ticket: &TicketFacts, cases: &[CaseFacts], to
     let mut capped = false;
     for cap in &rule.caps {
         let mut used: std::collections::BTreeMap<(i32, u32, u32), Cents> = Default::default();
+        for (date, cents) in &ticket.claimed_before {
+            *used.entry(cap_key(cap.per, *date)).or_insert(0) += cents;
+        }
         for (s, c) in shares.iter_mut().zip(&order) {
             if s.cents == 0 {
                 continue;
@@ -325,6 +330,15 @@ mod tests {
         let job = TicketFacts { price_cents: Some(5985), ..Default::default() };
         let p = eval("deutschlandticket", job, &[(d(2026, 9, 3), 60); 12], today());
         assert_eq!(p.amount, 1496);
+    }
+
+    #[test]
+    fn a_claim_already_sent_uses_up_the_month() {
+        // 12 € of September went out already: 3,75 € is left under the 15,75 € cap.
+        let t = TicketFacts { claimed_before: vec![(d(2026, 9, 2), 1200)], ..Default::default() };
+        let p = eval("deutschlandticket", t, &[(d(2026, 9, 20), 60); 4], today());
+        assert_eq!(p.amount, 375);
+        assert!(p.capped);
     }
 
     #[test]

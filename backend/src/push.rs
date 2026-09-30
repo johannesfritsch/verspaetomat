@@ -238,8 +238,10 @@ pub fn compose(kind: &str, payload: &Value, facts: &Facts) -> Option<Notificatio
 
 fn claim_line(cents: Option<i64>, ngo: &str) -> String {
     match cents {
-        Some(c) => format!("Anspruch entstanden: {} für {ngo}.", euro(c)),
-        None => String::new(),
+        // A case whose minutes do not complete a full hour of its pot yet (#66) is worth nothing on
+        // its own; saying "0,00 €" would be true and useless. The minutes stand in the push anyway.
+        Some(c) if c > 0 => format!("Anspruch entstanden: {} für {ngo}.", euro(c)),
+        _ => String::new(),
     }
 }
 
