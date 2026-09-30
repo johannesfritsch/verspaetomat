@@ -203,6 +203,29 @@ async fn deleting_personal_data_clears_the_four_fields_and_keeps_the_address(poo
     assert_eq!(relay_after.as_deref(), Some(relay.as_str()), "answers to sent claims still arrive there");
 }
 
+#[sqlx::test(migrations = "./migrations")]
+async fn saving_personal_data_without_a_number_keeps_the_d_tickets(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, token) = device(&app).await;
+    let (s, v) = call(&app, "POST", "/v1/me/tickets", Some(&token), Some(json!({"product": "deutschlandticket", "number": "D-77"}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let t = v["id"].as_str().unwrap().to_string();
+
+    // A build since #66 sends three fields.
+    let (s, _) = call(&app, "PUT", "/v1/me/personal-data", Some(&token), Some(json!({"name": "A B", "address": "Weg 1", "email": "a@example.org"}))).await;
+    assert_eq!(s, StatusCode::OK);
+    let number: Option<String> = sqlx::query_scalar("select number from tickets where id = $1::uuid").bind(&t).fetch_one(&pool).await.unwrap();
+    assert_eq!(number.as_deref(), Some("D-77"), "the ticket keeps its number");
+
+    // An older build still writes the number through.
+    let (s, _) = call(&app, "PUT", "/v1/me/personal-data", Some(&token), Some(json!({"name": "A B", "address": "Weg 1", "email": "a@example.org", "ticket_number": "D-88"}))).await;
+    assert_eq!(s, StatusCode::OK);
+    let number: Option<String> = sqlx::query_scalar("select number from tickets where id = $1::uuid").bind(&t).fetch_one(&pool).await.unwrap();
+    assert_eq!(number.as_deref(), Some("D-88"));
+    let stored: Option<String> = sqlx::query_scalar("select ticket_number from customers where id = $1").bind(id).fetch_one(&pool).await.unwrap();
+    assert_eq!(stored.as_deref(), Some("D-88"));
+}
+
 // ---------------------------------------------------------------------------
 // GET /v1/me/share (#49)
 // ---------------------------------------------------------------------------

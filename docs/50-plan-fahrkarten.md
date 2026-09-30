@@ -420,9 +420,16 @@ ohne Töpfe bleiben die Karten je Stelle. `/v1/fares` sagt in `fields`, ob eine 
 Preisnachweis gebraucht werden. Ein wieder aufgenommener Entwurf nimmt den Betrag seiner Fälle von
 jetzt (fiel in der E2E auf: zuerst bekam er den des ganzen Topfs).
 
-Offen aus Phase 4: ein Upload für den Preisnachweis (bisher nur, dass das Produkt einen will);
-„Ticket-Nr." steht noch in den persönlichen Daten und wird mit der Nummer des D-Tickets
-gleichgehalten.
+Offen aus Phase 4, erledigt am 1. Oktober 2026: Einen eigenen Upload für den Preisnachweis gibt es
+nicht. Der Nachweis geht an dieselbe Stelle wie der Antrag, und dort genügt die Kopie der
+Fahrkarte, die der Antrag schon anhängt (bei der Einzelfahrkarte steht der Preis darauf, beim
+D-Ticket steht er im Tarif). Fragt ein Unternehmen bei einer Verbund-Zeitkarte nach, geht die
+Rückfrage wie jede andere über die Verspätomat-Adresse. `price_proof` bleibt im Katalog als Angabe.
+„Ticket-Nr." ist aus den persönlichen Daten verschwunden (Einstellungen und Antrag); die Nummer
+steht an der Fahrkarte. Ältere Builds schicken sie weiter mit und schreiben sie ins D-Ticket;
+ein Speichern ohne Nummer lässt sie stehen. Das PDF nimmt die Nummer der Fahrkarte des Falls und
+die alte Kundennummer nur für Fälle ohne Fahrkarte, nicht mehr für eine Einzelfahrkarte ohne
+Nummer.
 
 **Phase 5** — 30. September 2026: Die Fahrt kennt ihre Fahrkarte (`ticket` in `journeys/current`:
 ab welcher Minute sie zählt, ab wann die Zugbindung fällt, ob erheblich ermäßigt). Unterwegs sagt

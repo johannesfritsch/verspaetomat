@@ -137,7 +137,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
           const VSection('Anträge'),
           VListRow(
             title: 'Persönliche Daten für Anträge',
-            subtitle: personal == null ? 'Noch nicht hinterlegt. Fragen wir beim ersten Antrag.' : '${personal.name} · ${personal.ticketNumber ?? 'ohne Ticketnummer'}',
+            subtitle: personal == null ? 'Noch nicht hinterlegt. Fragen wir beim ersten Antrag.' : '${personal.name} · ${personal.email}',
             chevron: true,
             onTap: () => _personalData(context, session, personal),
           ),
@@ -341,7 +341,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     final name = TextEditingController(text: current?.name ?? '');
     final address = TextEditingController(text: current?.address ?? '');
     final email = TextEditingController(text: current?.email ?? '');
-    final ticketNo = TextEditingController(text: current?.ticketNumber ?? '');
     showVSheet(
       context,
       builder: (ctx) => Padding(
@@ -361,8 +360,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
                   TextField(controller: address, maxLines: 2, decoration: const InputDecoration(labelText: 'Anschrift'), style: VText.body),
                   const VGap.s(),
                   TextField(controller: email, decoration: const InputDecoration(labelText: 'Private E-Mail-Adresse'), style: VText.body),
-                  const VGap.s(),
-                  TextField(controller: ticketNo, decoration: const InputDecoration(labelText: 'Deutschlandticket-Nummer'), style: VText.mono),
                   const VGap.m(),
                   VPrimaryButton(
                     label: 'Speichern',
@@ -372,7 +369,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
                         name: name.text.trim(),
                         address: address.text.trim(),
                         email: email.text.trim(),
-                        ticketNumber: ticketNo.text.trim().isEmpty ? null : ticketNo.text.trim(),
                       ));
                       if (context.mounted) showSnack(context, session.error ?? 'Gespeichert. Steht nur auf dem Formular.');
                     },
@@ -407,7 +403,7 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(4))),
         title: Text('Persönliche Daten löschen?', style: VText.h2),
         content: Text(
-          'Name, Anschrift, E-Mail-Adresse und Ticketnummer. Beim nächsten Antrag fragen wir wieder danach. '
+          'Name, Anschrift und E-Mail-Adresse. Beim nächsten Antrag fragen wir wieder danach. Deine Fahrkarten bleiben. '
           'Antworten der Bahn auf gesendete Anträge siehst du weiter in der App, per Mail bekommst du sie nicht mehr.',
           style: VText.bodyS,
         ),

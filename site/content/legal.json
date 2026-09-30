@@ -97,7 +97,7 @@
           "heading": "Was wir speichern",
           "paragraphs": [
             "Beim Fahren: den Bahnhof, an dem du eingecheckt hast, die Position, mit der du das bestätigt hast, den Zug, den Ausstieg, die Zeiten laut Fahrplan und Live-Daten, die daraus gezählten Minuten und Abzeichen. Optional einen Anzeigenamen, den du selbst wählst.",
-            "Beim ersten Antrag, nicht früher: Name, Anschrift, deine private E-Mail-Adresse und bei Zeitkarten die Ticketnummer. Name, Anschrift und Ticketnummer stehen auf dem Antragsformular, weil das Eisenbahnunternehmen sie verlangt. Deine private E-Mail-Adresse steht nicht darauf: Im Formular steht die Verspätomat-Adresse dieses Antrags, damit die Antwort dorthin geht. Deine eigene Adresse benutzen wir nur, um dir jede Mail in Kopie zu schicken.",
+            "Beim ersten Antrag, nicht früher: Name, Anschrift und deine private E-Mail-Adresse. Name und Anschrift stehen auf dem Antragsformular, weil das Eisenbahnunternehmen sie verlangt, dazu die Angaben deiner Fahrkarte (unten). Deine private E-Mail-Adresse steht nicht darauf: Im Formular steht die Verspätomat-Adresse dieses Antrags, damit die Antwort dorthin geht. Deine eigene Adresse benutzen wir nur, um dir jede Mail in Kopie zu schicken.",
             "Pro Antrag: das Bild deines Tickets für die betroffenen Monate und deine Unterschrift (getippt oder gezeichnet). Beides landet nur im PDF und in der Mail an das Unternehmen.",
             "Der Schriftverkehr über deine Verspätomat-Adresse: die Anträge, die du abschickst, und die Antworten des Unternehmens. Dazu unten mehr.",
             "Deine Fahrkarten, soweit du sie einträgst: welche es sind, 1. oder 2. Klasse, Nummer, Preis, Geltungsdauer, bei einer Streckenzeitkarte die Strecke und bei der BahnCard 100 dein Geburtsdatum, weil die Bahn sie daran erkennt. Wir brauchen sie, um auszurechnen, was dir zusteht, und um das Antragsformular auszufüllen.",
@@ -170,7 +170,7 @@
           "paragraphs": [
             "Auskunft und Übertragbarkeit: Schreib an info@zoom7.de. Wir schicken dir alles, was wir über dich gespeichert haben, als Datei (JSON), spätestens innerhalb eines Monats.",
             "Löschung: Einstellungen → Deine Daten → „Alles löschen“ entfernt Konto, Fahrten, Anträge, Anhänge und deine Verspätomat-Adresse sofort und endgültig. Ein bereits abgeschickter Antrag liegt beim Eisenbahnunternehmen weiter; seine Antwort sehen wir dann nicht mehr.",
-            "Berichtigung: Name, Anschrift, E-Mail-Adresse und Ticketnummer änderst oder löschst du unter Einstellungen → Anträge, deine Fahrkarten unter Einstellungen → Fahrkarten. Deinen Anzeigenamen unter Einstellungen → Konto.",
+            "Berichtigung: Name, Anschrift und E-Mail-Adresse änderst oder löschst du unter Einstellungen → Anträge, deine Fahrkarten mit ihren Nummern unter Einstellungen → Fahrkarten. Deinen Anzeigenamen unter Einstellungen → Konto.",
             "Widerspruch, Beschwerde: schreib an info@zoom7.de. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, für uns ist das der Landesbeauftragte für den Datenschutz und die Informationsfreiheit Baden-Württemberg."
           ]
         }

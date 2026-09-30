@@ -97,7 +97,6 @@ class _AntragScreenState extends State<AntragScreen> {
   final _pName = TextEditingController();
   final _pAddress = TextEditingController();
   final _pEmail = TextEditingController();
-  final _pTicket = TextEditingController();
 
   /// Where each required row is and how to put the cursor in it, so „Weiter" can take the
   /// passenger to what is missing. It used to name the missing field in a snackbar while the form
@@ -150,7 +149,7 @@ class _AntragScreenState extends State<AntragScreen> {
   @override
   void dispose() {
     _unknownAddress.dispose();
-    for (final c in [_pName, _pAddress, _pEmail, _pTicket]) {
+    for (final c in [_pName, _pAddress, _pEmail]) {
       c.dispose();
     }
     for (final f in [_fName, _fAddress, _fEmail]) {
@@ -243,7 +242,6 @@ class _AntragScreenState extends State<AntragScreen> {
         _pName.text = pd.name;
         _pAddress.text = pd.address;
         _pEmail.text = pd.email;
-        _pTicket.text = pd.ticketNumber ?? '';
       }
       _signed = _draft!.claim.signedBy != null;
       _readAttachments();
@@ -380,7 +378,7 @@ class _AntragScreenState extends State<AntragScreen> {
       final me = session.me;
       bytes = await renderTicketPng(
         name: me?.personalData?.name ?? me?.nickname ?? 'Fahrgast',
-        ticketNumber: me?.personalData?.ticketNumber ?? '–',
+        ticketNumber: _ticket?.number ?? me?.personalData?.ticketNumber ?? '–',
         month: month == 'Ticket' ? 'Fahrkarte' : monthLabel(month),
       );
     } else {
@@ -597,7 +595,7 @@ class _AntragScreenState extends State<AntragScreen> {
             // A mark stays only while its row is still missing.
             if (_marked.isNotEmpty) _marked = _marked.intersection(_missingPersonal().toSet());
           }),
-          personal: (name: _pName, address: _pAddress, email: _pEmail, ticket: _pTicket),
+          personal: (name: _pName, address: _pAddress, email: _pEmail),
           focus: (name: _fName, address: _fAddress, email: _fEmail),
           keys: (name: _kName, address: _kAddress, email: _kEmail),
           marked: _marked,
@@ -775,7 +773,6 @@ class _AntragScreenState extends State<AntragScreen> {
         name: _pName.text.trim(),
         address: _pAddress.text.trim(),
         email: _pEmail.text.trim(),
-        ticketNumber: _pTicket.text.trim().isEmpty ? null : _pTicket.text.trim(),
       ));
       if (!mounted) return;
       setState(() => _busy = false);
@@ -926,7 +923,7 @@ class _Pruefen extends StatelessWidget {
   final GlobalKey unknownKey;
   final bool showPersonal;
   final VoidCallback onChanged;
-  final ({TextEditingController name, TextEditingController address, TextEditingController email, TextEditingController ticket}) personal;
+  final ({TextEditingController name, TextEditingController address, TextEditingController email}) personal;
   final ({FocusNode name, FocusNode address, FocusNode email}) focus;
   final ({GlobalKey name, GlobalKey address, GlobalKey email}) keys;
   final Set<PersonalField> marked;
@@ -994,8 +991,6 @@ class _Pruefen extends StatelessWidget {
           VKeyValue('Anschrift', pd.address.replaceAll('\n', ', ')),
           const VRule(),
           VKeyValue('E-Mail', pd.email),
-          const VRule(),
-          VKeyValue('Ticket-Nr.', pd.ticketNumber ?? '–', valueStyle: VText.mono),
         ],
         // The relay address used to stand here in full, in mono, in a box of its own — and it
         // confused people: a second e-mail address, on the step where they have just typed their
@@ -1122,7 +1117,7 @@ bool looksLikeEmail(String s) => RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$').hasMat
 /// passenger to work out which one matters, and the answer used to be "both, in order".
 class _PersonalForm extends StatelessWidget {
   const _PersonalForm({required this.fields, required this.focus, required this.keys, required this.marked, required this.onChanged});
-  final ({TextEditingController name, TextEditingController address, TextEditingController email, TextEditingController ticket}) fields;
+  final ({TextEditingController name, TextEditingController address, TextEditingController email}) fields;
   final ({FocusNode name, FocusNode address, FocusNode email}) focus;
   final ({GlobalKey name, GlobalKey address, GlobalKey email}) keys;
   final Set<PersonalField> marked;
@@ -1187,27 +1182,19 @@ class _PersonalForm extends StatelessWidget {
                   autofill: const [AutofillHints.email],
                   keyboard: TextInputType.emailAddress,
                 ),
-                const VDivider(),
-                _Field(
-                  label: 'Ticket-Nr.',
-                  hint: 'Optional',
-                  controller: fields.ticket,
-                  onChanged: onChanged,
-                  mono: true,
-                ),
               ],
             ),
           ),
         ),
         const VGap.s(),
-        // Which of the four rows actually travels, row by row: the form carries name, address and
-        // ticket number, and the e-mail row does not go on it at all — it is the address your own
-        // copy goes to, and the form names ours so the answer comes back through us (#22). The
-        // banner used to say „diese Angaben" and mean all four.
+        // Which of the rows actually travels, row by row: the form carries name and address, and
+        // the e-mail row does not go on it at all — it is the address your own copy goes to, and
+        // the form names ours so the answer comes back through us (#22). The ticket number comes
+        // from the Fahrkarte step since #66.
         VNoteBanner(
           tone: VNoteTone.neutral,
           icon: Icons.lock_outline,
-          text: 'Name, Anschrift und Ticketnummer stehen auf dem Formular an das Eisenbahnunternehmen — '
+          text: 'Name und Anschrift stehen auf dem Formular an das Eisenbahnunternehmen — '
               'deine E-Mail-Adresse nicht. Alles bleibt auf '
               '${RepoScope.read(context).isLocal ? 'deinem Gerät und unserem Server' : 'diesem Gerät'}.',
         ),
@@ -1233,7 +1220,6 @@ class _Field extends StatelessWidget {
     this.keyboard,
     this.capitalization = TextCapitalization.none,
     this.lines = 1,
-    this.mono = false,
   });
 
   final String label;
@@ -1248,7 +1234,6 @@ class _Field extends StatelessWidget {
   final TextInputType? keyboard;
   final TextCapitalization capitalization;
   final int lines;
-  final bool mono;
 
   @override
   Widget build(BuildContext context) {
@@ -1279,7 +1264,7 @@ class _Field extends StatelessWidget {
                     keyboardType: keyboard,
                     textCapitalization: capitalization,
                     maxLines: lines,
-                    style: mono ? VText.mono : VText.bodySStrong,
+                    style: VText.bodySStrong,
                     decoration: InputDecoration(
                       hintText: hint,
                       hintStyle: VText.bodyS.copyWith(color: VColors.ink3),

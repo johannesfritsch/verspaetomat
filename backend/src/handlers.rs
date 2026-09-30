@@ -574,10 +574,13 @@ pub struct PersonalData {
     pub name: String,
     pub address: String,
     pub email: String,
+    /// Sent only by builds before tickets (#66); the number lives on the ticket now. Absent or
+    /// empty keeps what is stored, so a newer build saving its three fields clears nothing.
     #[serde(default)]
     pub ticket_number: Option<String>,
+    /// Likewise only from older builds; absent keeps it.
     #[serde(default)]
-    pub first_class: bool,
+    pub first_class: Option<bool>,
 }
 
 /// Domain of the per-customer relay addresses (`fahrgast-XXXX@…`). A subdomain, so the apex keeps
@@ -615,20 +618,23 @@ pub fn new_message_id() -> String {
 /// Asked at the first claim. Assigns the relay address the first time.
 pub async fn put_personal_data(State(s): State<AppState>, c: Customer, Json(p): Json<PersonalData>) -> ApiResult {
     let relay = c.0.relay_address.clone().unwrap_or_else(|| relay_address_for(c.0.id));
+    let number = p.ticket_number.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned);
     let row: CustomerRow = sqlx::query_as(
-        "update customers set full_name = $2, postal_address = $3, email = $4, ticket_number = $5, first_class = $6, relay_address = $7 where id = $1 returning *",
+        "update customers set full_name = $2, postal_address = $3, email = $4, ticket_number = coalesce($5, ticket_number), first_class = coalesce($6, first_class), relay_address = $7 where id = $1 returning *",
     )
     .bind(c.0.id)
     .bind(p.name)
     .bind(p.address)
     .bind(p.email)
-    .bind(p.ticket_number)
+    .bind(number.clone())
     .bind(p.first_class)
     .bind(relay)
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
-    crate::tickets::number_from_personal_data(&s.pool, c.0.id, row.ticket_number.as_deref()).await.map_err(internal)?;
+    if let Some(n) = &number {
+        crate::tickets::number_from_personal_data(&s.pool, c.0.id, Some(n)).await.map_err(internal)?;
+    }
     Ok(Json(customer_json(&s.pool, &s.flags(), &row).await.map_err(internal)?))
 }
 

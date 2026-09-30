@@ -433,12 +433,11 @@ void main() {
 
       // Step 1: personal data appear on the first claim only; the twelve words stay out of the Antrag (#45).
       await pumpUntilFound(tester, find.text('DEINE ANGABEN'), timeout: const Duration(seconds: 40));
-      if (find.byType(TextField).evaluate().length >= 4) {
+      if (find.byType(TextField).evaluate().length >= 3) {
         final fields = find.byType(TextField);
         await tester.enterText(fields.at(0), 'Johannes Test');
         await tester.enterText(fields.at(1), 'Venloer Straße 123, 50823 Köln');
         await tester.enterText(fields.at(2), 'johannes@example.de');
-        await tester.enterText(fields.at(3), 'D-2026-0904-771-2201');
         await tester.pump(const Duration(milliseconds: 200));
       }
       // One button: Weiter checks the form, saves it and moves on — no sheet of words in between (#45).
@@ -692,12 +691,11 @@ void main() {
       // section itself — it is there whether the form or the saved details are shown, and the relay
       // address it used to wait for only exists after the first save.
       await pumpUntilFound(tester, find.text('DEINE ANGABEN'), timeout: const Duration(seconds: 40));
-      if (find.byType(TextField).evaluate().length >= 4) {
+      if (find.byType(TextField).evaluate().length >= 3) {
         final fields = find.byType(TextField);
         await tester.enterText(fields.at(0), 'Johannes Test');
         await tester.enterText(fields.at(1), 'Venloer Straße 123, 50823 Köln');
         await tester.enterText(fields.at(2), 'johannes@example.de');
-        await tester.enterText(fields.at(3), 'D-2026-0904-771-2201');
         await tester.pump(const Duration(milliseconds: 200));
       }
 

@@ -157,7 +157,13 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
         }
         .to_string(),
     };
-    let ticket_number = doc.ticket.and_then(|t| t.number.clone()).or_else(|| c.ticket_number.clone()).unwrap_or_else(|| "–".into());
+    // The case's own ticket; the customer's old D-Ticket number only for a case from before
+    // tickets, never on a single ticket that simply has no number.
+    let ticket_number = match doc.ticket {
+        Some(t) => t.number.clone(),
+        None => c.ticket_number.clone(),
+    }
+    .unwrap_or_else(|| "–".into());
     let fare = doc.incidents.first().and_then(|i| i.fare_cents).map(euro).unwrap_or_else(|| "–".into());
     let signed_on = claim.signed_at.map(|t| berlin(t).format("%d.%m.%Y").to_string()).unwrap_or_default();
     let place = c.postal_address.as_deref().and_then(|a| a.lines().last()).map(|l| l.trim().to_string()).unwrap_or_default();
