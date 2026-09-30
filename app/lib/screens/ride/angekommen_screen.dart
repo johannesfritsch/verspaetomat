@@ -12,6 +12,7 @@ import '../share/share_sheet.dart';
 import '../../widgets/ticket.dart';
 import '../community/community_widgets.dart' show BadgeIcon;
 import 'ride_widgets.dart';
+import '../claims/claims_widgets.dart' show potFigure, potMissing;
 
 /// The reveal. The only screen allowed to feel like a reward.
 ///
@@ -171,14 +172,18 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     final ngoId = incident?.ngoId ?? session.me?.settings.ngoId;
     final ngo = session.ngos.where((n) => n.id == ngoId).firstOrNull;
     final ngoName = ngo?.name ?? 'deinen Zweck';
-    final hasClaim = incident != null || delay >= 60 || cancelled;
+    // The pot this case went into (#66): what it holds, and whether it can go out. Absent from a
+    // server before pots; then the desk, as before.
+    final pot = incident == null ? null : _incidents?.summary.pots.where((p) => p.incidentIds.contains(incident.id)).firstOrNull;
+    final hasClaim = incident != null || (pot == null && (delay >= 60 || cancelled));
     final desk = incident?.desk ?? '';
     final deskSummary = _incidents?.summary.desks.where((d) => d.desk == desk).firstOrNull;
     final openCount = deskSummary?.incidentIds.length ?? (incident == null ? 0 : 1);
-    final ready = deskSummary?.ready ?? result.bundleReady;
+    final ready = pot?.payable ?? deskSummary?.ready ?? result.bundleReady;
     final counted = hasClaim ? openCount.clamp(1, 3) : openCount;
     final amountCents = incident?.amountCents;
-    final canFile = hasClaim && incident != null && (ticket == TicketType.einzelfahrkarte || ready);
+    final canFile = hasClaim && incident != null && (pot != null ? pot.payable : (ticket == TicketType.einzelfahrkarte || ready));
+    final claimRoute = pot != null ? '${Routes.claim}?pot=${Uri.encodeComponent(pot.id)}&desk=${Uri.encodeComponent(desk)}' : '${Routes.claim}?desk=${Uri.encodeComponent(desk)}';
 
     void share() => showShareSheet(
           context,
@@ -197,7 +202,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
     final actions = canFile
         ? Column(
             children: [
-              VPrimaryButton(label: 'Jetzt einreichen', onTap: () => context.push('${Routes.claim}?desk=${Uri.encodeComponent(desk)}')),
+              VPrimaryButton(label: 'Jetzt einreichen', onTap: () => context.push(claimRoute)),
               const VGap.s(),
               Row(
                 children: [
@@ -288,7 +293,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
             VCard(
               tone: VCardTone.sunken,
               padding: const EdgeInsets.all(VSpace.card),
-              child: _ClaimLine(ticket: ticket, amountCents: amountCents, ngoName: ngoName, counted: counted, ready: ready, pending: incident == null),
+              child: _ClaimLine(ticket: ticket, amountCents: amountCents, ngoName: ngoName, counted: counted, ready: ready, pending: incident == null, pot: pot),
             )
           else ...[
             _NoClaimCard(delay: delay, ngoName: ngoName),
@@ -704,8 +709,11 @@ class _TripLine extends StatelessWidget {
 }
 
 class _ClaimLine extends StatelessWidget {
-  const _ClaimLine({required this.ticket, required this.amountCents, required this.ngoName, required this.counted, required this.ready, required this.pending});
+  const _ClaimLine({required this.ticket, required this.amountCents, required this.ngoName, required this.counted, required this.ready, required this.pending, this.pot});
   final TicketType ticket;
+
+  /// The pot the case went into (#66). Its figures replace the old three-dot count.
+  final ApiPot? pot;
   final int? amountCents;
   final String ngoName;
   final int counted;
@@ -714,6 +722,29 @@ class _ClaimLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = pot;
+    if (p != null) {
+      // Where delays pool, this ride's minutes went into the pot; one ride alone is not an amount,
+      // so the line names the pot and what it holds, and what is missing before it can go out.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Expanded(child: Text(p.pools ? 'Zählt für ${p.ticketName}' : 'Anspruch entstanden', style: VText.bodyStrong)),
+              // No fare yet: no figure. The line below asks for it.
+              Text(p.blockers.any((b) => b.kind == 'price_missing') ? '–' : fmtEuro((p.pools ? p.amountCents : (amountCents ?? 0)) / 100), style: VText.numberM),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text('für $ngoName', style: VText.bodyS.copyWith(color: VColors.ink2)),
+          const SizedBox(height: 12),
+          Text(p.payable ? 'Bereit · ${potFigure(p)}' : (p.pools ? '${potFigure(p)}. ${potMissing(p) ?? ''}' : (potMissing(p) ?? potFigure(p))), style: VText.caption),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -780,7 +811,9 @@ class _NoClaimCard extends StatelessWidget {
                 Text(title, style: VText.bodyStrong),
                 if (delay != 59) ...[
                   const SizedBox(height: VSpace.xs),
-                  Text('Ab 60 Minuten entsteht ein Anspruch. Bis dahin zählen die Minuten, und $ngoName freut sich auch so.', style: VText.bodyS),
+                  // Not „ab 60 Minuten": where delays pool, they count from 20 (#66). The threshold is
+                  // the ticket's; the sentence says only that this one did not reach it.
+                  Text('Für deine Fahrkarte zählt diese Verspätung noch nicht. Die Minuten zählen trotzdem, und $ngoName freut sich auch so.', style: VText.bodyS),
                 ],
               ],
             ),

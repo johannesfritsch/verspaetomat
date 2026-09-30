@@ -321,6 +321,9 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
   final toExit = toExitRaw == null || toExitRaw < 0 ? null : toExitRaw;
   final info = j?.currentLegInfo;
   final claimFrom = m.journey?.claimFromMinute ?? 60;
+  // The journey's ticket (#66): where delays pool, they count from its own threshold; a ticket
+  // with a Zugbindung has it lifted from its own minute on.
+  final ticket = m.journey?.ticket;
 
   if (r.cancelled) {
     return (
@@ -349,12 +352,32 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
     );
   }
 
-  // A claim outranks the welcome: someone boarding an hour late checked in for this line.
+  // A delay that counts outranks the welcome: someone boarding an hour late checked in for this line.
+  // Where the ticket pools its delays, the minutes count from its own threshold and the sentence
+  // says so; one delay alone does not make an amount there. Otherwise a claim starts at the hour.
+  if (ticket != null && ticket.pools && delay >= ticket.countsFromMinute) {
+    return (
+      eyebrow: 'Unterwegs · ${r.line}',
+      title: '+${_minutes(delay)}.',
+      subtitle: 'Ab hier zählt die Verspätung für ${ticket.name} mit.',
+      track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
+    );
+  }
   if (delay >= claimFrom) {
     return (
       eyebrow: 'Unterwegs · ${r.line}',
       title: '+${_minutes(delay)}.',
       subtitle: 'Ab hier entsteht ein Anspruch.',
+      track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
+    );
+  }
+  // A ticket bound to its train is free of it from here (BB 9.1.1): the one right on the way that
+  // is worth saying before there is any money.
+  if (ticket != null && !ticket.reducedFare && ticket.releaseAfterMin > 0 && delay >= ticket.releaseAfterMin) {
+    return (
+      eyebrow: 'Unterwegs · ${r.line}',
+      title: '+${_minutes(delay)}.',
+      subtitle: 'Deine Zugbindung ist aufgehoben: du darfst einen anderen Zug nehmen.',
       track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
     );
   }
@@ -1229,7 +1252,8 @@ Future<void> showAbortSheet(BuildContext context, RideMonitor monitor) {
                   trailing: const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
                   onTap: () async {
                     Navigator.of(ctx).pop();
-                    final ticket = RepoScope.read(context).me?.settings.ticket;
+                    // The journey's own ticket (#66), not the setting: that was chosen at check-in.
+                    final ticket = monitor.journey?.ticket?.legacy ?? RepoScope.read(context).me?.settings.ticket;
                     await _abortAction(context, monitor, () => monitor.finish(arrived: false, reason: 'aufgegeben'));
                     if (context.mounted) await showGaveUpSheet(context, ticket, monitor.lastAbandonMinutes);
                   },

@@ -66,7 +66,7 @@ title = "Einchecken, warten, zahlen lassen."
 # steht, ist nachprüfbar.
 [fahrplan.karte]
 title = "Deine Verspätung bewirkt etwas."
-text = "Jede Minute zählt für dich. Ab 60 Minuten entsteht ein gesetzlicher Anspruch — und der geht an einen Verein, nicht an uns."
+text = "Jede Minute zählt für dich. Wird daraus ein gesetzlicher Anspruch, geht er an einen Verein, nicht an uns."
 
 [[fahrplan.halt]]
 label = "Einchecken"
@@ -81,7 +81,7 @@ text = "Leg das Handy weg. Die Verspätung holt unser Server aus den öffentlich
 [[fahrplan.halt]]
 label = "Ankommen"
 icon = "halt"
-text = "Jede Minute wird gezählt. Ab 60 Minuten entsteht ein Anspruch."
+text = "Jede Minute wird gezählt. Wann daraus ein Anspruch wird, hängt an deiner Fahrkarte."
 
 [[fahrplan.halt]]
 label = "Antrag stellen"
@@ -118,7 +118,7 @@ height = 1388
 
 [[bilder.schuss]]
 src = "shots/antraege.webp"
-alt = "Der Antragsschalter: vier gesammelte Fälle — drei Verspätungen und ein Ausfall — zusammen 6,00 Euro für die Bahnhofsmission Köln, bereit für den Antrag. Darunter beginnt ein zweites Bündel."
+alt = "Der Antragsschalter, eine Karte je Fahrkarte: das Deutschlandticket mit fünf gesammelten Fällen — drei Verspätungen und zwei Ausfälle — zusammen 7,50 Euro für die Bahnhofsmission Köln, bereit für den Antrag."
 caption = "Der Antrag, bereit"
 width = 640
 height = 1387
@@ -185,11 +185,15 @@ a = "Der Verein, den du in der App wählst. Auf dem Antrag steht seine Kontoverb
 
 [[fragen.frage]]
 q = "Ab wann gibt es überhaupt Geld?"
-a = "Ab 60 Minuten Verspätung am Ziel: 25 % des Fahrpreises. Ab 120 Minuten: 50 %. Darunter gibt es keinen gesetzlichen Anspruch — gezählt werden deine Minuten trotzdem."
+a = "Mit einer Einzelfahrkarte ab 60 Minuten Verspätung am Ziel: 25 % des Fahrpreises, ab 120 Minuten 50 %. Mit einer Zeitkarte gibt es feste Beträge, siehe unten. Gezählt werden deine Minuten in jedem Fall."
 
 [[fragen.frage]]
 q = "Und mit dem Deutschlandticket?"
-a = "Da sind es pauschal 1,50 € im Nahverkehr. Auszahlen muss die Bahn erst ab 4 €, deshalb sammelt Verspätomat, bis drei Verspätungen zusammenkommen, und schickt sie als einen Antrag."
+a = "Da zählt jede Verspätung ab 20 Minuten mit: die Minuten werden zusammengerechnet, je volle Stunde gibt es 1,50 €. Auszahlen muss die Bahn erst über 4 €, deshalb sammelt Verspätomat, bis drei volle Stunden zusammenkommen, und schickt sie als einen Antrag."
+
+[[fragen.frage]]
+q = "Und mit BahnCard 100 oder Monatskarte?"
+a = "Die BahnCard 100 bringt ab 60 Minuten 10 € je Fahrt, in der 1. Klasse 15 €. Monats- und Jahreskarten der Verbünde meist 1,50 € je Fahrt ab 60 Minuten, im Einzelnen nach dem Tarif des Verbunds. Du legst deine Fahrkarte in der App an; was sie bringt, steht dort."
 
 [[fragen.frage]]
 q = "Muss ich mich anmelden?"

@@ -1703,7 +1703,7 @@ class ApiJourney {
 
 /// `GET /v1/journeys/current`: the journey plus the live view of its current leg.
 class ApiJourneyLive {
-  const ApiJourneyLive({required this.journey, this.ride, this.stops = const [], this.eta, this.nextLeg, this.justArrived = false, this.claimFromMinute = 60});
+  const ApiJourneyLive({required this.journey, this.ride, this.stops = const [], this.eta, this.nextLeg, this.justArrived = false, this.claimFromMinute = 60, this.ticket});
   final ApiJourney journey;
   final ApiRide? ride;
   final List<ApiStop> stops;
@@ -1711,6 +1711,10 @@ class ApiJourneyLive {
   final ApiLeg? nextLeg;
   final bool justArrived;
   final int claimFromMinute;
+
+  /// The journey's ticket and what it is entitled to on the way (#66). Null from a server before
+  /// tickets.
+  final ApiJourneyTicket? ticket;
 
   /// The same view the old ride screens consume, for the current leg.
   ApiRideLive? get asRideLive => ride == null ? null : ApiRideLive(ride: ride!, stops: stops, eta: eta);
@@ -1725,8 +1729,35 @@ class ApiJourneyLive {
       nextLeg: _m(j['next_leg']) == null ? (_m(jm['next_leg']) == null ? null : ApiLeg.fromJson(_m(jm['next_leg'])!)) : ApiLeg.fromJson(_m(j['next_leg'])!),
       justArrived: _b(j['just_arrived']),
       claimFromMinute: _i(j['claim_from_minute'], 60),
+      ticket: _m(j['ticket']) == null ? null : ApiJourneyTicket.fromJson(_m(j['ticket'])!),
     );
   }
+}
+
+/// A journey's ticket as the ride screen needs it: from which minute a delay counts for it, from
+/// which minute its Zugbindung is lifted, whether it may switch to a higher train.
+class ApiJourneyTicket {
+  const ApiJourneyTicket({required this.name, required this.product, required this.family, this.countsFromMinute = 60, this.pools = false, this.releaseAfterMin = 0, this.reducedFare = false});
+  final String name;
+  final String product;
+  final String family;
+  final int countsFromMinute;
+  final bool pools;
+  final int releaseAfterMin;
+  final bool reducedFare;
+
+  /// The old type, for the sheets that still speak in it.
+  TicketType get legacy => family == 'deutschlandticket' ? TicketType.deutschlandticket : (family == 'einzelfahrkarte' ? TicketType.einzelfahrkarte : TicketType.zeitkarte);
+
+  factory ApiJourneyTicket.fromJson(Map<String, dynamic> j) => ApiJourneyTicket(
+        name: _s(j['name']),
+        product: _s(j['product']),
+        family: _s(j['family']),
+        countsFromMinute: _i(j['counts_from_minute'], 60),
+        pools: _b(j['pools']),
+        releaseAfterMin: _i(j['release_after_min']),
+        reducedFare: _b(j['reduced_fare']),
+      );
 }
 
 class StartJourneyRequest {

@@ -243,6 +243,25 @@ fn legacy_ride_as_journey(r: &RideRow) -> Value {
     })
 }
 
+/// The ticket of a journey for the ride screen: its name, from which minute a delay counts for it,
+/// from which minute its Zugbindung is lifted, and whether it may switch to a higher train.
+async fn journey_ticket_json(pool: &PgPool, j: &JourneyRow) -> anyhow::Result<Value> {
+    let t: Option<TicketRow> = sqlx::query_as("select t.* from journey_tickets jt join tickets t on t.id = jt.ticket_id where jt.journey_id = $1 order by jt.first_leg desc limit 1").bind(j.id).fetch_optional(pool).await?;
+    let Some(t) = t else { return Ok(Value::Null) };
+    let p = crate::tickets::product_of(&t);
+    let rule = p.rule_on(j.planned_departure.date_naive());
+    Ok(json!({
+        "id": t.id,
+        "name": crate::tickets::ticket_json(&t)["name"],
+        "product": p.id,
+        "family": p.family,
+        "counts_from_minute": rule.compensation.threshold(),
+        "pools": matches!(rule.compensation, crate::fares::Compensation::MinutePool { .. }),
+        "release_after_min": rule.release_after_min,
+        "reduced_fare": rule.reduced_fare,
+    }))
+}
+
 /// `journeys/current` payload: the journey, the current (or last) leg with its stops, the proposal.
 pub async fn current_payload(s: &AppState, j: &JourneyRow, just_arrived: bool) -> anyhow::Result<Value> {
     let ride: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 order by leg_no desc limit 1").bind(j.id).fetch_optional(&s.pool).await?;
@@ -269,7 +288,10 @@ pub async fn current_payload(s: &AppState, j: &JourneyRow, just_arrived: bool) -
         "eta": eta,
         "next_leg": j.next_leg,
         "just_arrived": just_arrived,
+        // What builds before tickets read: from here one delay on its own is worth something.
         "claim_from_minute": 60,
+        // The journey's ticket and what it is entitled to on the way (#66, docs/49 §2.3).
+        "ticket": journey_ticket_json(&s.pool, j).await?,
     }))
 }
 

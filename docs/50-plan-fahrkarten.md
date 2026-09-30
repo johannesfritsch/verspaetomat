@@ -423,3 +423,13 @@ jetzt (fiel in der E2E auf: zuerst bekam er den des ganzen Topfs).
 Offen aus Phase 4: ein Upload für den Preisnachweis (bisher nur, dass das Produkt einen will);
 „Ticket-Nr." steht noch in den persönlichen Daten und wird mit der Nummer des D-Tickets
 gleichgehalten.
+
+**Phase 5** — 30. September 2026: Die Fahrt kennt ihre Fahrkarte (`ticket` in `journeys/current`:
+ab welcher Minute sie zählt, ab wann die Zugbindung fällt, ob erheblich ermäßigt). Unterwegs sagt
+die Kopfzeile beim Minuten-Topf ab 20 Minuten „Ab hier zählt die Verspätung für … mit", bei einer
+Fahrkarte mit Zugbindung ab 20 Minuten „Deine Zugbindung ist aufgehoben", ab 60 wie bisher „Ab hier
+entsteht ein Anspruch". Das Abbrechen-Blatt liest die Fahrkarte der Reise statt der Einstellung.
+Die Ankunft zeigt den Topf des Falls statt der drei Punkte, „Jetzt einreichen" nur, wenn er raus
+kann. Website (Fahrplan, FAQ zum D-Ticket, neue Frage zu BahnCard 100 und Monatskarte, Bild der
+Anträge) und Datenherkunft (Regeln, Frist) nachgezogen. `unterwegs.webp` bleibt: die Demo-Fahrt
+hat keine Fahrkarte und sieht aus wie vorher.
