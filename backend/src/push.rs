@@ -187,6 +187,15 @@ pub fn compose(kind: &str, payload: &Value, facts: &Facts) -> Option<Notificatio
             let title = if c.is_some() { "Post von der Bahn" } else { "Neue Post" };
             Some(Notification { title: title.to_string(), body, kind: "mail", data: json!({ "claim_id": s("claim_id") }) })
         }
+        "incident" if b("aim") => {
+            let i = facts.incident.as_ref()?;
+            Some(Notification {
+                title: "Bereit zum Einreichen".to_string(),
+                body: format!("{} vom {} wartet bald drei Monate. Jetzt einreichen?", i.line, short_date(i.ride_date)),
+                kind: "incident",
+                data: json!({ "incident_id": s("incident_id") }),
+            })
+        }
         "incident" if b("warning") => {
             let i = facts.incident.as_ref()?;
             let days = payload.get("days_left").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -674,6 +683,8 @@ mod tests {
         let n = compose("incident", &json!({ "incident_id": "i1", "warning": true, "days_left": 21 }), &f).unwrap();
         assert_eq!(n.body, "RE 10 vom 21.08. verfällt in 21 Tagen. Antrag vorbereiten?");
         assert!(compose("incident", &json!({ "expired": ["i1"] }), &f).is_none());
+        let n = compose("incident", &json!({ "incident_id": "i1", "aim": true, "days_left": 21 }), &f).unwrap();
+        assert_eq!(n.body, "RE 10 vom 21.08. wartet bald drei Monate. Jetzt einreichen?");
 
         f.claim = Some(ClaimFacts { desk: "Servicecenter".into(), sent_on: NaiveDate::from_ymd_opt(2026, 8, 15), amount_claimed_cents: 450, amount_confirmed_cents: None });
         let n = compose("claim", &json!({ "claim_id": "c1", "nudge": true }), &f).unwrap();

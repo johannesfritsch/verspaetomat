@@ -1,9 +1,10 @@
 //! The deadline scanner: one tokio task, hourly (first pass 30 s after start), on the
-//! simulated clock. It warns 21 days before an incident's legal deadline, expires open
+//! simulated clock. It reminds 21 days before a ready case's aim (three months after the ride,
+//! docs/49 §1), warns 21 days before an incident's legal deadline, expires open
 //! incidents at the deadline for every customer, nudges when a sent claim passed its
 //! expected reply date without an answer, sweeps attachments of closed claims, and drops the
 //! event channels of streams that have since closed.
-//! Every pass is idempotent: `warned_at` and `nudged_at` mark what already went out.
+//! Every pass is idempotent: `aim_nudged_at`, `warned_at` and `nudged_at` mark what already went out.
 
 use std::time::Duration;
 
@@ -24,7 +25,7 @@ pub fn spawn(state: AppState) {
         tokio::time::sleep(FIRST_RUN_AFTER).await;
         loop {
             match run_once(&state).await {
-                Ok(v) => tracing::info!(warned = %v["warned"], expired = %v["expired"], nudged = %v["nudged"], asked = %v["asked"], retained = %v["retained"], swept = %v["swept"], "deadline scanner pass"),
+                Ok(v) => tracing::info!(warned = %v["warned"], aimed = %v["aimed"], expired = %v["expired"], nudged = %v["nudged"], asked = %v["asked"], retained = %v["retained"], swept = %v["swept"], "deadline scanner pass"),
                 Err(e) => tracing::error!("deadline scanner: {e}"),
             }
             tokio::time::sleep(INTERVAL).await;
@@ -37,6 +38,7 @@ pub async fn run_once(s: &AppState) -> anyhow::Result<Value> {
     let today = clock::today();
     let expired = expire(s, today).await?;
     let warned = warn(s, today).await?;
+    let aimed = remind_aim(s, today).await?;
     let nudged = nudge(s, today).await?;
     let asked = ask_stale(s).await?;
     let retained = sweep_retention(&s.pool).await?;
@@ -44,7 +46,7 @@ pub async fn run_once(s: &AppState) -> anyhow::Result<Value> {
     // along here rather than on a task of its own: the map is small, the sweep takes one lock and
     // no I/O, and an entry nobody listens on costs a few KiB until the next hour comes round.
     let swept = s.events.sweep();
-    Ok(json!({ "today": today, "expired": expired, "warned": warned, "nudged": nudged, "asked": asked, "retained": retained, "swept": swept }))
+    Ok(json!({ "today": today, "expired": expired, "warned": warned, "aimed": aimed, "nudged": nudged, "asked": asked, "retained": retained, "swept": swept }))
 }
 
 /// (e) A journey still `riding` or `transfer` three hours past its planned arrival: ask once
@@ -93,6 +95,29 @@ async fn warn(s: &AppState, today: NaiveDate) -> anyhow::Result<usize> {
     .await?;
     for (id, customer, deadline) in &due {
         s.events.publish(*customer, "incident", json!({ "incident_id": id, "warning": true, "legal_deadline": deadline, "days_left": rules::days_until(*deadline, today) }));
+    }
+    Ok(due.len())
+}
+
+/// (a') 21 days before the aim (three months after the ride), once per incident, and only when the
+/// case is `bereit`: a reminder to send what can be sent, never a push towards a bundle that is
+/// still below its minimum. Nothing expires at the aim, so the text does not say so (push.rs).
+async fn remind_aim(s: &AppState, today: NaiveDate) -> anyhow::Result<usize> {
+    let due: Vec<(Uuid, Uuid, NaiveDate)> = sqlx::query_as(
+        "update incidents set aim_nudged_at = now()
+         where status = 'bereit' and discarded_at is null and aim_nudged_at is null
+           and (ride_date + make_interval(months => $3))::date >= $1
+           and (ride_date + make_interval(months => $3))::date - $2::int <= $1
+         returning id, customer_id, ride_date",
+    )
+    .bind(today)
+    .bind(rules::WARN_DAYS_BEFORE_DEADLINE as i32)
+    .bind(rules::AIM_MONTHS as i32)
+    .fetch_all(&s.pool)
+    .await?;
+    for (id, customer, ride_date) in &due {
+        let aim = rules::aim_date(*ride_date);
+        s.events.publish(*customer, "incident", json!({ "incident_id": id, "aim": true, "aim_date": aim, "days_left": rules::days_until(aim, today) }));
     }
     Ok(due.len())
 }

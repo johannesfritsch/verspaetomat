@@ -233,6 +233,38 @@ fn resolve(cli: &Cli, cfg: &ConfigFile) -> anyhow::Result<(String, Target)> {
     Ok((name, t))
 }
 
+#[derive(Subcommand)]
+enum FaresCmd {
+    /// Every fare product this server knows, with its rule line
+    List,
+    /// One product: the rule in force today, its prices, and the source of every value
+    Show { id: String },
+    /// The whole catalogue as JSON (the app's demo mode reads this, docs/50 phase 3)
+    Export,
+    /// What these cases would be worth on this ticket; nothing is stored.
+    /// Cases are minutes of delay, optionally with a date: 30 45@2026-08-31 70
+    Try {
+        id: String,
+        #[arg(required = true)]
+        cases: Vec<String>,
+        /// First class
+        #[arg(long)]
+        first: bool,
+        /// What was paid, in euros (63 or 63,00): the fare of a single ticket, the price of the cap's window for a season ticket
+        #[arg(long)]
+        price: Option<String>,
+        /// Ticket valid from (YYYY-MM-DD)
+        #[arg(long)]
+        from: Option<String>,
+        /// Ticket valid until (YYYY-MM-DD)
+        #[arg(long)]
+        until: Option<String>,
+        /// Evaluate as of this day instead of the server's
+        #[arg(long)]
+        today: Option<String>,
+    },
+}
+
 // clap builds one enum variant per subcommand and `Set` carries a dozen optional strings, so it
 // dwarfs `List`. That is what a CLI argument enum looks like; boxing it would buy nothing.
 #[allow(clippy::large_enum_variant)]
@@ -613,6 +645,11 @@ enum Cmd {
     Route {
         #[command(subcommand)]
         cmd: RouteCmd,
+    },
+    /// The fare catalogue: list, show, export, and try a ticket against cases (docs/49, docs/50)
+    Fares {
+        #[command(subcommand)]
+        cmd: FaresCmd,
     },
     /// Manage the NGOs customers can choose (list, set, import, remove)
     Ngo {
@@ -1437,6 +1474,72 @@ async fn main() -> anyhow::Result<()> {
                 println!("  (Subdomains zählen mit; die Domain der Zieladresse immer.)");
             }
         },
+        Cmd::Fares { cmd } => match cmd {
+            FaresCmd::List => {
+                let v = api.get("/admin/fares").await?;
+                println!("{:<26} {:<18} {:<20} Regel", "ID", "Familie", "Tarif");
+                for p in v.as_array().unwrap_or(&vec![]) {
+                    let caveat = if p["rule"]["offer"] == "offered" { "" } else { " ⚠" };
+                    println!("{:<26} {:<18} {:<20} {}{}", p["id"].as_str().unwrap_or(""), p["family"].as_str().unwrap_or(""), p["tariff"].as_str().unwrap_or(""), p["rule_line"].as_str().unwrap_or(""), caveat);
+                }
+            }
+            FaresCmd::Show { id } => {
+                let v = api.get("/admin/fares").await?;
+                let Some(p) = v.as_array().and_then(|a| a.iter().find(|p| p["id"] == id.as_str())) else { anyhow::bail!("no fare product {id}") };
+                println!("{} — {} ({})", p["id"].as_str().unwrap_or(""), p["name"].as_str().unwrap_or(""), p["tariff_name"].as_str().unwrap_or(""));
+                println!("{}\n", p["rule_line"].as_str().unwrap_or(""));
+                println!("{}", serde_json::to_string_pretty(&p["rule"])?);
+                if let Some(prices) = p["prices"].as_array().filter(|a| !a.is_empty()) {
+                    println!("\nPreise:");
+                    for pr in prices {
+                        println!("  ab {}  {}", pr["valid_from"].as_str().unwrap_or(""), euro_cents(pr["cents"].as_i64().unwrap_or(0)));
+                    }
+                }
+                println!("\nQuellen:");
+                for src in p["sources"].as_array().unwrap_or(&vec![]) {
+                    println!("  [{}] {} — {}\n      „{}“", src["grade"].as_str().unwrap_or(""), src["field"].as_str().unwrap_or(""), src["doc"].as_str().unwrap_or(""), src["quote"].as_str().unwrap_or(""));
+                }
+            }
+            FaresCmd::Export => {
+                println!("{}", serde_json::to_string_pretty(&api.get("/admin/fares").await?)?);
+            }
+            FaresCmd::Try { id, cases, first, price, from, until, today } => {
+                let mut list = Vec::new();
+                for c in &cases {
+                    let (delay, date) = match c.split_once('@') {
+                        Some((d, date)) => (d, Some(date.to_string())),
+                        None => (c.as_str(), None),
+                    };
+                    let delay: i64 = delay.parse().map_err(|_| anyhow::anyhow!("{c}: minutes, optionally @YYYY-MM-DD"))?;
+                    list.push(json!({ "delay_min": delay, "date": date }));
+                }
+                let price_cents = match price {
+                    Some(p) => Some((p.replace(',', ".").parse::<f64>().map_err(|_| anyhow::anyhow!("--price in euros, e.g. 63,00"))? * 100.0).round() as i64),
+                    None => None,
+                };
+                let body = json!({ "first_class": first, "price_cents": price_cents, "valid_from": from, "valid_until": until, "today": today, "cases": list });
+                let pot = api.post(&format!("/admin/fares/{id}/evaluate"), body).await?;
+                for c in pot["cases"].as_array().unwrap_or(&vec![]) {
+                    let note = match c["excluded"].as_str() {
+                        Some("below_threshold") => "  zählt nicht (unter der Schwelle)".to_string(),
+                        Some("expired") => "  zählt nicht (Frist um)".to_string(),
+                        _ if c["capped"].as_bool().unwrap_or(false) => "  gedeckelt".to_string(),
+                        _ => String::new(),
+                    };
+                    println!("  {:>4} Min.  {:>8}  Frist {}{}", c["minutes"], euro_cents(c["cents"].as_i64().unwrap_or(0)), c["deadline"].as_str().unwrap_or(""), note);
+                }
+                println!("Minuten: {}{}", pot["minutes"], pot["next_unit_minutes"].as_i64().map(|n| format!(" (noch {n} bis zur nächsten vollen Stunde)")).unwrap_or_default());
+                println!("Betrag:  {}{}", euro_cents(pot["amount"].as_i64().unwrap_or(0)), if pot["capped"].as_bool().unwrap_or(false) { format!(" (vor dem Deckel {})", euro_cents(pot["gross"].as_i64().unwrap_or(0))) } else { String::new() });
+                if pot["payable"].as_bool().unwrap_or(false) {
+                    println!("Einreichbar.");
+                } else {
+                    println!("Noch nicht einreichbar: {}", pot["blockers"]);
+                }
+                if let Some(aim) = pot["aim"].as_str() {
+                    println!("Ziel {aim}, Frist {}", pot["deadline"].as_str().unwrap_or(""));
+                }
+            }
+        },
         Cmd::Ngo { cmd } => match cmd {
             NgoCmd::List => {
                 let v = api.get("/admin/ngos").await?;
@@ -1806,4 +1909,9 @@ async fn main() -> anyhow::Result<()> {
         },
     }
     Ok(())
+}
+
+/// 1575 → "15,75 €".
+fn euro_cents(c: i64) -> String {
+    format!("{},{:02} €", c / 100, (c % 100).abs())
 }

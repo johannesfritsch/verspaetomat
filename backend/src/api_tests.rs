@@ -776,3 +776,38 @@ async fn outlines_replace_the_table_whole_or_not_at_all(pool: PgPool) {
     std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&gz[..]), &mut plain).unwrap();
     assert_eq!(plain, body);
 }
+
+// ---------------------------------------------------------------------------
+// The aim reminder (#66, docs/49 §1): three months is what we aim for, twelve the hard limit
+// ---------------------------------------------------------------------------
+
+/// 21 days before the aim, once, and only for a case that can go out: a bundle below its minimum
+/// gets no push towards a claim it cannot send yet.
+#[sqlx::test(migrations = "./migrations")]
+async fn the_aim_reminder_comes_once_and_only_when_ready(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (customer, _) = device(&app).await;
+    let today = crate::clock::today();
+    let due = incident(&pool, customer, None, 450, "bereit").await;
+    let fresh = incident(&pool, customer, None, 450, "bereit").await;
+    let collecting = incident(&pool, customer, None, 150, "gesammelt").await;
+    for (id, days_ago) in [(due, 80), (fresh, 10), (collecting, 80)] {
+        let ride = today - chrono::Duration::days(days_ago);
+        sqlx::query("update incidents set ride_date = $2, legal_deadline = $3 where id = $1")
+            .bind(id)
+            .bind(ride)
+            .bind(crate::rules::legal_deadline(ride))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let (s, v) = admin(&app, "POST", "/admin/scan", json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["aimed"], 1, "only the ready case near its aim: {v}");
+    assert_eq!(count(&pool, "select count(*) from incidents where id = $1 and aim_nudged_at is not null", due).await, 1);
+    assert_eq!(v["warned"], 0, "the hard deadline is eleven months away");
+
+    let (_, v) = admin(&app, "POST", "/admin/scan", json!({})).await;
+    assert_eq!(v["aimed"], 0, "once per case");
+}

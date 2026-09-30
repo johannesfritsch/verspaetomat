@@ -13,6 +13,7 @@ mod auth;
 mod classify;
 mod db;
 mod events;
+mod fares;
 mod fixtures;
 mod flags;
 mod handlers;
@@ -116,6 +117,8 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(stage = stage.name(), commit = stage::commit(), "stage");
 
     let pool = db::connect().await?;
+    // A broken fare catalogue stops the boot here, not at the first claim (docs/50 phase 1).
+    tracing::info!(products = fares::catalogue().products.len(), "fare catalogue loaded");
     db::seed(&pool).await?;
     clock::load(&pool).await?;
     // One station table for the handlers and for the train source, which names live stops from it.
@@ -320,6 +323,8 @@ pub fn router(state: AppState) -> Router {
         .route("/admin/ngos", get(admin::ngos_list))
         .route("/admin/ngos/{id}", put(admin::ngo_upsert).delete(admin::ngo_remove))
         .route("/admin/desks", get(admin::desks))
+        .route("/admin/fares", get(admin::fares_list))
+        .route("/admin/fares/{id}/evaluate", post(admin::fares_evaluate))
         .route("/admin/routes", get(admin::routes).put(admin::route_set))
         .route("/admin/routes/remove", post(admin::route_remove))
         .route("/admin/routes/answers", post(admin::route_answers))

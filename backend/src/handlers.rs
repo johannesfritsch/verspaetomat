@@ -1031,7 +1031,7 @@ pub async fn incidents(State(s): State<AppState>, c: Customer) -> ApiResult {
             "confirmed_cents": confirmed,
             "submitted_cents": submitted,
             "capped_cents": capped,
-            "oldest_open": oldest.map(|i| json!({ "id": i.id, "line": i.line, "date": i.ride_date, "deadline": i.legal_deadline, "days_left": rules::days_until(i.legal_deadline, today), "warn_from": rules::warn_from(i.legal_deadline) })),
+            "oldest_open": oldest.map(|i| json!({ "id": i.id, "line": i.line, "date": i.ride_date, "deadline": i.legal_deadline, "days_left": rules::days_until(i.legal_deadline, today), "warn_from": rules::warn_from(i.legal_deadline), "aim": rules::aim_date(i.ride_date) })),
             "min_payout_cents": rules::MIN_PAYOUT_CENTS,
             "dticket_monthly_cap_cents": rules::dticket_monthly_cap_cents(),
             // What one qualifying journey earns with this customer's ticket, when that is a fixed

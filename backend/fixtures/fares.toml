@@ -1,0 +1,429 @@
+# The fare catalogue (docs/49 §5.2, issue #66): what each ticket is owed when a train is late.
+#
+# Three layers, each only saying what differs from the one above it:
+#   tariffs   — whose conditions apply (DB, Deutschlandtarif, a Verbund, FlixTrain). A tariff may
+#               `extends` another; `eu_minimum` is the root and must set every field.
+#   products  — a kind of ticket in a tariff (Deutschlandticket, BahnCard 100, a Monatskarte VRS).
+#   versions  — a product's rule from a date on (`valid_from`). A ride is computed with the version
+#               of its date; a price or a rounding change is a new version, never an edit.
+#
+# The code knows the kinds of rule (src/fares/); this file holds the values. Every value that is
+# not self-evident carries a source with its grade: verified (primary text), secondary (FAQ,
+# Verbraucherzentrale, press), inferred, unknown. The full research is docs/49-recherche/.
+#
+# Money is in cents, shares in basis points (2500 = 25 %), minutes are minutes of delay at the
+# destination of the ticket.
+
+# ── Tariffs ───────────────────────────────────────────────────────────────────────────────────────
+
+[tariffs.eu_minimum]
+name = "VO (EU) 2021/782"
+valid_on = { regional = true, long_distance = true }
+compensation = { kind = "share_of_price", steps = [[60, 2500], [120, 5000]] }
+window = "ticket"
+min_cases = 0
+caps = []
+payout_min = { cents = 400, inclusive = true }
+rounding = "cent"
+submit = "immediately"
+# Our rule, not the law's: the law gives one year after the ticket's validity ends (CIV Art. 60,
+# BB A.9.5, DT-A 8.2.8); twelve months after the ride is never later than that and needs no
+# answer to when an open-ended Abo "ends". Aim for three (docs/49 §1).
+deadline = { from = "ride", months = 12, aim_months = 3 }
+payout = "money"
+claimant = "passenger"
+desk = "operator"
+reduced_fare = false
+release_after_min = 0
+form = { season_box = false, number = "booking", price_proof = false, copy = true, birth_date = false }
+offer = "offered"
+caveat = ""
+
+[[tariffs.eu_minimum.sources]]
+field = "compensation"
+doc = "VO (EU) 2021/782 Art. 19 Abs. 1"
+quote = "a) 25 % des Preises der Fahrkarte bei einer Verspätung von 60 bis 119 Minuten; b) 50 % des Preises der Fahrkarte ab einer Verspätung von 120 Minuten."
+grade = "verified"
+
+[[tariffs.eu_minimum.sources]]
+field = "payout_min"
+doc = "VO (EU) 2021/782 Art. 19 Abs. 8"
+quote = "Dieser Mindestbetrag darf höchstens 4 EUR pro Fahrkarte betragen."
+grade = "verified"
+
+[[tariffs.eu_minimum.sources]]
+field = "deadline"
+doc = "BB Personenverkehr A.9.5; EBA-FAQ Fristen"
+quote = "Ansprüche nach den Nummern 9.1 bis 9.3 verjähren innerhalb eines Jahres nach Ablauf der Geltungsdauer der Fahrkarte."
+grade = "verified"
+
+[tariffs.db]
+extends = "eu_minimum"
+name = "Beförderungsbedingungen der DB (BB Personenverkehr)"
+release_after_min = 20
+
+[[tariffs.db.sources]]
+field = "rounding"
+doc = "BB Personenverkehr 9.2.1, Stand 24.09.2026"
+quote = "Der Betrag wird kaufmännisch auf die zweite Nachkommastelle gerundet."
+grade = "verified"
+
+[[tariffs.db.sources]]
+field = "release_after_min"
+doc = "BB Personenverkehr 9.1.1"
+quote = "Muss vernünftigerweise davon ausgegangen werden, dass der Reisende … am Zielbahnhof … mindestens 20 Minuten verspätet ankommen wird, hat er, auch mit einer zuggebundenen Fahrkarte, … die Wahl zwischen (i) der Fortsetzung der Fahrt oder der Weiterreise mit geänderter Streckenführung …"
+grade = "verified"
+
+[tariffs.deutschlandtarif]
+extends = "eu_minimum"
+name = "Deutschlandtarif"
+rounding = "up_to_5_cents"
+release_after_min = 20
+
+[[tariffs.deutschlandtarif.sources]]
+field = "rounding"
+doc = "Deutschlandtarif Teil A 8.2.6, Stand 14.06.2026"
+quote = "Der Betrag wird auf einen durch 5 Cent teilbaren Betrag aufgerundet."
+grade = "verified"
+
+# The common text most Verbünde copy or defer to ("Fahrgastrechte im SPNV", current copy MDV
+# Anlage 4 ab 01.08.2026). A Verbund with no deviation is this tariff.
+[tariffs.spnv_standard]
+extends = "eu_minimum"
+name = "Fahrgastrechte im SPNV (gemeinsamer Text der Verbünde)"
+rounding = "up_to_5_cents"
+release_after_min = 20
+
+[[tariffs.spnv_standard.sources]]
+field = "compensation"
+doc = "MDV Anlage 4 (Fahrgastrechte im SPNV), gültig ab 01.08.2026"
+quote = "1) 1,50 Euro je Fall bei Zeitfahrkarten für die 2. Wagenklasse 2) 2,25 Euro je Fall bei Zeitfahrkarten (einschließlich Zusatzfahrkarten) für die 1. Wagenklasse"
+grade = "verified"
+
+[tariffs.vrr_nrw]
+extends = "spnv_standard"
+name = "Verbund- und Gemeinschaftstarife in NRW (VRR, VRS, AVV, WestfalenTarif, NRW-Tarif)"
+
+[tariffs.hvv]
+extends = "spnv_standard"
+name = "hvv"
+
+[tariffs.mvv]
+extends = "spnv_standard"
+name = "MVV"
+deadline = { from = "validity_end", months = 3, aim_months = 3 }
+
+[[tariffs.mvv.sources]]
+field = "deadline"
+doc = "MVV-Gemeinschaftstarif ab 01.01.2026, § 17 Abs. 6"
+quote = "Der Anspruch muss innerhalb von 3 Monaten nach Ablauf der Geltungsdauer der Fahrkarte bzw. innerhalb eines Jahres nach der ersten zu entschädigenden Verspätung geltend gemacht werden."
+grade = "verified"
+
+[tariffs.vbb]
+extends = "spnv_standard"
+name = "VBB"
+
+[tariffs.rmv]
+extends = "spnv_standard"
+name = "RMV"
+
+[tariffs.niedersachsen]
+extends = "spnv_standard"
+name = "Niedersachsentarif"
+
+[tariffs.sh]
+extends = "spnv_standard"
+name = "SH-Tarif"
+payout_min = { cents = 400, inclusive = false }
+
+[[tariffs.sh.sources]]
+field = "payout_min"
+doc = "SH-Tarif, Tarifbestimmungen 01.01.2026, Anlage 5, 5.1.6"
+quote = "Eine Zahlung erfolgt jeweils auf Antrag, wenn der Anspruch den Betrag von 4,00 € überschreitet (Bagatellgrenze)."
+grade = "verified"
+
+[tariffs.flixtrain]
+extends = "eu_minimum"
+name = "FlixTrain"
+payout_min = { cents = 400, inclusive = false }
+deadline = { from = "ride", months = 3, aim_months = 3 }
+desk = "FlixTrain"
+
+[[tariffs.flixtrain.sources]]
+field = "payout_min"
+doc = "flixtrain.de/fahrgastrechte"
+quote = "Entschädigungen werden nur ausgezahlt, wenn der berechnete Betrag höher als 4 EUR ist."
+grade = "verified"
+
+[[tariffs.flixtrain.sources]]
+field = "deadline"
+doc = "flixtrain.de/fahrgastrechte"
+quote = "innerhalb von drei Monaten nach der tatsächlichen oder geplanten Durchführung eines Linienverkehrsdienstes"
+grade = "verified"
+
+# ── Products ──────────────────────────────────────────────────────────────────────────────────────
+#
+# `family` groups products for the app's first question ("Welche Fahrkarte?"); within the family
+# `zeitkarte` the product is the Verbund. `rule_line` is the one German sentence the app shows
+# under a ticket; it must be true of every version below it.
+
+[products.deutschlandticket]
+tariff = "deutschlandtarif"
+family = "deutschlandticket"
+name = "Deutschlandticket"
+rule_line = "Ab 20 Minuten zählt jede Verspätung mit. Je volle Stunde 1,50 €, gesammelt über Monate."
+valid_on = { regional = true, long_distance = false, extra_routes = ["ic-bremen-norddeich", "ic-bremen-emden", "ic-stuttgart-singen", "ic-rostock-stralsund", "ice-rostock-hamburg", "ic-erfurt-gera", "ic-dresden-chemnitz", "ic-dortmund-dillenburg"] }
+compensation = { kind = "minute_pool", counts_from = 20, unit = 60, per_unit = { second = 150, first = 225 } }
+# Johannes, 30.09.2026: minutes pool across months, without limit (docs/49 §9). The cap stays per
+# calendar month of the ride.
+window = "subscription"
+caps = [{ share = 2500, per = "calendar_month" }]
+payout_min = { cents = 400, inclusive = false }
+submit = "when_payable"
+reduced_fare = true
+release_after_min = 0
+form = { season_box = true, number = "abo", price_proof = true, copy = true, birth_date = false }
+prices = [
+    { valid_from = 2025-01-01, cents = 5800 },
+    { valid_from = 2026-01-01, cents = 6300 },
+]
+
+[[products.deutschlandticket.sources]]
+field = "compensation"
+doc = "Deutschlandtarif Teil C 8.1, Stand 14.12.2025 (angewendet über Tarifbestimmungen Deutschland-Ticket 1.6)"
+quote = "Inhaber einer Fahrkarte oder Fahrtberechtigung als Zeitkarte können auch wiederholte Verspätungsfälle ab 20 Minuten innerhalb der Geltungsdauer der Zeitkarte zusammenrechnen … für jeweils volle 60 Minuten Verspätung eine Erstattung bzw. Entschädigung in Höhe von 1,50 € für die 2. Wagenklasse und 2,25 € für die 1. Wagenklasse"
+grade = "verified"
+
+[[products.deutschlandticket.sources]]
+field = "window"
+doc = "Tarifbestimmungen Deutschland-Ticket 1.3; Entscheidung Johannes 30.09.2026"
+quote = "Das Abonnement wird für unbestimmte Zeit abgeschlossen und kann monatlich gekündigt werden."
+grade = "inferred"
+
+[[products.deutschlandticket.sources]]
+field = "caps"
+doc = "Deutschlandtarif Teil C 8.1; bahn.de-FAQ Deutschland-Ticket"
+quote = "Insgesamt werden max. 25 % des gezahlten Zeitkartenpreises ausgezahlt."
+grade = "verified"
+
+[[products.deutschlandticket.sources]]
+field = "reduced_fare"
+doc = "Tarifbestimmungen Deutschland-Ticket 1.6"
+quote = "Das Entgelt für das Deutschlandticket gilt als erheblich ermäßigtes Beförderungsentgelt gemäß § 3 EVO. Das zusätzliche Recht bei Verspätung gemäß § 11 Absatz 1 Nummer 1 EVO wird ausgeschlossen."
+grade = "verified"
+
+[[products.deutschlandticket.sources]]
+field = "prices"
+doc = "Tarifbestimmungen Deutschland-Ticket 1.4, Stand 15.06.2026"
+quote = "… ab dem 01. Januar 2026 63,00 EUR pro Monat bei monatlicher Zahlung."
+grade = "verified"
+
+[products.bahncard100]
+tariff = "db"
+family = "bahncard100"
+name = "BahnCard 100"
+rule_line = "Ab 60 Minuten 10 € je Fahrt, in der 1. Klasse 15 €."
+compensation = { kind = "per_case", steps = [[60, { second = 1000, first = 1500 }]] }
+window = "validity"
+caps = [{ share = 2500, per = "validity" }]
+submit = "immediately"
+form = { season_box = true, number = "bahncard", price_proof = false, copy = false, birth_date = true }
+offer = "with_caveat"
+caveat = "Ob die Bahn im Regionalzug 10 € zahlt oder die Regel des beigelegten Deutschlandtickets anwendet, ist noch nicht geklärt."
+prices = [
+    { valid_from = 2026-01-01, cents = 489900, first_cents = 799900 },
+]
+
+[[products.bahncard100.sources]]
+field = "compensation"
+doc = "BB Personenverkehr C.3.10.1, Stand 24.09.2026"
+quote = "… ab 60 Minuten eine Erstattung bzw. Entschädigung in Höhe von 10 €, Inhaber einer BahnCard 100 1. Klasse eine solche in Höhe von 15 € erhalten, insgesamt max. 25 % des gezahlten BahnCard-Preises. Verspätungen können nicht zwecks Erreichen der Zeitgrenze nach Satz 1 addiert werden."
+grade = "verified"
+
+[[products.bahncard100.sources]]
+field = "offer"
+doc = "BB Personenverkehr C.3.1.1.1, C.3.10.3"
+quote = "Die Fahrgastrechte bei Nutzung des Deutschland-Tickets richten sich gem. Nr. 3.1.1.1 nach dem Tarif für das Deutschland-Ticket."
+grade = "unknown"
+
+# Monats- und Jahreskarten of the Verbünde: a sum per case from 60 minutes, no pooling (only the
+# Deutschlandtarif and DB's long-distance season tickets pool). One product per tariff; the app
+# asks for the Verbund, "weiß ich nicht" is the standard text.
+[products.zeitkarte_spnv]
+tariff = "spnv_standard"
+family = "zeitkarte"
+name = "Monats- oder Jahreskarte (anderer Verbund)"
+rule_line = "Ab 60 Minuten 1,50 € je Fahrt, in der 1. Klasse 2,25 €."
+valid_on = { regional = true, long_distance = false }
+compensation = { kind = "per_case", steps = [[60, { second = 150, first = 225 }]] }
+window = "validity"
+caps = [{ share = 2500, per = "validity" }]
+submit = "after_short_window"
+form = { season_box = true, number = "zeitkarte", price_proof = true, copy = true, birth_date = false }
+
+[[products.zeitkarte_spnv.sources]]
+field = "submit"
+doc = "MDV Anlage 4 (Fahrgastrechte im SPNV), gültig ab 01.08.2026"
+quote = "Eine Kumulation der Entschädigungsbeträge erfolgt nur, wenn die Entschädigungsforderungen gesammelt eingereicht werden, bei Wochen- und Monats-, Abo-Monatskarten, sowie Zeitfahrkarten mit einer kürzeren Geltungsdauer (Tageskarten) gesammelt für den Geltungszeitraum nach Ablauf der Geltungsdauer der Zeitfahrkarte."
+grade = "verified"
+
+[products.zeitkarte_vrr_nrw]
+extends = "zeitkarte_spnv"
+tariff = "vrr_nrw"
+name = "Monats- oder Jahreskarte in NRW (VRR, VRS, AVV, Westfalen)"
+rule_line = "Ab 60 Minuten 1,50 € je Fahrt, ab drei Fahrten im Monat."
+min_cases = 3
+caps = [{ share = 2500, per = "calendar_month" }]
+
+[[products.zeitkarte_vrr_nrw.sources]]
+field = "min_cases"
+doc = "VRS Gemeinschaftstarif 01.01.2026, Ziff. 12 Abs. 3; VRR Tarifhandbuch 2026, 1.20"
+quote = "… wenn er im Gültigkeitsbereich seiner Zeitkarte wiederholt Verspätungen (mindestens drei) von mindestens sechzig Minuten erlitten hat."
+grade = "verified"
+
+[[products.zeitkarte_vrr_nrw.sources]]
+field = "caps"
+doc = "VRR Tarifhandbuch 2026, 1.20"
+quote = "auf maximal 25 Prozent des tatsächlich entrichteten Fahrpreises pro Monat begrenzt"
+grade = "verified"
+
+[products.zeitkarte_hvv]
+extends = "zeitkarte_spnv"
+tariff = "hvv"
+name = "Monats- oder Jahreskarte hvv"
+
+[products.zeitkarte_mvv]
+extends = "zeitkarte_spnv"
+tariff = "mvv"
+name = "Monats- oder Jahreskarte MVV"
+rule_line = "Ab 60 Minuten 1,50 € je Fahrt."
+compensation = { kind = "per_case", steps = [[60, { second = 150, first = 150 }]] }
+
+[[products.zeitkarte_mvv.sources]]
+field = "compensation"
+doc = "MVV-Gemeinschaftstarif ab 01.01.2026, § 17 Abs. 5"
+quote = "a) je Fahrt pauschal 1,50 Euro"
+grade = "verified"
+
+[products.zeitkarte_vbb]
+extends = "zeitkarte_spnv"
+tariff = "vbb"
+name = "Monats- oder Jahreskarte VBB"
+
+[products.zeitkarte_rmv]
+extends = "zeitkarte_spnv"
+tariff = "rmv"
+name = "Monats- oder Jahreskarte RMV"
+
+[products.zeitkarte_niedersachsen]
+extends = "zeitkarte_spnv"
+tariff = "niedersachsen"
+name = "Monats- oder Jahreskarte Niedersachsentarif"
+rule_line = "Ab 20 Minuten 1,50 € je Fahrt, in der 1. Klasse 2,25 €."
+compensation = { kind = "per_case", steps = [[20, { second = 150, first = 225 }]] }
+
+[[products.zeitkarte_niedersachsen.sources]]
+field = "compensation"
+doc = "Niedersachsentarif, Beförderungsbedingungen ab 01.01.2026, Ziff. 12"
+quote = "wiederholt mit einer Verspätung von mindestens 20 Minuten am Zielort eingetroffen"
+grade = "verified"
+
+[products.zeitkarte_sh]
+extends = "zeitkarte_spnv"
+tariff = "sh"
+name = "Monats- oder Jahreskarte SH-Tarif"
+
+[products.zeitkarte_dt]
+tariff = "deutschlandtarif"
+family = "zeitkarte"
+name = "Monats- oder Jahreskarte Deutschlandtarif"
+rule_line = "Ab 20 Minuten zählt jede Verspätung mit. Je volle Stunde 1,50 €."
+valid_on = { regional = true, long_distance = false }
+compensation = { kind = "minute_pool", counts_from = 20, unit = 60, per_unit = { second = 150, first = 225 } }
+window = "validity"
+caps = [{ share = 2500, per = "validity" }]
+payout_min = { cents = 400, inclusive = false }
+submit = "after_short_window"
+form = { season_box = true, number = "zeitkarte", price_proof = true, copy = true, birth_date = false }
+
+[[products.zeitkarte_dt.sources]]
+field = "compensation"
+doc = "Deutschlandtarif Teil C 8.1, 8.2"
+quote = "… für jeweils volle 60 Minuten Verspätung eine Erstattung bzw. Entschädigung in Höhe von 1,50 € … Eine Zahlung erfolgt jeweils auf Antrag, wenn der Anspruch den Betrag von 4 € (Bagatellgrenze) überschreitet."
+grade = "verified"
+
+[products.streckenzeitkarte]
+tariff = "db"
+family = "streckenzeitkarte"
+name = "Streckenzeitkarte ICE oder IC"
+rule_line = "Ab 20 Minuten zählt jede Verspätung mit. Je volle Stunde 5 €, in der 1. Klasse 7,50 €."
+compensation = { kind = "minute_pool", counts_from = 20, unit = 60, per_unit = { second = 500, first = 750 } }
+window = "validity"
+caps = [{ share = 2500, per = "validity" }]
+submit = "after_short_window"
+form = { season_box = true, number = "zeitkarte", price_proof = true, copy = true, birth_date = false }
+
+[[products.streckenzeitkarte.sources]]
+field = "compensation"
+doc = "BB Personenverkehr B.13.1, Stand 24.09.2026"
+quote = "… in Höhe von 5 € für die 2. Wagenklasse und 7,50 € für die 1. Wagenklasse erhalten, Verspätungen ab 20 Minuten können zwecks Erreichen der Zeitgrenze nach Satz 1 addiert und gesammelt eingereicht werden. Insgesamt werden maximal 25 % des gezahlten Fahrkartenpreises ausgezahlt."
+grade = "verified"
+
+[products.einzel_db]
+tariff = "db"
+family = "einzelfahrkarte"
+name = "Einzelfahrkarte (Flexpreis, Sparpreis)"
+rule_line = "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die Hälfte."
+
+[[products.einzel_db.sources]]
+field = "compensation"
+doc = "BB Personenverkehr 9.2.1"
+quote = "(bei einer Verspätung von 60 bis 119 Minuten 25 % und ab 120 Minuten 50 % des gezahlten Fahrkartenwertes der vorgelegten Fahrkarte) … Entschädigungsbeträge unter 4 € werden nicht ausgezahlt."
+grade = "verified"
+
+[products.einzel_nah]
+tariff = "deutschlandtarif"
+family = "einzelfahrkarte"
+name = "Einzelfahrkarte Nahverkehr"
+rule_line = "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die Hälfte."
+valid_on = { regional = true, long_distance = false }
+
+[[products.einzel_nah.sources]]
+field = "compensation"
+doc = "Deutschlandtarif Teil A 8.2.6"
+quote = "(bei einer Verspätung von 60 bis 119 Minuten 25 % und ab 120 Minuten 50 % des gezahlten Fahrkartenwertes der vorgelegten Fahrkarte oder Fahrberechtigung) … Entschädigungsbeträge unter 4 € werden nicht ausgezahlt."
+grade = "verified"
+
+[products.einzel_flixtrain]
+tariff = "flixtrain"
+family = "einzelfahrkarte"
+name = "FlixTrain"
+rule_line = "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die Hälfte."
+valid_on = { regional = false, long_distance = true, operator = "FlixTrain" }
+
+[products.laender_ticket]
+tariff = "deutschlandtarif"
+family = "laender_ticket"
+name = "Länder-Ticket oder Quer-durchs-Land"
+rule_line = "Ab 20 Minuten zählt jede Verspätung mit. Je volle Stunde am selben Tag 1,50 €."
+valid_on = { regional = true, long_distance = false }
+compensation = { kind = "minute_pool", counts_from = 20, unit = 60, per_unit = { second = 150, first = 225 } }
+window = "validity_day"
+caps = [{ share = 2500, per = "validity" }]
+payout_min = { cents = 400, inclusive = false }
+submit = "after_window"
+reduced_fare = true
+release_after_min = 0
+form = { season_box = true, number = "booking", price_proof = false, copy = true, birth_date = false }
+
+[[products.laender_ticket.sources]]
+field = "compensation"
+doc = "Deutschlandtarif Teil D 4.1.1; bahn.de Fahrgastrechte, rechtliche Regelungen"
+quote = "Zeitfahrkarten des Nah- und Fernverkehrs (z.B. Wochen- oder Monatskarten, Länder-Tickets, Quer-durchs-Land-Ticket) werden pauschal jeweils ab einer Verspätung ab 60 Minuten am Zielbahnhof entschädigt."
+grade = "verified"
+
+[[products.laender_ticket.sources]]
+field = "reduced_fare"
+doc = "Deutschlandtarif Teil D"
+quote = "Es handelt sich bei dem Angebot um eine Fahrkarte mit erheblich ermäßigtem Beförderungsentgelt"
+grade = "verified"

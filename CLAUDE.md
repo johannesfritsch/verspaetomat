@@ -31,6 +31,10 @@ backend/target/debug/stellwerk stations import --dry-run # what it would change
 backend/target/debug/stellwerk stations                  # count, feed version, last runs
 backend/target/debug/stellwerk backdate <who> --delay 70 --days 3 --count 3   # rides that already happened, with their cases
 
+# the fare catalogue (#66, docs/49, backend/fixtures/fares.toml): what each ticket is owed
+backend/target/debug/stellwerk fares list | show deutschlandticket | export
+backend/target/debug/stellwerk fares try deutschlandticket 70 45 25@2026-08-31 --today 2026-10-05   # what these cases are worth
+
 # station premises from OSM (#64, docs/48): premise, ring and touch points per station; production
 # only, like the stations — staging gets them through deploy/stations-to-staging.sh
 backend/target/debug/stellwerk --prod stations outlines --from germany-latest.osm.pbf           # builds and sends

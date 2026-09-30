@@ -6,48 +6,47 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::db::rows::{ClaimStatus, IncidentRow, IncidentStatus, TicketType, TrainCategory};
+use crate::fares;
 
 pub type Cents = i64;
 
 pub const MIN_PAYOUT_CENTS: Cents = 400;
 
 /// Below this a delay is worth nothing at all — the one threshold the whole product turns on.
+/// Until pots arrive (docs/50 phase 2) no case is made below it, whatever the ticket.
 pub const MIN_DELAY_MINUTES: i64 = 60;
-pub const DTICKET_MONTHLY_PRICE_CENTS: Cents = 6300;
-pub const LEGAL_DEADLINE_MONTHS: u32 = 3;
+/// Twelve months after the ride: never later than the law's one year after the ticket's validity
+/// ends (CIV Art. 60, BB A.9.5), and it needs no answer to when an open-ended Abo ends. The same
+/// number as `deadline.months` of `eu_minimum` in fixtures/fares.toml (docs/49 §1, #66).
+pub const LEGAL_DEADLINE_MONTHS: u32 = 12;
+/// What we aim for: "reich ein, solange es frisch ist" (DB asks for three months, EU Art. 28).
+pub const AIM_MONTHS: u32 = 3;
 pub const WARN_DAYS_BEFORE_DEADLINE: i64 = 21;
 pub const REPLY_EXPECTED_DAYS: i64 = 28;
+/// The fare a single ticket is assumed to cost until the passenger enters theirs (docs/50 phase 2
+/// removes it: a single ticket without a price has no amount).
 pub const DEFAULT_FARE_CENTS: Cents = 3990;
 
-/// Compensation for one delayed journey. None when nothing is owed.
+/// The catalogue product the three legacy ticket types stand for (docs/50 phase 1). A Zeitkarte
+/// is the Verbund standard regionally and DB's Streckenzeitkarte long-distance, which is how the
+/// rate was chosen before the catalogue.
+pub fn legacy_product(ticket: TicketType, category: TrainCategory) -> &'static fares::Product {
+    let id = match (ticket, category) {
+        (TicketType::Deutschlandticket, _) => "deutschlandticket",
+        (TicketType::Zeitkarte, TrainCategory::Fern) => "streckenzeitkarte",
+        (TicketType::Zeitkarte, _) => "zeitkarte_spnv",
+        (TicketType::Einzelfahrkarte, _) => "einzel_db",
+    };
+    fares::catalogue().product(id)
+}
+
+/// Compensation for one delayed journey. None when nothing is owed. The rates come from the
+/// catalogue (fixtures/fares.toml); one case is worth what it was worth before pots.
 pub fn claim_amount_cents(ticket: TicketType, category: TrainCategory, delay_minutes: i64, first_class: bool, fare_cents: Option<Cents>) -> Option<Cents> {
     if delay_minutes < MIN_DELAY_MINUTES {
         return None;
     }
-    let amount = match ticket {
-        TicketType::Deutschlandticket => {
-            if first_class {
-                225
-            } else {
-                150
-            }
-        }
-        TicketType::Zeitkarte => match (category, first_class) {
-            (TrainCategory::Fern, false) => 500,
-            (TrainCategory::Fern, true) => 750,
-            (_, false) => 150,
-            (_, true) => 225,
-        },
-        TicketType::Einzelfahrkarte => {
-            let fare = fare_cents?;
-            if delay_minutes >= 120 {
-                fare / 2
-            } else {
-                fare / 4
-            }
-        }
-    };
-    Some(amount)
+    fares::legacy_case_cents(legacy_product(ticket, category), delay_minutes, first_class, fare_cents)
 }
 
 /// What one qualifying journey is worth with this ticket, when that is a fixed number (issue #30).
@@ -63,7 +62,7 @@ pub fn claim_amount_cents(ticket: TicketType, category: TrainCategory, delay_min
 /// of the table that could drift away from it.
 pub fn flat_claim_cents(ticket: TicketType, first_class: bool) -> Option<Cents> {
     match ticket {
-        TicketType::Deutschlandticket => Some(if first_class { 225 } else { 150 }),
+        TicketType::Deutschlandticket => fares::legacy_case_cents(fares::catalogue().product("deutschlandticket"), MIN_DELAY_MINUTES, first_class, None),
         // Regional and long-distance differ, and which one it will be is not known in advance.
         TicketType::Zeitkarte => None,
         // A share of a fare nobody has entered yet.
@@ -89,6 +88,11 @@ pub fn legal_deadline(ride_date: NaiveDate) -> NaiveDate {
     ride_date.checked_add_months(Months::new(LEGAL_DEADLINE_MONTHS)).unwrap_or(ride_date)
 }
 
+/// The date we aim to have sent a case by (docs/49 §1).
+pub fn aim_date(ride_date: NaiveDate) -> NaiveDate {
+    ride_date.checked_add_months(Months::new(AIM_MONTHS)).unwrap_or(ride_date)
+}
+
 pub fn days_until(deadline: NaiveDate, today: NaiveDate) -> i64 {
     (deadline - today).num_days()
 }
@@ -97,8 +101,11 @@ pub fn warn_from(deadline: NaiveDate) -> NaiveDate {
     deadline - Duration::days(WARN_DAYS_BEFORE_DEADLINE)
 }
 
+/// 25 % of the D-Ticket's newest list price (fixtures/fares.toml). Until pots (docs/50 phase 2) the
+/// cap is this one number for every month.
 pub fn dticket_monthly_cap_cents() -> Cents {
-    DTICKET_MONTHLY_PRICE_CENTS / 4
+    let dt = fares::catalogue().product("deutschlandticket");
+    dt.prices.last().map(|p| p.cents).unwrap_or(0) / 4
 }
 
 /// Is the open bundle for a desk sendable? Ordinary-ticket incidents always are;
@@ -283,13 +290,18 @@ mod tests {
         );
         assert_eq!(claim_amount_cents(TicketType::Zeitkarte, TrainCategory::Fern, 70, false, None), Some(500));
         assert_eq!(claim_amount_cents(TicketType::Einzelfahrkarte, TrainCategory::Fern, 124, false, Some(3990)), Some(1995));
-        assert_eq!(claim_amount_cents(TicketType::Einzelfahrkarte, TrainCategory::Fern, 70, false, Some(3990)), Some(997));
+        // 997,5 rounds up: DB rounds commercially to the cent (BB 9.2.1).
+        assert_eq!(claim_amount_cents(TicketType::Einzelfahrkarte, TrainCategory::Fern, 70, false, Some(3990)), Some(998));
     }
 
     #[test]
     fn deadline() {
-        let d = legal_deadline(NaiveDate::from_ymd_opt(2026, 9, 9).unwrap());
-        assert_eq!(d, NaiveDate::from_ymd_opt(2026, 12, 9).unwrap());
+        let ride = NaiveDate::from_ymd_opt(2026, 9, 9).unwrap();
+        assert_eq!(legal_deadline(ride), NaiveDate::from_ymd_opt(2027, 9, 9).unwrap());
+        assert_eq!(aim_date(ride), NaiveDate::from_ymd_opt(2026, 12, 9).unwrap());
+        // The constant and the catalogue say the same.
+        let rule = fares::catalogue().product("deutschlandticket").latest();
+        assert_eq!((rule.deadline.months, rule.deadline.aim_months), (LEGAL_DEADLINE_MONTHS, AIM_MONTHS));
     }
 
     fn incident(day: u32, status: IncidentStatus, amount: Cents) -> IncidentRow {

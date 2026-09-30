@@ -168,7 +168,7 @@ paths:
       responses: { "200": { description: "{ride, incident?}" } }
 
   /v1/incidents:
-    get: { summary: "Ledger: {incidents, claims, summary:{desks:[{desk, open_cents, ready, missing_cents, incident_ids}], ready_desk, confirmed_cents, submitted_cents, capped_cents, oldest_open:{id,line,date,deadline,days_left,warn_from}, min_payout_cents, dticket_monthly_cap_cents}}. Reading refreshes statuses: expiry at the legal deadline, bundle readiness, and the 25 % monthly Deutschlandticket cap (incidents beyond it are `gedeckelt`; capped_cents sums them).", responses: { "200": { description: ledger } } }
+    get: { summary: "Ledger: {incidents, claims, summary:{desks:[{desk, open_cents, ready, missing_cents, incident_ids}], ready_desk, confirmed_cents, submitted_cents, capped_cents, oldest_open:{id,line,date,deadline,days_left,warn_from,aim}, min_payout_cents, dticket_monthly_cap_cents}}. Reading refreshes statuses: expiry at the legal deadline (twelve months after the ride; `aim` is three months, what the app asks the passenger to aim for — docs/49 §1), bundle readiness, and the 25 % monthly Deutschlandticket cap (incidents beyond it are `gedeckelt`; capped_cents sums them).", responses: { "200": { description: ledger } } }
   /v1/claims:
     get: { summary: "Claim: {id, desk, ngo_id, status: draft|sent|question|accepted|rejected|bounced, sent_at, expected_reply_by, amount_claimed_cents, amount_confirmed_cents, closed_at, pdf_url}. The scanner's reply nudge (claims.nudged_at) reaches the app as the SSE event claim {nudge: true}, not as a field.", responses: { "200": { description: "[Claim]" } } }
   /v1/claims/draft:
@@ -286,7 +286,17 @@ paths:
                 cancelled: { type: boolean }
       responses: { "200": { description: The invented ride and its case }, "400": { description: "Bad times, an unknown category or ticket, or a ride that would still be running" }, "404": { description: no such customer } }
   /admin/scan:
-    post: { summary: "Run one deadline-scanner pass now: warnings, expiry across all customers, reply nudges, retention sweep.", responses: { "200": { description: "{today, warned, expired, nudged, retained}" } } }
+    post: { summary: "Run one deadline-scanner pass now: aim reminders (21 days before three months, ready cases only), deadline warnings (21 days before twelve months), expiry across all customers, reply nudges, retention sweep.", responses: { "200": { description: "{today, warned, aimed, expired, nudged, retained}" } } }
+  /admin/fares:
+    get:
+      summary: "The fare catalogue this server runs (fixtures/fares.toml, docs/49 §5): per product the rule in force today, its list prices, the dates it changes and the source of every value (Stellwerk `fares list|show|export`)"
+      security: [{ adminToken: [] }]
+      responses: { '200': { description: List } }
+  /admin/fares/{id}/evaluate:
+    post:
+      summary: "What these cases would be worth on a ticket of this product; nothing is stored (Stellwerk `fares try`). Body {first_class?, price_cents?, valid_from?, valid_until?, today?, cases:[{date?, delay_min}]}; returns the pot {cases, minutes, next_unit_minutes, gross, capped, amount, payable, ready_from, deadline, aim, blockers}."
+      security: [{ adminToken: [] }]
+      responses: { '200': { description: Pot }, '404': { description: no such fare product } }
   /admin/ngos:
     get:
       summary: Every NGO, inactive ones included, with totals and how many customers chose it (Stellwerk)

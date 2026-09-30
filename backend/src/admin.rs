@@ -1830,3 +1830,51 @@ pub async fn stations_extract(State(s): State<AppState>, _a: Admin) -> Result<Re
     // so a failure reads like every other stellwerk command's.
     Ok(([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
 }
+
+// ── Fare catalogue (docs/49 §5, docs/50 phase 1) ──────────────────────────────────────────────────
+
+/// One product as Stellwerk shows it: the rule in force today, when it changes, and where every
+/// value comes from.
+fn fare_json(p: &crate::fares::Product, today: chrono::NaiveDate) -> Value {
+    json!({
+        "id": p.id, "name": p.name, "family": p.family, "tariff": p.tariff, "tariff_name": p.tariff_name,
+        "rule_line": p.rule_line, "prices": p.prices, "rule": p.rule_on(today),
+        "versions": p.versions.iter().skip(1).map(|(from, _)| from).collect::<Vec<_>>(),
+        "sources": p.sources,
+    })
+}
+
+/// `GET /admin/fares`: the catalogue this server runs.
+pub async fn fares_list(State(_s): State<AppState>, _a: Admin) -> ApiResult {
+    let today = clock::now().date_naive();
+    Ok(Json(json!(crate::fares::catalogue().products.values().map(|p| fare_json(p, today)).collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+pub struct FareTry {
+    #[serde(default)]
+    first_class: bool,
+    price_cents: Option<i64>,
+    valid_from: Option<chrono::NaiveDate>,
+    valid_until: Option<chrono::NaiveDate>,
+    /// Defaults to the server's clock.
+    today: Option<chrono::NaiveDate>,
+    cases: Vec<FareTryCase>,
+}
+
+#[derive(Deserialize)]
+pub struct FareTryCase {
+    date: Option<chrono::NaiveDate>,
+    delay_min: i64,
+}
+
+/// `POST /admin/fares/{id}/evaluate`: what these cases would be worth on this ticket. Nothing is
+/// stored; it is how a rule is checked against a real month before it reaches anyone's claim.
+pub async fn fares_evaluate(State(_s): State<AppState>, _a: Admin, Path(id): Path<String>, Json(b): Json<FareTry>) -> ApiResult {
+    use crate::fares::evaluate::{evaluate, CaseFacts, TicketFacts};
+    let product = crate::fares::catalogue().get(&id).ok_or_else(|| err(StatusCode::NOT_FOUND, "no such fare product"))?;
+    let today = b.today.unwrap_or_else(|| clock::now().date_naive());
+    let ticket = TicketFacts { first_class: b.first_class, price_cents: b.price_cents, valid_from: b.valid_from, valid_until: b.valid_until };
+    let cases: Vec<CaseFacts> = b.cases.iter().map(|c| CaseFacts { id: Uuid::new_v4(), ride_date: c.date.unwrap_or(today), delay_min: c.delay_min }).collect();
+    Ok(Json(json!(evaluate(product, &ticket, &cases, today))))
+}

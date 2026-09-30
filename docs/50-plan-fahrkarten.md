@@ -47,15 +47,18 @@ schneller ist — getrennt sind sie, damit jede für sich prüfbar ist.
 
 **Geändert**
 
-- `rules.rs:17,88-90` `legal_deadline`: zwölf Monate nach der Fahrt; neu `aim_date` (drei Monate).
-  `WARN_DAYS_BEFORE_DEADLINE` warnt vor dem Ziel, nicht vor der harten Frist
-  (`scanner.rs:70-95`). Migration: `incidents.legal_deadline` neu rechnen; `verfallen`, das in
+- `rules.rs:17,88-90` `legal_deadline`: zwölf Monate nach der Fahrt; neu `aim_date` (drei Monate),
+  Migration `0044_deadline_twelve_months.sql`.
+  Die Fristwarnung bleibt 21 Tage vor der harten Frist; neu ist eine eigene Erinnerung 21 Tage vor
+  dem Ziel (`aim_nudged_at`, `scanner.rs` `remind_aim`), nur für Fälle, deren Bündel raus kann —
+  „wartet bald drei Monate", nicht „verfällt". Migration: `incidents.legal_deadline` neu rechnen; `verfallen`, das in
   den zwölf Monaten liegt und nie eingereicht war, wird wieder `gesammelt` (mit Audit-Eintrag).
 - `rules.rs:23-72` `claim_amount_cents` und `flat_claim_cents` rufen den Katalog für die drei
   alten Typen auf (Abbildung: `deutschlandticket` → Produkt `deutschlandticket`, `zeitkarte` →
   `verbund_zeitkarte`/`spnv_standard` bzw. `streckenzeitkarte_fern` wie heute nach Kategorie,
   `einzelfahrkarte` → `einzel_db`). Bis Phase 2 ändert das keinen Betrag.
-- `stellwerk fares list | show <product>` (Muster `stellwerk ngo`, stellwerk.rs:618).
+- `stellwerk fares list | show <product> | export | try <product> <Minuten>…` über
+  `GET /admin/fares` und `POST /admin/fares/{id}/evaluate` (Muster `stellwerk ngo`).
 
 **Fertig, wenn** `cargo test` und `clippy` sauber sind und die alten Tests in `rules.rs`
 (`amounts` :253, `monthly_cap` :383, …) unverändert durchlaufen — außer `deadline` :290.
@@ -66,11 +69,11 @@ schneller ist — getrennt sind sie, damit jede für sich prüfbar ist.
 
 ### Datenbank
 
-- **`0044_tickets.sql`**: `tickets`, `journey_tickets`, `ticket_uploads` (docs/49 §5.3–5.4), alle
+- **`0045_tickets.sql`**: `tickets`, `journey_tickets`, `ticket_uploads` (docs/49 §5.3–5.4), alle
   mit `on delete cascade` an `customers` (sonst bleiben sie beim Löschen stehen, `account.rs:33-67`
   und `admin.rs:739-750`); `incidents` + `ticket_id`, `first_class`, `arrival_delay`, `rule_from`,
   `window_key`; `claims` + `ticket_id`, `window_key`, `rule_from`, `breakdown jsonb`.
-- **`0045_tickets_from_customers.sql`**: je Kunde eine Fahrkarte aus `customers.ticket`
+- **`0046_tickets_from_customers.sql`**: je Kunde eine Fahrkarte aus `customers.ticket`
   (`deutschlandticket` → D-Ticket mit `ticket_number` und 63 €; `zeitkarte` → Verbund-Zeitkarte
   mit `spnv_standard` und Merker `product_unsure`; `einzelfahrkarte` → keine), jede offene
   Reise und jeder offene Fall bekommt ihre `ticket_id`; Einzelfahrkarten-Fälle je eine eigene
