@@ -376,8 +376,12 @@ pub struct CreateJourney {
     pub to_station_id: String,
     pub to_station_name: String,
     pub legs: Vec<LegRef>,
+    /// A build before tickets names a type; the server finds or makes the ticket it means.
     #[serde(default)]
     pub ticket: Option<TicketType>,
+    /// A build with tickets names the ticket (docs/50 phase 2). One per journey for now.
+    #[serde(default)]
+    pub tickets: Option<Vec<crate::tickets::TicketChoice>>,
     #[serde(default)]
     pub location: Option<crate::handlers::LocationFix>,
     #[serde(default)]
@@ -404,8 +408,9 @@ async fn insert_leg_ride(
     let row: RideRow = sqlx::query_as(
         "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name,
             exit_station_id, exit_station_name, planned_departure, planned_arrival, ticket, live_delay_min, cancelled,
-            location_verified, location_lat, location_lon, from_lat, from_lon, journey_id, leg_no, transfer_station_id, transfer_station_name)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) returning *",
+            location_verified, location_lat, location_lon, from_lat, from_lon, journey_id, leg_no, transfer_station_id, transfer_station_name, ticket_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
+                 (select jt.ticket_id from journey_tickets jt where jt.journey_id = $22 and jt.first_leg <= $23 and (jt.last_leg is null or jt.last_leg >= $23) order by jt.first_leg desc limit 1)) returning *",
     )
     .bind(id)
     .bind(customer.id)
@@ -472,7 +477,9 @@ pub async fn create(State(s): State<AppState>, c: Customer, Json(b): Json<Create
     }
     let first = legs.first().unwrap();
     let last = legs.last().unwrap();
-    let ticket = b.ticket.unwrap_or(c.0.ticket);
+    let long_distance = legs.iter().any(|l| l.category == crate::train::TrainCategory::Fern);
+    let t = crate::tickets::for_journey(&s.pool, &c.0, b.tickets.as_deref(), b.ticket, long_distance).await?;
+    let ticket = crate::tickets::legacy_type(&t.product);
     let itinerary = json!(legs);
     let j: JourneyRow = sqlx::query_as(
         "insert into journeys (id, customer_id, origin_station_id, origin_station_name, destination_station_id, destination_station_name,
@@ -493,6 +500,7 @@ pub async fn create(State(s): State<AppState>, c: Customer, Json(b): Json<Create
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
+    sqlx::query("insert into journey_tickets (journey_id, ticket_id) values ($1, $2)").bind(j.id).bind(t.id).execute(&s.pool).await.map_err(internal)?;
     insert_leg_ride(&s.pool, &c.0, &j, first, 1, legs.len() == 1, &trips[0], b.location.as_ref(), b.from_lat, b.from_lon).await.map_err(internal)?;
     rules::audit(&s.pool, "journey", j.id, None, "riding", "check-in").await.map_err(internal)?;
     s.events.publish(c.0.id, "journey", json!({ "journey_id": j.id, "status": "riding", "transfer": false, "arrived": false, "finished": false, "missed_connection": false, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null }));
@@ -1412,6 +1420,18 @@ pub async fn finalise_journey(
     Ok((updated, Some((incident, new_badge))))
 }
 
+/// What a case with this delay is worth on this ticket, one case on its own (phase 2a of docs/50:
+/// pots come next), and the fare it was computed from. A single ticket without a price still
+/// assumes `DEFAULT_FARE_CENTS` until pots can say "price missing" instead.
+pub(crate) fn case_amount(ticket: &TicketRow, delay: i64) -> (Option<i64>, Option<i64>) {
+    let product = crate::tickets::product_of(ticket);
+    let fare = ticket.price_cents.or((product.family == "einzelfahrkarte").then_some(rules::DEFAULT_FARE_CENTS));
+    if delay < rules::MIN_DELAY_MINUTES {
+        return (fare, None);
+    }
+    (fare, crate::fares::legacy_case_cents(product, delay, ticket.first_class, fare))
+}
+
 /// The case a finished journey leaves behind. `source` and `self_entered` say where the
 /// arrival time came from: the live feed for a journey the follower watched, the Stellwerk for
 /// an invented one (docs/20). A claim form must never dress up hand-entered data as live data.
@@ -1435,12 +1455,20 @@ pub(crate) async fn create_journey_incident(
         return Ok(existing);
     }
     let legs = plan_legs(j);
-    // The highest category on the journey decides the season-ticket rate; the operator is the one
-    // whose leg was late most (the carrier of the delay), else the first one.
-    let category = if rides.iter().any(|r| r.category == TrainCategory::Fern) || legs.iter().any(|l| l.category == crate::train::TrainCategory::Fern) { TrainCategory::Fern } else { rides.first().map(|r| r.category).unwrap_or(TrainCategory::Re) };
+    // The operator is the one whose leg was late most (the carrier of the delay), else the first.
     let operator = rides.iter().max_by_key(|r| r.final_delay_min.unwrap_or(0)).or(rides.first()).map(|r| r.operator.clone()).unwrap_or_else(|| legs.first().map(|l| l.operator.clone()).unwrap_or_default());
-    let fare = if j.ticket == TicketType::Einzelfahrkarte { Some(rules::DEFAULT_FARE_CENTS) } else { None };
-    let Some(amount) = rules::claim_amount_cents(j.ticket, category, delay, c.first_class, fare) else { return Ok(None) };
+    // The ticket decides the rate, not the train (docs/49 §2.2). A journey from before tickets has
+    // no row in journey_tickets; its type still names one.
+    let ticket: Option<TicketRow> = sqlx::query_as("select t.* from journey_tickets jt join tickets t on t.id = jt.ticket_id where jt.journey_id = $1 order by jt.first_leg desc limit 1").bind(j.id).fetch_optional(pool).await?;
+    let ticket = match ticket {
+        Some(t) => t,
+        None => {
+            let long_distance = rides.iter().any(|r| r.category == TrainCategory::Fern) || legs.iter().any(|l| l.category == crate::train::TrainCategory::Fern);
+            crate::tickets::for_legacy(pool, c, j.ticket, long_distance).await?
+        }
+    };
+    let (fare, amount) = case_amount(&ticket, delay);
+    let Some(amount) = amount else { return Ok(None) };
     let desk: String = sqlx::query_scalar("select desk from operators where name = $1").bind(&operator).fetch_optional(pool).await?.unwrap_or_else(|| "Unbekannt".into());
     let line = rides.iter().map(|r| r.line.clone()).collect::<Vec<_>>().join(" + ");
     let line = if line.is_empty() { legs.first().map(|l| l.line.clone()).unwrap_or_default() } else { line };
@@ -1482,8 +1510,8 @@ pub(crate) async fn create_journey_incident(
     });
     let id = Uuid::new_v4();
     let row: IncidentRow = sqlx::query_as(
-        "insert into incidents (id, customer_id, ride_id, journey_id, ride_date, line, from_name, to_name, delay_min, amount_cents, ticket, operator, desk, cancelled, self_entered, ngo_id, fare_cents, legal_deadline, evidence)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning *",
+        "insert into incidents (id, customer_id, ride_id, journey_id, ride_date, line, from_name, to_name, delay_min, amount_cents, ticket, operator, desk, cancelled, self_entered, ngo_id, fare_cents, legal_deadline, evidence, ticket_id, first_class)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) returning *",
     )
     .bind(id)
     .bind(j.customer_id)
@@ -1495,7 +1523,7 @@ pub(crate) async fn create_journey_incident(
     .bind(&to_name)
     .bind(delay as i32)
     .bind(amount)
-    .bind(j.ticket)
+    .bind(crate::tickets::legacy_type(&ticket.product))
     .bind(&operator)
     .bind(&desk)
     .bind(cancelled)
@@ -1504,6 +1532,8 @@ pub(crate) async fn create_journey_incident(
     .bind(fare)
     .bind(rules::legal_deadline(j.planned_departure.with_timezone(&chrono_tz::Europe::Berlin).date_naive()))
     .bind(evidence)
+    .bind(ticket.id)
+    .bind(ticket.first_class)
     .fetch_one(pool)
     .await?;
     rules::audit(pool, "incident", id, None, "gesammelt", "journey finalised").await?;

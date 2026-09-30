@@ -40,15 +40,6 @@ pub fn legacy_product(ticket: TicketType, category: TrainCategory) -> &'static f
     fares::catalogue().product(id)
 }
 
-/// Compensation for one delayed journey. None when nothing is owed. The rates come from the
-/// catalogue (fixtures/fares.toml); one case is worth what it was worth before pots.
-pub fn claim_amount_cents(ticket: TicketType, category: TrainCategory, delay_minutes: i64, first_class: bool, fare_cents: Option<Cents>) -> Option<Cents> {
-    if delay_minutes < MIN_DELAY_MINUTES {
-        return None;
-    }
-    fares::legacy_case_cents(legacy_product(ticket, category), delay_minutes, first_class, fare_cents)
-}
-
 /// What one qualifying journey is worth with this ticket, when that is a fixed number (issue #30).
 ///
 /// The app's empty state wants to tell a newcomer what a delayed journey earns, and the amount is
@@ -256,6 +247,14 @@ pub async fn audit(pool: &PgPool, entity: &str, id: Uuid, from: Option<&str>, to
 mod tests {
     use super::*;
 
+    /// What one case was worth before pots, through the catalogue.
+    fn claim_amount_cents(ticket: TicketType, category: TrainCategory, delay: i64, first_class: bool, fare: Option<Cents>) -> Option<Cents> {
+        if delay < MIN_DELAY_MINUTES {
+            return None;
+        }
+        fares::legacy_case_cents(legacy_product(ticket, category), delay, first_class, fare)
+    }
+
     #[test]
     fn amounts() {
         assert_eq!(claim_amount_cents(TicketType::Deutschlandticket, TrainCategory::Re, 68, false, None), Some(150));
@@ -331,6 +330,9 @@ mod tests {
             discarded_at: None,
             discard_reason: None,
             confirmed_cents: None,
+            ticket_id: None,
+            first_class: None,
+            window_key: None,
         }
     }
 

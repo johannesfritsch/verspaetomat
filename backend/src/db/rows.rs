@@ -265,6 +265,10 @@ pub struct RideRow {
     pub transfer_station_id: Option<String>,
     #[serde(default)]
     pub transfer_station_name: Option<String>,
+    /// The ticket the ride was on (migration 0045, #66).
+    #[sqlx(default)]
+    #[serde(default)]
+    pub ticket_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -301,6 +305,17 @@ pub struct IncidentRow {
     /// before `amount_cents`, which is what we asked for.
     #[sqlx(default)]
     pub confirmed_cents: Option<i64>,
+    /// The ticket this case was made with (migration 0045, #66). Null only for rows a migration
+    /// could not place, which it can.
+    #[sqlx(default)]
+    #[serde(default)]
+    pub ticket_id: Option<Uuid>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub first_class: Option<bool>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub window_key: Option<String>,
 }
 
 impl IncidentRow {
@@ -331,6 +346,33 @@ pub struct ClaimRow {
     pub created_at: DateTime<Utc>,
     /// `antrag-<8 hex>@RELAY_DOMAIN`, assigned at send time (docs/18 §4).
     pub reply_address: Option<String>,
+    /// The ticket whose pot this claim is (migration 0045, #66).
+    #[sqlx(default)]
+    #[serde(default)]
+    pub ticket_id: Option<Uuid>,
+}
+
+/// A passenger's ticket: one contract of one catalogue product (docs/49 §5.3).
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct TicketRow {
+    pub id: Uuid,
+    pub customer_id: Uuid,
+    pub product: String,
+    pub product_unsure: bool,
+    pub first_class: bool,
+    pub label: Option<String>,
+    pub number: Option<String>,
+    pub booking_ref: Option<String>,
+    pub birth_date: Option<chrono::NaiveDate>,
+    pub price_cents: Option<i64>,
+    pub valid_from: Option<chrono::NaiveDate>,
+    pub valid_until: Option<chrono::NaiveDate>,
+    pub origin_station_id: Option<String>,
+    pub origin_station_name: Option<String>,
+    pub destination_station_id: Option<String>,
+    pub destination_station_name: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

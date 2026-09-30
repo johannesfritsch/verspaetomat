@@ -628,6 +628,7 @@ pub async fn put_personal_data(State(s): State<AppState>, c: Customer, Json(p): 
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
+    crate::tickets::number_from_personal_data(&s.pool, c.0.id, row.ticket_number.as_deref()).await.map_err(internal)?;
     Ok(Json(customer_json(&s.pool, &s.flags(), &row).await.map_err(internal)?))
 }
 
@@ -670,6 +671,7 @@ pub async fn export_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value
     let rides: Vec<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 order by checked_in_at desc").bind(c.id).fetch_all(pool).await?;
     let incidents: Vec<IncidentRow> = sqlx::query_as("select * from incidents where customer_id = $1 order by ride_date desc").bind(c.id).fetch_all(pool).await?;
     let claims: Vec<ClaimRow> = sqlx::query_as("select * from claims where customer_id = $1 order by created_at desc").bind(c.id).fetch_all(pool).await?;
+    let tickets: Vec<TicketRow> = sqlx::query_as("select * from tickets where customer_id = $1 order by created_at").bind(c.id).fetch_all(pool).await?;
     let rows: Vec<MailRow> = sqlx::query_as("select * from mails where customer_id = $1 order by occurred_at desc").bind(c.id).fetch_all(pool).await?;
     // The export is the passenger's right to see what was done with their mail (Art. 15), so it
     // carries what the mail list leaves out: who read each answer, what a model was shown, and
@@ -685,7 +687,7 @@ pub async fn export_json(pool: &PgPool, c: &CustomerRow) -> anyhow::Result<Value
             v
         })
         .collect();
-    Ok(json!({ "customer": c, "rides": rides, "incidents": incidents, "claims": claims, "mails": mails, "exported_at": crate::clock::now() }))
+    Ok(json!({ "customer": c, "tickets": tickets, "rides": rides, "incidents": incidents, "claims": claims, "mails": mails, "exported_at": crate::clock::now() }))
 }
 
 /// „Alles löschen": the account and everything that hangs off it, files included (`account.rs`).
@@ -855,8 +857,16 @@ pub async fn on_ride_finalised(s: &AppState, ride_id: Uuid) -> anyhow::Result<Fi
     let existing: Option<IncidentRow> = sqlx::query_as("select * from incidents where ride_id = $1").bind(ride_id).fetch_optional(pool).await?;
     let mut incident = existing;
     if incident.is_none() {
-        let fare = if r.ticket == TicketType::Einzelfahrkarte { Some(rules::DEFAULT_FARE_CENTS) } else { None };
-        if let Some(amount) = rules::claim_amount_cents(r.ticket, r.category, delay, c.first_class, fare) {
+        let ticket: Option<TicketRow> = match r.ticket_id {
+            Some(id) => sqlx::query_as("select * from tickets where id = $1").bind(id).fetch_optional(pool).await?,
+            None => None,
+        };
+        let ticket = match ticket {
+            Some(t) => t,
+            None => crate::tickets::for_legacy(pool, &c, r.ticket, r.category == TrainCategory::Fern).await?,
+        };
+        let (fare, amount) = crate::journeys::case_amount(&ticket, delay);
+        if let Some(amount) = amount {
             let desk: String = sqlx::query_scalar("select desk from operators where name = $1").bind(&r.operator).fetch_optional(pool).await?.unwrap_or_else(|| "Unbekannt".into());
             let evidence = json!({
                 "planned_arrival": r.planned_arrival, "actual_arrival": r.actual_arrival,
@@ -865,8 +875,8 @@ pub async fn on_ride_finalised(s: &AppState, ride_id: Uuid) -> anyhow::Result<Fi
             });
             let id = Uuid::new_v4();
             let row: IncidentRow = sqlx::query_as(
-                "insert into incidents (id, customer_id, ride_id, ride_date, line, from_name, to_name, delay_min, amount_cents, ticket, operator, desk, cancelled, self_entered, ngo_id, fare_cents, legal_deadline, evidence)
-                 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning *",
+                "insert into incidents (id, customer_id, ride_id, ride_date, line, from_name, to_name, delay_min, amount_cents, ticket, operator, desk, cancelled, self_entered, ngo_id, fare_cents, legal_deadline, evidence, ticket_id, first_class)
+                 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) returning *",
             )
             .bind(id)
             .bind(r.customer_id)
@@ -877,7 +887,7 @@ pub async fn on_ride_finalised(s: &AppState, ride_id: Uuid) -> anyhow::Result<Fi
             .bind(&r.exit_station_name)
             .bind(delay as i32)
             .bind(amount)
-            .bind(r.ticket)
+            .bind(crate::tickets::legacy_type(&ticket.product))
             .bind(&r.operator)
             .bind(&desk)
             .bind(r.cancelled)
@@ -886,6 +896,8 @@ pub async fn on_ride_finalised(s: &AppState, ride_id: Uuid) -> anyhow::Result<Fi
             .bind(fare)
             .bind(rules::legal_deadline(r.planned_arrival.date_naive()))
             .bind(evidence)
+            .bind(ticket.id)
+            .bind(ticket.first_class)
             .fetch_one(pool)
             .await?;
             rules::audit(pool, "incident", id, None, "gesammelt", "ride finalised").await?;
@@ -952,6 +964,9 @@ pub struct Nachtrag {
     pub from_station_name: String,
     pub exit_station_id: String,
     pub exit_station_name: String,
+    /// The ticket the ride was on (docs/50 phase 3). Without it, an older build: the setting.
+    #[serde(default)]
+    pub ticket_id: Option<Uuid>,
 }
 
 pub async fn nachtrag(State(s): State<AppState>, c: Customer, Json(n): Json<Nachtrag>) -> ApiResult {
@@ -964,11 +979,15 @@ pub async fn nachtrag(State(s): State<AppState>, c: Customer, Json(n): Json<Nach
     let delay = (actual - planned_arrival).num_minutes().max(0);
     let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
     let operator = map_operator(&ops, &t.agency_name);
+    let ticket = match n.ticket_id {
+        Some(tid) => crate::tickets::owned(&s.pool, c.0.id, tid).await?.ok_or_else(|| err(StatusCode::BAD_REQUEST, "no such ticket"))?,
+        None => crate::tickets::for_legacy(&s.pool, &c.0, c.0.ticket, t.category == crate::train::TrainCategory::Fern).await.map_err(internal)?,
+    };
     let id = Uuid::new_v4();
     let row: RideRow = sqlx::query_as(
         "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name, exit_station_id, exit_station_name,
-            planned_departure, planned_arrival, actual_arrival, ticket, status, live_delay_min, final_delay_min, cancelled, nachtrag, points, finalised_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'arrived',$16,$16,$17,true,$18,now()) returning *",
+            planned_departure, planned_arrival, actual_arrival, ticket, status, live_delay_min, final_delay_min, cancelled, nachtrag, points, finalised_at, ticket_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'arrived',$16,$16,$17,true,$18,now(),$19) returning *",
     )
     .bind(id)
     .bind(c.0.id)
@@ -984,10 +1003,11 @@ pub async fn nachtrag(State(s): State<AppState>, c: Customer, Json(n): Json<Nach
     .bind(planned_departure)
     .bind(planned_arrival)
     .bind(actual)
-    .bind(c.0.ticket)
+    .bind(crate::tickets::legacy_type(&ticket.product))
     .bind(delay as i32)
     .bind(t.cancelled || exit.cancelled)
     .bind(rules::counted_minutes(delay, t.cancelled) as i32)
+    .bind(ticket.id)
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
@@ -1159,9 +1179,14 @@ async fn render_claim_pdf(pool: &PgPool, claim: &ClaimRow, customer: &CustomerRo
         }
         None => None,
     };
+    // The ticket the cases were made with, never the one the passenger has chosen since (#66).
+    let ticket = match incidents.first() {
+        Some(i) => crate::tickets::of_incident(pool, i).await?,
+        None => None,
+    };
     let claim = claim.clone();
     let customer = customer.clone();
-    tokio::task::spawn_blocking(move || crate::pdf::render(&crate::pdf::ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png })).await?
+    tokio::task::spawn_blocking(move || crate::pdf::render(&crate::pdf::ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, ticket: ticket.as_ref(), signature_png })).await?
 }
 
 /// `GET /v1/claims/{id}/pdf` — the filled EU form as it stands right now (draft or sent).

@@ -626,9 +626,13 @@ enum Cmd {
         category: String,
         #[arg(long, default_value = "DB Regio NRW")]
         operator: String,
-        /// deutschlandticket | zeitkarte | einzelfahrkarte (default: the customer's own)
+        /// A fare product (bahncard100, zeitkarte_vrr_nrw, einzel_db, … — `stellwerk fares list`) or
+        /// deutschlandticket | zeitkarte | einzelfahrkarte (default: the customer's setting)
         #[arg(long)]
         ticket: Option<String>,
+        /// A single ticket's fare in euros (39,90)
+        #[arg(long)]
+        price: Option<String>,
         /// The train was cancelled
         #[arg(long)]
         cancelled: bool,
@@ -1862,16 +1866,20 @@ async fn main() -> anyhow::Result<()> {
             println!("Push an {} ({platform}, {token}, {how}): {}", s(&v, "nickname"), s(&v, "result"));
             println!("  {} – {}", s(&v, "title"), s(&v, "body"));
         }
-        Cmd::Backdate { customer, delay, days, count, at, duration, from, to, line, category, operator, ticket, cancelled } => {
+        Cmd::Backdate { customer, delay, days, count, at, duration, from, to, line, category, operator, ticket, price, cancelled } => {
             if count < 1 {
                 anyhow::bail!("--count must be at least 1");
             }
+            let price_cents = match price {
+                Some(p) => Some((p.replace(',', ".").parse::<f64>().map_err(|_| anyhow::anyhow!("--price in euros, e.g. 39,90"))? * 100.0).round() as i64),
+                None => None,
+            };
             let mut warned = false;
             for i in 0..count {
                 let body = json!({
                     "from": from, "to": to, "delay_minutes": delay, "days_ago": days + i, "departure": at,
                     "duration_minutes": duration, "line": line, "category": category, "operator": operator,
-                    "ticket": ticket, "cancelled": cancelled,
+                    "ticket": ticket, "price_cents": price_cents, "cancelled": cancelled,
                 });
                 let v = api.post(&format!("/admin/customers/{customer}/backdate"), body).await?;
                 let j = &v["journey"];

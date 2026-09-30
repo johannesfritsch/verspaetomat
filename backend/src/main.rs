@@ -30,6 +30,7 @@ mod scanner;
 mod share;
 mod stage;
 mod storage;
+mod tickets;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -254,6 +255,9 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/me/push-token", put(handlers::put_push_token).delete(handlers::delete_push_token))
         .route("/v1/me/geofence", get(handlers::geofence))
         .route("/v1/me/destinations", get(journeys::destinations))
+        .route("/v1/fares", get(tickets::fares_public))
+        .route("/v1/me/tickets", get(tickets::list).post(tickets::create))
+        .route("/v1/me/tickets/{id}", axum::routing::patch(tickets::patch).delete(tickets::archive))
         // journeys (docs/17)
         .route("/v1/journeys", get(journeys::list).post(journeys::create))
         .route("/v1/journeys/plan", get(journeys::plan))

@@ -811,3 +811,117 @@ async fn the_aim_reminder_comes_once_and_only_when_ready(pool: PgPool) {
     let (_, v) = admin(&app, "POST", "/admin/scan", json!({})).await;
     assert_eq!(v["aimed"], 0, "once per case");
 }
+
+// ---------------------------------------------------------------------------
+// Tickets (#66, docs/49 §5.3, docs/50 phase 2)
+// ---------------------------------------------------------------------------
+
+/// The catalogue is public, a ticket is the passenger's own, and archiving keeps it for its cases.
+#[sqlx::test(migrations = "./migrations")]
+async fn tickets_are_made_changed_and_archived(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (s, v) = call(&app, "GET", "/v1/fares", None, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let ids: Vec<&str> = v["fares"].as_array().unwrap().iter().filter_map(|f| f["id"].as_str()).collect();
+    assert!(ids.contains(&"deutschlandticket") && ids.contains(&"bahncard100") && ids.contains(&"einzel_db"), "{ids:?}");
+    let dt = v["fares"].as_array().unwrap().iter().find(|f| f["id"] == "deutschlandticket").unwrap();
+    assert_eq!(dt["threshold_min"], 20);
+    assert_eq!(dt["valid_on"]["long_distance"], false);
+    assert_eq!(dt["ticket"], "deutschlandticket", "the legacy type an older build understands");
+
+    let (customer, token) = device(&app).await;
+    let (s, v) = call(&app, "POST", "/v1/me/tickets", Some(&token), Some(json!({ "product": "nope" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    let (s, bc) = call(&app, "POST", "/v1/me/tickets", Some(&token), Some(json!({ "product": "bahncard100", "first_class": true, "number": "7081 4101 2345 6789" }))).await;
+    assert_eq!(s, StatusCode::OK, "{bc}");
+    assert_eq!((bc["name"].as_str(), bc["family"].as_str(), bc["ticket"].as_str()), (Some("BahnCard 100"), Some("bahncard100"), Some("zeitkarte")));
+    let id = bc["id"].as_str().unwrap().to_string();
+
+    let (s, v) = call(&app, "PATCH", &format!("/v1/me/tickets/{id}"), Some(&token), Some(json!({ "price_cents": 799900, "label": "Meine BahnCard" }))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!((v["price_cents"].as_i64(), v["name"].as_str()), (Some(799900), Some("Meine BahnCard")));
+    let (_, v) = call(&app, "PATCH", &format!("/v1/me/tickets/{id}"), Some(&token), Some(json!({ "price_cents": null }))).await;
+    assert!(v["price_cents"].is_null(), "null clears: {v}");
+
+    // Someone else's ticket is nobody's business.
+    let (_, other) = device(&app).await;
+    let (s, _) = call(&app, "PATCH", &format!("/v1/me/tickets/{id}"), Some(&other), Some(json!({ "label": "x" }))).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, _) = call(&app, "DELETE", &format!("/v1/me/tickets/{id}"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, v) = call(&app, "GET", "/v1/me/tickets", Some(&token), None).await;
+    assert_eq!(v["tickets"].as_array().unwrap().len(), 0);
+    let (_, v) = call(&app, "GET", "/v1/me/tickets?all=true", Some(&token), None).await;
+    assert_eq!(v["tickets"].as_array().unwrap().len(), 1, "archived, not gone");
+
+    // The D-Ticket's number is the one an older build reads as personal data.
+    call(&app, "POST", "/v1/me/tickets", Some(&token), Some(json!({ "product": "deutschlandticket", "number": "D-2026-1" }))).await;
+    assert_eq!(count(&pool, "select count(*) from customers where id = $1 and ticket_number = 'D-2026-1'", customer).await, 1);
+}
+
+/// The rate follows the ticket, not the train (docs/49 §2.2): a BahnCard 100 is 10 € where a
+/// "Zeitkarte" used to book 1,50 €, and a single ticket is a share of its own fare.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_case_is_worth_what_its_ticket_is_owed(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (customer, _) = device(&app).await;
+    let backdate = |ticket: Option<&str>, delay: i64, price: Option<i64>| {
+        json!({ "from": "Köln Hbf", "to": "Düsseldorf Hbf", "delay_minutes": delay, "days_ago": 2, "ticket": ticket, "price_cents": price })
+    };
+    let path = format!("/admin/customers/{customer}/backdate");
+
+    let (s, v) = admin(&app, "POST", &path, backdate(Some("bahncard100"), 65, None)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["incident"]["amount_cents"], 1000, "{v}");
+    assert_eq!(v["incident"]["ticket"], "zeitkarte", "older builds still read a type they know");
+    let bc = v["incident"]["ticket_id"].as_str().unwrap().to_string();
+    // The second ride on it is the same ticket, not a new one.
+    let (_, v) = admin(&app, "POST", &path, backdate(Some("bahncard100"), 61, None)).await;
+    assert_eq!(v["incident"]["ticket_id"].as_str(), Some(bc.as_str()));
+
+    let (_, v) = admin(&app, "POST", &path, backdate(Some("einzel_db"), 125, Some(3990))).await;
+    assert_eq!(v["incident"]["amount_cents"], 1995, "{v}");
+    let (_, v) = admin(&app, "POST", &path, backdate(Some("einzel_db"), 70, Some(3990))).await;
+    assert_eq!(v["incident"]["amount_cents"], 998, "25 % of 39,90 € rounds commercially: {v}");
+
+    // No ticket named: the customer's setting, as an older build meant it.
+    let (_, v) = admin(&app, "POST", &path, backdate(None, 70, None)).await;
+    assert_eq!(v["incident"]["amount_cents"], 150, "{v}");
+    assert_eq!(count(&pool, "select count(*) from tickets where customer_id = $1 and product = 'deutschlandticket'", customer).await, 1);
+    assert_eq!(count(&pool, "select count(*) from journey_tickets jt join journeys j on j.id = jt.journey_id where j.customer_id = $1", customer).await, 5, "every journey names its ticket");
+}
+
+/// Migration 0046 on rows as they were before tickets: each type becomes the ticket it meant.
+#[sqlx::test(migrations = "./migrations")]
+async fn old_rows_become_tickets(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (dt_customer, _) = device(&app).await;
+    let (zk_customer, _) = device(&app).await;
+    sqlx::query("update customers set ticket = 'zeitkarte' where id = $1").bind(zk_customer).execute(&pool).await.unwrap();
+    sqlx::query("update customers set ticket_number = 'D-77' where id = $1").bind(dt_customer).execute(&pool).await.unwrap();
+    let dt_case = incident(&pool, dt_customer, None, 150, "gesammelt").await;
+    let zk_case = incident(&pool, zk_customer, None, 150, "gesammelt").await;
+    let zk_fern_case = incident(&pool, zk_customer, None, 500, "gesammelt").await;
+    let single = incident(&pool, dt_customer, None, 997, "bereit").await;
+    sqlx::query("update incidents set ticket = 'zeitkarte' where id = any($1)").bind(vec![zk_case, zk_fern_case]).execute(&pool).await.unwrap();
+    sqlx::query("update incidents set ticket = 'einzelfahrkarte' where id = $1").bind(single).execute(&pool).await.unwrap();
+    // A long-distance Zeitkarte ride: the migration makes a Streckenzeitkarte for it.
+    let r = ride(&pool, zk_customer, "ICE 5", 70, 3).await;
+    sqlx::query("update rides set ticket = 'zeitkarte', category = 'fern' where id = $1").bind(r).execute(&pool).await.unwrap();
+
+    sqlx::raw_sql(include_str!("../migrations/0046_tickets_from_customers.sql")).execute(&pool).await.expect("migration 0046");
+
+    let product = |id: Uuid| {
+        let pool = pool.clone();
+        async move { sqlx::query_scalar::<_, String>("select t.product from incidents i join tickets t on t.id = i.ticket_id where i.id = $1").bind(id).fetch_one(&pool).await.unwrap() }
+    };
+    assert_eq!(product(dt_case).await, "deutschlandticket");
+    assert_eq!(product(zk_case).await, "zeitkarte_spnv");
+    assert_eq!(product(zk_fern_case).await, "streckenzeitkarte", "5 € was the long-distance rate");
+    assert_eq!(product(single).await, "einzel_db");
+    assert_eq!(count(&pool, "select count(*) from tickets where id = $1 and price_cents is null", single).await, 1, "the assumed 39,90 € was nobody's fare");
+    assert_eq!(count(&pool, "select count(*) from tickets where customer_id = $1 and product = 'deutschlandticket' and number = 'D-77'", dt_customer).await, 1);
+    assert_eq!(count(&pool, "select count(*) from tickets where customer_id = $1 and product_unsure", zk_customer).await, 2, "nobody was asked which Verbund");
+    assert_eq!(count(&pool, "select count(*) from rides where id = $1 and ticket_id is not null", r).await, 1);
+}

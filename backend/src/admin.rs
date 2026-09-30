@@ -742,7 +742,8 @@ pub async fn reset(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(
     for t in &trips {
         let _ = s.train.clear_override(&s.pool, t).await;
     }
-    for table in ["mails", "claims", "incidents", "uploads", "rides", "journeys", "badge_awards", "sim_customer_location"] {
+    // Tickets last: journeys, rides and cases point at them (#66).
+    for table in ["mails", "claims", "incidents", "uploads", "rides", "journeys", "badge_awards", "sim_customer_location", "tickets"] {
         sqlx::query(&format!("delete from {table} where customer_id = $1")).bind(c.id).execute(&s.pool).await.map_err(internal)?;
     }
     s.events.publish(c.id, "reset", json!({}));
@@ -913,9 +914,15 @@ pub struct BackdateBody {
     pub category: Option<String>,
     #[serde(default)]
     pub operator: Option<String>,
-    /// deutschlandticket | zeitkarte | einzelfahrkarte; the customer's own by default.
+    /// A fare product of the catalogue (bahncard100, zeitkarte_vrr_nrw, einzel_db, …) or one of the
+    /// legacy types deutschlandticket | zeitkarte | einzelfahrkarte; the customer's setting by
+    /// default. A season ticket is the customer's own of that product, found or made once; a single
+    /// ticket is new for this ride.
     #[serde(default)]
     pub ticket: Option<String>,
+    /// For a single ticket: what it cost, in cents.
+    #[serde(default)]
+    pub price_cents: Option<i64>,
     #[serde(default)]
     pub cancelled: bool,
 }
@@ -940,6 +947,35 @@ fn parse_category(v: Option<&str>) -> Result<crate::train::TrainCategory, (Statu
         "bus" => C::Bus,
         other => return Err(err(StatusCode::BAD_REQUEST, &format!("category must be s|rb|re|fern|bus, got {other}"))),
     })
+}
+
+/// The ticket a backdated ride was on: a catalogue product, or a legacy type as before tickets.
+async fn backdate_ticket(pool: &sqlx::PgPool, c: &CustomerRow, name: Option<&str>, price_cents: Option<i64>, long_distance: bool) -> Result<TicketRow, (StatusCode, Json<Value>)> {
+    let name = name.map(|n| n.trim().to_lowercase());
+    let Some(product) = name.as_deref().and_then(|n| crate::fares::catalogue().get(n)) else {
+        let legacy = match name.as_deref() {
+            Some(n) => parse_ticket(n)?,
+            None => c.ticket,
+        };
+        let mut t = crate::tickets::for_legacy(pool, c, legacy, long_distance).await.map_err(internal)?;
+        if let (Some(p), TicketType::Einzelfahrkarte) = (price_cents, legacy) {
+            t = sqlx::query_as("update tickets set price_cents = $2 where id = $1 returning *").bind(t.id).bind(p).fetch_one(pool).await.map_err(internal)?;
+        }
+        return Ok(t);
+    };
+    if product.family != "einzelfahrkarte" {
+        let found: Option<TicketRow> = sqlx::query_as("select * from tickets where customer_id = $1 and product = $2 and archived_at is null order by created_at desc limit 1")
+            .bind(c.id)
+            .bind(&product.id)
+            .fetch_optional(pool)
+            .await
+            .map_err(internal)?;
+        if let Some(t) = found {
+            return Ok(t);
+        }
+    }
+    let n = crate::tickets::NewTicket { product: product.id.clone(), first_class: c.first_class, price_cents, ..Default::default() };
+    crate::tickets::insert(pool, c.id, &n, false).await.map_err(internal)
 }
 
 fn parse_ticket(v: &str) -> Result<TicketType, (StatusCode, Json<Value>)> {
@@ -1004,10 +1040,8 @@ pub async fn backdate(State(s): State<AppState>, _a: Admin, _sim: Simulation, Pa
         return Err(err(StatusCode::BAD_REQUEST, "name both stations: from and to"));
     }
     let category = parse_category(b.category.as_deref())?;
-    let ticket = match &b.ticket {
-        Some(t) => parse_ticket(t)?,
-        None => c.ticket,
-    };
+    let ticket_row = backdate_ticket(&s.pool, &c, b.ticket.as_deref(), b.price_cents, category == crate::train::TrainCategory::Fern).await?;
+    let ticket = crate::tickets::legacy_type(&ticket_row.product);
     let time = match b.departure.as_deref() {
         Some(t) => NaiveTime::parse_from_str(t.trim(), "%H:%M").map_err(|_| err(StatusCode::BAD_REQUEST, "departure must read HH:MM"))?,
         None => NaiveTime::from_hms_opt(8, 12, 0).unwrap(),
@@ -1077,12 +1111,13 @@ pub async fn backdate(State(s): State<AppState>, _a: Admin, _sim: Simulation, Pa
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;
+    sqlx::query("insert into journey_tickets (journey_id, ticket_id) values ($1, $2)").bind(j.id).bind(ticket_row.id).execute(&s.pool).await.map_err(internal)?;
 
     let ride: RideRow = sqlx::query_as(
         "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name,
             exit_station_id, exit_station_name, planned_departure, planned_arrival, actual_arrival, ticket, status, live_delay_min,
-            final_delay_min, cancelled, self_entered, points, checked_in_at, finalised_at, last_polled_at, dismissed_at, journey_id, leg_no)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'arrived',$16,$16,$17,true,$18,$12,$14,$14,$14,$19,1) returning *",
+            final_delay_min, cancelled, self_entered, points, checked_in_at, finalised_at, last_polled_at, dismissed_at, journey_id, leg_no, ticket_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'arrived',$16,$16,$17,true,$18,$12,$14,$14,$14,$19,1,$20) returning *",
     )
     .bind(Uuid::new_v4())
     .bind(c.id)
@@ -1103,6 +1138,7 @@ pub async fn backdate(State(s): State<AppState>, _a: Admin, _sim: Simulation, Pa
     .bind(b.cancelled)
     .bind(points as i32)
     .bind(j.id)
+    .bind(ticket_row.id)
     .fetch_one(&s.pool)
     .await
     .map_err(internal)?;

@@ -32,6 +32,9 @@ pub struct ClaimDocument<'a> {
     pub claim: &'a ClaimRow,
     pub incidents: &'a [IncidentRow],
     pub customer: &'a CustomerRow,
+    /// The ticket the cases were made with (#66). None for claims from before tickets: then the
+    /// customer's setting, as it was.
+    pub ticket: Option<&'a TicketRow>,
     /// PNG bytes of the drawn signature, if the customer signed by hand.
     pub signature_png: Option<Vec<u8>>,
 }
@@ -97,7 +100,12 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
     let first = doc.incidents.first().map(incident_json).unwrap_or_else(|| json!({
         "date": "–", "line": "–", "from": "–", "to": "–", "planned": "–", "actual": "–", "delay": 0, "cancelled": false, "self_entered": false, "amount": "–"
     }));
-    let season = matches!(c.ticket, TicketType::Deutschlandticket | TicketType::Zeitkarte);
+    let product = doc.ticket.map(crate::tickets::product_of);
+    let legacy = doc.ticket.map(|t| crate::tickets::legacy_type(&t.product)).unwrap_or(c.ticket);
+    let season = match product {
+        Some(p) => p.latest().form.season_box,
+        None => matches!(c.ticket, TicketType::Deutschlandticket | TicketType::Zeitkarte),
+    };
     let kind = if season {
         "season"
     } else if doc.incidents.iter().any(|i| i.delay_min >= 120 || i.cancelled) {
@@ -105,17 +113,26 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
     } else {
         "60"
     };
-    let ticket_type = match c.ticket {
-        TicketType::Deutschlandticket => "Deutschlandticket",
-        TicketType::Zeitkarte => "Zeitkarte",
-        TicketType::Einzelfahrkarte => "Einzelfahrkarte",
+    let ticket_type = match product {
+        Some(p) => p.name.clone(),
+        None => match c.ticket {
+            TicketType::Deutschlandticket => "Deutschlandticket",
+            TicketType::Zeitkarte => "Zeitkarte",
+            TicketType::Einzelfahrkarte => "Einzelfahrkarte",
+        }
+        .to_string(),
     };
+    let ticket_number = doc.ticket.and_then(|t| t.number.clone()).or_else(|| c.ticket_number.clone()).unwrap_or_else(|| "–".into());
     let fare = doc.incidents.first().and_then(|i| i.fare_cents).map(euro).unwrap_or_else(|| "–".into());
     let signed_on = claim.signed_at.map(|t| berlin(t).format("%d.%m.%Y").to_string()).unwrap_or_default();
     let place = c.postal_address.as_deref().and_then(|a| a.lines().last()).map(|l| l.trim().to_string()).unwrap_or_default();
     let mut notes = String::new();
-    if c.ticket == TicketType::Deutschlandticket {
+    if legacy == TicketType::Deutschlandticket {
         notes.push_str("Deutschlandticket: Entschädigung 1,50 € je Fall ab 60 Minuten Verspätung, Auszahlung ab 4,00 € (Art. 19 VO (EU) 2021/782, § 8 EVO). ");
+    }
+    // The EU form has no field for the class (DVO 2024/949); the free text carries it.
+    if let Some(t) = doc.ticket {
+        notes.push_str(&format!("Fahrkarte: {ticket_type}, {}. Klasse. ", if t.first_class { 1 } else { 2 }));
     }
     // docs/21 §2: where a journey was interrupted we claim only the railway's share. The form
     // still carries the true arrival; this line says what was left out and why. Never a false time.
@@ -151,7 +168,7 @@ pub fn claim_inputs(doc: &ClaimDocument<'_>) -> Value {
         "operator": doc.incidents.first().map(|i| i.operator.clone()).unwrap_or_default(),
         "kind": kind,
         "ticket_type": ticket_type,
-        "ticket_number": c.ticket_number.clone().unwrap_or_else(|| "–".into()),
+        "ticket_number": ticket_number,
         "first": first,
         "incidents": doc.incidents.iter().map(incident_json).collect::<Vec<_>>(),
         "person": {
@@ -262,6 +279,7 @@ mod tests {
             closed_at: None,
             created_at: Utc::now(),
             reply_address: Some("antrag-3d09a883@users.verspaetomat.de".into()),
+            ticket_id: None,
         };
         let incident = |d: u32, delay: i32| IncidentRow {
             id: Uuid::new_v4(),
@@ -289,6 +307,9 @@ mod tests {
             discarded_at: None,
             discard_reason: None,
             confirmed_cents: None,
+            ticket_id: None,
+            first_class: None,
+            window_key: None,
         };
         // docs/21 §2: an interrupted journey prints the true arrival plus the line saying only
         // the railway's share is claimed. The passenger's own pause is named, never hidden.
@@ -302,7 +323,7 @@ mod tests {
                 "interrupted_at": "Hagen Hbf",
             }
         }));
-        let notes = claim_inputs(&ClaimDocument { claim: &claim, incidents: &[interrupted], customer: &customer, signature_png: None })["notes"]
+        let notes = claim_inputs(&ClaimDocument { claim: &claim, incidents: &[interrupted], customer: &customer, ticket: None, signature_png: None })["notes"]
             .as_str()
             .unwrap_or_default()
             .to_string();
@@ -312,18 +333,18 @@ mod tests {
         assert!(notes.contains("01.09.2026 13:10"), "the earliest onward arrival is named: {notes}");
         assert!(notes.contains("70 Minuten"), "only the railway's 70 minutes are claimed: {notes}");
         // A journey that ran through says nothing of the sort.
-        let plain = claim_inputs(&ClaimDocument { claim: &claim, incidents: &[incident(1, 68)], customer: &customer, signature_png: None })["notes"]
+        let plain = claim_inputs(&ClaimDocument { claim: &claim, incidents: &[incident(1, 68)], customer: &customer, ticket: None, signature_png: None })["notes"]
             .as_str()
             .unwrap_or_default()
             .to_string();
         assert!(!plain.contains("unterbrochen"), "an uninterrupted journey gets no such line: {plain}");
 
         let incidents = vec![incident(1, 68), incident(3, 75), incident(5, 130)];
-        let pdf = render(&ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png: None }).expect("render");
+        let pdf = render(&ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, ticket: None, signature_png: None }).expect("render");
         assert!(pdf.starts_with(b"%PDF"));
         // a drawn signature, 300x90 PNG with transparency
         let png = signature_png();
-        let signed_doc = ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, signature_png: Some(png) };
+        let signed_doc = ClaimDocument { claim: &claim, incidents: &incidents, customer: &customer, ticket: None, signature_png: Some(png) };
         assert_eq!(compile(&signed_doc).expect("compile with signature").pages().len(), 1, "the signed form must fit on one page");
         let signed = render(&signed_doc).expect("render with signature");
         assert!(signed.starts_with(b"%PDF"));
@@ -351,7 +372,7 @@ mod tests {
             ] }
         }));
         let with_connection = vec![j];
-        let doc = ClaimDocument { claim: &claim, incidents: &with_connection, customer: &customer, signature_png: None };
+        let doc = ClaimDocument { claim: &claim, incidents: &with_connection, customer: &customer, ticket: None, signature_png: None };
         let inputs = claim_inputs(&doc);
         assert_eq!(inputs["missed"], json!(true));
         assert_eq!(inputs["first"]["legs"].as_array().unwrap().len(), 2);
@@ -384,9 +405,10 @@ mod tests {
             closed_at: None,
             created_at: Utc::now(),
             reply_address: Some("antrag-3d09a883@users.verspaetomat.de".into()),
+            ticket_id: None,
         };
         let inputs = |claim: &ClaimRow| {
-            claim_inputs(&ClaimDocument { claim, incidents: &[], customer: &customer, signature_png: None })["person"]["email"]
+            claim_inputs(&ClaimDocument { claim, incidents: &[], customer: &customer, ticket: None, signature_png: None })["person"]["email"]
                 .as_str()
                 .unwrap()
                 .to_string()

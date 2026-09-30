@@ -106,6 +106,14 @@ paths:
         - { name: time, in: query, schema: { type: string, format: date-time } }
         - { name: first_trip, in: query, schema: { type: string }, description: keep only itineraries starting with this trip }
       responses: { '200': { description: '{from, to, itineraries[]}' } }
+  /v1/fares:
+    get: { summary: "The fare catalogue (fixtures/fares.toml, docs/49): {families, fares:[{id, family, name, tariff, rule_line, offer, caveat, valid_on:{regional, long_distance, extra_routes}, threshold_min, list_price_cents, list_price_first_cents, reduced_fare, release_after_min, fields:{number, price: required|optional, validity: none|day|range, birth_date, route, first_class}, ticket}]}. Public; hidden products are left out. The app shows these sentences and asks for these fields; it holds no rule of its own.", responses: { "200": { description: Catalogue } } }
+  /v1/me/tickets:
+    get: { summary: "The passenger's tickets, the one used last first: {tickets:[Ticket]}; archived ones only with ?all=true. A Ticket is the row (id, product, product_unsure, first_class, label, number, booking_ref, birth_date, price_cents, valid_from, valid_until, origin/destination station id and name, created_at, archived_at) plus name, family, rule_line and the legacy ticket type.", responses: { "200": { description: Tickets } } }
+    post: { summary: "Add a ticket.", requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/NewTicket" } } } }, responses: { "200": { description: Ticket }, "400": { description: unknown or hidden product, bad dates or price } } }
+  /v1/me/tickets/{id}:
+    patch: { summary: "Change any field; null clears it. Naming the product settles a ticket a migration could only guess (product_unsure).", responses: { "200": { description: Ticket }, "404": { description: not this passenger's ticket } } }
+    delete: { summary: "Archive: a ticket someone no longer has. Its journeys and cases keep it.", responses: { "200": { description: "{archived: true}" }, "404": { description: not this passenger's ticket } } }
   /v1/journeys:
     get:
       summary: Journey history, newest first; rides from before journeys appear as single-leg journeys
@@ -124,7 +132,8 @@ paths:
                 to_station_id: { type: string }
                 to_station_name: { type: string }
                 legs: { type: array, items: { type: object, required: [trip_id, from_station_id, to_station_id], properties: { trip_id: { type: string }, from_station_id: { type: string }, to_station_id: { type: string }, from_station_name: { type: string }, to_station_name: { type: string } } } }
-                ticket: { type: string, enum: [deutschlandticket, zeitkarte, einzelfahrkarte] }
+                ticket: { type: string, enum: [deutschlandticket, zeitkarte, einzelfahrkarte], description: "Builds before tickets: the type; the server finds or makes the ticket it means (a Zeitkarte on a long-distance journey is the Streckenzeitkarte)." }
+                tickets: { type: array, maxItems: 1, description: "The ticket of this journey (#66): one it has, or one it adds now. One per journey for now.", items: { type: object, properties: { ticket_id: { type: string, format: uuid }, new_ticket: { $ref: "#/components/schemas/NewTicket" } } } }
                 location: { type: object, properties: { lat: { type: number }, lon: { type: number }, accuracy_m: { type: number } } }
                 from_lat: { type: number }
                 from_lon: { type: number }
@@ -163,7 +172,7 @@ paths:
     post: { summary: Acknowledge the arrival summary, responses: { "200": { description: ok } } }
   /v1/rides/nachtrag:
     post:
-      summary: Record a forgotten ride from a trip id (1 point, claimable if the feed shows 60+, never ranks).
+      summary: "Record a forgotten ride from a trip id (claimable if the feed shows 60+, never ranks). Optional ticket_id (#66); without it the setting names the ticket, as for builds before tickets."
       requestBody: { content: { application/json: { schema: { type: object, required: [trip_id, from_station_id, from_station_name, exit_station_id, exit_station_name], properties: { trip_id: { type: string }, from_station_id: { type: string }, from_station_name: { type: string }, exit_station_id: { type: string }, exit_station_name: { type: string } } } } } }
       responses: { "200": { description: "{ride, incident?}" } }
 
@@ -263,7 +272,7 @@ paths:
       responses: { "200": { description: result }, "404": { description: no such customer } }
   /admin/customers/{key}/backdate:
     post:
-      summary: "A ride that already happened, invented for testing claims (Stellwerk `backdate`). Body {from, to, delay_minutes=70, days_ago=1, departure=\"08:12\" (German local time), duration_minutes=52, line, category=re, operator, ticket, cancelled}. No feed is asked: the trip id is the server's, the times are computed, the station ids come from the geocoder when it answers. Writes what an arrival writes — an arrived journey, its one leg, and the case the rules allow — so bundles, the monthly cap and deadlines see ordinary rows; the evidence names the Stellwerk and the case counts as self-entered. Answers {customer, journey, ride, incident, new_badge, points, operator_known}."
+      summary: "A ride that already happened, invented for testing claims (Stellwerk `backdate`). Body {from, to, delay_minutes=70, days_ago=1, departure=\"08:12\" (German local time), duration_minutes=52, line, category=re, operator, ticket (a fare product such as bahncard100 or einzel_db, or a legacy type), price_cents (a single ticket's fare), cancelled}. No feed is asked: the trip id is the server's, the times are computed, the station ids come from the geocoder when it answers. Writes what an arrival writes — an arrived journey, its one leg, and the case the rules allow — so bundles, the monthly cap and deadlines see ordinary rows; the evidence names the Stellwerk and the case counts as self-entered. Answers {customer, journey, ride, incident, new_badge, points, operator_known}."
       parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
       requestBody:
         required: true
@@ -282,7 +291,8 @@ paths:
                 line: { type: string }
                 category: { type: string, enum: [s, rb, re, fern, bus] }
                 operator: { type: string }
-                ticket: { type: string, enum: [deutschlandticket, zeitkarte, einzelfahrkarte] }
+                ticket: { type: string, description: "A fare product id or deutschlandticket | zeitkarte | einzelfahrkarte" }
+                price_cents: { type: integer }
                 cancelled: { type: boolean }
       responses: { "200": { description: The invented ride and its case }, "400": { description: "Bad times, an unknown category or ticket, or a ride that would still be running" }, "404": { description: no such customer } }
   /admin/scan:
@@ -343,6 +353,23 @@ paths:
 
 components:
   schemas:
+    NewTicket:
+      type: object
+      required: [product]
+      properties:
+        product: { type: string, description: "A catalogue product id (GET /v1/fares)" }
+        first_class: { type: boolean }
+        label: { type: string }
+        number: { type: string }
+        booking_ref: { type: string }
+        birth_date: { type: string, format: date }
+        price_cents: { type: integer, description: "A single ticket: its fare. A season ticket: the price of its cap's window (optional)." }
+        valid_from: { type: string, format: date }
+        valid_until: { type: string, format: date }
+        origin_station_id: { type: string }
+        origin_station_name: { type: string }
+        destination_station_id: { type: string }
+        destination_station_name: { type: string }
     CheckIn:
       type: object
       required: [trip_id, from_station_id, from_station_name, exit_station_id, exit_station_name]
