@@ -96,6 +96,10 @@ class DemoState extends ChangeNotifier {
   bool notificationsGranted = true;
   LocationMode locationMode = LocationMode.always;
   TicketType ticket = TicketType.deutschlandticket;
+
+  /// The passenger's tickets in Demo mode (#66), as the server would keep them. Seeded on first
+  /// read by the demo repository with a D-Ticket.
+  final List<Map<String, dynamic>> demoTickets = [];
   String ngoId = 'bahnhofsmission';
   bool personalDataEntered = false;
 

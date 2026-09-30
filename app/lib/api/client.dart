@@ -236,6 +236,15 @@ class ApiClient {
 
   // -- rides ----------------------------------------------------------------
 
+  // -- fares and tickets (#66) ------------------------------------------------
+
+  Future<ApiFares> fares() async => ApiFares.fromJson(_map(await _get('/v1/fares')));
+  Future<List<ApiTicket>> tickets({bool all = false}) async =>
+      _list(_map(await _get('/v1/me/tickets', all ? {'all': 'true'} : null))['tickets']).map(ApiTicket.fromJson).toList();
+  Future<ApiTicket> createTicket(TicketInput t) async => ApiTicket.fromJson(_map(await _post('/v1/me/tickets', t.toJson())));
+  Future<ApiTicket> updateTicket(String id, TicketInput t) async => ApiTicket.fromJson(_map(await _patch('/v1/me/tickets/${Uri.encodeComponent(id)}', t.toJson())));
+  Future<void> archiveTicket(String id) async => _delete('/v1/me/tickets/${Uri.encodeComponent(id)}');
+
   Future<List<ApiRide>> rides() async => _list(await _get('/v1/rides')).map(ApiRide.fromJson).toList();
 
 

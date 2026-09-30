@@ -445,11 +445,15 @@ String hyphenateToFit(String name, TextStyle style, double maxWidth) {
 
 /// Settings row with a switch on the right.
 class SwitchRow extends StatelessWidget {
-  const SwitchRow({super.key, required this.title, this.subtitle, required this.value, required this.onChanged});
+  const SwitchRow({super.key, required this.title, this.subtitle, required this.value, required this.onChanged, this.divider = true});
   final String title;
   final String? subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
+
+  /// The line under the row. Off for the last row of a card: a line under the last row is a line
+  /// under nothing (STYLE.md).
+  final bool divider;
 
   @override
   Widget build(BuildContext context) {
@@ -473,7 +477,7 @@ class SwitchRow extends StatelessWidget {
             ],
           ),
         ),
-        const VRule(),
+        if (divider) const VRule(),
       ],
     );
   }

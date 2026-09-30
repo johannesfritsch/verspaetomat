@@ -246,39 +246,6 @@ mod tests {
         assert_eq!((rule.deadline.months, rule.deadline.aim_months), (LEGAL_DEADLINE_MONTHS, AIM_MONTHS));
     }
 
-    fn incident(day: u32, status: IncidentStatus, amount: Cents) -> IncidentRow {
-        IncidentRow {
-            id: Uuid::new_v4(),
-            customer_id: Uuid::nil(),
-            ride_id: None,
-            ride_date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
-            line: "RE 1".into(),
-            from_name: "A".into(),
-            to_name: "B".into(),
-            delay_min: 70,
-            amount_cents: amount,
-            ticket: TicketType::Deutschlandticket,
-            operator: "DB Regio NRW".into(),
-            desk: "DB".into(),
-            status,
-            cancelled: false,
-            self_entered: false,
-            ngo_id: "bahnhofsmission".into(),
-            claim_id: None,
-            fare_cents: None,
-            legal_deadline: NaiveDate::from_ymd_opt(2026, 12, day).unwrap(),
-            evidence: None,
-            created_at: chrono::Utc::now(),
-            journey_id: None,
-            discarded_at: None,
-            discard_reason: None,
-            confirmed_cents: None,
-            ticket_id: None,
-            first_class: None,
-            window_key: None,
-        }
-    }
-
     /// docs/23 §2: a ride logged by accident can go — unless it is already out of the house.
     #[test]
     fn deleting_a_ride() {

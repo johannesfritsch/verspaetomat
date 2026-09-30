@@ -322,11 +322,30 @@ void main() {
     await tester.tap(find.widgetWithText(VPrimaryButton, 'Weiter').first, warnIfMissed: false);
     await wait(tester, 1400);
     await shot('einchecken-fahrkarte');
+    // #66: the single ticket opens its fare and class in place.
+    await tester.tap(find.byKey(const Key('ticket-single')), warnIfMissed: false);
+    await wait(tester, 600);
+    await shot('einchecken-einzelfahrkarte');
+    // Back to the D-Ticket first: open, the fields make the sheet tall enough to cover the spot
+    // `dismissSheet` taps, and a check-in left open refuses the next one.
+    await tester.tap(find.byKey(const Key('ticket-deutschlandticket')), warnIfMissed: false);
+    await wait(tester, 600);
     await dismissSheet(tester);
     await dismissSheet(tester);
     demo.reset();
     // docs/24 §3: the pause, and the one line on Home that says it is running.
+    // #66: Deine Fahrkarten, adding one, and one product's form.
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.tickets);
+    await wait(tester, 1200);
+    await shot('fahrkarten');
+    await tester.tap(find.byKey(const Key('fahrkarte-neu')), warnIfMissed: false);
+    await wait(tester, 1200);
+    await shot('fahrkarte-neu');
+    await tester.tap(find.byKey(const Key('familie-bahncard100')), warnIfMissed: false);
+    await wait(tester, 1200);
+    await shot('fahrkarte-bahncard100');
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.settings);
+    await wait(tester, 600);
     await shot('einstellungen-pausieren');
     await tester.tap(find.byKey(const Key('pausieren')));
     await wait(tester, 900);
@@ -498,7 +517,10 @@ void main() {
     demo.noHistory = true;
     await tab(Routes.home, 'bahnsteig-idle');
     await tester.tap(find.byKey(const Key('einchecken-cta')));
-    await wait(tester, 1000);
+    // The station is found asynchronously; wait for it as the workflow E2E does, not a fixed second.
+    for (var i = 0; i < 100 && find.byKey(const Key('von-detected')).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
     await tester.tap(find.byKey(const Key('von-detected')));
     await wait(tester, 1200);
     await shot('einchecken-wohin-leer');

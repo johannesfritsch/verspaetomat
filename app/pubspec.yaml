@@ -77,6 +77,9 @@ flutter:
 
   assets:
     - assets/beispiel-antrag.pdf
+    # The fare catalogue as GET /v1/fares serves it (#66): Demo mode reads it instead of a copy of
+    # the rules. Refresh with `curl https://api.staging.verspaetomat.de/v1/fares > assets/demo/fares.json`.
+    - assets/demo/fares.json
     - assets/achievements/
     - assets/header/
     - assets/sheet/

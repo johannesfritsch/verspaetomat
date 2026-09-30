@@ -1,0 +1,469 @@
+{
+ "families": [
+  "deutschlandticket",
+  "bahncard100",
+  "zeitkarte",
+  "streckenzeitkarte",
+  "einzelfahrkarte",
+  "laender_ticket"
+ ],
+ "fares": [
+  {
+   "caveat": "Ob die Bahn im Regionalzug 10 \u20ac zahlt oder die Regel des beigelegten Deutschlandtickets anwendet, ist noch nicht gekl\u00e4rt.",
+   "family": "bahncard100",
+   "fields": {
+    "birth_date": true,
+    "first_class": true,
+    "number": "bahncard",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "bahncard100",
+   "list_price_cents": 489900,
+   "list_price_first_cents": 799900,
+   "name": "BahnCard 100",
+   "offer": "with_caveat",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten 10 \u20ac je Fahrt, in der 1. Klasse 15 \u20ac.",
+   "tariff": "Bef\u00f6rderungsbedingungen der DB (BB Personenverkehr)",
+   "threshold_min": 60,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": true,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "deutschlandticket",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "abo",
+    "price": "optional",
+    "route": false,
+    "validity": "none"
+   },
+   "id": "deutschlandticket",
+   "list_price_cents": 6300,
+   "list_price_first_cents": null,
+   "name": "Deutschlandticket",
+   "offer": "offered",
+   "reduced_fare": true,
+   "release_after_min": 0,
+   "rule_line": "Ab 20 Minuten z\u00e4hlt jede Versp\u00e4tung mit. Je volle Stunde 1,50 \u20ac, gesammelt \u00fcber Monate.",
+   "tariff": "Deutschlandtarif",
+   "threshold_min": 20,
+   "ticket": "deutschlandticket",
+   "valid_on": {
+    "extra_routes": [
+     "ic-bremen-norddeich",
+     "ic-bremen-emden",
+     "ic-stuttgart-singen",
+     "ic-rostock-stralsund",
+     "ice-rostock-hamburg",
+     "ic-erfurt-gera",
+     "ic-dresden-chemnitz",
+     "ic-dortmund-dillenburg"
+    ],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "einzelfahrkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "booking",
+    "price": "required",
+    "route": false,
+    "validity": "none"
+   },
+   "id": "einzel_db",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Einzelfahrkarte (Flexpreis, Sparpreis)",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die H\u00e4lfte.",
+   "tariff": "Bef\u00f6rderungsbedingungen der DB (BB Personenverkehr)",
+   "threshold_min": 60,
+   "ticket": "einzelfahrkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": true,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "einzelfahrkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "booking",
+    "price": "required",
+    "route": false,
+    "validity": "none"
+   },
+   "id": "einzel_flixtrain",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "FlixTrain",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 0,
+   "rule_line": "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die H\u00e4lfte.",
+   "tariff": "FlixTrain",
+   "threshold_min": 60,
+   "ticket": "einzelfahrkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": true,
+    "regional": false
+   }
+  },
+  {
+   "caveat": null,
+   "family": "einzelfahrkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "booking",
+    "price": "required",
+    "route": false,
+    "validity": "none"
+   },
+   "id": "einzel_nah",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Einzelfahrkarte Nahverkehr",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die H\u00e4lfte.",
+   "tariff": "Deutschlandtarif",
+   "threshold_min": 60,
+   "ticket": "einzelfahrkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "laender_ticket",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "booking",
+    "price": "optional",
+    "route": false,
+    "validity": "day"
+   },
+   "id": "laender_ticket",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "L\u00e4nder-Ticket oder Quer-durchs-Land",
+   "offer": "offered",
+   "reduced_fare": true,
+   "release_after_min": 0,
+   "rule_line": "Ab 20 Minuten z\u00e4hlt jede Versp\u00e4tung mit. Je volle Stunde am selben Tag 1,50 \u20ac.",
+   "tariff": "Deutschlandtarif",
+   "threshold_min": 20,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "streckenzeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": true,
+    "validity": "range"
+   },
+   "id": "streckenzeitkarte",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Streckenzeitkarte ICE oder IC",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 20 Minuten z\u00e4hlt jede Versp\u00e4tung mit. Je volle Stunde 5 \u20ac, in der 1. Klasse 7,50 \u20ac.",
+   "tariff": "Bef\u00f6rderungsbedingungen der DB (BB Personenverkehr)",
+   "threshold_min": 20,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": true,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "zeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "zeitkarte_dt",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Monats- oder Jahreskarte Deutschlandtarif",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 20 Minuten z\u00e4hlt jede Versp\u00e4tung mit. Je volle Stunde 1,50 \u20ac.",
+   "tariff": "Deutschlandtarif",
+   "threshold_min": 20,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "zeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "zeitkarte_hvv",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Monats- oder Jahreskarte hvv",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "tariff": "hvv",
+   "threshold_min": 60,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "zeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "zeitkarte_mvv",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Monats- oder Jahreskarte MVV",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt.",
+   "tariff": "MVV",
+   "threshold_min": 60,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "zeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "zeitkarte_niedersachsen",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Monats- oder Jahreskarte Niedersachsentarif",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 20 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "tariff": "Niedersachsentarif",
+   "threshold_min": 20,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "zeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "zeitkarte_rmv",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Monats- oder Jahreskarte RMV",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "tariff": "RMV",
+   "threshold_min": 60,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "zeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "zeitkarte_sh",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Monats- oder Jahreskarte SH-Tarif",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "tariff": "SH-Tarif",
+   "threshold_min": 60,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "zeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "zeitkarte_spnv",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Monats- oder Jahreskarte (anderer Verbund)",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "tariff": "Fahrgastrechte im SPNV (gemeinsamer Text der Verb\u00fcnde)",
+   "threshold_min": 60,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "zeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "zeitkarte_vbb",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Monats- oder Jahreskarte VBB",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "tariff": "VBB",
+   "threshold_min": 60,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  },
+  {
+   "caveat": null,
+   "family": "zeitkarte",
+   "fields": {
+    "birth_date": false,
+    "first_class": true,
+    "number": "zeitkarte",
+    "price": "optional",
+    "route": false,
+    "validity": "range"
+   },
+   "id": "zeitkarte_vrr_nrw",
+   "list_price_cents": null,
+   "list_price_first_cents": null,
+   "name": "Monats- oder Jahreskarte in NRW (VRR, VRS, AVV, Westfalen)",
+   "offer": "offered",
+   "reduced_fare": false,
+   "release_after_min": 20,
+   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, ab drei Fahrten im Monat.",
+   "tariff": "Verbund- und Gemeinschaftstarife in NRW (VRR, VRS, AVV, WestfalenTarif, NRW-Tarif)",
+   "threshold_min": 60,
+   "ticket": "zeitkarte",
+   "valid_on": {
+    "extra_routes": [],
+    "long_distance": false,
+    "regional": true
+   }
+  }
+ ]
+}

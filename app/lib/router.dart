@@ -51,6 +51,7 @@ class Routes {
   static const cause = '/cause'; // ?id=bahnhofsmission
   static const history = '/history';
   static const settings = '/settings';
+  static const tickets = '/settings/tickets'; // Deine Fahrkarten (#66)
   static const dataSources = '/settings/data-sources';
 
   /// docs/25 §5: the debug page. In every build, release included (issue #29).

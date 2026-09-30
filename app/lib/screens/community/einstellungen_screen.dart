@@ -4,7 +4,6 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
-import '../../mock/mock_data.dart';
 import '../../platform/geofence.dart';
 import '../../platform/geofence_sync.dart';
 import '../../repo/repo_scope.dart';
@@ -32,7 +31,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     final session = RepoScope.of(context);
     final me = session.me;
     final settings = me?.settings;
-    final ticket = settings?.ticket ?? state.ticket;
     final ngoId = settings?.ngoId ?? state.ngoId;
     final ngoName = session.ngos.where((n) => n.id == ngoId).map((n) => n.name).firstOrNull ?? state.ngo.name;
     final locationMode = settings?.locationMode ?? state.locationMode;
@@ -48,11 +46,14 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
         children: [
           const VGap.m(),
           const VSection('Fahren'),
+          // The tickets are their own page now (#66): each with its product, class and price, and
+          // the one used last is the one the check-in offers first.
           VListRow(
-            title: 'Ticket',
-            subtitle: ticket.label,
+            key: const Key('einstellungen-fahrkarten'),
+            title: 'Fahrkarten',
+            subtitle: 'Welche du hast, und was sie bringen',
             chevron: true,
-            onTap: () => _pickTicket(context, session, ticket),
+            onTap: () => context.push(Routes.tickets),
           ),
           VListRow(
             title: 'Zweck',
@@ -268,41 +269,6 @@ class _EinstellungenScreenState extends State<EinstellungenScreen> {
     if (!granted && context.mounted) {
       showSnack(context, 'Dein Telefon lässt keine Mitteilungen zu. Du kannst sie in den Systemeinstellungen erlauben.');
     }
-  }
-
-  void _pickTicket(BuildContext context, Session session, TicketType current) {
-    showVSheet(
-      context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.only(bottom: VSpace.l),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const VSheetHeader(title: 'Dein Ticket', subtitle: 'Bestimmt, was eine Verspätung wert ist'),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(VSpace.page, VSpace.s, VSpace.page, 0),
-              child: Column(
-                children: [
-                  for (final t in TicketType.values) ...[
-                    VChoiceCard(
-                      title: t.label,
-                      subtitle: t.rule,
-                      selected: current == t,
-                      onTap: () {
-                        session.updateSettings(MePatch(ticket: t));
-                        Navigator.of(ctx).pop();
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   void _mutedStations(BuildContext context) {

@@ -331,8 +331,13 @@ Future<ApiItinerary?> chooseJourney(WidgetTester tester, String search, {require
   // impossible.
   await tapText(tester, 'Weiter');
   await pumpUntilFound(tester, find.text('Fahrkarte auswählen'), timeout: const Duration(seconds: 20));
+  // The ticket by its product (#66): a saved one carries the product's key, and so does the
+  // shortcut to add one when none covers the connection. A long-distance train is the
+  // Streckenzeitkarte, which is what the old „Zeitkarte" stood for there.
   final longDistance = picked.legs.any((l) => l.category == ApiCategory.fern);
-  await tester.tap(find.byKey(Key(longDistance ? 'ticket-zeitkarte' : 'ticket-deutschlandticket')), warnIfMissed: false);
+  final ticketKey = Key(longDistance ? 'ticket-streckenzeitkarte' : 'ticket-deutschlandticket');
+  await pumpUntilFound(tester, find.byKey(ticketKey), timeout: const Duration(seconds: 20));
+  await tester.tap(find.byKey(ticketKey), warnIfMissed: false);
   await settle(tester);
   await tapText(tester, 'Jetzt einchecken');
   return picked;

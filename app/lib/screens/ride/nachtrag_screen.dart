@@ -7,6 +7,7 @@ import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'ride_widgets.dart';
+import '../tickets/tickets.dart';
 
 /// E4: forgot to check in. One point, claimable if the feed shows a delay, never ranks.
 class NachtragScreen extends StatefulWidget {
@@ -28,10 +29,74 @@ class _NachtragScreenState extends State<NachtragScreen> {
   bool _sending = false;
   String? _error;
 
+  /// The ticket the ride was on (#66): the one used last, until the passenger says otherwise.
+  /// Null against a server from before tickets, which then takes the setting.
+  List<ApiTicket> _tickets = const [];
+  ApiTicket? _ticket;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadStation());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadStation();
+      _loadTickets();
+    });
+  }
+
+  Future<void> _loadTickets() async {
+    try {
+      final list = await RepoScope.read(context).repo.tickets();
+      if (!mounted) return;
+      setState(() {
+        _tickets = list;
+        _ticket ??= list.firstOrNull;
+      });
+    } catch (_) {
+      // A server from before tickets: the section stays away.
+    }
+  }
+
+  Future<void> _pickTicket() async {
+    final picked = await showVSheet<Object>(
+      context,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.only(bottom: VSpace.l),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const VSheetHeader(title: 'Mit welcher Fahrkarte?'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+              child: VCard(
+                padding: const EdgeInsets.symmetric(horizontal: VSpace.cardTight),
+                child: Column(
+                  children: [
+                    for (final t in _tickets)
+                      VOptionRow(
+                        leading: VIconBadge(icon: TicketFamily.of(t.family).icon, tone: VBadgeTone.neutral, size: VControl.badgeSmall, iconColor: VColors.ink2),
+                        title: t.name,
+                        subtitle: t.ruleLine,
+                        onTap: () => Navigator.of(ctx).pop(t),
+                      ),
+                    VOptionRow(title: 'Andere Fahrkarte', subtitle: 'Hinzufügen', divider: false, onTap: () => Navigator.of(ctx).pop('add')),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (picked is ApiTicket) setState(() => _ticket = picked);
+    if (picked == 'add') {
+      final t = await addTicket(context, single: true);
+      if (t != null && mounted) {
+        await _loadTickets();
+        setState(() => _ticket = t);
+      }
+    }
   }
 
   Future<void> _loadStation() async {
@@ -103,6 +168,7 @@ class _NachtragScreenState extends State<NachtragScreen> {
         exitStationId: exit.stationId ?? exit.name,
         exitStationName: exit.name,
         date: date,
+        ticketId: _ticket?.id,
       ));
       if (!mounted) return;
       final d = result.ride.finalDelayMinutes ?? 0;
@@ -162,6 +228,12 @@ class _NachtragScreenState extends State<NachtragScreen> {
           VSection('Bahnhof', trailing: InkWell(onTap: _search, child: Padding(padding: const EdgeInsets.all(8), child: Text('Ändern', style: VText.bodySStrong)))),
           const VGap.s(),
           Text(_station?.name ?? '–', style: VText.bodyStrong),
+          if (_ticket != null) ...[
+            const VGap.l(),
+            VSection('Fahrkarte', trailing: InkWell(key: const Key('nachtrag-fahrkarte'), onTap: _pickTicket, child: Padding(padding: const EdgeInsets.all(8), child: Text('Ändern', style: VText.bodySStrong)))),
+            const VGap.s(),
+            Text(_ticket!.name, style: VText.bodyStrong),
+          ],
           const VGap.l(),
           const VSection('Zug'),
           if (_loading) const VSkeletonList(rows: 4),

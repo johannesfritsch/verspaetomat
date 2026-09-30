@@ -8,6 +8,8 @@ import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'angekommen_screen.dart' show ArrivalArt;
 import 'ride_widgets.dart';
+import '../community/community_widgets.dart' show SwitchRow;
+import '../tickets/tickets.dart';
 
 // The full screen that used to live here is gone: every train choice is a sheet now
 // (docs/29). `WelcherZugList` below is the shared body it always was.
@@ -147,11 +149,11 @@ class _WelcherZugListState extends State<WelcherZugList> {
       await _start(it, null);
       return;
     }
-    final started = await showTicketChoiceSheet(context, itinerary: it, fromStationName: widget.fromStationName, onCheckin: (t) => _start(it, t, rethrowErrors: true));
+    final started = await showTicketChoiceSheet(context, itinerary: it, fromStationName: widget.fromStationName, onCheckin: (choice, legacy) => _start(it, legacy, choice: choice, rethrowErrors: true));
     if (started == true && mounted) widget.onStarted();
   }
 
-  Future<void> _start(ApiItinerary it, TicketType? ticket, {bool rethrowErrors = false}) async {
+  Future<void> _start(ApiItinerary it, TicketType? ticket, {JourneyTicketChoice? choice, bool rethrowErrors = false}) async {
     final session = RepoScope.read(context);
     setState(() => _sending = true);
     try {
@@ -170,6 +172,7 @@ class _WelcherZugListState extends State<WelcherZugList> {
         toStationName: widget.toStationName,
         legs: it.legs,
         ticket: ticket,
+        tickets: choice == null ? null : [choice],
         location: loc,
         fromLat: widget.fromLat,
         fromLon: widget.fromLon,
@@ -406,19 +409,24 @@ class _Pill extends StatelessWidget {
   }
 }
 
-/// „Fahrkarte auswählen" (#67): after Weiter, before the journey starts. The platform drawing with
-/// the station you are leaving from on its sign, the connection in one line, the three tickets,
-/// and „Jetzt einchecken". The ticket goes with this journey only; the setting stays as it was.
+/// „Fahrkarte auswählen" (#67, #66): after Weiter, before the journey starts. The platform drawing
+/// with the station you are leaving from on its sign, the connection in one line, the passenger's
+/// own tickets (the one used last first), a single ticket for this ride, and „Andere Fahrkarte".
+/// The sentence under the choice is the catalogue's, so what the app says a ticket brings is what
+/// the server will count.
 ///
-/// The Deutschlandticket is greyed out when a long-distance train is part of the connection: it
-/// does not cover one, so whoever sits in it holds another ticket.
+/// A ticket that does not cover a train of this connection is greyed out with the reason: the
+/// Deutschlandticket does not cover an ICE, so whoever sits in one holds another ticket.
+///
+/// On a first ride there are no tickets yet: the common ones are offered to add right here. And a
+/// server from before tickets gets the three types it knows.
 ///
 /// Returns true when the journey started; the caller then closes the check-in and goes home.
 Future<bool?> showTicketChoiceSheet(
   BuildContext context, {
   required ApiItinerary itinerary,
   required String fromStationName,
-  required Future<void> Function(TicketType ticket) onCheckin,
+  required Future<void> Function(JourneyTicketChoice? choice, TicketType legacy) onCheckin,
 }) {
   return showVSheet<bool>(
     context,
@@ -426,53 +434,142 @@ Future<bool?> showTicketChoiceSheet(
   );
 }
 
+/// What is chosen: a ticket the passenger has, a new one of a product, or the single ticket.
+class _Pick {
+  const _Pick.ticket(String this.ticketId) : product = null, single = false;
+  const _Pick.product(String this.product) : ticketId = null, single = false;
+  const _Pick.single() : ticketId = null, product = null, single = true;
+  final String? ticketId;
+  final String? product;
+  final bool single;
+
+  @override
+  bool operator ==(Object other) => other is _Pick && other.ticketId == ticketId && other.product == product && other.single == single;
+
+  @override
+  int get hashCode => Object.hash(ticketId, product, single);
+}
+
 class _TicketChoice extends StatefulWidget {
   const _TicketChoice({required this.itinerary, required this.fromStationName, required this.onCheckin});
   final ApiItinerary itinerary;
   final String fromStationName;
-  final Future<void> Function(TicketType ticket) onCheckin;
+  final Future<void> Function(JourneyTicketChoice? choice, TicketType legacy) onCheckin;
 
   @override
   State<_TicketChoice> createState() => _TicketChoiceState();
 }
 
 class _TicketChoiceState extends State<_TicketChoice> {
-  TicketType? _ticket;
+  TicketBook? _book;
+  bool _legacyOnly = false;
+  _Pick? _pick;
+  TicketType? _legacy;
+  final _price = TextEditingController();
+  bool _first = false;
   bool _busy = false;
   String? _error;
 
   bool get _longDistance => widget.itinerary.legs.any((l) => l.category == ApiCategory.fern);
 
-  bool _allowed(TicketType t) => !(t == TicketType.deutschlandticket && _longDistance);
+  /// The single ticket's product: DB's for a long-distance journey, the Deutschlandtarif's for a
+  /// regional one.
+  String get _singleProduct => _longDistance ? 'einzel_db' : 'einzel_nah';
+
+  /// The first ride's shortcuts: the families that are one product each.
+  static const _quick = ['deutschlandticket', 'bahncard100', 'streckenzeitkarte', 'laender_ticket'];
 
   @override
   void initState() {
     super.initState();
-    final current = RepoScope.read(context).me?.settings.ticket;
-    if (current != null && _allowed(current)) _ticket = current;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
-  static IconData _icon(TicketType t) => switch (t) {
-        TicketType.deutschlandticket => Icons.confirmation_number,
-        TicketType.zeitkarte => Icons.badge_outlined,
-        TicketType.einzelfahrkarte => Icons.receipt_long_outlined,
-      };
+  @override
+  void dispose() {
+    _price.dispose();
+    super.dispose();
+  }
 
-  String _hint(TicketType t) => switch (t) {
-        TicketType.deutschlandticket => _longDistance ? 'Gilt nicht im Fernverkehr.' : 'Nah- und Regionalverkehr.',
-        TicketType.zeitkarte => 'BahnCard 100, Monats- oder Jahreskarte.',
-        TicketType.einzelfahrkarte => 'Für genau diese Fahrt gekauft.',
-      };
+  Future<void> _load({String? select}) async {
+    try {
+      final b = await TicketBook.load(context);
+      if (!mounted) return;
+      setState(() {
+        _book = b;
+        if (select != null) {
+          _pick = _Pick.ticket(select);
+        } else {
+          _pick ??= b.tickets.where((t) => _covers(b.fares.byId(t.product))).map((t) => _Pick.ticket(t.id)).firstOrNull;
+        }
+      });
+    } catch (_) {
+      // A server from before tickets (#66): the three types it knows.
+      if (!mounted) return;
+      final current = RepoScope.read(context).me?.settings.ticket;
+      setState(() {
+        _legacyOnly = true;
+        if (current != null && _legacyAllowed(current)) _legacy = current;
+      });
+    }
+  }
+
+  bool _covers(ApiFare? fare) => fare == null || !_longDistance || fare.validLongDistance;
+
+  bool _legacyAllowed(TicketType t) => !(t == TicketType.deutschlandticket && _longDistance);
+
+  static IconData _legacyIcon(TicketType t) => switch (t) {
+    TicketType.deutschlandticket => Icons.confirmation_number,
+    TicketType.zeitkarte => Icons.badge_outlined,
+    TicketType.einzelfahrkarte => Icons.receipt_long_outlined,
+  };
+
+  String _legacyHint(TicketType t) => switch (t) {
+    TicketType.deutschlandticket => _longDistance ? 'Gilt nicht im Fernverkehr.' : 'Nah- und Regionalverkehr.',
+    TicketType.zeitkarte => 'BahnCard 100, Monats- oder Jahreskarte.',
+    TicketType.einzelfahrkarte => 'Für genau diese Fahrt gekauft.',
+  };
+
+  ApiFare? get _pickedFare {
+    final b = _book;
+    final p = _pick;
+    if (b == null || p == null) return null;
+    if (p.single) return b.fares.byId(_singleProduct);
+    if (p.product != null) return b.fares.byId(p.product!);
+    final t = b.tickets.where((t) => t.id == p.ticketId).firstOrNull;
+    return t == null ? null : b.fares.byId(t.product);
+  }
+
+  Future<void> _addOther() async {
+    final t = await addTicket(context);
+    if (t != null && mounted) await _load(select: t.id);
+  }
 
   Future<void> _checkin() async {
-    final t = _ticket;
-    if (t == null) return;
+    JourneyTicketChoice? choice;
+    TicketType legacy;
+    if (_legacyOnly) {
+      if (_legacy == null) return;
+      legacy = _legacy!;
+    } else {
+      final p = _pick;
+      final fare = _pickedFare;
+      if (p == null) return;
+      if (p.single && _price.text.trim().isNotEmpty && parseEuro(_price.text) == null) {
+        setState(() => _error = 'Der Fahrpreis ist keine Zahl.');
+        return;
+      }
+      choice = p.ticketId != null
+          ? JourneyTicketChoice.existing(p.ticketId!)
+          : JourneyTicketChoice.adding(TicketInput(product: p.single ? _singleProduct : p.product!, firstClass: p.single && _first, priceCents: p.single ? parseEuro(_price.text) : null));
+      legacy = fare?.ticket ?? TicketType.deutschlandticket;
+    }
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await widget.onCheckin(t);
+      await widget.onCheckin(choice, legacy);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
@@ -484,6 +581,95 @@ class _TicketChoiceState extends State<_TicketChoice> {
     }
   }
 
+  List<Widget> _options() {
+    if (_legacyOnly) {
+      return [
+        for (final t in TicketType.values) ...[
+          _TicketOption(
+            key: Key('ticket-${t.name}'),
+            icon: _legacyIcon(t),
+            title: t.label,
+            hint: _legacyHint(t),
+            selected: _legacy == t,
+            enabled: _legacyAllowed(t) && !_busy,
+            onTap: () => setState(() => _legacy = t),
+          ),
+          const VGap.s(),
+        ],
+      ];
+    }
+    final b = _book;
+    if (b == null) return const [VSkeletonCard(), VGap.s()];
+    final seen = <String>{};
+    final out = <Widget>[];
+    void option({required Key key, required IconData icon, required String title, required String hint, required _Pick pick, required bool enabled}) {
+      out
+        ..add(_TicketOption(key: key, icon: icon, title: title, hint: hint, selected: _pick == pick, enabled: enabled && !_busy, onTap: () => setState(() => _pick = pick)))
+        ..add(const VGap.s());
+    }
+
+    for (final t in b.tickets) {
+      final fare = b.fares.byId(t.product);
+      final covers = _covers(fare);
+      // The first ticket of a product carries the product's key: the E2E picks by product.
+      final key = seen.add(t.product) ? Key('ticket-${t.product}') : Key('ticket-${t.id}');
+      option(
+        key: key,
+        icon: TicketFamily.of(t.family).icon,
+        title: t.name,
+        hint: covers ? (ticketMissing(t, fare) ?? (fare?.validLongDistance == false ? 'Nah- und Regionalverkehr.' : (t.firstClass ? '1. Klasse.' : '2. Klasse.'))) : 'Gilt nicht im Fernverkehr.',
+        pick: _Pick.ticket(t.id),
+        enabled: covers,
+      );
+    }
+    // The shortcuts: on a first ride, and whenever none of the passenger's tickets covers this
+    // connection (a D-Ticket holder boarding an ICE holds another ticket for it).
+    final covered = b.tickets.any((t) => _covers(b.fares.byId(t.product)));
+    if (b.tickets.isEmpty || !covered) {
+      for (final id in _quick) {
+        final fare = b.fares.inFamily(id).firstOrNull;
+        if (fare == null || b.tickets.any((t) => t.product == fare.id)) continue;
+        final covers = _covers(fare);
+        option(
+          key: Key('ticket-${fare.id}'),
+          icon: TicketFamily.of(id).icon,
+          title: fare.name,
+          hint: covers ? (fare.validLongDistance ? 'Nah- und Fernverkehr.' : 'Nah- und Regionalverkehr.') : 'Gilt nicht im Fernverkehr.',
+          pick: _Pick.product(fare.id),
+          enabled: covers,
+        );
+      }
+    }
+    option(key: const Key('ticket-single'), icon: Icons.receipt_long_outlined, title: 'Einzelfahrkarte', hint: 'Für genau diese Fahrt gekauft.', pick: const _Pick.single(), enabled: true);
+    if (_pick?.single ?? false) {
+      out
+        ..add(
+          VCard(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.cardTight),
+            child: Column(
+              children: [
+                TicketField(
+                  key: const Key('ticket-single-preis'),
+                  label: 'Fahrpreis',
+                  hint: 'Kannst du auch später eintragen',
+                  controller: _price,
+                  keyboard: const TextInputType.numberWithOptions(decimal: true),
+                  suffix: '€',
+                ),
+                const VDivider(),
+                SwitchRow(title: '1. Klasse', value: _first, divider: false, onChanged: (v) => setState(() => _first = v)),
+              ],
+            ),
+          ),
+        )
+        ..add(const VGap.s());
+    }
+    out
+      ..add(VGhostButton(key: const Key('ticket-add'), label: 'Andere Fahrkarte', icon: Icons.add, onTap: _busy ? null : _addOther))
+      ..add(const VGap.s());
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     final it = widget.itinerary;
@@ -492,6 +678,8 @@ class _TicketChoiceState extends State<_TicketChoice> {
     final dep = first?.liveDeparture ?? first?.plannedDeparture ?? it.plannedDeparture;
     final arr = last?.liveArrival ?? last?.plannedArrival ?? it.liveArrival ?? it.plannedArrival;
     final lines = it.legs.map((l) => l.line).where((l) => l.isNotEmpty).join(' · ');
+    final fare = _legacyOnly ? null : _pickedFare;
+    final ready = _legacyOnly ? _legacy != null : _pick != null;
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.l),
       child: Column(
@@ -512,6 +700,7 @@ class _TicketChoiceState extends State<_TicketChoice> {
               ),
             ],
           ),
+          // No scroll view of its own: showVSheet already scrolls a sheet taller than the screen.
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: VSpace.sheet),
             child: Column(
@@ -521,29 +710,19 @@ class _TicketChoiceState extends State<_TicketChoice> {
                 const VGap.xs(),
                 Text('Für die Verbindung ${fmtLocal(dep)} → ${fmtLocal(arr)}${lines.isEmpty ? '' : ' ($lines)'}', style: VText.body.copyWith(color: VColors.ink2)),
                 const VGap.m(),
-                for (final t in TicketType.values) ...[
-                  _TicketOption(
-                    key: Key('ticket-${t.name}'),
-                    icon: _icon(t),
-                    title: t.label,
-                    hint: _hint(t),
-                    selected: _ticket == t,
-                    enabled: _allowed(t) && !_busy,
-                    onTap: () => setState(() => _ticket = t),
+                ..._options(),
+                if (fare != null) ...[
+                  Text(
+                    fare.ruleLine,
+                    key: const Key('ticket-regel'),
+                    style: VText.bodyS.copyWith(color: VColors.ink2),
                   ),
+                  if (fare.caveat != null) ...[const SizedBox(height: 2), Text(fare.caveat!, style: VText.bodyS.copyWith(color: VColors.ink3))],
                   const VGap.s(),
                 ],
-                if (_error != null) ...[
-                  Text(_error!, style: VText.bodyS.copyWith(color: VColors.red)),
-                  const VGap.s(),
-                ],
+                if (_error != null) ...[Text(_error!, style: VText.bodyS.copyWith(color: VColors.red)), const VGap.s()],
                 const VGap.s(),
-                VPrimaryButton(
-                  label: 'Jetzt einchecken',
-                  trailingIcon: Icons.arrow_forward,
-                  busy: _busy,
-                  onTap: _ticket == null || _busy ? null : _checkin,
-                ),
+                VPrimaryButton(label: 'Jetzt einchecken', trailingIcon: Icons.arrow_forward, busy: _busy, onTap: !ready || _busy ? null : _checkin),
               ],
             ),
           ),

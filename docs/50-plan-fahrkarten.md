@@ -395,3 +395,17 @@ Abweichungen vom Plan und was offen bleibt:
 - Eine Fahrkarte je Reise; `journey_tickets` trägt mehr, die API nimmt noch eine.
 - `incidents.legal_deadline` ist für alle Tarife zwölf Monate nach der Fahrt; die kürzere MVV-Frist
   (drei Monate nach Ablauf) rechnet der Topf selbst und schließt verfallene Fälle aus.
+
+**Phase 3** — App, 30. September 2026: „Deine Fahrkarten" (Einstellungen → Fahrkarten), „Welche
+Fahrkarte?" mit Verbund-Auswahl, ein Formular je Produkt aus `fields` des Katalogs, die
+Fahrkarten-Auswahl beim Einchecken (eigene Fahrkarten, zuletzt benutzte zuerst; Abkürzungen beim
+ersten Mal und wenn keine eigene den Zug abdeckt; Einzelfahrkarte mit Fahrpreis und Klasse;
+„Andere Fahrkarte"; gegen einen Server vor Fahrkarten die drei alten Typen), Fahrkarte beim
+Nachtrag. Der Demo-Modus liest den Katalog aus `assets/demo/fares.json`, einer Kopie von
+`GET /v1/fares` — nicht aus `stellwerk fares export`, dessen Format das der Stellwerk-Ansicht ist.
+
+Mitgenommen, weil es mit diesem Build wahr sein muss: die Datenschutzerklärung nennt die
+gespeicherten Fahrkarten (mit dem Geburtsdatum der BahnCard 100), und der Server schwärzt vor dem
+Lesen einer Antwort jede gespeicherte Fahrkartennummer, nicht nur die des D-Tickets. Und eine
+Zeitkarte ohne Geltungsdaten geht raus, sobald ihr Topf zahlbar ist, statt auf ein Monatsende zu
+warten, das niemand kennt (fiel in der E2E auf).

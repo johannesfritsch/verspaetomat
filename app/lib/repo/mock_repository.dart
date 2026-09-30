@@ -199,9 +199,73 @@ class MockRepository implements AppRepository {
     return known[id] ?? id.substring(5);
   }
 
+  // -- fares and tickets (#66) ------------------------------------------------
+
+  static ApiFares? _fares;
+
+  /// The catalogue as the server serves it, bundled (assets/demo/fares.json): Demo shows the
+  /// server's sentences, not a copy of the rules.
+  @override
+  Future<ApiFares> fares() async => _fares ??= ApiFares.fromJson((jsonDecode(await rootBundle.loadString('assets/demo/fares.json')) as Map).cast<String, dynamic>());
+
+  Future<ApiTicket> _ticketFrom(Map<String, dynamic> row) async {
+    final fare = (await fares()).byId(row['product'] as String);
+    final label = row['label'] as String?;
+    return ApiTicket.fromJson({
+      ...row,
+      'name': label == null || label.isEmpty ? (fare?.name ?? row['product']) : label,
+      'family': fare?.family ?? '',
+      'rule_line': fare?.ruleLine ?? '',
+      'ticket': ticketToWire(fare?.ticket ?? TicketType.zeitkarte),
+    });
+  }
+
+  void _seedTickets() {
+    if (state.demoTickets.isNotEmpty) return;
+    state.demoTickets.add({'id': 'demo-dticket', 'product': 'deutschlandticket', 'first_class': false, 'number': state.personalTicketNumber ?? Mock.ticketNumber});
+  }
+
+  @override
+  Future<List<ApiTicket>> tickets({bool all = false}) async {
+    _seedTickets();
+    final rows = state.demoTickets.where((t) => all || t['archived_at'] == null).toList().reversed;
+    return [for (final r in rows) await _ticketFrom(r)];
+  }
+
+  @override
+  Future<ApiTicket> createTicket(TicketInput t) async {
+    _seedTickets();
+    final row = {'id': 'demo-${state.demoTickets.length + 1}-${DateTime.now().millisecondsSinceEpoch}', ...t.toJson()};
+    state.demoTickets.add(row);
+    return _ticketFrom(row);
+  }
+
+  @override
+  Future<ApiTicket> updateTicket(String id, TicketInput t) async {
+    final i = state.demoTickets.indexWhere((r) => r['id'] == id);
+    if (i < 0) throw StateError('no such ticket');
+    state.demoTickets[i] = {...state.demoTickets[i], ...t.toJson(), 'product_unsure': false};
+    return _ticketFrom(state.demoTickets[i]);
+  }
+
+  @override
+  Future<void> archiveTicket(String id) async {
+    final i = state.demoTickets.indexWhere((r) => r['id'] == id);
+    if (i >= 0) state.demoTickets[i] = {...state.demoTickets[i], 'archived_at': DateTime.now().toUtc().toIso8601String()};
+  }
+
+  /// Demo still counts money by the three old types; the ticket chosen says which.
+  Future<void> _useTicket(List<JourneyTicketChoice>? choice) async {
+    final c = choice == null || choice.isEmpty ? null : choice.first;
+    if (c == null) return;
+    final ticket = c.ticketId != null ? (await tickets(all: true)).where((t) => t.id == c.ticketId).firstOrNull : await createTicket(c.newTicket!);
+    if (ticket != null) state.setTicket(ticket.ticket);
+  }
+
   @override
   Future<ApiJourneyLive> startJourney(StartJourneyRequest r) async {
     if (r.ticket != null) state.setTicket(r.ticket!);
+    await _useTicket(r.tickets);
     final legs = <DemoLeg>[];
     var from = r.fromStationName;
     for (final l in r.legs) {
@@ -766,6 +830,7 @@ class MockRepository implements AppRepository {
 
   @override
   Future<ApiArrivalResult> nachtrag(NachtragRequest n) async {
+    if (n.ticketId != null) await _useTicket([JourneyTicketChoice.existing(n.ticketId!)]);
     final d = _findDeparture(n.tripId);
     if (d == null) throw StateError('unknown trip ${n.tripId}');
     final stop = d.stops.firstWhere((s) => s.name == n.exitStationName, orElse: () => d.stops.last);

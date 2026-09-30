@@ -2473,6 +2473,7 @@ pub async fn reread_mail(s: &AppState, mail_id: Uuid) -> Result<Value, (StatusCo
     let relay = inbound_address(&mail.to_addr);
     let mut known = crate::reply::known_of(&cust, claim.as_ref(), Some(&relay));
     known.sent = sent_by_passenger(&s.pool, cust.id).await.map_err(internal)?;
+    known.ticket_numbers = crate::reply::ticket_numbers(&s.pool, cust.id).await.map_err(internal)?;
     let mut decision = crate::reply::read(&crate::reply::Mail { from: &mail.from_addr, subject: &mail.subject, body: &mail.body }, &known, &claimed, &rides, true).await;
     let auth = mail.sender_auth.clone().unwrap_or_else(|| json!({ "aligned": false }));
     guard_sender(&s.pool, claim.as_ref(), &mail.from_addr, false, &auth, &mut decision).await?;
@@ -2549,6 +2550,7 @@ pub async fn process_inbound(s: &AppState, mut m: InboundMail) -> Result<Value, 
     let (claimed, rides) = crate::reply::rides_of(&claimed_rows);
     let mut known = crate::reply::known_of(&cust, claim.as_ref(), Some(&relay));
     known.sent = sent_by_passenger(&s.pool, cust.id).await.map_err(internal)?;
+    known.ticket_numbers = crate::reply::ticket_numbers(&s.pool, cust.id).await.map_err(internal)?;
     let auth = sender_auth(&m.headers, m.headers_trusted, &m.from, &m.from_addresses);
     let mut decision = crate::reply::read(&crate::reply::Mail { from: &m.from, subject: &m.subject, body: &m.body }, &known, &claimed, &rides, !m.trusted).await;
     guard_sender(&s.pool, claim.as_ref(), &m.from, m.trusted, &auth, &mut decision).await?;

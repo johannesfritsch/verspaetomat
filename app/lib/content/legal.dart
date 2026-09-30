@@ -98,7 +98,8 @@ const datenschutz = LegalDoc(
       'Beim ersten Antrag, nicht früher: Name, Anschrift, deine private E-Mail-Adresse und bei Zeitkarten die Ticketnummer. Name, Anschrift und Ticketnummer stehen auf dem Antragsformular, weil das Eisenbahnunternehmen sie verlangt. Deine private E-Mail-Adresse steht nicht darauf: Im Formular steht die Verspätomat-Adresse dieses Antrags, damit die Antwort dorthin geht. Deine eigene Adresse benutzen wir nur, um dir jede Mail in Kopie zu schicken.',
       'Pro Antrag: das Bild deines Tickets für die betroffenen Monate und deine Unterschrift (getippt oder gezeichnet). Beides landet nur im PDF und in der Mail an das Unternehmen.',
       'Der Schriftverkehr über deine Verspätomat-Adresse: die Anträge, die du abschickst, und die Antworten des Unternehmens. Dazu unten mehr.',
-      'Einstellungen wie Ticketart, gewählter Verein, Standortmodus, stumme Bahnhöfe.',
+      'Deine Fahrkarten, soweit du sie einträgst: welche es sind, 1. oder 2. Klasse, Nummer, Preis, Geltungsdauer, bei einer Streckenzeitkarte die Strecke und bei der BahnCard 100 dein Geburtsdatum, weil die Bahn sie daran erkennt. Wir brauchen sie, um auszurechnen, was dir zusteht, und um das Antragsformular auszufüllen.',
+      'Einstellungen wie gewählter Verein, Standortmodus, stumme Bahnhöfe.',
     ]),
     LegalSection('Standort', [
       'Solange die App offen ist und du nicht gerade auf einer Fahrt bist, lässt sie sich von deinem Telefon melden, wenn du dich um mehr als 500 Meter bewegt hast — grob, nicht metergenau. Nach einer frischen Position fragt sie beim Start, bei der Rückkehr in den Vordergrund und immer dann, wenn sich für sie etwas geändert hat. Welche Bahnhöfe in der Nähe liegen und was hinter einem Namen im Suchfeld steckt, beantwortet die App auf dem Telefon, aus einem Bahnhofsverzeichnis, das sie selbst dabeihat; diese Positionen schickt sie uns nicht. Was die Hintergrund-Schicht tut, steht weiter unten.',
@@ -143,7 +144,7 @@ const datenschutz = LegalDoc(
     LegalSection('Deine Rechte', [
       'Auskunft und Übertragbarkeit: Schreib an $legalEmail. Wir schicken dir alles, was wir über dich gespeichert haben, als Datei (JSON), spätestens innerhalb eines Monats.',
       'Löschung: Einstellungen → Deine Daten → „Alles löschen“ entfernt Konto, Fahrten, Anträge, Anhänge und deine Verspätomat-Adresse sofort und endgültig. Ein bereits abgeschickter Antrag liegt beim Eisenbahnunternehmen weiter; seine Antwort sehen wir dann nicht mehr.',
-      'Berichtigung: Name, Anschrift, E-Mail-Adresse und Ticketnummer änderst oder löschst du unter Einstellungen → Anträge. Deinen Anzeigenamen unter Einstellungen → Konto.',
+      'Berichtigung: Name, Anschrift, E-Mail-Adresse und Ticketnummer änderst oder löschst du unter Einstellungen → Anträge, deine Fahrkarten unter Einstellungen → Fahrkarten. Deinen Anzeigenamen unter Einstellungen → Konto.',
       'Widerspruch, Beschwerde: schreib an $legalEmail. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, für uns ist das der Landesbeauftragte für den Datenschutz und die Informationsfreiheit Baden-Württemberg.',
     ]),
   ],

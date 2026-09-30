@@ -287,12 +287,14 @@ pub async fn read_mail(State(s): State<AppState>, _a: Admin, Json(b): Json<ReadM
             let (claimed, rides) = crate::reply::rides_of(&rows);
             let mut known = crate::reply::known_of(&cust, Some(&claim), None);
             known.sent = handlers::sent_by_passenger(&s.pool, cust.id).await.map_err(internal)?;
+            known.ticket_numbers = crate::reply::ticket_numbers(&s.pool, cust.id).await.map_err(internal)?;
             (Some(claim), claimed, rides, known)
         }
         // The passenger, but no claim to answer: read like the webhook, where nothing can move.
         Some((cust, None)) => {
             let mut known = crate::reply::known_of(&cust, None, None);
             known.sent = handlers::sent_by_passenger(&s.pool, cust.id).await.map_err(internal)?;
+            known.ticket_numbers = crate::reply::ticket_numbers(&s.pool, cust.id).await.map_err(internal)?;
             (None, vec![], vec![], known)
         }
         None => {

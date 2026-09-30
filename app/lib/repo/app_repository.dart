@@ -34,6 +34,16 @@ abstract class AppRepository {
   Future<List<ApiNgo>> ngos();
   Future<List<ApiBadge>> badges();
 
+  // -- fares and tickets (#66, docs/49 §5) -----------------------------------
+  /// The fare catalogue: what each kind of ticket is owed, in the server's words.
+  Future<ApiFares> fares();
+  /// The passenger's tickets, the one used last first; archived ones only with [all].
+  Future<List<ApiTicket>> tickets({bool all = false});
+  Future<ApiTicket> createTicket(TicketInput ticket);
+  Future<ApiTicket> updateTicket(String id, TicketInput ticket);
+  /// A ticket someone no longer has. Its journeys and cases keep it.
+  Future<void> archiveTicket(String id);
+
   // -- rides ----------------------------------------------------------------
   Future<List<ApiRide>> rides();
   Future<ApiRideLive?> currentRide();

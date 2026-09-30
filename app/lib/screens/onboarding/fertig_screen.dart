@@ -44,7 +44,7 @@ class _FertigScreenState extends State<FertigScreen> {
         SetupText('Gemeinsam aus Verspätungen etwas Gutes machen.', centred: true),
         _Line(icon: Icons.schedule, text: 'Einchecken und Minuten sammeln'),
         _Line(icon: Icons.groups_outlined, text: 'Zusammen zählt jede Minute mehr'),
-        _Line(icon: Icons.favorite_border, text: 'Ab 60 Minuten zahlt die Bahn an deinen Verein'),
+        _Line(icon: Icons.favorite_border, text: 'Was die Bahn dir schuldet, geht an deinen Verein'),
       ],
       primary: 'Zum Bahnsteig',
       onPrimary: _busy ? null : _done,

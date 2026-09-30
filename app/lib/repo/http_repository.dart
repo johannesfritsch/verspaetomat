@@ -186,6 +186,21 @@ class HttpRepository implements AppRepository {
   Future<List<ApiOperator>> operators() => client.operators();
   @override
   Future<List<ApiNgo>> ngos() => client.ngos();
+
+  @override
+  Future<ApiFares> fares() => client.fares();
+
+  @override
+  Future<List<ApiTicket>> tickets({bool all = false}) => client.tickets(all: all);
+
+  @override
+  Future<ApiTicket> createTicket(TicketInput ticket) => client.createTicket(ticket);
+
+  @override
+  Future<ApiTicket> updateTicket(String id, TicketInput ticket) => client.updateTicket(id, ticket);
+
+  @override
+  Future<void> archiveTicket(String id) => client.archiveTicket(id);
   @override
   Future<List<ApiBadge>> badges() => client.badges();
 

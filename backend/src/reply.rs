@@ -55,6 +55,11 @@ pub fn rides_of(incidents: &[IncidentRow]) -> (Vec<Claimed>, Vec<openai::Ride>) 
         .unzip()
 }
 
+/// The numbers on the passenger's tickets (#66), for [`known_of`]'s `ticket_numbers`.
+pub async fn ticket_numbers(pool: &sqlx::PgPool, customer: uuid::Uuid) -> anyhow::Result<Vec<String>> {
+    Ok(sqlx::query_scalar("select distinct n from tickets, unnest(array[number, booking_ref]) as n where customer_id = $1 and n is not null").bind(customer).fetch_all(pool).await?)
+}
+
 /// Everything we hold that identifies the passenger a mail is about, for `redact.rs` to take out.
 pub fn known_of(cust: &CustomerRow, claim: Option<&ClaimRow>, relay: Option<&str>) -> Known {
     Known {
@@ -62,6 +67,7 @@ pub fn known_of(cust: &CustomerRow, claim: Option<&ClaimRow>, relay: Option<&str
         postal_address: cust.postal_address.clone(),
         email: cust.email.clone(),
         ticket_number: cust.ticket_number.clone(),
+        ticket_numbers: vec![],
         addresses: [relay.map(str::to_string), cust.relay_address.clone(), claim.and_then(|c| c.reply_address.clone())].into_iter().flatten().collect(),
         sent: vec![],
         payee: claim.map(|c| c.account_holder.clone()),

@@ -237,8 +237,10 @@ pub fn evaluate(product: &Product, ticket: &TicketFacts, cases: &[CaseFacts], to
     };
     let short = match (ticket.valid_from, ticket.valid_until) {
         (Some(from), Some(until)) => (until - from).num_days() <= 31,
-        // A Wochen- or Monatskarte whose dates we do not know: wait for the end of the month.
-        _ => true,
+        // Dates not entered: it could be a Monats- or a Jahreskarte. Waiting for a month end
+        // nobody knows would hold every such pot back; sending once it pays at worst gives up
+        // pooling with later cases of the same month, and is never a wrong claim.
+        _ => false,
     };
     let ready_from = match rule.submit {
         Submit::Immediately | Submit::WhenPayable => None,
@@ -353,6 +355,12 @@ mod tests {
         assert_eq!(p.amount, 450);
         assert_eq!(p.blockers, vec![Blocker::WindowOpen { until: d(2026, 10, 1) }], "a Monatskarte waits for the end of its month");
         assert!(eval("zeitkarte_vrr_nrw", month, &three, d(2026, 10, 1)).payable);
+    }
+
+    #[test]
+    fn a_season_ticket_without_dates_goes_out_once_it_pays() {
+        let p = eval("zeitkarte_spnv", TicketFacts::default(), &[(d(2026, 10, 1), 70), (d(2026, 10, 2), 70), (d(2026, 10, 3), 70)], today());
+        assert!(p.payable, "{:?}", p.blockers);
     }
 
     #[test]

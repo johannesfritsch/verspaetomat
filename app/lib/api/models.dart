@@ -656,7 +656,9 @@ class ArrivalRequest {
 }
 
 class NachtragRequest {
-  const NachtragRequest({required this.tripId, required this.fromStationId, required this.fromStationName, required this.exitStationId, required this.exitStationName, required this.date});
+  const NachtragRequest({required this.tripId, required this.fromStationId, required this.fromStationName, required this.exitStationId, required this.exitStationName, required this.date, this.ticketId});
+  /// The ticket the ride was on (#66); without it the server takes the setting.
+  final String? ticketId;
   final String tripId;
   final String fromStationId;
   final String fromStationName;
@@ -670,6 +672,7 @@ class NachtragRequest {
         'exit_station_id': exitStationId,
         'exit_station_name': exitStationName,
         'date': _fmtDate(date),
+        if (ticketId != null) 'ticket_id': ticketId,
       };
 }
 
@@ -814,10 +817,13 @@ class ApiIncident {
     this.discardedAt,
     this.discardReason,
     this.confirmedCents,
+    this.ticketId,
   });
   final String id;
   final String? rideId;
   final String? journeyId;
+  /// The ticket this case was made with (#66); null on a server before tickets.
+  final String? ticketId;
   final DateTime date;
   final String line;
   final String from;
@@ -874,6 +880,7 @@ class ApiIncident {
         discardedAt: _dt(j['discarded_at']),
         discardReason: _sn(j['discard_reason']),
         confirmedCents: _in(j['confirmed_cents']),
+        ticketId: _sn(j['ticket_id']),
       );
 }
 
@@ -1720,6 +1727,7 @@ class StartJourneyRequest {
     required this.toStationName,
     required this.legs,
     this.ticket,
+    this.tickets,
     this.location,
     this.fromLat,
     this.fromLon,
@@ -1729,7 +1737,10 @@ class StartJourneyRequest {
   final String toStationId;
   final String toStationName;
   final List<ApiLeg> legs;
+  /// The legacy type; sent alongside [tickets] so a server before tickets still understands it.
   final TicketType? ticket;
+  /// The ticket of this journey (#66). One for now.
+  final List<JourneyTicketChoice>? tickets;
   final ApiLocation? location;
   final double? fromLat;
   final double? fromLon;
@@ -1740,6 +1751,7 @@ class StartJourneyRequest {
         'to_station_name': toStationName,
         'legs': legs.map((l) => l.toStartJson()).toList(),
         if (ticket != null) 'ticket': ticketToWire(ticket!),
+        if (tickets != null) 'tickets': tickets!.map((t) => t.toJson()).toList(),
         if (location != null) 'location': location!.toJson(),
         if (fromLat != null && fromLon != null) ...{'from_lat': fromLat, 'from_lon': fromLon},
       };
@@ -1864,4 +1876,223 @@ class ApiShareConfirmed {
         minutes: _i(j['minutes']),
         confirmedAt: _dt(j['confirmed_at']),
       );
+}
+
+
+// ---------------------------------------------------------------------------
+// Fares and tickets (#66, docs/49 §5)
+// ---------------------------------------------------------------------------
+
+/// What the app asks for when a passenger adds a ticket of one product.
+class ApiFareFields {
+  const ApiFareFields({this.number = 'booking', this.priceRequired = false, this.validity = 'none', this.birthDate = false, this.route = false, this.firstClass = true});
+  /// `abo` | `zeitkarte` | `bahncard` | `booking` | `none`
+  final String number;
+  /// A single ticket's price is its amount; a season ticket's only sets its cap.
+  final bool priceRequired;
+  /// `none` | `day` | `range`
+  final String validity;
+  final bool birthDate;
+  final bool route;
+  final bool firstClass;
+
+  factory ApiFareFields.fromJson(Map<String, dynamic> j) => ApiFareFields(
+        number: _s(j['number'], 'booking'),
+        priceRequired: _s(j['price']) == 'required',
+        validity: _s(j['validity'], 'none'),
+        birthDate: _b(j['birth_date']),
+        route: _b(j['route']),
+        firstClass: _b(j['first_class'], true),
+      );
+}
+
+/// One product of the fare catalogue (`GET /v1/fares`): what the server says about it, in its own
+/// words. The app holds no rule of its own.
+class ApiFare {
+  const ApiFare({
+    required this.id,
+    required this.family,
+    required this.name,
+    required this.tariff,
+    required this.ruleLine,
+    this.caveat,
+    this.validRegional = true,
+    this.validLongDistance = true,
+    this.thresholdMin = 60,
+    this.listPriceCents,
+    this.listPriceFirstCents,
+    this.reducedFare = false,
+    this.releaseAfterMin = 0,
+    this.fields = const ApiFareFields(),
+    this.ticket = TicketType.zeitkarte,
+  });
+  final String id;
+  final String family;
+  final String name;
+  final String tariff;
+  final String ruleLine;
+  final String? caveat;
+  final bool validRegional;
+  final bool validLongDistance;
+  final int thresholdMin;
+  final int? listPriceCents;
+  final int? listPriceFirstCents;
+  final bool reducedFare;
+  final int releaseAfterMin;
+  final ApiFareFields fields;
+  /// The legacy type a server before tickets understands.
+  final TicketType ticket;
+
+  factory ApiFare.fromJson(Map<String, dynamic> j) {
+    final on = _m(j['valid_on']) ?? const {};
+    return ApiFare(
+      id: _s(j['id']),
+      family: _s(j['family']),
+      name: _s(j['name']),
+      tariff: _s(j['tariff']),
+      ruleLine: _s(j['rule_line']),
+      caveat: _sn(j['caveat']),
+      validRegional: _b(on['regional'], true),
+      validLongDistance: _b(on['long_distance'], true),
+      thresholdMin: _i(j['threshold_min'], 60),
+      listPriceCents: _in(j['list_price_cents']),
+      listPriceFirstCents: _in(j['list_price_first_cents']),
+      reducedFare: _b(j['reduced_fare']),
+      releaseAfterMin: _i(j['release_after_min']),
+      fields: ApiFareFields.fromJson(_m(j['fields']) ?? const {}),
+      ticket: ticketFromWire(_sn(j['ticket'])),
+    );
+  }
+}
+
+class ApiFares {
+  const ApiFares({this.families = const [], this.fares = const []});
+  final List<String> families;
+  final List<ApiFare> fares;
+
+  ApiFare? byId(String id) => fares.where((f) => f.id == id).firstOrNull;
+  List<ApiFare> inFamily(String family) => fares.where((f) => f.family == family).toList();
+
+  factory ApiFares.fromJson(Map<String, dynamic> j) => ApiFares(families: _sl(j['families']), fares: _ml(j['fares']).map(ApiFare.fromJson).toList());
+}
+
+/// A passenger's ticket: one contract of one catalogue product.
+class ApiTicket {
+  const ApiTicket({
+    required this.id,
+    required this.product,
+    required this.name,
+    this.family = '',
+    this.ruleLine = '',
+    this.productUnsure = false,
+    this.firstClass = false,
+    this.label,
+    this.number,
+    this.bookingRef,
+    this.birthDate,
+    this.priceCents,
+    this.validFrom,
+    this.validUntil,
+    this.originStationName,
+    this.destinationStationName,
+    this.archivedAt,
+    this.ticket = TicketType.deutschlandticket,
+  });
+  final String id;
+  final String product;
+  final String name;
+  final String family;
+  final String ruleLine;
+  final bool productUnsure;
+  final bool firstClass;
+  final String? label;
+  final String? number;
+  final String? bookingRef;
+  final DateTime? birthDate;
+  final int? priceCents;
+  final DateTime? validFrom;
+  final DateTime? validUntil;
+  final String? originStationName;
+  final String? destinationStationName;
+  final DateTime? archivedAt;
+  final TicketType ticket;
+
+  bool get archived => archivedAt != null;
+
+  factory ApiTicket.fromJson(Map<String, dynamic> j) => ApiTicket(
+        id: _s(j['id']),
+        product: _s(j['product']),
+        name: _s(j['name'], _s(j['product'])),
+        family: _s(j['family']),
+        ruleLine: _s(j['rule_line']),
+        productUnsure: _b(j['product_unsure']),
+        firstClass: _b(j['first_class']),
+        label: _sn(j['label']),
+        number: _sn(j['number']),
+        bookingRef: _sn(j['booking_ref']),
+        birthDate: _date(j['birth_date']),
+        priceCents: _in(j['price_cents']),
+        validFrom: _date(j['valid_from']),
+        validUntil: _date(j['valid_until']),
+        originStationName: _sn(j['origin_station_name']),
+        destinationStationName: _sn(j['destination_station_name']),
+        archivedAt: _dt(j['archived_at']),
+        ticket: ticketFromWire(_sn(j['ticket'])),
+      );
+}
+
+/// A ticket to add, or the fields of one to change. On a change every field is sent: null clears.
+class TicketInput {
+  const TicketInput({
+    required this.product,
+    this.firstClass = false,
+    this.label,
+    this.number,
+    this.bookingRef,
+    this.birthDate,
+    this.priceCents,
+    this.validFrom,
+    this.validUntil,
+    this.originStationName,
+    this.destinationStationName,
+  });
+  final String product;
+  final bool firstClass;
+  final String? label;
+  final String? number;
+  final String? bookingRef;
+  final DateTime? birthDate;
+  final int? priceCents;
+  final DateTime? validFrom;
+  final DateTime? validUntil;
+  final String? originStationName;
+  final String? destinationStationName;
+
+  Map<String, dynamic> toJson() => {
+        'product': product,
+        'first_class': firstClass,
+        'label': label,
+        'number': number,
+        // No form asks for it yet: left out when null, so a change does not clear one set elsewhere.
+        if (bookingRef != null) 'booking_ref': bookingRef,
+        'birth_date': birthDate == null ? null : _fmtDate(birthDate!),
+        'price_cents': priceCents,
+        'valid_from': validFrom == null ? null : _fmtDate(validFrom!),
+        'valid_until': validUntil == null ? null : _fmtDate(validUntil!),
+        'origin_station_name': originStationName,
+        'destination_station_name': destinationStationName,
+      };
+}
+
+/// The ticket of a journey: one the passenger has, or one added with the check-in.
+class JourneyTicketChoice {
+  const JourneyTicketChoice.existing(String this.ticketId) : newTicket = null;
+  const JourneyTicketChoice.adding(TicketInput this.newTicket) : ticketId = null;
+  final String? ticketId;
+  final TicketInput? newTicket;
+
+  Map<String, dynamic> toJson() => {
+        if (ticketId != null) 'ticket_id': ticketId,
+        if (newTicket != null) 'new_ticket': newTicket!.toJson(),
+      };
 }

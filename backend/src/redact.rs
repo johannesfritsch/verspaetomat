@@ -24,6 +24,9 @@ pub struct Known {
     pub postal_address: Option<String>,
     pub email: Option<String>,
     pub ticket_number: Option<String>,
+    /// The numbers of the passenger's other tickets (#66): a Monatskarte, a BahnCard 100, a
+    /// booking number. Taken out like the one above.
+    pub ticket_numbers: Vec<String>,
     /// The relay and reply addresses mail to this passenger goes through.
     pub addresses: Vec<String>,
     /// The mails we sent for this passenger — the claim and any reply written in the app. Their
@@ -316,7 +319,7 @@ fn scrub(text: &str, known: &Known) -> String {
     for a in known.addresses.iter().chain(&known.email) {
         whole.push((regex::escape(a.trim()), "[E-Mail]"));
     }
-    if let Some(t) = &known.ticket_number {
+    for t in known.ticket_number.iter().chain(&known.ticket_numbers) {
         // Letters and digits only, joined by whatever separator the desk's system prints — and the
         // digits alone, which is how an "Abo-Nr." often shows it.
         let sep = r"[\s\-\u{2013}_./]*";
@@ -429,6 +432,7 @@ mod tests {
             postal_address: Some("Musterstraße 12, 50667 Köln".into()),
             email: Some("j@example.org".into()),
             ticket_number: Some("DT-4711-0815".into()),
+            ticket_numbers: vec![],
             addresses: vec!["antrag-1a2b3c4d@users.verspaetomat.de".into()],
             sent: vec![],
             payee: None,
@@ -619,6 +623,13 @@ mod tests {
     fn a_known_ticket_number_is_found_with_any_separator() {
         let k = Known { ticket_number: Some("DT-4711-0815".into()), ..Known::default() };
         assert_eq!(scrub("Ticket DT 4711 0815 / DT47110815", &k), "Ticket [Ticketnummer] / [Ticketnummer]");
+    }
+
+    /// #66: every ticket the passenger saved, not only the D-Ticket of the personal data.
+    #[test]
+    fn the_numbers_of_saved_tickets_go_too() {
+        let k = Known { ticket_number: Some("DT-4711-0815".into()), ticket_numbers: vec!["MK-2026-998877".into(), "7081410123456789".into()], ..Known::default() };
+        assert_eq!(scrub("Monatskarte MK 2026 998877, BahnCard 7081 4101 2345 6789", &k), "Monatskarte [Ticketnummer], BahnCard [Ticketnummer]");
     }
 
     #[test]
