@@ -15,6 +15,8 @@ import '../../widgets/kit.dart';
 import '../../widgets/server_down.dart';
 import '../../widgets/ticket.dart' show NgoLogo;
 import '../ride/ride_widgets.dart';
+import '../community/community_widgets.dart' show showSnack;
+import '../tickets/tickets.dart' show pickTicket;
 
 // The claims screens reach for monthLabel and ticketLabel through this file.
 export '../../content/labels.dart';
@@ -32,6 +34,48 @@ VTone toneFor(IncidentStatus s) => switch (s) {
 
 /// Euro cents → "4,50 €".
 String fmtCents(int cents) => fmtEuro(cents / 100);
+
+// -- pots (#66) ---------------------------------------------------------------
+//
+// The server says whether a pot can go out and, if not, what is missing and how much. These are
+// the words for it. They name amounts and minutes the server sent, never a rule of their own.
+
+String _dmyShort(DateTime d) => '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.';
+
+/// The pot's figure in one line: „280 Minuten · 6,00 €" where delays pool, „3 Fälle · 4,50 €"
+/// where each case counts on its own.
+String potFigure(ApiPot p) {
+  final n = p.incidentIds.length;
+  return p.pools ? '${p.minutes} Minuten · ${fmtCents(p.amountCents)}' : '$n ${n == 1 ? 'Fall' : 'Fälle'} · ${fmtCents(p.amountCents)}';
+}
+
+/// What is still missing before the pot can go out, in one sentence. Null when nothing is.
+String? potMissing(ApiPot p) {
+  final b = p.blockers.firstOrNull;
+  if (b == null) return null;
+  return switch (b.kind) {
+    'below_minimum' when (b.missingMinutes ?? 0) > 0 => 'Noch ${b.missingMinutes} Minuten Verspätung, dann geht der Antrag raus.',
+    'below_minimum' => 'Noch ${fmtCents(b.missingCents ?? 0)}, dann geht der Antrag raus.',
+    'too_few_cases' => 'Noch ${b.missingCases} ${b.missingCases == 1 ? 'Fall' : 'Fälle'}, dann geht der Antrag raus.',
+    'window_open' => b.until == null ? 'Geht raus, wenn die Fahrkarte abgelaufen ist.' : 'Geht ab dem ${_dmyShort(b.until!)} raus, wenn die Fahrkarte abgelaufen ist.',
+    'price_missing' => 'Trag den Fahrpreis ein, dann steht fest, was dir zusteht.',
+    'not_money' => 'Diese Fahrkarte entschädigt die Bahn nicht in Geld.',
+    _ => 'Noch zählt keine Fahrt.',
+  };
+}
+
+/// Where a pot stands on the way to going out, 0..1, for the bar. Null where a bar says nothing.
+double? potProgress(ApiPot p, int minPayoutCents) {
+  final b = p.blockers.firstOrNull;
+  if (b == null) return null;
+  if (b.kind == 'below_minimum' && (b.missingMinutes ?? 0) > 0) return p.minutes / (p.minutes + b.missingMinutes!);
+  if (b.kind == 'below_minimum' && minPayoutCents > 0) return (p.amountCents / minPayoutCents).clamp(0.0, 1.0);
+  if (b.kind == 'too_few_cases') {
+    final have = p.incidentIds.length;
+    return have / (have + (b.missingCases ?? 0));
+  }
+  return null;
+}
 
 /// UTC timestamp → local "08:52".
 String fmtClock(DateTime d) => fmtTime(TimeOfDay.fromDateTime(d.toLocal()));
@@ -327,8 +371,12 @@ Future<bool> confirmDeleteRide(BuildContext context) async {
 /// case already taken out, "Doch einreichen"); it is offered only while the bundle is open.
 /// [onDelete] adds "Fahrt löschen" beside it (docs/23 §2), behind its own confirm.
 Future<void> showEvidenceSheet(BuildContext context, ApiIncident i,
-    {Future<void> Function(String reason)? onDiscard, Future<void> Function()? onRestore, Future<void> Function()? onDelete}) {
+    {Future<void> Function(String reason)? onDiscard, Future<void> Function()? onRestore, Future<void> Function()? onDelete, VoidCallback? onTicketChanged}) {
   final ev = i.evidence;
+  // The ticket by its own name (#66); the old type where the server has no tickets.
+  final ticketName = i.ticketId == null
+      ? Future.value(i.ticket.label)
+      : RepoScope.read(context).repo.tickets(all: true).then((l) => l.where((t) => t.id == i.ticketId).firstOrNull?.name ?? i.ticket.label, onError: (_) => i.ticket.label);
   return showVSheet(
     context,
     builder: (ctx) => Padding(
@@ -369,7 +417,10 @@ Future<void> showEvidenceSheet(BuildContext context, ApiIncident i,
                 const VRule(),
                 VKeyValue('Erfasst am', ev?.fetchedAt != null ? fmtStamp(ev!.fetchedAt!) : Mock.shortDate(i.date)),
                 const VRule(),
-                VKeyValue('Ticket', i.ticket.label),
+                FutureBuilder<String>(
+                  future: ticketName,
+                  builder: (_, snap) => VKeyValue('Fahrkarte', snap.data ?? i.ticket.label),
+                ),
                 const VRule(),
                 VKeyValue('Anspruch', fmtCents(i.amountCents), strong: i.confirmedCents == null),
                 if (i.status == IncidentStatus.bestaetigt && i.confirmedCents != null) ...[
@@ -382,6 +433,28 @@ Future<void> showEvidenceSheet(BuildContext context, ApiIncident i,
                 ],
                 const VRule(),
                 VKeyValue('Frist (gesetzlich)', Mock.longDate(i.legalDeadline)),
+                // The case was made with another ticket than the one chosen at check-in (#66):
+                // until it has left the house, it can move, and joins that ticket's pot.
+                if (onTicketChanged != null && i.ticketId != null && i.isOpen) ...[
+                  const VGap.m(),
+                  VGhostButton(
+                    key: const Key('fall-fahrkarte-aendern'),
+                    label: 'Fahrkarte ändern',
+                    icon: Icons.swap_horiz,
+                    onTap: () async {
+                      final t = await pickTicket(ctx, currentId: i.ticketId);
+                      if (t == null || t.id == i.ticketId || !ctx.mounted) return;
+                      try {
+                        final dropped = await RepoScope.read(ctx).repo.setIncidentTicket(i.id, t.id);
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                        if (context.mounted) showSnack(context, dropped ? 'Jetzt mit ${t.name}. Der Antrag, in dem der Fall war, kommt so nicht mehr zusammen und wird weiter gesammelt.' : 'Jetzt mit ${t.name}.');
+                        if (context.mounted) onTicketChanged();
+                      } catch (e) {
+                        if (ctx.mounted) showSnack(ctx, 'Ging nicht: $e');
+                      }
+                    },
+                  ),
+                ],
                 // „Als Nachweis exportieren" stood here and only showed „exportiert" (#55).
                 if (onRestore != null) ...[
                   const VGap.m(),

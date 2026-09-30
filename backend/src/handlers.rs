@@ -1346,6 +1346,21 @@ pub async fn claim_draft(State(s): State<AppState>, c: Customer, Json(d): Json<D
         let still_open: HashSet<Uuid> = chosen.incident_ids.iter().copied().collect();
         let wanted: Option<Vec<Uuid>> = d.incident_ids.as_ref().map(|_| counted.iter().map(|i| i.id).collect());
         if draft_action(&held, wanted.as_deref(), &still_open) == DraftAction::Resume {
+            // The same cases, but the ticket may have changed since (its class, its price): the
+            // form asks for what *its* cases are worth now — the ones it holds, which may be a
+            // selection of the pot, not the whole pot.
+            let held_facts: Vec<crate::fares::evaluate::CaseFacts> = rows.iter().filter(|i| held.contains(&i.id)).map(crate::pots::case_facts).collect();
+            let before: Vec<(chrono::NaiveDate, Cents)> = rows
+                .iter()
+                .filter(|i| i.ticket_id == Some(chosen.ticket.id) && i.discarded_at.is_none() && matches!(i.status, IncidentStatus::Eingereicht | IncidentStatus::Bestaetigt))
+                .map(|i| (i.ride_date, i.confirmed_cents.unwrap_or(i.amount_cents)))
+                .collect();
+            let now = crate::fares::evaluate::evaluate(chosen.product, &crate::pots::ticket_facts(&chosen.ticket, before), &held_facts, today);
+            let old = if old.amount_claimed_cents != now.amount && now.payable {
+                sqlx::query_as("update claims set amount_claimed_cents = $2, breakdown = $3 where id = $1 returning *").bind(old.id).bind(now.amount).bind(json!(now)).fetch_one(&s.pool).await.map_err(internal)?
+            } else {
+                old
+            };
             return Ok(Json(draft_json(&s, &c.0, &old, &desk).await?));
         }
         sqlx::query("delete from claim_attachments where claim_id = $1").bind(old.id).execute(&s.pool).await.map_err(internal)?;

@@ -100,6 +100,9 @@ class DemoState extends ChangeNotifier {
   /// The passenger's tickets in Demo mode (#66), as the server would keep them. Seeded on first
   /// read by the demo repository with a D-Ticket.
   final List<Map<String, dynamic>> demoTickets = [];
+
+  /// Which ticket a demo case was moved to („Fahrkarte ändern", #66), by case id.
+  final Map<String, String> incidentTickets = {};
   String ngoId = 'bahnhofsmission';
   bool personalDataEntered = false;
 

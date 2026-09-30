@@ -9,7 +9,7 @@
  ],
  "fares": [
   {
-   "caveat": "Ob die Bahn im Regionalzug 10 \u20ac zahlt oder die Regel des beigelegten Deutschlandtickets anwendet, ist noch nicht gekl\u00e4rt.",
+   "caveat": "Ob die Bahn im Regionalzug 10 € zahlt oder die Regel des beigelegten Deutschlandtickets anwendet, ist noch nicht geklärt.",
    "family": "bahncard100",
    "fields": {
     "birth_date": true,
@@ -17,7 +17,9 @@
     "number": "bahncard",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": false,
+    "price_proof": false
    },
    "id": "bahncard100",
    "list_price_cents": 489900,
@@ -26,8 +28,8 @@
    "offer": "with_caveat",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten 10 \u20ac je Fahrt, in der 1. Klasse 15 \u20ac.",
-   "tariff": "Bef\u00f6rderungsbedingungen der DB (BB Personenverkehr)",
+   "rule_line": "Ab 60 Minuten 10 € je Fahrt, in der 1. Klasse 15 €.",
+   "tariff": "Beförderungsbedingungen der DB (BB Personenverkehr)",
    "threshold_min": 60,
    "ticket": "zeitkarte",
    "valid_on": {
@@ -45,7 +47,9 @@
     "number": "abo",
     "price": "optional",
     "route": false,
-    "validity": "none"
+    "validity": "none",
+    "copy": true,
+    "price_proof": true
    },
    "id": "deutschlandticket",
    "list_price_cents": 6300,
@@ -54,7 +58,7 @@
    "offer": "offered",
    "reduced_fare": true,
    "release_after_min": 0,
-   "rule_line": "Ab 20 Minuten z\u00e4hlt jede Versp\u00e4tung mit. Je volle Stunde 1,50 \u20ac, gesammelt \u00fcber Monate.",
+   "rule_line": "Ab 20 Minuten zählt jede Verspätung mit. Je volle Stunde 1,50 €, gesammelt über Monate.",
    "tariff": "Deutschlandtarif",
    "threshold_min": 20,
    "ticket": "deutschlandticket",
@@ -82,7 +86,9 @@
     "number": "booking",
     "price": "required",
     "route": false,
-    "validity": "none"
+    "validity": "none",
+    "copy": true,
+    "price_proof": false
    },
    "id": "einzel_db",
    "list_price_cents": null,
@@ -91,8 +97,8 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die H\u00e4lfte.",
-   "tariff": "Bef\u00f6rderungsbedingungen der DB (BB Personenverkehr)",
+   "rule_line": "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die Hälfte.",
+   "tariff": "Beförderungsbedingungen der DB (BB Personenverkehr)",
    "threshold_min": 60,
    "ticket": "einzelfahrkarte",
    "valid_on": {
@@ -110,7 +116,9 @@
     "number": "booking",
     "price": "required",
     "route": false,
-    "validity": "none"
+    "validity": "none",
+    "copy": true,
+    "price_proof": false
    },
    "id": "einzel_flixtrain",
    "list_price_cents": null,
@@ -119,7 +127,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 0,
-   "rule_line": "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die H\u00e4lfte.",
+   "rule_line": "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die Hälfte.",
    "tariff": "FlixTrain",
    "threshold_min": 60,
    "ticket": "einzelfahrkarte",
@@ -138,7 +146,9 @@
     "number": "booking",
     "price": "required",
     "route": false,
-    "validity": "none"
+    "validity": "none",
+    "copy": true,
+    "price_proof": false
    },
    "id": "einzel_nah",
    "list_price_cents": null,
@@ -147,7 +157,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die H\u00e4lfte.",
+   "rule_line": "Ab 60 Minuten ein Viertel des Fahrpreises, ab 120 Minuten die Hälfte.",
    "tariff": "Deutschlandtarif",
    "threshold_min": 60,
    "ticket": "einzelfahrkarte",
@@ -166,16 +176,18 @@
     "number": "booking",
     "price": "optional",
     "route": false,
-    "validity": "day"
+    "validity": "day",
+    "copy": true,
+    "price_proof": false
    },
    "id": "laender_ticket",
    "list_price_cents": null,
    "list_price_first_cents": null,
-   "name": "L\u00e4nder-Ticket oder Quer-durchs-Land",
+   "name": "Länder-Ticket oder Quer-durchs-Land",
    "offer": "offered",
    "reduced_fare": true,
    "release_after_min": 0,
-   "rule_line": "Ab 20 Minuten z\u00e4hlt jede Versp\u00e4tung mit. Je volle Stunde am selben Tag 1,50 \u20ac.",
+   "rule_line": "Ab 20 Minuten zählt jede Verspätung mit. Je volle Stunde am selben Tag 1,50 €.",
    "tariff": "Deutschlandtarif",
    "threshold_min": 20,
    "ticket": "zeitkarte",
@@ -194,7 +206,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": true,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "streckenzeitkarte",
    "list_price_cents": null,
@@ -203,8 +217,8 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 20 Minuten z\u00e4hlt jede Versp\u00e4tung mit. Je volle Stunde 5 \u20ac, in der 1. Klasse 7,50 \u20ac.",
-   "tariff": "Bef\u00f6rderungsbedingungen der DB (BB Personenverkehr)",
+   "rule_line": "Ab 20 Minuten zählt jede Verspätung mit. Je volle Stunde 5 €, in der 1. Klasse 7,50 €.",
+   "tariff": "Beförderungsbedingungen der DB (BB Personenverkehr)",
    "threshold_min": 20,
    "ticket": "zeitkarte",
    "valid_on": {
@@ -222,7 +236,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "zeitkarte_dt",
    "list_price_cents": null,
@@ -231,7 +247,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 20 Minuten z\u00e4hlt jede Versp\u00e4tung mit. Je volle Stunde 1,50 \u20ac.",
+   "rule_line": "Ab 20 Minuten zählt jede Verspätung mit. Je volle Stunde 1,50 €.",
    "tariff": "Deutschlandtarif",
    "threshold_min": 20,
    "ticket": "zeitkarte",
@@ -250,7 +266,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "zeitkarte_hvv",
    "list_price_cents": null,
@@ -259,7 +277,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "rule_line": "Ab 60 Minuten 1,50 € je Fahrt, in der 1. Klasse 2,25 €.",
    "tariff": "hvv",
    "threshold_min": 60,
    "ticket": "zeitkarte",
@@ -278,7 +296,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "zeitkarte_mvv",
    "list_price_cents": null,
@@ -287,7 +307,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt.",
+   "rule_line": "Ab 60 Minuten 1,50 € je Fahrt.",
    "tariff": "MVV",
    "threshold_min": 60,
    "ticket": "zeitkarte",
@@ -306,7 +326,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "zeitkarte_niedersachsen",
    "list_price_cents": null,
@@ -315,7 +337,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 20 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "rule_line": "Ab 20 Minuten 1,50 € je Fahrt, in der 1. Klasse 2,25 €.",
    "tariff": "Niedersachsentarif",
    "threshold_min": 20,
    "ticket": "zeitkarte",
@@ -334,7 +356,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "zeitkarte_rmv",
    "list_price_cents": null,
@@ -343,7 +367,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "rule_line": "Ab 60 Minuten 1,50 € je Fahrt, in der 1. Klasse 2,25 €.",
    "tariff": "RMV",
    "threshold_min": 60,
    "ticket": "zeitkarte",
@@ -362,7 +386,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "zeitkarte_sh",
    "list_price_cents": null,
@@ -371,7 +397,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "rule_line": "Ab 60 Minuten 1,50 € je Fahrt, in der 1. Klasse 2,25 €.",
    "tariff": "SH-Tarif",
    "threshold_min": 60,
    "ticket": "zeitkarte",
@@ -390,7 +416,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "zeitkarte_spnv",
    "list_price_cents": null,
@@ -399,8 +427,8 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
-   "tariff": "Fahrgastrechte im SPNV (gemeinsamer Text der Verb\u00fcnde)",
+   "rule_line": "Ab 60 Minuten 1,50 € je Fahrt, in der 1. Klasse 2,25 €.",
+   "tariff": "Fahrgastrechte im SPNV (gemeinsamer Text der Verbünde)",
    "threshold_min": 60,
    "ticket": "zeitkarte",
    "valid_on": {
@@ -418,7 +446,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "zeitkarte_vbb",
    "list_price_cents": null,
@@ -427,7 +457,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, in der 1. Klasse 2,25 \u20ac.",
+   "rule_line": "Ab 60 Minuten 1,50 € je Fahrt, in der 1. Klasse 2,25 €.",
    "tariff": "VBB",
    "threshold_min": 60,
    "ticket": "zeitkarte",
@@ -446,7 +476,9 @@
     "number": "zeitkarte",
     "price": "optional",
     "route": false,
-    "validity": "range"
+    "validity": "range",
+    "copy": true,
+    "price_proof": true
    },
    "id": "zeitkarte_vrr_nrw",
    "list_price_cents": null,
@@ -455,7 +487,7 @@
    "offer": "offered",
    "reduced_fare": false,
    "release_after_min": 20,
-   "rule_line": "Ab 60 Minuten 1,50 \u20ac je Fahrt, ab drei Fahrten im Monat.",
+   "rule_line": "Ab 60 Minuten 1,50 € je Fahrt, ab drei Fahrten im Monat.",
    "tariff": "Verbund- und Gemeinschaftstarife in NRW (VRR, VRS, AVV, WestfalenTarif, NRW-Tarif)",
    "threshold_min": 60,
    "ticket": "zeitkarte",

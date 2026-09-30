@@ -4,7 +4,7 @@ import '../../api/models.dart';
 import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
-import '../community/community_widgets.dart' show SwitchRow;
+import '../community/community_widgets.dart' show SwitchRow, showSnack;
 import '../ride/ride_widgets.dart' show shortError;
 
 // Tickets (#66, docs/49 §5.3, docs/50 phase 3): the passenger's own tickets, adding one, changing
@@ -97,6 +97,54 @@ Future<ApiTicket?> editTicket(BuildContext context, ApiTicket ticket, ApiFares f
       builder: (_) => FahrkarteScreen(fare: fare, fares: fares, ticket: ticket),
     ),
   );
+}
+
+/// „Mit welcher Fahrkarte?": one of the passenger's tickets, or a new one. Null when backed out.
+Future<ApiTicket?> pickTicket(BuildContext context, {String title = 'Mit welcher Fahrkarte?', String? currentId}) async {
+  final List<ApiTicket> tickets;
+  try {
+    tickets = await RepoScope.read(context).repo.tickets();
+  } catch (e) {
+    if (context.mounted) showSnack(context, 'Fahrkarten nicht geladen: ${shortError(e)}');
+    return null;
+  }
+  if (!context.mounted) return null;
+  final picked = await showVSheet<Object>(
+    context,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.l),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          VSheetHeader(title: title),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: VSpace.page),
+            child: VCard(
+              padding: const EdgeInsets.symmetric(horizontal: VSpace.cardTight),
+              child: Column(
+                children: [
+                  for (final t in tickets)
+                    VOptionRow(
+                      key: Key('waehle-${t.id}'),
+                      leading: VIconBadge(icon: TicketFamily.of(t.family).icon, tone: t.id == currentId ? VBadgeTone.red : VBadgeTone.neutral, size: VControl.badgeSmall, iconColor: t.id == currentId ? null : VColors.ink2),
+                      title: t.name,
+                      subtitle: t.id == currentId ? 'Jetzt gewählt' : t.ruleLine,
+                      onTap: () => Navigator.of(ctx).pop(t),
+                    ),
+                  VOptionRow(key: const Key('waehle-neu'), title: 'Andere Fahrkarte', subtitle: 'Hinzufügen', divider: false, onTap: () => Navigator.of(ctx).pop('add')),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (!context.mounted) return null;
+  if (picked is ApiTicket) return picked;
+  if (picked == 'add') return addTicket(context, single: true);
+  return null;
 }
 
 /// „Deine Fahrkarten" (Einstellungen → Fahrkarten).

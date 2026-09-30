@@ -166,7 +166,7 @@ void main() {
     await weiter();
     await wait(tester, 1500);
     // #52: what to upload, and why one picture per month.
-    await shot('antrag-ticket');
+    await shot('antrag-fahrkarte');
     // This claim spans two months, and every month is its own ticket, so the step holds until
     // each one has a picture on it.
     final anhaengen = find.widgetWithText(VDropzone, 'Ticket anhängen');

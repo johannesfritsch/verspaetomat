@@ -285,7 +285,10 @@ class HttpRepository implements AppRepository {
   @override
   Future<void> markClaimSeen(String claimId) => client.markClaimSeen(claimId);
   @override
-  Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds}) => client.draftClaim(desk: desk, incidentIds: incidentIds);
+  Future<ApiClaimDraft> draftClaim({String? desk, String? pot, List<String>? incidentIds}) => client.draftClaim(desk: desk, pot: pot, incidentIds: incidentIds);
+
+  @override
+  Future<bool> setIncidentTicket(String incidentId, String ticketId) => client.setIncidentTicket(incidentId, ticketId);
   @override
   Future<ApiClaim> patchClaim(String id, {String? ngoId, List<ApiClaimAttachment>? attachments}) =>
       client.patchClaim(id, ngoId: ngoId, attachments: attachments);

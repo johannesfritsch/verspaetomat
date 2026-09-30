@@ -349,8 +349,16 @@ class ApiClient {
     }
   }
 
-  Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds}) async =>
-      ApiClaimDraft.fromJson(_map(await _post('/v1/claims/draft', {'desk': desk, if (incidentIds != null) 'incident_ids': incidentIds})));
+  /// A claim for one pot (#66), or for a desk from before pots.
+  Future<ApiClaimDraft> draftClaim({String? desk, String? pot, List<String>? incidentIds}) async => ApiClaimDraft.fromJson(_map(await _post('/v1/claims/draft', {
+        if (pot != null) 'pot': pot,
+        if (desk != null) 'desk': desk,
+        if (incidentIds != null) 'incident_ids': incidentIds,
+      })));
+
+  /// The case was made with another ticket (#66). True when a draft fell below its minimum with it.
+  Future<bool> setIncidentTicket(String id, String ticketId) async =>
+      _map(await _patch('/v1/incidents/${Uri.encodeComponent(id)}', {'ticket_id': ticketId}))['claim_deleted'] == true;
 
   /// The backend takes `{upload_id, label}` per attachment; a bare list of ids is a 422.
   Future<ApiClaim> patchClaim(String id, {String? ngoId, List<ApiClaimAttachment>? attachments}) async => ApiClaim.fromJson(_map(await _patch(

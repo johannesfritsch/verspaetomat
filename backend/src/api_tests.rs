@@ -1003,6 +1003,12 @@ async fn a_selection_is_its_own_pot(pool: PgPool) {
     let (s, e) = call(&app, "POST", "/v1/claims/draft", Some(&token), Some(json!({ "desk": desk, "incident_ids": &ids[..2] }))).await;
     assert_eq!(s, StatusCode::PRECONDITION_FAILED, "{e}");
     assert_eq!(e["error"], "bundle below the 4 € minimum; keep collecting", "the words older builds know");
+
+    // Picked up again with no selection named, the draft keeps its three cases and their 4,50 €,
+    // not the four of the pot (the E2E of the build in the store does exactly this).
+    let (s, d) = call(&app, "POST", "/v1/claims/draft", Some(&token), Some(json!({ "desk": desk }))).await;
+    assert_eq!(s, StatusCode::OK, "{d}");
+    assert_eq!((d["incidents"].as_array().unwrap().len(), d["amount_claimed_cents"].as_i64()), (3, Some(450)), "{d}");
 }
 
 /// A case moved to another ticket leaves the draft that held it and joins its new ticket's pot.

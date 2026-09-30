@@ -57,6 +57,9 @@ fn fields_of(p: &Product) -> Value {
         "price": if p.family == "einzelfahrkarte" { "required" } else { "optional" },
         "validity": validity,
         "birth_date": rule.form.birth_date,
+        // What the claim carries: a copy of the ticket, a proof of what it cost.
+        "copy": rule.form.copy,
+        "price_proof": rule.form.price_proof,
         "route": p.family == "streckenzeitkarte",
         "first_class": true,
     })

@@ -91,7 +91,11 @@ abstract class AppRepository {
   Future<List<ApiClaim>> claims();
   /// The claim card's thread was opened: its inbound mails count as seen (docs/18).
   Future<void> markClaimSeen(String claimId);
-  Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds});
+  /// A claim for one pot (#66: `summary.pots[].id`), or for a desk against a server before pots.
+  Future<ApiClaimDraft> draftClaim({String? desk, String? pot, List<String>? incidentIds});
+  /// Moves a case to another of the passenger's tickets (#66). True when a draft that held it
+  /// fell below its minimum and went.
+  Future<bool> setIncidentTicket(String incidentId, String ticketId);
   Future<ApiClaim> patchClaim(String id, {String? ngoId, List<ApiClaimAttachment>? attachments});
   Future<ApiUpload> upload({required String kind, required String filename, required List<int> bytes});
   Future<ApiClaim> signClaim(String id, {required String typedName, String? signatureUploadId});

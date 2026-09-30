@@ -14,6 +14,7 @@ import '../community/community_widgets.dart' show pickNgo;
 import '../share/share_moments.dart';
 import 'claims_widgets.dart';
 import 'pdf_view.dart';
+import '../tickets/tickets.dart' show TicketBook, editTicket;
 
 class _AntraegeData {
   const _AntraegeData(this.ledger, this.claims, this.mails);
@@ -98,6 +99,36 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Antrag nicht möglich: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// A claim for one pot (#66).
+  Future<void> _preparePot(BuildContext context, ApiPot pot) async {
+    final session = RepoScope.read(context);
+    setState(() => _busy = true);
+    try {
+      final draft = await session.repo.draftClaim(pot: pot.id);
+      if (!context.mounted) return;
+      await context.push('${Routes.claim}?id=${draft.claim.id}&pot=${Uri.encodeComponent(pot.id)}&desk=${Uri.encodeComponent(pot.desk)}', extra: draft);
+      _loader.refresh();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Antrag nicht möglich: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// The pot's ticket, to enter what is missing (a single ticket's fare).
+  Future<void> _openTicket(BuildContext context, ApiPot pot) async {
+    try {
+      final book = await TicketBook.load(context, all: true);
+      final t = book.tickets.where((t) => t.id == pot.ticketId).firstOrNull;
+      if (t == null || !context.mounted) return;
+      await editTicket(context, t, book.fares);
+      _loader.refresh();
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Fahrkarte nicht geladen: $e')));
     }
   }
 
@@ -187,13 +218,19 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
         final summary = ledger.summary;
         final byId = {for (final i in ledger.incidents) i.id: i};
         final desks = _sortedDesks(summary.desks);
+        // One card per pot where the server has pots (#66): ready ones first, then the oldest.
+        final pots = [...summary.pots]..sort((a, b) {
+            if (a.payable != b.payable) return a.payable ? -1 : 1;
+            return (a.deadline ?? DateTime(9999)).compareTo(b.deadline ?? DateTime(9999));
+          });
+        final potDesks = pots.map((p) => p.desk).toSet();
         final claims = data.claims.where((c) => c.status != ApiClaimStatus.draft).toList()
           ..sort((a, b) => (b.sentAt ?? DateTime(0)).compareTo(a.sentAt ?? DateTime(0)));
         final out = claims.where((c) => c.status == ApiClaimStatus.sent || c.status == ApiClaimStatus.question || c.status == ApiClaimStatus.bounced).toList();
         final expired = ledger.incidents.where((i) => !i.discarded && i.status == IncidentStatus.verfallen).toList();
         final discarded = ledger.incidents.where((i) => i.discarded).toList();
         final nothingAtAll = ledger.incidents.isEmpty && claims.isEmpty;
-        final openCount = summary.desks.fold(0, (s, d) => s + d.incidentIds.length);
+        final openCount = pots.isNotEmpty ? pots.fold(0, (s, p) => s + p.incidentIds.length) : summary.desks.fold(0, (s, d) => s + d.incidentIds.length);
         final caption = [
           if (openCount > 0) '$openCount ${openCount == 1 ? 'Fall' : 'Fälle'} gesammelt',
           if (out.isNotEmpty) '${out.length} ${out.length == 1 ? 'Antrag' : 'Anträge'} unterwegs',
@@ -212,8 +249,27 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
               delayMinutes: summary.delayMinutesThreshold,
               notifications: session.me?.settings.notifications ?? true,
             )
-          else if (desks.isEmpty)
+          else if (desks.isEmpty && pots.isEmpty)
             _EmptyCollecting()
+          else if (pots.isNotEmpty)
+            for (final (n, p) in pots.indexed)
+              _PotCard(
+                pot: p,
+                ngoName: ngoName(session.me?.settings.ngoId ?? ''),
+                onChangeNgo: () => pickNgo(context, session, session.me?.settings.ngoId),
+                incidents: p.incidentIds.map((id) => byId[id]).whereType<ApiIncident>().toList(),
+                showDesk: potDesks.length > 1,
+                minPayoutCents: summary.minPayoutCents,
+                oldest: summary.oldestOpen,
+                busy: _busy,
+                discarded: n == 0 ? discarded : const [],
+                onDiscard: (id, reason) => _discard(context, id, reason),
+                onRestore: (id) => _restore(context, id),
+                onDelete: (i) => _deleteRide(context, i),
+                onTicketChanged: _loader.refresh,
+                onOpenTicket: () => _openTicket(context, p),
+                onPrepare: p.payable ? () => _preparePot(context, p) : null,
+              )
           else
             for (final d in desks)
               _CollectingCard(
@@ -232,7 +288,7 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
                 onPrepare: d.ready ? () => _prepare(context, d.desk) : null,
               ),
           // Cases taken out while no bundle is collecting still need a way back.
-          if (desks.isEmpty && discarded.isNotEmpty)
+          if (desks.isEmpty && pots.isEmpty && discarded.isNotEmpty)
             _DiscardedCard(incidents: discarded, onRestore: (id) => _restore(context, id), onDelete: (i) => _deleteRide(context, i)),
           // Then every claim, newest first, status in words.
           for (final c in claims)
@@ -273,11 +329,13 @@ class _AntraegeScreenState extends State<AntraegeScreen> {
                 icon: Icons.mark_email_unread_outlined,
                 onTap: () => _simulateReply(context),
               ),
-            if (desks.length > 1)
+            if (pots.isEmpty && desks.length > 1)
               Text(
                 'Ansprüche werden pro Bahnunternehmen gebündelt. Jedes Bündel muss 4 € erreichen.',
                 style: VText.bodyS,
               ),
+            if (pots.length > 1)
+              Text('Gesammelt wird je Fahrkarte und je Stelle, die den Antrag bearbeitet.', style: VText.bodyS),
           ],
         );
       },
@@ -539,6 +597,144 @@ class _CollectingCard extends StatelessWidget {
   }
 }
 
+/// One pot (#66): one ticket's open cases at one desk, what they are worth, and what is still
+/// missing before they can go out. Every figure and every reason is the server's.
+class _PotCard extends StatelessWidget {
+  const _PotCard({
+    required this.pot,
+    required this.ngoName,
+    required this.onChangeNgo,
+    required this.incidents,
+    required this.showDesk,
+    required this.minPayoutCents,
+    required this.oldest,
+    required this.busy,
+    required this.discarded,
+    required this.onDiscard,
+    required this.onRestore,
+    required this.onDelete,
+    required this.onTicketChanged,
+    required this.onOpenTicket,
+    required this.onPrepare,
+  });
+  final ApiPot pot;
+  final String? ngoName;
+  final VoidCallback onChangeNgo;
+  final List<ApiIncident> incidents;
+  final bool showDesk;
+  final int minPayoutCents;
+  final ApiOldestOpen? oldest;
+  final bool busy;
+  final List<ApiIncident> discarded;
+  final Future<void> Function(String id, String reason) onDiscard;
+  final Future<void> Function(String id) onRestore;
+  final Future<void> Function(ApiIncident incident) onDelete;
+  final VoidCallback onTicketChanged;
+  final VoidCallback onOpenTicket;
+  final VoidCallback? onPrepare;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = pot;
+    final missing = potMissing(p);
+    final progress = potProgress(p, minPayoutCents);
+    final priceMissing = p.blockers.any((b) => b.kind == 'price_missing');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.m),
+      child: VFahrkarte(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                VOperatorMark(p.desk),
+                const SizedBox(width: VSpace.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(p.ticketName, key: Key('topf-${p.product}'), style: VText.title),
+                      if (showDesk) ...[
+                        const SizedBox(height: 2),
+                        Text('an ${deskDisplay(p.desk)}', style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ],
+                      const SizedBox(height: VSpace.xs),
+                      if (p.payable)
+                        VPill('Bereit · ${fmtCents(p.amountCents)}', icon: Icons.schedule, tone: VPillTone.green)
+                      else
+                        Text(potFigure(p), style: VText.bodyStrong),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (p.payable && p.pools) ...[
+              const SizedBox(height: VSpace.s),
+              Text(
+                '${p.minutes} Minuten gesammelt.${(p.nextUnitMinutes ?? 0) > 0 && !p.capped ? ' In ${p.nextUnitMinutes} Minuten kommt ein Betrag dazu.' : ''}',
+                style: VText.bodyS,
+              ),
+            ],
+            if (!p.payable) ...[
+              if (progress != null) ...[
+                const SizedBox(height: VSpace.s),
+                VProgressBar(value: progress.clamp(0.0, 1.0), label: VProgressBar.pct(progress)),
+              ],
+              if (missing != null) ...[
+                const SizedBox(height: VSpace.s),
+                Text(missing, style: VText.bodyS),
+              ],
+            ],
+            if (p.capped) ...[
+              const SizedBox(height: 2),
+              Text('Ein Teil liegt über der Obergrenze dieser Fahrkarte.', style: VText.caption),
+            ],
+            const SizedBox(height: 4),
+            InkWell(
+              onTap: onChangeNgo,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(ngoName != null ? 'Für $ngoName' : 'Noch kein Zweck gewählt', style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('ändern', style: VText.caption.copyWith(color: VColors.ink2, decoration: TextDecoration.underline)),
+                  ],
+                ),
+              ),
+            ),
+            const VGap.s(),
+            for (final i in incidents)
+              IncidentRow(
+                incident: i,
+                onTap: () => showEvidenceSheet(context, i, onDiscard: (reason) => onDiscard(i.id, reason), onTicketChanged: onTicketChanged),
+              ),
+            if (oldest != null && incidents.any((i) => i.id == oldest!.id)) ...[
+              const VGap.s(),
+              _DeadlineLine(oldest: oldest!),
+            ],
+            if (discarded.isNotEmpty) ...[
+              const VGap.s(),
+              _DiscardedLine(incidents: discarded, onRestore: onRestore, onDelete: onDelete),
+            ],
+            if (priceMissing) ...[
+              const VGap.m(),
+              VTintButton(key: const Key('topf-fahrpreis'), label: 'Fahrpreis eintragen', icon: Icons.edit_outlined, onTap: onOpenTicket),
+            ],
+            if (onPrepare != null) ...[
+              const VGap.m(),
+              VPrimaryButton(key: Key('topf-antrag-${p.product}'), label: busy ? 'Einen Moment …' : 'Antrag vorbereiten', icon: Icons.edit_outlined, onTap: busy ? null : onPrepare),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// The whole tab is empty: no case, no Antrag, nothing taken out. Say what will
 /// happen here and when, rather than showing an empty box (docs/21 §5).
 class EmptyAntraege extends StatelessWidget {
@@ -786,7 +982,7 @@ class _EmptyCollecting extends StatelessWidget {
             const SizedBox(height: 4),
             Text('Noch nichts', style: VText.bodySStrong.copyWith(color: VColors.ink2)),
             const SizedBox(height: 2),
-            Text('Verspätungen ab 60 Minuten landen hier. Ab 4 € geht ein Antrag raus.', style: VText.caption),
+            Text('Verspätungen landen hier, sobald sie für deine Fahrkarte zählen. Ab 4 € geht ein Antrag raus.', style: VText.caption),
           ],
         ),
       ),

@@ -409,3 +409,17 @@ gespeicherten Fahrkarten (mit dem Geburtsdatum der BahnCard 100), und der Server
 Lesen einer Antwort jede gespeicherte Fahrkartennummer, nicht nur die des D-Tickets. Und eine
 Zeitkarte ohne Geltungsdaten geht raus, sobald ihr Topf zahlbar ist, statt auf ein Monatsende zu
 warten, das niemand kennt (fiel in der E2E auf).
+
+**Phase 4** — App, 30. September 2026: Anträge je Topf (Titel ist die Fahrkarte, die Stelle
+darunter, wo es mehrere gibt; Minuten und Betrag beim Minuten-Topf, Fälle und Betrag sonst; was
+fehlt, in einem Satz aus den Zahlen des Servers; „Fahrpreis eintragen" öffnet die Fahrkarte),
+„Fahrkarte ändern" in den Fall-Details, der Antrag öffnet per Topf, Schritt 2 heißt „Fahrkarte":
+die Fahrkarte des Antrags mit „Angaben ändern", Bilder je Produkt (je Monat beim D-Ticket, eines
+sonst, keines bei der BahnCard 100, die dafür Nummer und Geburtsdatum braucht). Gegen einen Server
+ohne Töpfe bleiben die Karten je Stelle. `/v1/fares` sagt in `fields`, ob eine Kopie und ein
+Preisnachweis gebraucht werden. Ein wieder aufgenommener Entwurf nimmt den Betrag seiner Fälle von
+jetzt (fiel in der E2E auf: zuerst bekam er den des ganzen Topfs).
+
+Offen aus Phase 4: ein Upload für den Preisnachweis (bisher nur, dass das Produkt einen will);
+„Ticket-Nr." steht noch in den persönlichen Daten und wird mit der Nummer des D-Tickets
+gleichgehalten.

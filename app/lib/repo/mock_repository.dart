@@ -855,6 +855,32 @@ class MockRepository implements AppRepository {
         return _incident(i, discardedAt: reason == null ? null : i.date, discardReason: reason);
       }).toList(),
       summary: ApiIncidentSummary(
+        // One pot per desk, on the demo's ticket. Demo counts per case, as it always has; the
+        // pooling of minutes is the server's and shows against a real one.
+        pots: [
+          for (final d in desks)
+            ApiPot(
+              id: 'demo|${d.desk}',
+              ticketId: 'demo-dticket',
+              ticketName: state.ticket.label,
+              product: switch (state.ticket) {
+                TicketType.deutschlandticket => 'deutschlandticket',
+                TicketType.zeitkarte => 'zeitkarte_spnv',
+                TicketType.einzelfahrkarte => 'einzel_db',
+              },
+              family: switch (state.ticket) {
+                TicketType.deutschlandticket => 'deutschlandticket',
+                TicketType.zeitkarte => 'zeitkarte',
+                TicketType.einzelfahrkarte => 'einzelfahrkarte',
+              },
+              desk: d.desk,
+              minutes: [for (final id in d.incidentIds) state.incidents.where((i) => i.id == id).firstOrNull?.delayMinutes ?? 0].fold(0, (a, b) => a + b),
+              amountCents: d.openCents,
+              payable: d.ready,
+              blockers: d.ready ? const [] : [ApiPotBlocker(kind: 'below_minimum', missingCents: d.missingCents)],
+              incidentIds: d.incidentIds,
+            ),
+        ],
         desks: desks,
         readyDesk: state.readyDesk,
         confirmedCents: _cents(state.confirmedTotal),
@@ -917,14 +943,16 @@ class MockRepository implements AppRepository {
   Future<void> markClaimSeen(String claimId) async => state.markClaimSeen(claimId);
 
   @override
-  Future<ApiClaimDraft> draftClaim({required String desk, List<String>? incidentIds}) async {
-    state.startClaim(desk);
+  Future<ApiClaimDraft> draftClaim({String? desk, String? pot, List<String>? incidentIds}) async {
+    // A demo pot is its desk: `demo|<desk>`.
+    final d = desk ?? (pot != null && pot.startsWith('demo|') ? pot.substring(5) : 'Servicecenter Fahrgastrechte');
+    state.startClaim(d);
     if (incidentIds != null) {
       for (final id in List.of(state.draftIncidentIds)) {
         if (!incidentIds.contains(id)) state.toggleDraftIncident(id);
       }
     }
-    final addr = Mock.deskAddresses[desk];
+    final addr = Mock.deskAddresses[d];
     // No e-mail address. Where a claim really goes lives in the server's `mail_routes`, which the
     // demo cannot reach, and an address invented here was read as the app's answer to „wohin geht
     // mein Antrag?" — a `.invalid` one at that (#22, #25). The postal address stays: it is public
@@ -938,6 +966,12 @@ class MockRepository implements AppRepository {
       relayAddress: Mock.relayAddress,
       claimReplyAddress: Mock.claimReplyAddress,
     );
+  }
+
+  @override
+  Future<bool> setIncidentTicket(String incidentId, String ticketId) async {
+    state.incidentTickets[incidentId] = ticketId;
+    return false;
   }
 
   @override

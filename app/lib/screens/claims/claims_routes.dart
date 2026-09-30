@@ -16,6 +16,7 @@ final claimsRoutes = <RouteBase>[
     path: Routes.claim,
     builder: (_, s) => AntragScreen(
       desk: s.uri.queryParameters['desk'] ?? 'Servicecenter Fahrgastrechte',
+      pot: s.uri.queryParameters['pot'],
       claimId: s.uri.queryParameters['id'],
       draft: s.extra is ApiClaimDraft ? s.extra as ApiClaimDraft : null,
     ),

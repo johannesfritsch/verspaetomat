@@ -683,7 +683,7 @@ void main() {
       // The pre-step: what is about to happen, and what it is worth, before anything is asked.
       await pumpUntilFound(tester, find.text('So läuft das'), timeout: const Duration(seconds: 40));
       expect(find.text('4 Fälle · 6,00 €'), findsOneWidget);
-      for (final step in ['Prüfen', 'Ticket', 'Zweck', 'Unterschrift', 'Senden']) {
+      for (final step in ['Prüfen', 'Fahrkarte', 'Zweck', 'Unterschrift', 'Senden']) {
         expect(find.text(step), findsWidgets, reason: 'the five steps are named up front');
       }
       await tapText(tester, 'Los geht\'s');

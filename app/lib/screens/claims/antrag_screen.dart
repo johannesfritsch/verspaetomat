@@ -20,11 +20,16 @@ import 'claims_widgets.dart';
 import 'pdf_view.dart';
 import 'signature_board.dart';
 import 'ticket_photo.dart';
+import '../tickets/tickets.dart' show TicketBook, editTicket, TicketFamily;
 
 /// Antrag: the five-step claim flow. Prüfen · Ticket · Zweck · Unterschrift · Senden.
 class AntragScreen extends StatefulWidget {
-  const AntragScreen({super.key, required this.desk, this.claimId, this.draft, this.demo = false});
+  const AntragScreen({super.key, required this.desk, this.pot, this.claimId, this.draft, this.demo = false});
   final String desk;
+
+  /// The pot this claim is (#66, `summary.pots[].id`). Null from a server before pots, and from an
+  /// older link: then the desk.
+  final String? pot;
   final String? claimId;
   final ApiClaimDraft? draft;
 
@@ -37,7 +42,7 @@ class AntragScreen extends StatefulWidget {
 }
 
 class _AntragScreenState extends State<AntragScreen> {
-  static const _steps = ['Prüfen', 'Ticket', 'Zweck', 'Unterschrift', 'Senden'];
+  static const _steps = ['Prüfen', 'Fahrkarte', 'Zweck', 'Unterschrift', 'Senden'];
 
   /// One drawing per step, behind the header. Each names what the step is about rather than
   /// decorating it: the clock a delay is measured against, a ticket on a phone, a heart in a
@@ -58,6 +63,11 @@ class _AntragScreenState extends State<AntragScreen> {
 
   /// Every open case at this desk, and the ones that go into this Antrag. Default: all of them.
   List<ApiIncident> _available = const [];
+
+  /// The ticket this claim is made with, and what its product asks for (#66). Null from a server
+  /// before tickets: the step then asks for a picture per month, as it did.
+  ApiTicket? _ticket;
+  ApiFare? _fare;
   Set<String> _selected = const {};
   List<ApiNgo> _ngos = const [];
   Object? _error;
@@ -190,7 +200,7 @@ class _AntragScreenState extends State<AntragScreen> {
     final session = RepoScope.read(context);
     setState(() => _busy = true);
     try {
-      final draft = await session.repo.draftClaim(desk: widget.desk, incidentIds: next.toList());
+      final draft = await session.repo.draftClaim(desk: widget.pot == null ? widget.desk : null, pot: widget.pot, incidentIds: next.toList());
       final ids = draft.claim.incidentIds.toSet();
       // The draft is a new one: its ticket and its signature are gone with the old form.
       _draft = draft;
@@ -216,11 +226,14 @@ class _AntragScreenState extends State<AntragScreen> {
       _error = null;
     });
     try {
-      _draft ??= await session.repo.draftClaim(desk: widget.desk);
+      _draft ??= await session.repo.draftClaim(desk: widget.pot == null ? widget.desk : null, pot: widget.pot);
       final ledger = await session.repo.incidents();
       final ids = _draft!.claim.incidentIds.toSet();
       _incidents = ledger.incidents.where((i) => ids.contains(i.id)).toList()..sort((a, b) => a.date.compareTo(b.date));
-      _available = ledger.incidents.where((i) => i.desk == widget.desk && (i.isOpen || ids.contains(i.id))).toList()..sort((a, b) => a.date.compareTo(b.date));
+      // The cases that could go on this form: the pot's (#66), else every open one at the desk.
+      final potIds = ledger.summary.pots.where((p) => p.id == widget.pot).firstOrNull?.incidentIds.toSet();
+      _available = ledger.incidents.where((i) => (potIds != null ? potIds.contains(i.id) : i.desk == widget.desk && i.isOpen) || ids.contains(i.id)).toList()..sort((a, b) => a.date.compareTo(b.date));
+      await _loadTicket();
       _selected = ids;
       _ngos = session.ngos.isNotEmpty ? session.ngos : await session.repo.ngos();
       final me = session.me ?? await session.repo.getMe();
@@ -239,6 +252,50 @@ class _AntragScreenState extends State<AntragScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// The claim's ticket and its product. A server before tickets has neither, and that is fine.
+  Future<void> _loadTicket() async {
+    final id = _draft?.claim.ticketId;
+    if (id == null) return;
+    try {
+      final book = await TicketBook.load(context, all: true);
+      _ticket = book.tickets.where((t) => t.id == id).firstOrNull;
+      _fare = _ticket == null ? null : book.fares.byId(_ticket!.product);
+    } catch (_) {
+      _ticket = null;
+      _fare = null;
+    }
+  }
+
+  /// „Angaben ändern" on the Fahrkarte step: the ticket's own form. A changed class or price
+  /// changes what the pot is worth, so the draft is asked for again (the server keeps it and
+  /// updates its amount).
+  Future<void> _editTicket() async {
+    final t = _ticket;
+    if (t == null) return;
+    final book = await TicketBook.load(context, all: true);
+    if (!mounted) return;
+    final changed = await editTicket(context, t, book.fares);
+    if (changed == null || !mounted) return;
+    final session = RepoScope.read(context);
+    try {
+      _draft = await session.repo.draftClaim(desk: widget.pot == null ? widget.desk : null, pot: widget.pot, incidentIds: _selected.toList());
+    } catch (_) {
+      // The pot may no longer go out with the new ticket details; the screen says so on reload.
+    }
+    if (!mounted) return;
+    await _loadTicket();
+    if (mounted) setState(_readAttachments);
+  }
+
+  /// A ticket the desk knows by number and birth date instead of a copy (the BahnCard 100) needs
+  /// both before the form can go.
+  bool get _ticketComplete {
+    final f = _fare;
+    final t = _ticket;
+    if (f == null || t == null || f.fields.copy) return true;
+    return (t.number ?? '').isNotEmpty && (!f.fields.birthDate || t.birthDate != null);
   }
 
   /// What is already on this form. A draft left lying about keeps its tickets, so the Ticket
@@ -261,7 +318,7 @@ class _AntragScreenState extends State<AntragScreen> {
         // Only "is there anything to claim". What is still missing is said when Weiter is pressed,
         // instead of a grey button that does not explain itself.
         0 => _incidents.isNotEmpty,
-        1 => _months.every(_uploads.containsKey),
+        1 => _months.every(_uploads.containsKey) && _ticketComplete,
         2 => true,
         3 => _signed,
         _ => true,
@@ -281,8 +338,14 @@ class _AntragScreenState extends State<AntragScreen> {
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
+  /// The pictures this form needs. By month for a D-Ticket (a new ticket every month), one for any
+  /// other ticket, none where the desk knows the ticket by its number (#66). A server before
+  /// tickets: by month, as before.
   List<String> get _months {
+    final f = _fare;
+    if (f != null && !f.fields.copy) return const [];
     final m = _claim?.ticketMonths ?? const [];
+    if (f != null && f.family != 'deutschlandticket') return const ['Ticket'];
     if (m.isNotEmpty) return m;
     return const ['Ticket'];
   }
@@ -540,6 +603,9 @@ class _AntragScreenState extends State<AntragScreen> {
           marked: _marked,
         ),
       1 => _Ticket(
+          ticket: _ticket,
+          fare: _fare,
+          onEditTicket: _busy ? null : _editTicket,
           months: _months,
           tickets: {for (final i in _incidents) i.ticket},
           uploads: _uploads,
@@ -651,6 +717,8 @@ class _AntragScreenState extends State<AntragScreen> {
             // ticket month in the app does.
             for (final m in _months)
               if (!_uploads.containsKey(m)) m == 'Ticket' ? 'ein Bild deines Tickets' : 'das Ticket für ${monthLabel(m)}',
+            // A ticket the desk knows by number and birth date (#66): the card says which is missing.
+            if (!_ticketComplete) 'Nummer und Geburtsdatum deiner Fahrkarte',
           ],
         3 => _signed ? const [] : ['deine Unterschrift'],
         _ => const [],
@@ -1306,6 +1374,9 @@ class _WhatToUpload extends StatelessWidget {
 
 class _Ticket extends StatelessWidget {
   const _Ticket({
+    required this.ticket,
+    required this.fare,
+    required this.onEditTicket,
     required this.months,
     required this.tickets,
     required this.uploads,
@@ -1314,6 +1385,11 @@ class _Ticket extends StatelessWidget {
     required this.busy,
     required this.onAttach,
   });
+  /// The claim's ticket (#66); null from a server before tickets.
+  final ApiTicket? ticket;
+  final ApiFare? fare;
+  final VoidCallback? onEditTicket;
+
   final List<String> months;
 
   /// The ticket kinds of the cases on this form, so the step can say what to photograph (#52).
@@ -1331,12 +1407,68 @@ class _Ticket extends StatelessWidget {
   final bool busy;
   final Future<void> Function(String month, ImageSource source) onAttach;
 
+  String _dmy(DateTime d) => '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+
+  /// The ticket on this form, as the desk will read it, and what of it is still missing.
+  Widget _ticketCard() {
+    final t = ticket!;
+    final f = fare;
+    final numberMissing = f != null && f.fields.number != 'none' && (t.number ?? '').isEmpty;
+    final birthMissing = f != null && f.fields.birthDate && t.birthDate == null;
+    final needed = f != null && !f.fields.copy;
+    return VCard(
+      key: const Key('antrag-fahrkarte'),
+      padding: const EdgeInsets.all(VSpace.cardTight),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              VIconBadge(icon: TicketFamily.of(t.family).icon, tone: VBadgeTone.neutral, size: VControl.badgeSmall, iconColor: VColors.ink2),
+              const SizedBox(width: VSpace.md),
+              Expanded(child: Text(t.name, style: VText.bodyStrong)),
+            ],
+          ),
+          const VGap.s(),
+          VKeyValue('Klasse', t.firstClass ? '1. Klasse' : '2. Klasse'),
+          if (f != null && f.fields.number != 'none')
+            VKeyValue('Nummer', (t.number ?? '').isEmpty ? (needed ? 'fehlt' : 'nicht angegeben') : t.number!, valueStyle: VText.mono),
+          if (f != null && f.fields.birthDate) VKeyValue('Geburtsdatum', t.birthDate == null ? 'fehlt' : _dmy(t.birthDate!)),
+          if (t.priceCents != null) VKeyValue('Preis', fmtCents(t.priceCents!)),
+          if (needed && (numberMissing || birthMissing)) ...[
+            const VGap.xs(),
+            Text('Die Bahn erkennt diese Fahrkarte an Nummer und Geburtsdatum. Ohne beides geht der Antrag nicht.', style: VText.bodyS.copyWith(color: VColors.red)),
+          ],
+          const VGap.xs(),
+          VGhostButton(key: const Key('antrag-fahrkarte-aendern'), label: 'Angaben ändern', icon: Icons.edit_outlined, onTap: onEditTicket),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final several = months.length > 1;
+    // A ticket the desk knows by its number (#66): no picture, only the card.
+    if (ticket != null && months.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Deine Fahrkarte.', style: VText.h2),
+          const VGap.s(),
+          Text('Ein Bild braucht es für diese Fahrkarte nicht. Die Angaben stehen im Formular.', style: VText.body.copyWith(color: VColors.ink2)),
+          const VGap.m(),
+          _ticketCard(),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (ticket != null) ...[
+          _ticketCard(),
+          const VGap.l(),
+        ],
         Text(several ? 'Ein Bild deines Tickets für jeden Monat.' : 'Ein Bild deines Tickets.', style: VText.h2),
         const VGap.s(),
         // #52: people did not see why one Antrag asks for two pictures. The reason is the form's,

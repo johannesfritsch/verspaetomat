@@ -918,6 +918,7 @@ class ApiOldestOpen {
 
 class ApiIncidentSummary {
   const ApiIncidentSummary({
+    this.pots = const [],
     this.desks = const [],
     this.readyDesk,
     this.confirmedCents = 0,
@@ -927,6 +928,9 @@ class ApiIncidentSummary {
     this.flatClaimCents,
     this.delayMinutesThreshold = 60,
   });
+  /// One per ticket, window and desk (#66): what a claim is made of. Empty from a server before
+  /// pots; the screen then groups by [desks].
+  final List<ApiPot> pots;
   final List<ApiDeskSummary> desks;
   final String? readyDesk;
   final int confirmedCents;
@@ -946,6 +950,7 @@ class ApiIncidentSummary {
   final int delayMinutesThreshold;
 
   factory ApiIncidentSummary.fromJson(Map<String, dynamic> j) => ApiIncidentSummary(
+        pots: _ml(j['pots']).map(ApiPot.fromJson).toList(),
         desks: _ml(j['desks']).map(ApiDeskSummary.fromJson).toList(),
         readyDesk: _sn(j['ready_desk']),
         confirmedCents: _i(j['confirmed_cents']),
@@ -976,6 +981,7 @@ class ApiClaim {
     required this.accountHolder,
     required this.iban,
     this.ticketMonths = const [],
+    this.ticketId,
     this.attachments = const [],
     this.signedBy,
     required this.status,
@@ -1008,6 +1014,9 @@ class ApiClaim {
   /// The claim's own mail address (`antrag-…@users.…`), assigned at send time (docs/18).
   final String? replyAddress;
 
+  /// The ticket whose pot this claim is (#66); null on a server before pots.
+  final String? ticketId;
+
   factory ApiClaim.fromJson(Map<String, dynamic> j) => ApiClaim(
         id: _s(j['id']),
         desk: _s(j['desk']),
@@ -1016,6 +1025,7 @@ class ApiClaim {
         accountHolder: _s(j['account_holder']),
         iban: _s(j['iban']),
         ticketMonths: _sl(j['ticket_months']),
+        ticketId: _sn(j['ticket_id']),
         attachments: _attachments(j['attachments']),
         signedBy: _sn(j['signed_by']),
         status: claimStatusFromWire(_sn(j['status'])),
@@ -1885,7 +1895,11 @@ class ApiShareConfirmed {
 
 /// What the app asks for when a passenger adds a ticket of one product.
 class ApiFareFields {
-  const ApiFareFields({this.number = 'booking', this.priceRequired = false, this.validity = 'none', this.birthDate = false, this.route = false, this.firstClass = true});
+  const ApiFareFields({this.number = 'booking', this.priceRequired = false, this.validity = 'none', this.birthDate = false, this.route = false, this.firstClass = true, this.copy = true, this.priceProof = false});
+  /// The claim carries a copy of the ticket. Not for a BahnCard 100: number and birth date.
+  final bool copy;
+  /// And, where the ticket shows no price, a proof of what it cost.
+  final bool priceProof;
   /// `abo` | `zeitkarte` | `bahncard` | `booking` | `none`
   final String number;
   /// A single ticket's price is its amount; a season ticket's only sets its cap.
@@ -1903,6 +1917,8 @@ class ApiFareFields {
         birthDate: _b(j['birth_date']),
         route: _b(j['route']),
         firstClass: _b(j['first_class'], true),
+        copy: _b(j['copy'], true),
+        priceProof: _b(j['price_proof']),
       );
 }
 
@@ -2095,4 +2111,81 @@ class JourneyTicketChoice {
         if (ticketId != null) 'ticket_id': ticketId,
         if (newTicket != null) 'new_ticket': newTicket!.toJson(),
       };
+}
+
+/// Why a pot cannot go out yet (#66). The server says which and how much; the app says it in words.
+class ApiPotBlocker {
+  const ApiPotBlocker({required this.kind, this.missingCents, this.missingMinutes, this.missingCases, this.until});
+  /// `empty` | `price_missing` | `not_money` | `below_minimum` | `too_few_cases` | `window_open`
+  final String kind;
+  final int? missingCents;
+  final int? missingMinutes;
+  final int? missingCases;
+  final DateTime? until;
+
+  factory ApiPotBlocker.fromJson(Map<String, dynamic> j) => ApiPotBlocker(
+        kind: _s(j['kind']),
+        missingCents: _in(j['missing_cents']),
+        missingMinutes: _in(j['missing_minutes']),
+        missingCases: _in(j['missing']),
+        until: _date(j['until']),
+      );
+}
+
+/// A pot (#66, docs/49 §5.5): one ticket's open cases in one window at one desk, evaluated by the
+/// server. What it is worth, whether it can go out, and if not, why.
+class ApiPot {
+  const ApiPot({
+    required this.id,
+    required this.ticketId,
+    required this.ticketName,
+    required this.product,
+    required this.family,
+    required this.desk,
+    this.minutes = 0,
+    this.nextUnitMinutes,
+    this.amountCents = 0,
+    this.capped = false,
+    this.payable = false,
+    this.blockers = const [],
+    this.aim,
+    this.deadline,
+    this.incidentIds = const [],
+  });
+  final String id;
+  final String ticketId;
+  final String ticketName;
+  final String product;
+  final String family;
+  final String desk;
+  final int minutes;
+  /// Set for a ticket whose delays pool: minutes until the next full unit.
+  final int? nextUnitMinutes;
+  final int amountCents;
+  final bool capped;
+  final bool payable;
+  final List<ApiPotBlocker> blockers;
+  final DateTime? aim;
+  final DateTime? deadline;
+  final List<String> incidentIds;
+
+  bool get pools => nextUnitMinutes != null;
+
+  factory ApiPot.fromJson(Map<String, dynamic> j) => ApiPot(
+        id: _s(j['id']),
+        ticketId: _s(j['ticket_id']),
+        ticketName: _s(j['ticket_name']),
+        product: _s(j['product']),
+        family: _s(j['family']),
+        desk: _s(j['desk']),
+        minutes: _i(j['minutes']),
+        nextUnitMinutes: _in(j['next_unit_minutes']),
+        amountCents: _i(j['amount_cents']),
+        capped: _b(j['capped']),
+        payable: _b(j['payable']),
+        blockers: _ml(j['blockers']).map(ApiPotBlocker.fromJson).toList(),
+        aim: _date(j['aim']),
+        deadline: _date(j['deadline']),
+        incidentIds: _sl(j['incident_ids']),
+      );
 }
