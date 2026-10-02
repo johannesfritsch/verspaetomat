@@ -94,6 +94,25 @@ Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (stri
   (`deploy/promote.sh`), then the production TestFlight build.** The server is up before the build
   that expects it.
 
+## Working from an issue
+
+Issues come through two forms (`.github/ISSUE_TEMPLATE/`): **Fehler** (what happened, optionally
+the ride, the version, a log) and **Idee** (the situation, optionally a proposal). They ask for
+little on purpose; the rest is ours to find out.
+
+- **Fehler:** reproduce before fixing — on the simulator, with Stellwerk, or with a test that
+  fails first. The version in Einstellungen, `1.0.1 (90)`, is the tag `ios-1.0.1-90`
+  (`· STAGING` → `ios-staging-1.0.1-<n>`), so `git log <tag>..main` says whether it is already
+  fixed. A ride (train, from, to, when) is where to start: its timetable, and on production its journey
+  rows (look, never copy them to staging).
+- **Idee:** build the small and obvious directly. Anything that touches money rules, the claim,
+  what the app promises, or something removed on purpose (streaks, points, teams…) gets a short
+  proposal in the issue first and waits for Johannes.
+- Reporters are often testers, in German. Never ask them for personal data in the issue; logs
+  carry positions. Questions back go in the issue in German, posted only when Johannes says so.
+- Done means the usual: tests, a closing reference (`#78`) in the commit, staging, and Johannes'
+  test before production.
+
 ## Rules that are easy to break
 
 - The backend owns every money rule (`backend/src/rules.rs`); the app never recomputes amounts or readiness.

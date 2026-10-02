@@ -1,0 +1,26 @@
+name: Idee
+description: Etwas fehlt, ist umständlich oder könnte besser sein.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Danke! Du musst keine fertige Lösung mitbringen. Am meisten hilft uns die Situation, in der dir etwas gefehlt hat. Wenn etwas unklar ist, fragen wir nach.
+
+        **Diese Seite ist öffentlich.** Bitte keine persönlichen Daten.
+
+  - type: textarea
+    id: situation
+    attributes:
+      label: Worum geht's?
+      description: Wann ist es dir aufgefallen, und was wolltest du da gerade tun?
+      placeholder: Ich fahre jeden Tag dieselbe Strecke und muss morgens jedes Mal wieder Start und Ziel suchen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: vorschlag
+    attributes:
+      label: Wie stellst du es dir vor? (freiwillig)
+      description: Eine Idee, eine Skizze, ein Bildschirmfoto aus einer anderen App, was immer du hast.
+      placeholder: Ein Knopf „Wie gestern" auf dem Bahnsteig.

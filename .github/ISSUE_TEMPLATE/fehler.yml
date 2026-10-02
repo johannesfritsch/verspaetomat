@@ -1,0 +1,41 @@
+name: Fehler
+description: Etwas in der App oder auf der Website tut nicht, was es soll.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Danke, dass du das meldest. Ein, zwei Sätze und ein Bildschirmfoto reichen oft schon.
+
+        **Diese Seite ist öffentlich.** Bitte keine Namen, Anschriften, E-Mail-Adressen oder Ticketnummern, auch nicht auf Bildschirmfotos. Geht es um deinen eigenen Antrag oder dein Geld, schreib uns lieber direkt (Kontakt im [Impressum](https://verspaetomat.de/impressum/)).
+
+  - type: textarea
+    id: was
+    attributes:
+      label: Was ist passiert?
+      description: Was du gemacht hast, was du gesehen hast, und was stattdessen hätte passieren sollen. Bildschirmfotos kannst du einfach hier hineinziehen.
+      placeholder: Ich saß im RE 96 von Kißlegg nach Memmingen und stand in Leutkirch am Bahnhof. Als nächster Halt stand Türkheim da, das stimmte nicht.
+    validations:
+      required: true
+
+  - type: input
+    id: fahrt
+    attributes:
+      label: Welche Fahrt?
+      description: Nur wenn es mit einer Fahrt zu tun hat. Zug, von wo nach wo, und ungefähr wann. Damit können wir die Fahrt nachstellen.
+      placeholder: RE 96, Kißlegg → Memmingen, 2. Oktober gegen 14:30
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Steht ganz unten in Einstellungen. Wenn du es nicht findest, lass es leer.
+      placeholder: 1.0.1 (90)
+
+  - type: textarea
+    id: protokoll
+    attributes:
+      label: Protokoll (freiwillig)
+      description: |
+        Nur bei Problemen mit dem Einchecken oder dem Bahnhof-Erkennen: Einstellungen → Entwicklung → Kopieren, und hier einfügen. **Das Protokoll enthält Standorte auf etwa zehn Meter genau, mit Uhrzeit**, also womöglich auch, wo du wohnst. Hier ist es öffentlich. Lass es lieber weg oder schick es uns über den Kontakt im Impressum.
+      render: text

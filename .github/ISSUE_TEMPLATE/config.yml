@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Frage zu deinem Antrag oder deinem Geld
+    url: https://verspaetomat.de/impressum/
+    about: Das ist privat und gehört nicht in ein öffentliches Issue. Schreib uns über den Kontakt im Impressum.
+  - name: Sicherheitslücke
+    url: https://verspaetomat.de/impressum/
+    about: Bitte nicht öffentlich melden. Schreib uns über den Kontakt im Impressum.
