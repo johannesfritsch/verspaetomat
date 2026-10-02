@@ -32,6 +32,13 @@ body:
       description: Steht ganz unten in Einstellungen. Wenn du es nicht findest, lass es leer.
       placeholder: 1.0.1 (90)
 
+  - type: input
+    id: geraet
+    attributes:
+      label: Gerät
+      description: Welches Telefon, und wenn du es weißt, welche iOS- oder Android-Version.
+      placeholder: iPhone 15, iOS 27.0
+
   - type: textarea
     id: protokoll
     attributes:

@@ -97,7 +97,7 @@ Dart-defines: `API_URL`, `BACKEND=local`, `INITIAL_ROUTE`, `NO_LOCATION=1` (stri
 ## Working from an issue
 
 Issues come through two forms (`.github/ISSUE_TEMPLATE/`): **Fehler** (what happened, optionally
-the ride, the version, a log) and **Idee** (the situation, optionally a proposal). They ask for
+the ride, the version, the device, a log) and **Idee** (the situation, optionally a proposal). They ask for
 little on purpose; the rest is ours to find out.
 
 - **Fehler:** reproduce before fixing — on the simulator, with Stellwerk, or with a test that
