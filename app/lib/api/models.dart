@@ -180,7 +180,7 @@ class ApiStation {
 }
 
 class ApiStop {
-  const ApiStop({required this.name, this.stationId, this.scheduledArrival, this.arrival, this.scheduledDeparture, this.departure, this.cancelled = false});
+  const ApiStop({required this.name, this.stationId, this.scheduledArrival, this.arrival, this.scheduledDeparture, this.departure, this.cancelled = false, this.track});
   final String name;
   final String? stationId;
   final DateTime? scheduledArrival;
@@ -188,6 +188,10 @@ class ApiStop {
   final DateTime? scheduledDeparture;
   final DateTime? departure;
   final bool cancelled;
+
+  /// The track at this stop, live where the feed has it (#56, read since #79). Fresher than the
+  /// leg's stored platform; see `stopTrack` (ride_widgets.dart).
+  final String? track;
 
   /// Delay at this stop in minutes, from the arrival forecast when known.
   int get delayMinutes {
@@ -205,6 +209,7 @@ class ApiStop {
         scheduledDeparture: _dt(j['scheduled_departure']),
         departure: _dt(j['departure'] ?? j['live_departure']),
         cancelled: _b(j['cancelled']),
+        track: _sn(j['track']),
       );
 }
 
@@ -694,6 +699,7 @@ class ApiRide {
     required this.status,
     this.passedStops = 0,
     this.liveDelayMinutes = 0,
+    this.liveKnown,
     this.cause,
     this.finalDelayMinutes,
     this.cancelled = false,
@@ -716,8 +722,14 @@ class ApiRide {
   final DateTime checkedInAt;
   final bool locationVerified;
   final ApiRideStatus status;
+  /// Stops of this leg behind the train, counted from the boarding stop (#78). Use
+  /// `nextStopIndex` (ride_widgets.dart) rather than adding it up by hand.
   final int passedStops;
   final int liveDelayMinutes;
+
+  /// Whether [liveDelayMinutes] comes from a live forecast (#78): only then is 0 „pünktlich".
+  /// Null from a server that does not say, and then the app keeps saying what it always said.
+  final bool? liveKnown;
   final String? cause;
   final int? finalDelayMinutes;
   final bool cancelled;
@@ -745,6 +757,7 @@ class ApiRide {
         status: switch (_s(j['status'])) { 'arrived' => ApiRideStatus.arrived, 'abandoned' => ApiRideStatus.abandoned, _ => ApiRideStatus.riding },
         passedStops: _i(j['passed_stops']),
         liveDelayMinutes: _i(j['live_delay_minutes'] ?? j['live_delay_min']),
+        liveKnown: j['live_known'] == null ? null : _b(j['live_known']),
         cause: _sn(j['cause']),
         finalDelayMinutes: _in(j['final_delay_minutes'] ?? j['final_delay_min']),
         cancelled: _b(j['cancelled']),

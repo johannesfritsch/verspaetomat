@@ -126,6 +126,45 @@ int fromIndex(List<ApiStop> stops, String? stationId, String stationName) {
   return loose >= 0 ? loose : 0;
 }
 
+/// Where the ride's exit stop is in a trip's stops, or -1 when it is not on them. [fromIndex]
+/// answers 0 for a name it cannot find, and an exit can never be at or before the boarding stop,
+/// so anything there means not found.
+int exitIndexOf(List<ApiStop> stops, ApiRide r) {
+  if (stops.isEmpty) return -1;
+  final exit = fromIndex(stops, r.exitStationId, r.exitStationName);
+  return exit > fromIndex(stops, r.fromStationId, r.fromStationName) ? exit : -1;
+}
+
+/// The next stop of the ridden leg (#78): the boarding stop plus the stops behind the train on
+/// this leg (`passed_stops`, counted by the server from the boarding stop). The boarding stop itself
+/// while the train still stands there; never beyond the exit, where the passenger gets off whatever
+/// the train does next. -1 when there are no stops.
+///
+/// The one place this sum is made: Home, the ride bar, the journey view, „Zug wechseln" and
+/// „Ich fahre später weiter" all name the same stop.
+int nextStopIndex(List<ApiStop> stops, ApiRide r) {
+  if (stops.isEmpty) return -1;
+  final exit = exitIndexOf(stops, r);
+  final last = exit < 0 ? stops.length - 1 : exit;
+  return (fromIndex(stops, r.fromStationId, r.fromStationName) + r.passedStops).clamp(0, last);
+}
+
+/// When the train reaches [s] (#78): the stop's own live time, else its planned time plus [delay].
+DateTime? stopTime(ApiStop s, int delay) => liveAt(s) ?? plannedAt(s)?.add(Duration(minutes: delay));
+
+/// The track at stop [index] of a trip (#79): the stop's own, live where the feed has it, else
+/// [stored] — the one the leg was planned with. A leg's tracks are written at check-in, and only
+/// the stops say a train has been moved since. Null when neither names one.
+String? stopTrack(List<ApiStop> stops, int index, String? stored) {
+  String? clean(String? t) => t == null || t.trim().isEmpty ? null : t.trim();
+  final live = index >= 0 && index < stops.length ? clean(stops[index].track) : null;
+  return live ?? clean(stored);
+}
+
+/// „pünktlich" only where the feed has said so (#78). A server that does not send `live_known`
+/// leaves it null, and then the word stays where it always was.
+bool onTimeKnown(ApiRide r) => r.liveKnown != false;
+
 /// The display-side fold, behind [sameStation] — **not** the server's.
 /// `serverStationFold` (app/lib/stations/station_rules.dart) is the port of
 /// `train::normalise_station_name` that the station search matches on; it folds differently

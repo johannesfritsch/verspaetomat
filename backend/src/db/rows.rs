@@ -269,6 +269,11 @@ pub struct RideRow {
     #[sqlx(default)]
     #[serde(default)]
     pub ticket_id: Option<Uuid>,
+    /// Whether `live_delay_min` comes from a live forecast at the exit stop (migration 0047, #78):
+    /// only then is 0 minutes „pünktlich". None where nobody knows.
+    #[sqlx(default)]
+    #[serde(default)]
+    pub live_known: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

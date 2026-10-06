@@ -50,7 +50,9 @@ Field names are snake_case like the rest of the API. Times are UTC ISO strings.
   "live_departure": null, "live_arrival": null, "platform": "7", "cancelled": false, "delay_min": 0 }
 ```
 
-In `journey.legs` a leg also carries `leg_no`, `ride_id` (null until confirmed), `status` (`planned | riding | arrived | cancelled | skipped`), `actual_arrival`, `final_delay_min`. In `journey.next_leg` it carries `replanned` (true after a missed connection) and `reason` (`"verpasst"`, `"ausfall"` or null).
+In `journey.legs` a leg also carries `leg_no`, `ride_id` (null until confirmed), `status` (`planned | riding | arrived | cancelled | skipped`), `actual_arrival`, `final_delay_min`.
+
+Gleise (seit #79): `platform` ist das Abfahrtsgleis am Einstieg, `arrival_platform` (seit #56) das Ankunftsgleis am Ausstieg. Beim Einchecken kommen beide aus dem Trip; für den Abschnitt, der gerade gefahren wird, schreibt der Follower bei jedem Abruf das aktuelle Gleis aus dem Live-Trip in `journeys.plan` zurück, sobald es sich ändert. Nennt der Feed kein Gleis mehr, bleibt das alte stehen. `journeys/current` schickt außerdem in `stops[].track` das Gleis je Halt, live, wo der Feed es hat; die App nimmt dieses zuerst und den Wert am Abschnitt nur, wenn der Halt keins nennt. Die Abschnitte danach zeigen, solange sie noch kommen, das Gleis aus der Planung. In `journey.next_leg` it carries `replanned` (true after a missed connection) and `reason` (`"verpasst"`, `"ausfall"` or null).
 
 **`GET /v1/journeys/plan?from=<stop id>&to=<stop id>[&time=<iso>][&first_trip=<trip id>]`**:
 

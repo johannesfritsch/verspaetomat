@@ -430,9 +430,9 @@ async fn insert_leg_ride(
     let row: RideRow = sqlx::query_as(
         "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name,
             exit_station_id, exit_station_name, planned_departure, planned_arrival, ticket, live_delay_min, cancelled,
-            location_verified, location_lat, location_lon, from_lat, from_lon, journey_id, leg_no, transfer_station_id, transfer_station_name, ticket_id)
+            location_verified, location_lat, location_lon, from_lat, from_lon, journey_id, leg_no, transfer_station_id, transfer_station_name, ticket_id, live_known)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
-                 (select jt.ticket_id from journey_tickets jt where jt.journey_id = $22 and jt.first_leg <= $23 and (jt.last_leg is null or jt.last_leg >= $23) order by jt.first_leg desc limit 1)) returning *",
+                 (select jt.ticket_id from journey_tickets jt where jt.journey_id = $22 and jt.first_leg <= $23 and (jt.last_leg is null or jt.last_leg >= $23) order by jt.first_leg desc limit 1), $26) returning *",
     )
     .bind(id)
     .bind(customer.id)
@@ -459,6 +459,8 @@ async fn insert_leg_ride(
     .bind(leg_no)
     .bind(if is_last { None } else { Some(&leg.to_station_id) })
     .bind(if is_last { None } else { Some(&leg.to_station_name) })
+    // The same rule the follower applies (#78): the delay at check-in is live only with realtime.
+    .bind(leg.realtime && leg.live_arrival.is_some())
     .fetch_one(pool)
     .await?;
     let _ = sqlx::query("insert into ride_snapshots (ride_id, source, payload) values ($1, 'transitous', $2)").bind(id).bind(json!(trip)).execute(pool).await;
@@ -916,7 +918,9 @@ pub enum TrainChange {
 
 /// The decision itself, kept pure so it can be tested without a train in sight.
 /// `boarding_station` is where the current leg started, `new_from` where the chosen train is
-/// boarded, `passed_stops` how many stops the current leg has already put behind it.
+/// boarded, `passed_stops` how many stops the current leg has already put behind it, as the
+/// follower counts them ([`crate::train::follower::passed_stops`]): from the boarding stop, so 0
+/// until the train has left it.
 pub fn decide_train_change(passed_stops: i32, boarding_station: &str, new_from: &str) -> TrainChange {
     if passed_stops == 0 && boarding_station == new_from {
         TrainChange::Replace
@@ -1027,14 +1031,18 @@ pub async fn finish(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
     Ok(Json(journey_json(&s.pool, &updated).await.map_err(internal)?))
 }
 
-/// The next stop the current leg reaches, from the live trip and how many stops are behind.
-/// None when the trip cannot be read or the train is already at its exit stop.
+/// The next stop the current leg reaches: the boarding stop's index plus `passed_stops`, the one
+/// the app calls „Nächster Halt" ([`crate::train::follower::passed_stops`] has the definition) —
+/// the boarding stop itself while the train still stands there, never beyond the exit stop.
+/// None when the trip cannot be read or the exit stop is not on it.
 async fn next_stop_of(s: AppState, r: &RideRow) -> Option<(String, String)> {
     let t = s.train.trip(&r.trip_id).await.ok()?;
     let ix = s.stations();
-    let (from_idx, _) = t.find_stop(&ix.candidate_ids(&r.from_station_id), &r.from_station_name)?;
+    // Without the boarding stop the follower counts from the trip's first stop, and so does this.
+    let from_idx = t.find_stop(&ix.candidate_ids(&r.from_station_id), &r.from_station_name).map(|(i, _)| i).unwrap_or(0);
     let (exit_idx, _) = t.find_stop(&ix.candidate_ids(&r.exit_station_id), &r.exit_station_name)?;
-    let next = (from_idx + r.passed_stops.max(0) as usize + 1).min(exit_idx);
+    // It used to add one more on top, and with the count from the origin (#78) it was further off.
+    let next = (from_idx + r.passed_stops.max(0) as usize).min(exit_idx);
     let stop = t.stops.get(next)?;
     Some((stop.stop_id.clone().unwrap_or_else(|| r.exit_station_id.clone()), stop.name.clone()))
 }
@@ -1609,6 +1617,44 @@ mod tests {
         // Same standing start, but boarding somewhere else: that is a change of plan.
         assert_eq!(decide_train_change(0, "de:05315:11", "de:05111:18"), TrainChange::EndAndContinue);
         assert_eq!(decide_train_change(3, "de:05315:11", "de:05111:18"), TrainChange::EndAndContinue);
+    }
+
+    /// #78: with the figure the follower writes right after a check-in at Kißlegg — the train still
+    /// standing there, four stops of it already behind it since Lindau — „Zug wechseln" is a
+    /// mis-tap, not a change. Counted from the train's origin it was 4, and the mis-tap became an
+    /// interruption with the ceiling of docs/21 §2 attached.
+    #[test]
+    fn right_after_check_in_mid_trip_a_change_of_train_is_a_mistap() {
+        let now = Utc::now();
+        let stop = |i: i64, dep: i64| crate::train::TripStop {
+            stop_id: Some(format!("test:{i}")),
+            name: format!("Halt {i}"),
+            scheduled_arrival: Some(now + Duration::minutes(dep - 1)),
+            live_arrival: Some(now + Duration::minutes(dep - 1)),
+            scheduled_departure: Some(now + Duration::minutes(dep)),
+            live_departure: Some(now + Duration::minutes(dep)),
+            cancelled: false,
+            track: None,
+        };
+        // Four stops gone, the boarding stop (4) leaves in eight minutes, the exit is 9.
+        let stops = [-40, -30, -20, -10, 8, 15, 20, 25, 30, 35, 40].iter().enumerate().map(|(i, d)| stop(i as i64, *d)).collect();
+        let trip = TripInfo {
+            trip_id: "re96".into(),
+            line: "RE 96".into(),
+            train_number: None,
+            headsign: "Buchloe".into(),
+            agency_name: String::new(),
+            operator: String::new(),
+            category: crate::train::TrainCategory::Re,
+            mode: "REGIONAL_RAIL".into(),
+            realtime: false,
+            cancelled: false,
+            stops,
+        };
+        let passed = crate::train::follower::passed_stops(&trip, Some(4), Some(9), now);
+        assert_eq!(decide_train_change(passed, "test:4", "test:4"), TrainChange::Replace, "passed_stops = {passed}");
+        let later = crate::train::follower::passed_stops(&trip, Some(4), Some(9), now + Duration::minutes(9));
+        assert_eq!(decide_train_change(later, "test:4", "test:4"), TrainChange::EndAndContinue, "the train has left the boarding stop");
     }
 
     fn t(s: &str) -> DateTime<Utc> {

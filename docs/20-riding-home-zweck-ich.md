@@ -11,6 +11,7 @@ While `RideMonitor.active` (riding or transfer) the square in the bottom nav is 
 Block 1 on Home while riding or in transfer is a card (hairline border, paper-elevated), not nothing. Tapping the card opens the sheet. Contents:
 
 - Riding: eyebrow `UNTERWEGS`, then the line badge and `RE 7 nach Rheine` (title), the live delay as a VDelay (or `pünktlich`), and two key lines: `Nächster Halt · Solingen Hbf 10:06` and `Ziel · Rheine an 12:08` (planned arrival plus the live delay; for a journey the destination and the journey's planned arrival). Beneath, a caption `Tippen für Details`.
+  Seit #78: `pünktlich` steht nur, wenn der Feed für den Zug Echtzeit hat (`ride.live_known`); ohne Echtzeit steht an der Stelle nichts, denn 0 Minuten sind dann der Fahrplan und nicht der Zug. Der nächste Halt ist der Einstieg plus `passed_stops`, und der Server zählt `passed_stops` ab dem Einstieg; er liegt nie hinter dem Ausstieg. Seine Uhrzeit ist die eigene Live-Zeit dieses Halts, nicht die Planzeit plus die Verspätung am Ausstieg.
 - Transfer: eyebrow `UMSTEIGEN`, title `Hagen Hbf`, the next leg as `RE 5 nach Kleve · 10:41 · Gleis 3` (live time when known), a primary ink button `Ich bin drin` (same action as the bar) and, when the connection was missed, the caption `Anschluss verpasst · nächste Möglichkeit`.
 
 The bar above the nav stays on every tab, Home included (the card is the detail, the bar is the constant). The arrival card for `arrived` is unchanged.

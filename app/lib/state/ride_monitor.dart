@@ -6,7 +6,7 @@ import '../api/events.dart';
 import '../api/models.dart';
 import '../repo/app_repository.dart';
 import '../repo/repo_scope.dart';
-import '../screens/ride/ride_widgets.dart' show fromIndex, shortError;
+import '../screens/ride/ride_widgets.dart' show nextStopIndex, shortError;
 
 /// The one place that knows whether a journey is under way (docs/19).
 ///
@@ -216,9 +216,8 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
       // Where the passenger can actually get off: the next stop the train still reaches (the
       // one the sheet calls "Nächster Halt"), else the last one it passed. Never the exit
       // stop by default — on a direct journey that is the destination itself.
-      final here = stops.isEmpty || r == null
-          ? null
-          : stops[(r.passedStops + fromIndex(stops, r.fromStationId, r.fromStationName)).clamp(0, stops.length - 1)];
+      final next = r == null ? -1 : nextStopIndex(stops, r);
+      final here = next < 0 ? null : stops[next];
       await session.repo.replanJourney(
         j.journey.id,
         fromStationId: here?.stationId ?? r?.fromStationId,
