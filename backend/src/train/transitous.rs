@@ -380,28 +380,39 @@ impl TransitousClient {
             .map(|(_, v)| v.clone())
     }
 
-    /// Rail itineraries from one stop to another at (or after) `time`. Walks between platforms
-    /// are folded into the transfer; an itinerary with a bus or tram leg is dropped. Cached for
-    /// 60 s per (from, to, minute) so a burst of app requests is one call to Transitous.
+    /// Rail itineraries from one stop to another at (or after) `time`: the first `n`. Walks
+    /// between platforms are folded into the transfer; an itinerary with a bus or tram leg is
+    /// dropped. Cached for 60 s per question so a burst of app requests is one call to Transitous.
     pub async fn plan(&self, from: &str, to: &str, time: DateTime<Utc>, n: usize) -> Result<Vec<Itinerary>> {
-        let key = format!("{from}|{to}|{}", time.format("%Y-%m-%dT%H:%M"));
+        self.plan_within(from, to, time, n, None).await
+    }
+
+    /// The same, and with a `window` also every itinerary that leaves within it of `time` (#84).
+    ///
+    /// Without one MOTIS stops at the first `n`, however little of the hour they cover: on a line
+    /// with six trains an hour a page of four ended after half an hour. With one it searches the
+    /// whole window and still returns at least `n`, reaching past the window when it has to
+    /// (both checked against api.transitous.org, 6 October 2026).
+    pub async fn plan_within(&self, from: &str, to: &str, time: DateTime<Utc>, n: usize, window: Option<Duration>) -> Result<Vec<Itinerary>> {
+        let n = n.max(1);
+        let window_secs = window.map(|w| w.as_secs());
+        let key = format!("{from}|{to}|{}|{n}|{}", time.format("%Y-%m-%dT%H:%M"), window_secs.map(|s| s.to_string()).unwrap_or_default());
         if let Some((at, v)) = self.plan_cache.lock().unwrap().get(&key) {
             if at.elapsed() < PLAN_CACHE_TTL {
                 return Ok(v.clone());
             }
         }
-        let resp: PlanResponse = self
-            .get_json(
-                "/api/v1/plan",
-                &[
-                    ("fromPlace", from.to_string()),
-                    ("toPlace", to.to_string()),
-                    ("time", time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
-                    ("numItineraries", n.max(1).to_string()),
-                    ("transitModes", PLAN_MODES.to_string()),
-                ],
-            )
-            .await?;
+        let mut query = vec![
+            ("fromPlace", from.to_string()),
+            ("toPlace", to.to_string()),
+            ("time", time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+            ("numItineraries", n.to_string()),
+            ("transitModes", PLAN_MODES.to_string()),
+        ];
+        if let Some(s) = window_secs {
+            query.push(("searchWindow", s.to_string()));
+        }
+        let resp: PlanResponse = self.get_json("/api/v1/plan", &query).await?;
         let mut out: Vec<Itinerary> = resp.itineraries.into_iter().filter_map(itinerary_from).collect();
         out.sort_by_key(|i| i.planned_departure);
         out.dedup_by(|a, b| a.legs.iter().map(|l| l.trip_id.as_str()).eq(b.legs.iter().map(|l| l.trip_id.as_str())));

@@ -681,10 +681,20 @@ pub struct PlanQuery {
     pub lookback: Option<i64>,
 }
 
-/// The furthest back the plan will look (issue #9). Someone who boarded and only then remembered
+/// How far back the first page looks (issue #9). Someone who boarded and only then remembered
 /// the app is on a train that has already left, and the check-in has to be able to name it.
-/// Further back than this is the Nachtrag, which is a different screen and a different promise.
+/// Further back is „Früher" (#67), one page at a time, and a ride that is over is the Nachtrag.
 pub const PLAN_LOOKBACK_MIN: i64 = 30;
+
+/// What one „Früher" page searches, from its `time` on (#84): two hours, the step the app goes
+/// back per tap, so a page holds every train of its stretch and not only the first four. The
+/// first page and every replanning ask for the next few trains, as they always have.
+pub const PLAN_PAGE_WINDOW: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
+
+/// The most connections one such page carries. Two hours on the densest S-Bahn trunk are about
+/// fifty (Frankfurt Hauptwache → Konstablerwache, 6 October 2026). Past this the earliest go:
+/// the trains nearest the list are the ones that may still be under way.
+pub const PLAN_PAGE_MAX: usize = 60;
 
 /// `GET /v1/journeys/plan`
 pub async fn plan(State(s): State<AppState>, _c: Customer, Query(q): Query<PlanQuery>) -> ApiResult {
@@ -693,8 +703,16 @@ pub async fn plan(State(s): State<AppState>, _c: Customer, Query(q): Query<PlanQ
     // Room for both halves: on a dense line the last half hour alone would fill a list of four
     // and leave nothing to board.
     let n = if back > 0 { 7 } else { 4 };
+    let window = q.time.map(|_| PLAN_PAGE_WINDOW);
     let ix = s.stations();
-    let mut its = s.train.plan(&ix.upstream_id(&q.from), &ix.upstream_id(&q.to), time, n).await.map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("plan: {e}")))?;
+    let mut its = s
+        .train
+        .plan_within(&ix.upstream_id(&q.from), &ix.upstream_id(&q.to), time, n, window)
+        .await
+        .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("plan: {e}")))?;
+    if window.is_some() && its.len() > PLAN_PAGE_MAX {
+        its.drain(..its.len() - PLAN_PAGE_MAX);
+    }
     if let Some(ft) = &q.first_trip {
         its.retain(|it| it.legs.first().map(|l| &l.trip_id == ft).unwrap_or(false));
     }
