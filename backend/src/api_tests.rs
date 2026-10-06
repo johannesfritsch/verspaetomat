@@ -1223,3 +1223,37 @@ async fn an_exit_not_on_the_trip_writes_0_as_before_and_it_is_not_on_time(pool: 
     assert_eq!(passed, 3, "still counted from Kißlegg");
     assert_eq!(status, "riding");
 }
+
+/// #79: the tracks of a leg were written once at check-in and never again. Kißlegg moved the RE 96
+/// from track 3 to 1 and Memmingen from 51 to 1; after one follower pass the leg says so, in the
+/// fields every build already reads.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_track_change_reaches_the_leg(pool: PgPool) {
+    // 08:20: the train stands in Kißlegg, eight minutes before it leaves.
+    let t0 = Utc::now() - Duration::minutes(33);
+    let trip = Arc::new(std::sync::RwLock::new(motis_re96(t0, true, Some("3"), Some("51"))));
+    let base = transitous_with_trip(trip.clone()).await;
+    let app = app(pool.clone(), Some(base.clone())).await;
+    let (_, token) = device(&app).await;
+    let v = check_in_re96(&app, &token).await;
+    assert_eq!((v["journey"]["legs"][0]["platform"].as_str(), v["journey"]["legs"][0]["arrival_platform"].as_str()), (Some("3"), Some("51")), "as planned");
+
+    *trip.write().unwrap() = motis_re96(t0, true, Some("1"), Some("1"));
+    follow_once(&pool, &base).await;
+
+    let (s, v) = call(&app, "GET", "/v1/journeys/current", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let leg = &v["journey"]["legs"][0];
+    assert_eq!(leg["platform"], "1", "the live departure track at Kißlegg: {leg}");
+    assert_eq!(leg["arrival_platform"], "1", "the live arrival track at Memmingen: {leg}");
+    assert_eq!(v["stops"][stop_index(&v["stops"], "Kißlegg")]["track"], "1", "and the stop says the same");
+    assert_eq!(v["ride"]["live_known"], true, "a trip with realtime");
+
+    // A feed that goes quiet about the track takes nothing away.
+    *trip.write().unwrap() = motis_re96(t0, true, None, None);
+    follow_once(&pool, &base).await;
+    let plan: Value = sqlx::query_scalar("select plan from journeys").fetch_one(&pool).await.unwrap();
+    assert_eq!((plan[0]["platform"].as_str(), plan[0]["arrival_platform"].as_str()), (Some("1"), Some("1")), "{plan}");
+    assert_eq!(plan[0]["trip_id"], "re96", "the rest of the leg is untouched");
+    assert_eq!(plan[0]["line"], "RE 96");
+}

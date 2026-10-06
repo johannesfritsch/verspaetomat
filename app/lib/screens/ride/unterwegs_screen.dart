@@ -319,6 +319,10 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
   final toExitRaw = eta?.difference(now).inMinutes;
   final toExit = toExitRaw == null || toExitRaw < 0 ? null : toExitRaw;
   final info = j?.currentLegInfo;
+  // Where the train leaves and arrives, live from the stops before what the leg was planned with
+  // (#79): a track change reaches the stops first.
+  final boardTrack = stopTrack(stops, boarded, info?.platform);
+  final exitTrack = stopTrack(stops, exitIndexOf(stops, r), info?.arrivalPlatform);
   final claimFrom = m.journey?.claimFromMinute ?? 60;
   // The journey's ticket (#66): where delays pool, they count from its own threshold; a ticket
   // with a Zugbindung has it lifted from its own minute on.
@@ -336,7 +340,7 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
   if (next != null && toExit != null && toExit <= 10) {
     final nextDep = next.liveDeparture ?? next.plannedDeparture;
     final gap = nextDep == null || eta == null ? null : nextDep.difference(eta).inMinutes;
-    final from = _track(info?.arrivalPlatform), to = _track(next.platform);
+    final from = exitTrack, to = _track(next.platform);
     if (gap != null && gap <= 0) {
       return (eyebrow: 'Umstieg · $exit', title: 'Der Anschluss wird knapp.', subtitle: 'Wir planen um, sobald du in $exit bist.', track: to);
     }
@@ -359,7 +363,7 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
       eyebrow: 'Unterwegs · ${r.line}',
       title: '+${_minutes(delay)}.',
       subtitle: 'Ab hier zählt die Verspätung für ${ticket.name} mit.',
-      track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
+      track: _track(next?.platform) ?? exitTrack,
     );
   }
   if (delay >= claimFrom) {
@@ -367,7 +371,7 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
       eyebrow: 'Unterwegs · ${r.line}',
       title: '+${_minutes(delay)}.',
       subtitle: 'Ab hier entsteht ein Anspruch.',
-      track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
+      track: _track(next?.platform) ?? exitTrack,
     );
   }
   // A ticket bound to its train is free of it from here (BB 9.1.1): the one right on the way that
@@ -377,7 +381,7 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
       eyebrow: 'Unterwegs · ${r.line}',
       title: '+${_minutes(delay)}.',
       subtitle: 'Deine Zugbindung ist aufgehoben: du darfst einen anderen Zug nehmen.',
-      track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
+      track: _track(next?.platform) ?? exitTrack,
     );
   }
 
@@ -390,12 +394,12 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
       subtitle: next != null
           ? 'In $exit steigst du um, um ${fmtLocal(eta)}. Bis dahin passen wir auf.'
           : 'Ankunft in $exit um ${fmtLocal(eta)}. Bis dahin passen wir auf.',
-      track: _track(info?.platform),
+      track: boardTrack,
     );
   }
 
   if (next == null && toExit != null && toExit <= 10) {
-    final arr = _track(info?.arrivalPlatform);
+    final arr = exitTrack;
     return (
       eyebrow: 'Ankunft · $exit',
       title: toExit <= 1 ? 'Gleich da.' : 'Noch ${_minutes(toExit)}.',
@@ -412,7 +416,7 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
     eyebrow: j != null && j.legs.length > 1 ? 'Unterwegs · Zug ${j.currentLeg} von ${j.legs.length}' : 'Unterwegs · ${r.line}',
     title: delay > 0 ? '+${_minutes(delay)}.' : (known ? 'Pünktlich unterwegs.' : 'Keine Live-Daten.'),
     subtitle: next != null ? 'Umstieg in $exit$by um ${fmtLocal(eta)}$late.' : 'Ankunft in $exit$by um ${fmtLocal(eta)}$late.',
-    track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
+    track: _track(next?.platform) ?? exitTrack,
   );
 }
 
@@ -469,7 +473,8 @@ class _RidingView extends StatelessWidget {
               if (exit != null) exit: ahead.isNotEmpty ? 'Umstieg' : 'Ziel',
             },
             operatorName: r.operator,
-            tracks: {boarded: info?.platform, if (exit != null) exit: info?.arrivalPlatform},
+            // The stop's live track before the leg's stored one (#79).
+            tracks: {boarded: stopTrack(stops, boarded, info?.platform), if (exit != null) exit: stopTrack(stops, exit, info?.arrivalPlatform)},
           );
 
     return Column(

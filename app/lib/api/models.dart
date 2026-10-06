@@ -180,7 +180,7 @@ class ApiStation {
 }
 
 class ApiStop {
-  const ApiStop({required this.name, this.stationId, this.scheduledArrival, this.arrival, this.scheduledDeparture, this.departure, this.cancelled = false});
+  const ApiStop({required this.name, this.stationId, this.scheduledArrival, this.arrival, this.scheduledDeparture, this.departure, this.cancelled = false, this.track});
   final String name;
   final String? stationId;
   final DateTime? scheduledArrival;
@@ -188,6 +188,10 @@ class ApiStop {
   final DateTime? scheduledDeparture;
   final DateTime? departure;
   final bool cancelled;
+
+  /// The track at this stop, live where the feed has it (#56, read since #79). Fresher than the
+  /// leg's stored platform; see `stopTrack` (ride_widgets.dart).
+  final String? track;
 
   /// Delay at this stop in minutes, from the arrival forecast when known.
   int get delayMinutes {
@@ -205,6 +209,7 @@ class ApiStop {
         scheduledDeparture: _dt(j['scheduled_departure']),
         departure: _dt(j['departure'] ?? j['live_departure']),
         cancelled: _b(j['cancelled']),
+        track: _sn(j['track']),
       );
 }
 

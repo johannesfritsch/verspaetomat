@@ -152,6 +152,15 @@ int nextStopIndex(List<ApiStop> stops, ApiRide r) {
 /// When the train reaches [s] (#78): the stop's own live time, else its planned time plus [delay].
 DateTime? stopTime(ApiStop s, int delay) => liveAt(s) ?? plannedAt(s)?.add(Duration(minutes: delay));
 
+/// The track at stop [index] of a trip (#79): the stop's own, live where the feed has it, else
+/// [stored] — the one the leg was planned with. A leg's tracks are written at check-in, and only
+/// the stops say a train has been moved since. Null when neither names one.
+String? stopTrack(List<ApiStop> stops, int index, String? stored) {
+  String? clean(String? t) => t == null || t.trim().isEmpty ? null : t.trim();
+  final live = index >= 0 && index < stops.length ? clean(stops[index].track) : null;
+  return live ?? clean(stored);
+}
+
 /// „pünktlich" only where the feed has said so (#78). A server that does not send `live_known`
 /// leaves it null, and then the word stays where it always was.
 bool onTimeKnown(ApiRide r) => r.liveKnown != false;

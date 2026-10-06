@@ -35,6 +35,8 @@ struct RidingRow {
     exit_station_id: String,
     exit_station_name: String,
     planned_arrival: DateTime<Utc>,
+    journey_id: Option<Uuid>,
+    leg_no: Option<i32>,
 }
 
 /// The minutes a ride counts (#74): its delay from minute 1; a cancellation counts at least 60.
@@ -96,8 +98,8 @@ pub fn spawn(pool: PgPool, client: Arc<TrainSource>, stations: crate::stations::
 /// One pass over all riding rides. Public so a demo control or a test can drive it.
 pub async fn poll_once(pool: &PgPool, client: &TrainSource, stations: &crate::stations::Index, announce: &broadcast::Sender<RideFinalised>) -> Result<()> {
     let riding: Vec<RidingRow> = sqlx::query_as(
-        "select id, customer_id, trip_id, from_station_id, from_station_name, exit_station_id, exit_station_name, planned_arrival \
-         from rides where status = 'riding' order by checked_in_at",
+        "select id, customer_id, trip_id, from_station_id, from_station_name, exit_station_id, exit_station_name, planned_arrival, \
+         journey_id, leg_no from rides where status = 'riding' order by checked_in_at",
     )
     .fetch_all(pool)
     .await
@@ -173,6 +175,13 @@ async fn apply_trip(pool: &PgPool, row: &RidingRow, trip: &TripInfo, stations: &
     .await
     .context("update live state")?;
 
+    let departs = boarding.and_then(|(_, s)| s.track.as_deref());
+    let arrives = exit.and_then(|(_, s)| s.track.as_deref());
+    if let Err(e) = refresh_tracks(pool, row, departs, arrives).await {
+        // A stale track is worth a line in the log, not a ride left unfinalised.
+        tracing::warn!(ride = %row.id, error = %e, "trip follower: tracks not refreshed");
+    }
+
     let cancelled = trip.cancelled || exit_cancelled;
     let arrived = arrival_estimate + ARRIVAL_GRACE < now;
     if cancelled || arrived {
@@ -189,6 +198,44 @@ async fn apply_trip(pool: &PgPool, row: &RidingRow, trip: &TripInfo, stations: &
         });
         tracing::info!(ride = %row.id, delay = final_delay, cancelled, "trip follower: ride finalised");
     }
+    Ok(())
+}
+
+/// The tracks of the riding leg as the live trip has them now, written back into the journey's
+/// plan (#79): the departure track at the boarding stop as the leg's `platform`, the arrival track
+/// at the exit stop as its `arrival_platform`.
+///
+/// The plan is what `journeys/current` hands out for every leg, and until now it held whatever the
+/// timetable said at check-in: a train moved to another track stayed on the old one in the app.
+/// Writing the existing fields means every build shows the new track without an update. Only a
+/// track that differs is written, and a track the feed has stopped naming is left as it was rather
+/// than erased. The leg is matched by its position and its trip, so a plan rewritten in the
+/// meantime — a confirmed connection, a change of train — is never touched.
+async fn refresh_tracks(pool: &PgPool, row: &RidingRow, departs: Option<&str>, arrives: Option<&str>) -> Result<()> {
+    let (Some(journey), Some(leg_no)) = (row.journey_id, row.leg_no) else {
+        return Ok(()); // A ride from before journeys has no plan to keep.
+    };
+    if departs.is_none() && arrives.is_none() {
+        return Ok(());
+    }
+    sqlx::query(
+        "update journeys set plan = jsonb_set(
+                jsonb_set(plan, array[$2::text, 'platform'], coalesce(to_jsonb($3::text), plan->$2->'platform', 'null'::jsonb)),
+                array[$2::text, 'arrival_platform'], coalesce(to_jsonb($4::text), plan->$2->'arrival_platform', 'null'::jsonb))
+          where id = $1 and status = 'riding' and current_leg = $5
+            and jsonb_typeof(plan) = 'array' and plan->$2->>'trip_id' = $6
+            and (($3::text is not null and plan->$2->>'platform' is distinct from $3::text)
+              or ($4::text is not null and plan->$2->>'arrival_platform' is distinct from $4::text))",
+    )
+    .bind(journey)
+    .bind(leg_no - 1)
+    .bind(departs)
+    .bind(arrives)
+    .bind(leg_no)
+    .bind(&row.trip_id)
+    .execute(pool)
+    .await
+    .context("update the leg's tracks")?;
     Ok(())
 }
 
