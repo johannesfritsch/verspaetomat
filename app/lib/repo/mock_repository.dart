@@ -257,7 +257,7 @@ class MockRepository with RideWriteHook implements AppRepository {
   // Every write that can start, move or end a ride reports through the hook (#80), as the
   // backend's does, so the geofence sync hears a Demo check-in the same way.
   @override
-  Future<ApiJourneyLive> startJourney(StartJourneyRequest r) => rideWrite('startJourney', () => _startJourney(r));
+  Future<ApiJourneyLive> startJourney(StartJourneyRequest r) => rideWrite('startJourney', () => _startJourney(r), checkedInAt: r.fromStationId);
   @override
   Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) => rideWrite('confirmLeg', () => _confirmLeg(journeyId, tripId));
   @override

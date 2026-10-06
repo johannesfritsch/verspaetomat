@@ -244,7 +244,7 @@ class HttpRepository with RideWriteHook implements AppRepository {
   Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip, DateTime? time}) =>
       client.planJourney(from: from, to: to, firstTrip: firstTrip, time: time);
   @override
-  Future<ApiJourneyLive> startJourney(StartJourneyRequest request) => rideWrite('startJourney', () => client.startJourney(request));
+  Future<ApiJourneyLive> startJourney(StartJourneyRequest request) => rideWrite('startJourney', () => client.startJourney(request), checkedInAt: request.fromStationId);
   @override
   Future<ApiJourneyLive?> currentJourney() => client.currentJourney();
   @override

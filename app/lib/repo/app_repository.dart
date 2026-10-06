@@ -5,8 +5,12 @@ export '../api/models.dart';
 
 /// A write that may have started, moved or ended a ride (#80): which call it was.
 class RideWrite {
-  const RideWrite(this.call);
+  const RideWrite(this.call, {this.checkedInAt});
   final String call;
+
+  /// The station a check-in that went through starts from (#86); null for every other write
+  /// and for a check-in that failed.
+  final String? checkedInAt;
 }
 
 /// The seam both repositories report ride writes through (#80). The screens call
@@ -18,11 +22,14 @@ class RideWrite {
 mixin RideWriteHook {
   void Function(RideWrite write)? onRideWrite;
 
-  Future<T> rideWrite<T>(String call, Future<T> Function() write) async {
+  Future<T> rideWrite<T>(String call, Future<T> Function() write, {String? checkedInAt}) async {
+    var done = false;
     try {
-      return await write();
+      final result = await write();
+      done = true;
+      return result;
     } finally {
-      onRideWrite?.call(RideWrite(call));
+      onRideWrite?.call(RideWrite(call, checkedInAt: done ? checkedInAt : null));
     }
   }
 }

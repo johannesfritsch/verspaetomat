@@ -186,6 +186,20 @@ enum GeofenceRules {
   /// A nudge ignored this many times running mutes its station for 30 days (docs/25 §4).
   static let ignoresBeforeMute = 3
   static let stationMuteDays = 30
+
+  /// The station of a nudge the open app swallows (#86): the `nudge` thread is not shown in the
+  /// foreground, and only one that names a station has a tally `scheduleNudge` moved. Nil for
+  /// everything that is shown, and for a nudge without a station.
+  static func swallowedNudgeStation(thread: String, userInfo: [AnyHashable: Any]) -> String? {
+    guard thread == "nudge", let id = userInfo["stationId"] as? String, !id.isEmpty else { return nil }
+    return id
+  }
+
+  /// The station's tally once a swallowed nudge is taken back out of it (#86). `scheduleNudge`
+  /// counted it as unanswered when it was planned, but nobody saw it, so nobody ignored it.
+  /// Never below zero: a tap or a check-in may have cleared the tally in between.
+  static func ignoredAfterSwallowed(_ tally: Int) -> Int { max(0, tally - 1) }
+
   /// No check-in for this long switches background scanning off altogether.
   static let idleDaysBeforeOff = 30
 
@@ -702,6 +716,12 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   /// A tap, or a check-in: this station is being used after all, so the tally starts over.
   func clearIgnored(_ stationId: String) {
     defaults.removeObject(forKey: ignoreKey(stationId))
+  }
+
+  /// A nudge the open app swallowed (#86): the count `scheduleNudge` added for it goes back.
+  private func takeBackIgnored(_ stationId: String) {
+    let n = GeofenceRules.ignoredAfterSwallowed(defaults.integer(forKey: ignoreKey(stationId)))
+    if n > 0 { defaults.set(n, forKey: ignoreKey(stationId)) } else { clearIgnored(stationId) }
   }
 
   /// Stations whose nudges have gone unanswered often enough to be muted, with how often.
@@ -1682,7 +1702,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     let trigger: UNNotificationTrigger? = delay > 0 ? UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false) : nil
     center.add(UNNotificationRequest(identifier: "nudge-\(s.id)", content: content, trigger: trigger))
     bumpCounter("scheduled")
-    // Counted as unanswered from the moment it is scheduled; a tap or a check-in clears it.
+    // Counted as unanswered from the moment it is scheduled; a tap or a check-in clears it, and
+    // the open app swallowing it takes it back (#86).
     noteNudgeFired(s)
     return true
   }
@@ -1697,7 +1718,15 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification, withCompletionHandler h: @escaping (UNNotificationPresentationOptions) -> Void) {
     // In the foreground the Bahnsteig shows its own banner.
-    if n.request.content.threadIdentifier == "nudge" { bumpCounter("fired"); return h([]) }
+    if n.request.content.threadIdentifier == "nudge" {
+      bumpCounter("fired")
+      // Swallowed, so never seen, so never ignored (docs/25 §4). Without this, three arrivals with
+      // the app open muted the station for a month on the old path (#86).
+      if let id = GeofenceRules.swallowedNudgeStation(thread: n.request.content.threadIdentifier, userInfo: n.request.content.userInfo) {
+        takeBackIgnored(id)
+      }
+      return h([])
+    }
     if #available(iOS 14, *) { h([.banner, .sound]) } else { h([.alert, .sound]) }
   }
 

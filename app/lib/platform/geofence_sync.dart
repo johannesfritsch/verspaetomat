@@ -68,7 +68,14 @@ class GeofenceSync with WidgetsBindingObserver {
     });
     // #80: this app's own check-in. The app is in the background seconds later (eight in the
     // report), so this one does not wait for the debounce.
-    _writes = session.rideWrites.listen((_) => unawaited(sync()));
+    _writes = session.rideWrites.listen((w) {
+      // docs/25 §4: a nudge counts as ignored when no check-in follows, so a check-in at its
+      // station answers it, and the tally starts over (#86). Before the sync, which reads the
+      // tally to mute.
+      final at = w.checkedInAt;
+      if (at != null && at.isNotEmpty) unawaited(_geofence.clearIgnored(at));
+      unawaited(sync());
+    });
     _checkPending();
     scheduleSync();
   }

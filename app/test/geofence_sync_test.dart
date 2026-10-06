@@ -202,4 +202,32 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
     });
   });
+
+  group('#86: a check-in answers the nudges of its station', () {
+    List<Object?> cleared() => [for (final c in calls.where((c) => c.method == 'clearIgnored')) (c.arguments as Map)['stationId']];
+
+    testWidgets('a check-in clears the ignored tally of the station it starts from', (tester) async {
+      await boot(tester);
+      // docs/25 §4: „no check-in within 30 minutes" is what makes a nudge ignored. Three nudges
+      // at a station somebody then checked in at must not mute it for a month.
+      final from = (await session.repo.nearbyStations()).stations.first;
+      await demoStartJourney(session.repo);
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(cleared(), [from.id]);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('a check-in that failed clears nothing', (tester) async {
+      await boot(tester);
+      await expectLater(
+        session.repo.startJourney(const StartJourneyRequest(fromStationId: 'koeln-hbf', fromStationName: 'Köln Hbf', toStationId: 'x', toStationName: 'X', legs: [])),
+        throwsA(anything),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(cleared(), isEmpty);
+      await tester.pump(const Duration(seconds: 2));
+    });
+  });
 }
