@@ -186,6 +186,20 @@ enum GeofenceRules {
   /// A nudge ignored this many times running mutes its station for 30 days (docs/25 §4).
   static let ignoresBeforeMute = 3
   static let stationMuteDays = 30
+
+  /// The station of a nudge the open app swallows (#86): the `nudge` thread is not shown in the
+  /// foreground, and only one that names a station has a tally `scheduleNudge` moved. Nil for
+  /// everything that is shown, and for a nudge without a station.
+  static func swallowedNudgeStation(thread: String, userInfo: [AnyHashable: Any]) -> String? {
+    guard thread == "nudge", let id = userInfo["stationId"] as? String, !id.isEmpty else { return nil }
+    return id
+  }
+
+  /// The station's tally once a swallowed nudge is taken back out of it (#86). `scheduleNudge`
+  /// counted it as unanswered when it was planned, but nobody saw it, so nobody ignored it.
+  /// Never below zero: a tap or a check-in may have cleared the tally in between.
+  static func ignoredAfterSwallowed(_ tally: Int) -> Int { max(0, tally - 1) }
+
   /// No check-in for this long switches background scanning off altogether.
   static let idleDaysBeforeOff = 30
 
@@ -369,6 +383,26 @@ enum GeofenceRules {
     // invisible, `firstUnregistered` always nil, and the radius always the search radius instead
     // of the distance the rule was written to use. `regionSet` does the cutting.
     return parsed.sorted { $0.1 < $1.1 }.map { $0.0 }
+  }
+}
+
+/// A UIKit background task that is ended exactly once: by its work when it is done, or by
+/// iOS's expiration, whichever comes first (#87). Main thread only, which is where both arrive.
+final class BackgroundTask {
+  private var id = UIBackgroundTaskIdentifier.invalid
+
+  /// `expired` runs when iOS takes the time back, just before the task is ended.
+  init(expired: (() -> Void)? = nil) {
+    id = UIApplication.shared.beginBackgroundTask { [self] in
+      expired?()
+      end()
+    }
+  }
+
+  func end() {
+    guard id != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(id)
+    id = .invalid
   }
 }
 
@@ -704,6 +738,12 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     defaults.removeObject(forKey: ignoreKey(stationId))
   }
 
+  /// A nudge the open app swallowed (#86): the count `scheduleNudge` added for it goes back.
+  private func takeBackIgnored(_ stationId: String) {
+    let n = GeofenceRules.ignoredAfterSwallowed(defaults.integer(forKey: ignoreKey(stationId)))
+    if n > 0 { defaults.set(n, forKey: ignoreKey(stationId)) } else { clearIgnored(stationId) }
+  }
+
   /// Stations whose nudges have gone unanswered often enough to be muted, with how often.
   func ignoredTally() -> [String: Int] {
     var out: [String: Int] = [:]
@@ -956,74 +996,90 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
 
   func status(reply: @escaping ([String: Any]) -> Void) {
     center.getNotificationSettings { [self] s in
-      var out: [String: Any] = [
-        "permission": Self.permissionString(authStatus),
-        "notifications": s.authorizationStatus == .authorized || s.authorizationStatus == .provisional,
-        "registered": manager.monitoredRegions.count,
-        "pushToken": pushToken as Any,
-        // docs/25 §4: stations whose nudges nobody answered, for Dart to mute with an expiry.
-        "ignored": ignoredTally(),
-        // docs/25 §5: the coverage disc, so the debug page can say why nothing happened.
-        "discLat": discCentre?.coordinate.latitude as Any,
-        "discLon": discCentre?.coordinate.longitude as Any,
-        "discRadiusM": discRadius,
-        "discAt": discAt?.timeIntervalSince1970 as Any,
-        "counters": counters(),
-        // issue #31: the set and the lookup, dated in their own right, and what the layer is
-        // doing right now. Without these the page could only show the disc's timestamp, which
-        // describes something else entirely.
-        "regionsAt": regionsAt?.timeIntervalSince1970 as Any,
-        "regionsLat": regionsCentre?.coordinate.latitude as Any,
-        "regionsLon": regionsCentre?.coordinate.longitude as Any,
-        "nearestAt": nearestAt?.timeIntervalSince1970 as Any,
-        "nearestCount": nearestCount,
-        "nearestLat": nearestCentre?.coordinate.latitude as Any,
-        "nearestLon": nearestCentre?.coordinate.longitude as Any,
-        // Nobody has ever read this off a real phone, and the umbrella is now sized against it.
-        "maxRegionRadiusM": manager.maximumRegionMonitoringDistance,
-        "umbrellaRadiusM": umbrellaRadius > 0 ? umbrellaRadius : (config?.umbrellaRadiusM ?? 0),
-        // Whether that number was worked out from an answer or is just the fallback. Printing
-        // only the metres cannot tell "computed 8 km" from "never computed, so 8 km" — and that
-        // is exactly the question that could not be answered from the page.
-        "umbrellaComputed": umbrellaRadius > 0,
-        // #40: which source the background lookup is on. Shipped before the path it guards, so
-        // that flipping it from a laptop and watching this line change is the proof that the
-        // switch works in both directions.
-        "stationsLocal": config?.stationsLocal == true,
-        // #64: premises on, which file, and the stays open right now.
-        "stationPremises": config?.stationPremises == true,
-        "premisesVersion": premiseTableCache.map { Int($0.version) } as Any,
-        "premisesCount": premiseTableCache?.count ?? 0,
-        "stays": stays.values.map { st -> [String: Any] in
-          ["id": st.station.id, "name": st.station.name, "enteredAt": st.enteredAt.timeIntervalSince1970,
-           "nudged": st.nudged, "touch": st.entry?.touch.count ?? 0, "ringM": st.entry?.ring.radius ?? 0]
-        },
-        "umbrellaWhy": umbrellaWhy as Any,
-        "mode": modeLabel,
-        "lastEventAt": (defaults.object(forKey: "geofence.lastEvent.at") as? Date)?.timeIntervalSince1970 as Any,
-        // Whether the one region that wakes everything else is actually being monitored. Its
-        // absence is the quietest failure this layer has: the stations stay registered, the page
-        // still looks populated, and nothing ever re-evaluates again.
-        "umbrellaUp": manager.monitoredRegions.contains { $0.identifier == Self.umbrellaId },
-        // Every registered region, with whether the phone is inside it right now (docs/25 §5).
-        "regions": manager.monitoredRegions.compactMap { r -> [String: Any]? in
-          guard let c = r as? CLCircularRegion else { return nil }
-          var row: [String: Any] = ["id": c.identifier, "lat": c.center.latitude, "lon": c.center.longitude, "radiusM": c.radius]
-          if let here = discCentre {
-            row["distanceM"] = here.distance(from: CLLocation(latitude: c.center.latitude, longitude: c.center.longitude))
-            row["inside"] = c.contains(here.coordinate)
-          }
-          if let st = station(for: c) { row["name"] = st.name }
-          return row
-        },
-      ]
-      if let e = lastEvent { out["lastEvent"] = e }
-      if let p = pendingNudge {
-        out["pendingNudge"] = p
-        pendingNudge = nil
-      }
-      DispatchQueue.main.async { reply(out) }
+      // The settings arrive on a queue of the notification centre's, not on main. Everything
+      // the status reads — `lastEvent`, the mode, the premise table, the stays, the monitored
+      // regions — is written on main, and `pendingNudge` is even taken here; a Swift string or
+      // object replaced on main while this thread reads it is a memory error, not a stale value.
+      // So only the setting is read here and the rest on main (#87).
+      let notifications = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional
+      onMain { [self] in reply(status(notifications: notifications)) }
     }
+  }
+
+  /// The status as Dart reads it. Main thread only; see `status(reply:)`.
+  private func status(notifications: Bool) -> [String: Any] {
+    var out: [String: Any] = [
+      "permission": Self.permissionString(authStatus),
+      "notifications": notifications,
+      "registered": manager.monitoredRegions.count,
+      "pushToken": pushToken as Any,
+      // docs/25 §4: stations whose nudges nobody answered, for Dart to mute with an expiry.
+      "ignored": ignoredTally(),
+      // docs/25 §5: the coverage disc, so the debug page can say why nothing happened.
+      "discLat": discCentre?.coordinate.latitude as Any,
+      "discLon": discCentre?.coordinate.longitude as Any,
+      "discRadiusM": discRadius,
+      "discAt": discAt?.timeIntervalSince1970 as Any,
+      "counters": counters(),
+      // issue #31: the set and the lookup, dated in their own right, and what the layer is
+      // doing right now. Without these the page could only show the disc's timestamp, which
+      // describes something else entirely.
+      "regionsAt": regionsAt?.timeIntervalSince1970 as Any,
+      "regionsLat": regionsCentre?.coordinate.latitude as Any,
+      "regionsLon": regionsCentre?.coordinate.longitude as Any,
+      "nearestAt": nearestAt?.timeIntervalSince1970 as Any,
+      "nearestCount": nearestCount,
+      "nearestLat": nearestCentre?.coordinate.latitude as Any,
+      "nearestLon": nearestCentre?.coordinate.longitude as Any,
+      // Nobody has ever read this off a real phone, and the umbrella is now sized against it.
+      "maxRegionRadiusM": manager.maximumRegionMonitoringDistance,
+      "umbrellaRadiusM": umbrellaRadius > 0 ? umbrellaRadius : (config?.umbrellaRadiusM ?? 0),
+      // Whether that number was worked out from an answer or is just the fallback. Printing
+      // only the metres cannot tell "computed 8 km" from "never computed, so 8 km" — and that
+      // is exactly the question that could not be answered from the page.
+      "umbrellaComputed": umbrellaRadius > 0,
+      // #40: which source the background lookup is on. Shipped before the path it guards, so
+      // that flipping it from a laptop and watching this line change is the proof that the
+      // switch works in both directions.
+      "stationsLocal": config?.stationsLocal == true,
+      // #64: premises on, which file, and the stays open right now.
+      "stationPremises": config?.stationPremises == true,
+      "premisesVersion": premiseTableCache.map { Int($0.version) } as Any,
+      "premisesCount": premiseTableCache?.count ?? 0,
+      "stays": stays.values.map { st -> [String: Any] in
+        ["id": st.station.id, "name": st.station.name, "enteredAt": st.enteredAt.timeIntervalSince1970,
+         "nudged": st.nudged, "touch": st.entry?.touch.count ?? 0, "ringM": st.entry?.ring.radius ?? 0]
+      },
+      "umbrellaWhy": umbrellaWhy as Any,
+      "mode": modeLabel,
+      "lastEventAt": (defaults.object(forKey: "geofence.lastEvent.at") as? Date)?.timeIntervalSince1970 as Any,
+      // Whether the one region that wakes everything else is actually being monitored. Its
+      // absence is the quietest failure this layer has: the stations stay registered, the page
+      // still looks populated, and nothing ever re-evaluates again.
+      "umbrellaUp": manager.monitoredRegions.contains { $0.identifier == Self.umbrellaId },
+      // Every registered region, with whether the phone is inside it right now (docs/25 §5).
+      "regions": manager.monitoredRegions.compactMap { r -> [String: Any]? in
+        guard let c = r as? CLCircularRegion else { return nil }
+        var row: [String: Any] = ["id": c.identifier, "lat": c.center.latitude, "lon": c.center.longitude, "radiusM": c.radius]
+        if let here = discCentre {
+          row["distanceM"] = here.distance(from: CLLocation(latitude: c.center.latitude, longitude: c.center.longitude))
+          row["inside"] = c.contains(here.coordinate)
+        }
+        if let st = station(for: c) { row["name"] = st.name }
+        return row
+      },
+    ]
+    if let e = lastEvent { out["lastEvent"] = e }
+    if let p = pendingNudge {
+      out["pendingNudge"] = p
+      pendingNudge = nil
+    }
+    return out
+  }
+
+  /// Runs `work` on the main thread: at once when already there, else on the next turn (#87).
+  private func onMain(_ work: @escaping () -> Void) {
+    if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
   }
 
   func stop() {
@@ -1568,7 +1624,11 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   /// still the best guess. An *empty* one is an answer: there is no station near here, the old
   /// nearest list describes somewhere else, and keeping it registered is worse than dropping it.
   private func refreshNearest(around l: CLLocation, _ c: GeofenceConfig) {
-    let task = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
+    // With an expiration handler: a task that is not ended by the time iOS's allowance runs out
+    // gets the process killed, and every later tap on a nudge is then a cold start (#87). A
+    // lookup still out by then keeps running whenever the app does; the set stays as it was
+    // until it lands.
+    let task = BackgroundTask { [weak self] in self?.lastEvent = "nearest lookup ran out of background time" }
     let finish = { [weak self] (answer: GeofenceRules.NearbyAnswer?) in
       DispatchQueue.main.async {
         guard let self = self else { return }
@@ -1613,7 +1673,7 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
           : "nearest \(answer!.stations.count)\(answer!.complete ? ", complete" : ", not exhaustive")"
         self.lastEvent = "recentred on \(Int(self.discRadius / 1000)) km disc, \(outcome)"
         self.onUmbrellaExit?()
-        if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+        task.end()
       }
     }
     // Issue #40: the answer comes off the disk when the server says it may. `finish` is the same
@@ -1682,7 +1742,8 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
     let trigger: UNNotificationTrigger? = delay > 0 ? UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false) : nil
     center.add(UNNotificationRequest(identifier: "nudge-\(s.id)", content: content, trigger: trigger))
     bumpCounter("scheduled")
-    // Counted as unanswered from the moment it is scheduled; a tap or a check-in clears it.
+    // Counted as unanswered from the moment it is scheduled; a tap or a check-in clears it, and
+    // the open app swallowing it takes it back (#86).
     noteNudgeFired(s)
     return true
   }
@@ -1696,12 +1757,31 @@ final class GeofenceManager: NSObject, CLLocationManagerDelegate, UNUserNotifica
   }
 
   func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification, withCompletionHandler h: @escaping (UNNotificationPresentationOptions) -> Void) {
+    // iOS calls in on main in practice; nothing promises it, and this touches the same state as
+    // everything else here (#87). A no-op on main.
+    guard Thread.isMainThread else {
+      DispatchQueue.main.async { self.userNotificationCenter(c, willPresent: n, withCompletionHandler: h) }
+      return
+    }
     // In the foreground the Bahnsteig shows its own banner.
-    if n.request.content.threadIdentifier == "nudge" { bumpCounter("fired"); return h([]) }
+    if n.request.content.threadIdentifier == "nudge" {
+      bumpCounter("fired")
+      // Swallowed, so never seen, so never ignored (docs/25 §4). Without this, three arrivals with
+      // the app open muted the station for a month on the old path (#86).
+      if let id = GeofenceRules.swallowedNudgeStation(thread: n.request.content.threadIdentifier, userInfo: n.request.content.userInfo) {
+        takeBackIgnored(id)
+      }
+      return h([])
+    }
     if #available(iOS 14, *) { h([.banner, .sound]) } else { h([.alert, .sound]) }
   }
 
   func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse, withCompletionHandler h: @escaping () -> Void) {
+    // As in `willPresent` (#87): the tap is handled on main, where `onNudgeTapped` is set.
+    guard Thread.isMainThread else {
+      DispatchQueue.main.async { self.userNotificationCenter(c, didReceive: r, withCompletionHandler: h) }
+      return
+    }
     let info = r.notification.request.content.userInfo
     // "3 Stunden Ruhe" straight from the notification (docs/24 §3). Dart owns the account, so
     // it does the patch; the app is launched into the background for it if it is not running.

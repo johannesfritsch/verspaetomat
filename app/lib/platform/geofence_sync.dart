@@ -2,33 +2,58 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
+import '../api/events.dart';
 import '../api/models.dart';
+import '../repo/app_repository.dart' show AppRepository, RideWrite;
 import '../repo/repo_scope.dart';
 import '../state/demo_state.dart' show LocationMode;
 import 'diagnose_log.dart';
 import 'geofence.dart';
 
-/// Keeps the native geofence layer in step with the account (docs/15).
-///
-/// Syncs after the session loads, on every session change (settings, muted
-/// stations, mode switch), when the app returns to the foreground and after a
-/// check-in or arrival. Debounced, so a burst of changes is one `configure`.
 /// The Entwicklung page's switch: ignored nudges do not mute a station (#64, test phones only).
 const noAutoMuteKey = 'debug.noAutoMute';
 
+/// Keeps the native geofence layer in step with the account (docs/15).
+///
+/// Syncs after the session loads, on every session change (settings, muted stations, mode
+/// switch), when the app returns to the foreground, on every event that touches a ride, and —
+/// at once, without the debounce — after every write of this app's that starts, moves or ends
+/// one (#80). Debounced otherwise, so a burst of changes is one `configure`; a sync still
+/// waiting when the app goes to the background runs on the way out.
 class GeofenceSync with WidgetsBindingObserver {
-  GeofenceSync({required this.session, required this.onNudge, Geofence? geofence}) : _geofence = geofence ?? Geofence.instance;
+  /// [events] and [repo] are the session's own, and [firstFrame] the binding's, unless a test
+  /// hands in others.
+  GeofenceSync({
+    required this.session,
+    required this.onNudge,
+    Geofence? geofence,
+    Stream<AppEvent>? events,
+    AppRepository? repo,
+    Future<void> Function()? firstFrame,
+  })  : _geofence = geofence ?? Geofence.instance,
+        _eventsIn = events,
+        _repoIn = repo,
+        _firstFrame = firstFrame ?? (() => WidgetsBinding.instance.waitUntilFirstFrameRasterized);
 
   final Session session;
 
-  /// Called with the station when the customer tapped a nudge notification.
+  /// Called with the station when the customer tapped a nudge notification — once the app has
+  /// drawn its first frame and knows its account (#87).
   final void Function(GeofenceNudge nudge) onNudge;
 
   final Geofence _geofence;
+  final Stream<AppEvent>? _eventsIn;
+  final AppRepository? _repoIn;
+  final Future<void> Function() _firstFrame;
+  AppRepository get _repo => _repoIn ?? session.repo;
+
   Timer? _debounce;
   StreamSubscription<GeofenceNudge>? _taps;
   StreamSubscription<PushToken>? _tokens;
+  StreamSubscription<AppEvent>? _events;
+  StreamSubscription<RideWrite>? _writes;
   bool _started = false;
+  bool _disposed = false;
   String? _lastFingerprint;
 
   /// The last answer to "is a ride running?" — see [sync].
@@ -44,17 +69,38 @@ class GeofenceSync with WidgetsBindingObserver {
     DiagnoseLog.instance.add('app', 'launch');
     WidgetsBinding.instance.addObserver(this);
     session.addListener(scheduleSync);
-    _taps = _geofence.onNudgeTapped.listen(onNudge);
+    _taps = _geofence.onNudgeTapped.listen(_deliver);
     _tokens = _geofence.onPushToken.listen(_sendPushToken);
+    // #80: the server's word that a ride started or ended elsewhere — Stellwerk, another
+    // phone, the arrival the backend detected itself.
+    _events = (_eventsIn ?? session.events).listen((e) {
+      if (e.touchesRide) scheduleSync();
+    });
+    // #80: this app's own check-in. The app is in the background seconds later (eight in the
+    // report), so this one does not wait for the debounce.
+    _writes = session.rideWrites.listen((w) {
+      // docs/25 §4: a nudge counts as ignored when no check-in follows, so a check-in at its
+      // station answers it, and the tally starts over (#86). Before the sync, which reads the
+      // tally to mute.
+      final at = w.checkedInAt;
+      if (at != null && at.isNotEmpty) unawaited(_geofence.clearIgnored(at));
+      unawaited(sync());
+    });
     _checkPending();
     scheduleSync();
   }
 
   void dispose() {
+    _disposed = true;
+    for (final stop in [..._accountWaits]) {
+      stop();
+    }
     _debounce?.cancel();
     _snoozeTimer?.cancel();
     _taps?.cancel();
     _tokens?.cancel();
+    _events?.cancel();
+    _writes?.cancel();
     session.removeListener(scheduleSync);
     if (_started) WidgetsBinding.instance.removeObserver(this);
   }
@@ -65,6 +111,10 @@ class GeofenceSync with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _checkPending();
       scheduleSync();
+    } else if (state == AppLifecycleState.hidden || state == AppLifecycleState.paused) {
+      // On the way out a debounced sync would fire into a suspended isolate and be lost until
+      // the next resume — after the station it was meant to silence (#80).
+      if (_debounce?.isActive ?? false) unawaited(sync());
     }
   }
 
@@ -79,12 +129,63 @@ class GeofenceSync with WidgetsBindingObserver {
   Future<void> _checkPending() async {
     final status = await _geofence.status();
     final pending = status.pendingNudge;
-    if (pending != null && (pending.stationId.isNotEmpty || pending.kind != 'station')) onNudge(pending);
+    if (pending != null && (pending.stationId.isNotEmpty || pending.kind != 'station')) _deliver(pending);
     if (status.pushToken != null) _sendPushToken(status.pushToken!);
     if (!_repaired) {
       _repaired = true;
       _repairPermissions(status);
     }
+  }
+
+  /// How long a tap waits for the account before it is dropped. `_sendPushToken` waits as long.
+  static const _accountWait = Duration(seconds: 10);
+
+  /// A tapped notification, handed to [onNudge] only once the app stands (#87).
+  ///
+  /// A tap on a cold start arrives before anything is drawn: `pendingNudge` is read from
+  /// `initState`, and a tap that wakes the engine is on the channel just as early. Routing then
+  /// and opening a sheet while the app is still being built, before `/v1/me` has answered, is
+  /// the least understood path in the app and the likeliest place for the crash in #87 — no
+  /// test ever walked it. So the tap waits for the first frame and for the account, like the
+  /// push token. Without an account after the wait it is dropped and logged: a check-in sheet
+  /// with no account behind it has nothing to ask with.
+  void _deliver(GeofenceNudge n) => unawaited(_deliverWhenReady(n));
+
+  Future<void> _deliverWhenReady(GeofenceNudge n) async {
+    await _firstFrame();
+    final loaded = await _accountLoaded();
+    if (_disposed) return;
+    if (!loaded) {
+      DiagnoseLog.instance.add('push', 'tap ${n.kind} dropped: no account after ${_accountWait.inSeconds} s', bad: true);
+      return;
+    }
+    onNudge(n);
+  }
+
+  /// The waits for the account still open, each with what ends it, so [dispose] leaves no
+  /// listener on the session and no timer behind.
+  final _accountWaits = <void Function()>{};
+
+  /// True as soon as `session.me` is there, false after [_accountWait] without it.
+  Future<bool> _accountLoaded() {
+    if (session.me != null) return Future.value(true);
+    final done = Completer<bool>();
+    late final Timer limit;
+    late final void Function() stop;
+    void check() {
+      if (session.me != null) stop();
+    }
+
+    stop = () {
+      limit.cancel();
+      session.removeListener(check);
+      _accountWaits.remove(stop);
+      if (!done.isCompleted) done.complete(session.me != null);
+    };
+    limit = Timer(_accountWait, stop);
+    session.addListener(check);
+    _accountWaits.add(stop);
+    return done.future;
   }
 
   /// Once per launch: make the account's settings agree with what the phone actually allows.
@@ -152,19 +253,55 @@ class GeofenceSync with WidgetsBindingObserver {
     }
   }
 
+  Future<void>? _inFlight;
+  bool _again = false;
+
   /// One `configure` with the current account state. Never throws.
-  Future<void> sync() async {
+  ///
+  /// One at a time. A sync that starts while another is still out runs once more after it,
+  /// rather than beside it: two side by side can land in the wrong order, and the one asked
+  /// before the check-in — „not riding" — would then be the last thing native heard (#80).
+  Future<void> sync() {
     _debounce?.cancel();
+    final running = _inFlight;
+    if (running != null) {
+      _again = true;
+      return running;
+    }
+    return _inFlight = _drain();
+  }
+
+  Future<void> _drain() async {
+    try {
+      do {
+        _again = false;
+        await _syncOnce();
+      } while (_again && !_disposed);
+    } finally {
+      _inFlight = null;
+    }
+  }
+
+  /// Whether native should hold its nudges: a journey under way or waiting at a change (#80),
+  /// else — only when there is no journey at all — a ride from before journeys, the way
+  /// `RideMonitor` reads the two. Throws when the server could not be asked.
+  static Future<bool> ridingNow(AppRepository repo) async {
+    final journey = await repo.currentJourney();
+    if (journey != null) return journey.journey.riding || journey.journey.inTransfer;
+    return (await repo.currentRide())?.ride.status == ApiRideStatus.riding;
+  }
+
+  Future<void> _syncOnce() async {
     if (session.me == null || session.healthy != true) return;
     try {
-      final geo = await session.repo.geofence();
+      final geo = await _repo.geofence();
       // A failed call is not an answer (issue #11). On a platform with one bar of signal this
       // used to come back as "not riding", the native layer forgot the journey, and every region
       // the phone was already inside nudged — twice, once per station at the same spot. The last
       // known answer is kept instead; the sync runs again on the next change.
       var riding = _lastRiding;
       try {
-        riding = (await session.repo.currentRide())?.ride.status == ApiRideStatus.riding;
+        riding = await ridingNow(_repo);
       } catch (_) {
         // keep what we last knew
       }

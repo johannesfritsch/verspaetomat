@@ -245,4 +245,24 @@ final class PremiseRegionTests: XCTestCase {
     XCTAssertEqual(GeofenceRules.stationId(ofTouch: "touch:de-DELFI_de:05315:11201:1"), "de-DELFI_de:05315:11201")
     XCTAssertNil(GeofenceRules.stationId(ofTouch: "station:vs:17"))
   }
+
+  /// #86: a station nudge that lands while the app is open is swallowed, and nobody saw it.
+  func testOnlyAStationNudgeIsSwallowedInTheOpenApp() {
+    XCTAssertEqual(GeofenceRules.swallowedNudgeStation(thread: "nudge", userInfo: ["stationId": "vs:4711", "stationName": "St. Ingbert"]), "vs:4711")
+    // The test notification of the Entwicklung page is meant to be seen, and a server push has its banner.
+    XCTAssertNil(GeofenceRules.swallowedNudgeStation(thread: "test", userInfo: [:]))
+    XCTAssertNil(GeofenceRules.swallowedNudgeStation(thread: "", userInfo: ["verspaetomat": ["kind": "journey"]]))
+    // Swallowed, but there is no station whose tally it could have moved.
+    XCTAssertNil(GeofenceRules.swallowedNudgeStation(thread: "nudge", userInfo: [:]))
+    XCTAssertNil(GeofenceRules.swallowedNudgeStation(thread: "nudge", userInfo: ["stationId": ""]))
+  }
+
+  /// #86, docs/25 §4: `scheduleNudge` counts a nudge as unanswered when it plans it. One the open
+  /// app swallowed was never seen, so it was never ignored either: the count it added goes back.
+  func testASwallowedNudgeIsNotCountedAsIgnored() {
+    XCTAssertEqual(GeofenceRules.ignoredAfterSwallowed(1), 0, "the only one: the station has no tally left")
+    XCTAssertEqual(GeofenceRules.ignoredAfterSwallowed(3), 2, "three in the open app is not a month of quiet")
+    // A tap or a check-in cleared the tally between scheduling and firing: nothing to take back.
+    XCTAssertEqual(GeofenceRules.ignoredAfterSwallowed(0), 0)
+  }
 }

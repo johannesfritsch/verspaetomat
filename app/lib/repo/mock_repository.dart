@@ -13,7 +13,7 @@ import 'app_repository.dart';
 /// The built-in demo, exposed through the same interface as the backend.
 /// Wraps [DemoState] and [Mock]; every write goes to DemoState so the
 /// existing screens keep following along.
-class MockRepository implements AppRepository {
+class MockRepository with RideWriteHook implements AppRepository {
   MockRepository(this.state);
 
   final DemoState state;
@@ -254,6 +254,30 @@ class MockRepository implements AppRepository {
     if (i >= 0) state.demoTickets[i] = {...state.demoTickets[i], 'archived_at': DateTime.now().toUtc().toIso8601String()};
   }
 
+  // Every write that can start, move or end a ride reports through the hook (#80), as the
+  // backend's does, so the geofence sync hears a Demo check-in the same way.
+  @override
+  Future<ApiJourneyLive> startJourney(StartJourneyRequest r) => rideWrite('startJourney', () => _startJourney(r), checkedInAt: r.fromStationId);
+  @override
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) => rideWrite('confirmLeg', () => _confirmLeg(journeyId, tripId));
+  @override
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) =>
+      rideWrite('finishJourney', () => _finishJourney(journeyId, arrived: arrived, reason: reason));
+  @override
+  Future<ApiJourneyLive> missedConnection(String journeyId) => rideWrite('missedConnection', () => _missedConnection(journeyId));
+  @override
+  Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName}) =>
+      rideWrite('replanJourney', () => _replanJourney(journeyId, fromStationId: fromStationId, fromStationName: fromStationName));
+  @override
+  Future<ApiJourneyLive> changeTrain(String journeyId, String tripId, {String? fromStationId, String? fromStationName}) =>
+      rideWrite('changeTrain', () => _changeTrain(journeyId, tripId, fromStationId: fromStationId, fromStationName: fromStationName));
+  @override
+  Future<bool> deleteJourney(String id) => rideWrite('deleteJourney', () => _deleteJourney(id));
+  @override
+  Future<bool> deleteRide(String id) => rideWrite('deleteRide', () => _deleteRide(id));
+  @override
+  Future<ApiArrivalResult> arrival(ArrivalRequest a) => rideWrite('arrival', () => _arrival(a));
+
   /// Demo still counts money by the three old types; the ticket chosen says which.
   Future<void> _useTicket(List<JourneyTicketChoice>? choice) async {
     final c = choice == null || choice.isEmpty ? null : choice.first;
@@ -262,8 +286,7 @@ class MockRepository implements AppRepository {
     if (ticket != null) state.setTicket(ticket.ticket);
   }
 
-  @override
-  Future<ApiJourneyLive> startJourney(StartJourneyRequest r) async {
+  Future<ApiJourneyLive> _startJourney(StartJourneyRequest r) async {
     if (r.ticket != null) state.setTicket(r.ticket!);
     await _useTicket(r.tickets);
     final legs = <DemoLeg>[];
@@ -375,31 +398,27 @@ class MockRepository implements AppRepository {
     return ApiJourneyLive(journey: api, ride: live?.ride, stops: live?.stops ?? const [], eta: live?.eta, justArrived: j.phase == JourneyPhase.arrived);
   }
 
-  @override
-  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) async {
+  Future<ApiJourneyLive> _confirmLeg(String journeyId, String tripId) async {
     final d = _findDeparture(tripId);
     if (d == null) throw StateError('unknown trip $tripId');
     state.confirmLeg(d);
     return (await currentJourney())!;
   }
 
-  @override
-  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) async {
+  Future<ApiJourney> _finishJourney(String journeyId, {required bool arrived, String? reason}) async {
     final j = state.journey;
     if (j == null) throw StateError('no journey');
     state.finishJourney(arrived: arrived, reason: reason);
     return _journey(j);
   }
 
-  @override
-  Future<ApiJourneyLive> missedConnection(String journeyId) async {
+  Future<ApiJourneyLive> _missedConnection(String journeyId) async {
     if (state.journey == null) throw StateError('no journey');
     state.missConnection();
     return (await currentJourney())!;
   }
 
-  @override
-  Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName}) async {
+  Future<ApiJourneyLive> _replanJourney(String journeyId, {String? fromStationId, String? fromStationName}) async {
     if (state.journey == null) throw StateError('no journey');
     state.replanJourney(at: fromStationName);
     return (await currentJourney())!;
@@ -407,8 +426,7 @@ class MockRepository implements AppRepository {
 
   /// docs/24 §2: the same decision the backend makes — a mis-tap swaps the leg, anything
   /// later ends it and starts the next one.
-  @override
-  Future<ApiJourneyLive> changeTrain(String journeyId, String tripId, {String? fromStationId, String? fromStationName}) async {
+  Future<ApiJourneyLive> _changeTrain(String journeyId, String tripId, {String? fromStationId, String? fromStationName}) async {
     final j = state.journey;
     if (j == null) throw StateError('no journey');
     final d = _findDeparture(tripId);
@@ -424,14 +442,12 @@ class MockRepository implements AppRepository {
     return (await currentJourney())!;
   }
 
-  @override
-  Future<bool> deleteJourney(String id) async {
+  Future<bool> _deleteJourney(String id) async {
     state.deleteRide(id);
     return state.readyDesk == null;
   }
 
-  @override
-  Future<bool> deleteRide(String id) async {
+  Future<bool> _deleteRide(String id) async {
     state.deleteRide(id);
     return state.readyDesk == null;
   }
@@ -806,8 +822,7 @@ class MockRepository implements AppRepository {
     );
   }
 
-  @override
-  Future<ApiArrivalResult> arrival(ArrivalRequest a) async {
+  Future<ApiArrivalResult> _arrival(ArrivalRequest a) async {
     final t = state.trip;
     if (t == null) throw StateError('no ride in progress');
     int? minutes = a.delayMinutes;

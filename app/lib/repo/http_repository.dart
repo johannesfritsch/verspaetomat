@@ -10,7 +10,7 @@ import '../stations/premise_store.dart';
 import 'app_repository.dart';
 
 /// The real thing: every call goes to the backend — except the two that no longer have to.
-class HttpRepository implements AppRepository {
+class HttpRepository with RideWriteHook implements AppRepository {
   HttpRepository({required this.client, required this.tokens, StationStore? stations, PremiseStore? premises})
       : stations = stations ?? StationStore(),
         premises = premises ?? PremiseStore();
@@ -223,7 +223,7 @@ class HttpRepository implements AppRepository {
   @override
   Future<ApiRideLive?> currentRide() => client.currentRide();
   @override
-  Future<ApiArrivalResult> arrival(ArrivalRequest request) => client.arrival(request);
+  Future<ApiArrivalResult> arrival(ArrivalRequest request) => rideWrite('arrival', () => client.arrival(request));
   @override
   Future<void> dismissRide() => client.dismissRide();
   @override
@@ -244,21 +244,22 @@ class HttpRepository implements AppRepository {
   Future<ApiPlan> planJourney({required String from, required String to, String? firstTrip, DateTime? time}) =>
       client.planJourney(from: from, to: to, firstTrip: firstTrip, time: time);
   @override
-  Future<ApiJourneyLive> startJourney(StartJourneyRequest request) => client.startJourney(request);
+  Future<ApiJourneyLive> startJourney(StartJourneyRequest request) => rideWrite('startJourney', () => client.startJourney(request), checkedInAt: request.fromStationId);
   @override
   Future<ApiJourneyLive?> currentJourney() => client.currentJourney();
   @override
-  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) => client.confirmLeg(journeyId, tripId);
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) => rideWrite('confirmLeg', () => client.confirmLeg(journeyId, tripId));
   @override
-  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) => client.finishJourney(journeyId, arrived: arrived, reason: reason);
+  Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) =>
+      rideWrite('finishJourney', () => client.finishJourney(journeyId, arrived: arrived, reason: reason));
   @override
-  Future<ApiJourneyLive> missedConnection(String journeyId) => client.missedConnection(journeyId);
+  Future<ApiJourneyLive> missedConnection(String journeyId) => rideWrite('missedConnection', () => client.missedConnection(journeyId));
   @override
   Future<ApiJourneyLive> replanJourney(String journeyId, {String? fromStationId, String? fromStationName}) =>
-      client.replanJourney(journeyId, fromStationId: fromStationId, fromStationName: fromStationName);
+      rideWrite('replanJourney', () => client.replanJourney(journeyId, fromStationId: fromStationId, fromStationName: fromStationName));
   @override
   Future<ApiJourneyLive> changeTrain(String journeyId, String tripId, {String? fromStationId, String? fromStationName}) =>
-      client.changeTrain(journeyId, tripId, fromStationId: fromStationId, fromStationName: fromStationName);
+      rideWrite('changeTrain', () => client.changeTrain(journeyId, tripId, fromStationId: fromStationId, fromStationName: fromStationName));
   @override
   Future<List<ApiJourney>> journeys() async {
     try {
@@ -270,9 +271,9 @@ class HttpRepository implements AppRepository {
   }
 
   @override
-  Future<bool> deleteJourney(String id) => client.deleteJourney(id);
+  Future<bool> deleteJourney(String id) => rideWrite('deleteJourney', () => client.deleteJourney(id));
   @override
-  Future<bool> deleteRide(String id) => client.deleteRide(id);
+  Future<bool> deleteRide(String id) => rideWrite('deleteRide', () => client.deleteRide(id));
 
   @override
   Future<ApiIncidents> incidents() => client.incidents();
