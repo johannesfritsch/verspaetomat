@@ -806,6 +806,52 @@ async fn missed_with_no_new_train_changes_nothing_and_sends_nothing(pool: PgPool
     assert!(tap.try_recv().is_err(), "nothing published, so nothing pushed");
 }
 
+/// The arrival in Saarbrücken of the RS 7 and the ICE 610 it reaches in Ulm.
+fn arrival_of_the_rs7_way() -> chrono::DateTime<Utc> {
+    ice610()["to"]["scheduledArrival"].as_str().unwrap().parse().unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_missed_connection_without_an_answer_for_the_destination_still_has_a_cap(pool: PgPool) {
+    // Asked for Saarbrücken, the planner has nothing; asked for Ulm, it has the RS 7. The RS 7
+    // becomes the proposal, and a proposal after a missed connection never comes without the
+    // cap: then it is the arrival of the way proposed.
+    let base = memmingen_planner(vec![rs7(), re75_1102()], vec![]).await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    let journey = memmingen_journey(&pool, me, booked(), None).await;
+
+    let (s, v) = call(&app, "POST", "/v1/rides/current/arrival", Some(&token), Some(json!({"actual_arrival": Utc::now() - Duration::minutes(1)}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (status, next, plan, missed, earliest) = journey_row(&pool, journey).await;
+    assert_eq!(status, "transfer");
+    assert!(missed);
+    assert_eq!(next["trip_id"], "rs7");
+    assert_eq!(trips_of(&plan), ["re96", "rs7", "ice610"]);
+    let earliest = earliest.expect("no proposal after a missed connection without a cap");
+    assert!((earliest - arrival_of_the_rs7_way()).num_seconds().abs() < 1, "cap {earliest}");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn missed_without_an_answer_for_the_destination_still_has_a_cap(pool: PgPool) {
+    // „Leider verpasst" on the RE 75 at 09:04, still there when the RE 96 came in: toward
+    // Saarbrücken the planner offers only that train, toward Ulm the RS 7 as well.
+    let mut plan = booked();
+    plan[1] = leg("re75-0904", "RE 75", MEMMINGEN, ULM, Utc::now() + Duration::minutes(2), 34);
+    let only_the_missed_one = vec![motis_route(vec![motis_leg("re75-0904", "RE 75", MEMMINGEN, ULM, 2, 34), ice610()])];
+    let base = memmingen_planner(vec![rs7(), re75_1102()], only_the_missed_one).await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    let journey = memmingen_journey(&pool, me, plan.clone(), Some(plan[1].clone())).await;
+
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, next, _, _, earliest) = journey_row(&pool, journey).await;
+    assert_eq!(next["trip_id"], "rs7");
+    let earliest = earliest.expect("no proposal after a missed connection without a cap");
+    assert!((earliest - arrival_of_the_rs7_way()).num_seconds().abs() < 1, "cap {earliest}");
+}
+
 #[sqlx::test(migrations = "./migrations")]
 async fn confirming_another_train_at_a_change_takes_its_onward_legs(pool: PgPool) {
     // #82: the plan was laid out for the RE 75 at 11:02 and its ICE at 12:47. The passenger takes

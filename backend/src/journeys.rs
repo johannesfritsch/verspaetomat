@@ -791,6 +791,11 @@ fn departs(l: &PlanLeg) -> DateTime<Utc> {
     l.live_departure.unwrap_or(l.planned_departure)
 }
 
+/// When a way of legs arrives at its end: live when the feed says, else planned.
+fn arrival_of(legs: &[PlanLeg]) -> Option<DateTime<Utc>> {
+    legs.last().map(|l| l.live_arrival.unwrap_or(l.planned_arrival))
+}
+
 /// Is this station the journey's destination? The legs carry the feed's platform ids, the
 /// journey our station id, so the name decides where the ids differ.
 fn is_destination(id: &str, name: &str, j: &JourneyRow) -> bool {
@@ -1322,14 +1327,17 @@ pub async fn missed(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
         return Err(err(StatusCode::NOT_FOUND, "keine weitere Verbindung ab hier"));
     };
     let proposal = way[0].clone();
+    let way_arrives = arrival_of(&way);
     // The legs before this change are done; everything from here on is the new way.
     let mut new_plan = plan_legs(&j);
     new_plan.truncate((j.current_leg.max(0) as usize).min(new_plan.len()));
     new_plan.extend(way);
     // The cap as it always was: the destination plan's first connection that is not the train
-    // just missed (docs/21 §2). `least` keeps an earlier one.
-    if let Some(it) = its.iter().find(|it| it.legs.first().is_some_and(|l| l.trip_id != next.trip_id)) {
-        note_earliest_onward(&s.pool, j.id, it.live_arrival.unwrap_or(it.planned_arrival)).await.map_err(internal)?;
+    // just missed (docs/21 §2). `least` keeps an earlier one. When that plan has nothing else,
+    // the way proposed sets it, so there is never a proposal without one (#81).
+    let cap = its.iter().find(|it| it.legs.first().is_some_and(|l| l.trip_id != next.trip_id)).map(|it| it.live_arrival.unwrap_or(it.planned_arrival)).or(way_arrives);
+    if let Some(cap) = cap {
+        note_earliest_onward(&s.pool, j.id, cap).await.map_err(internal)?;
     }
     let mut next_json = leg_json(&proposal);
     next_json["replanned"] = json!(true);
@@ -1406,28 +1414,36 @@ pub async fn on_leg_finalised(s: &AppState, ride: &RideRow) -> anyhow::Result<Le
         if missed {
             reason = Some(if next_cancelled { "ausfall" } else { "verpasst" });
             let at = actual + Duration::minutes(1);
-            match s.train.plan(&s.stations().upstream_id(&transfer_id), &s.stations().upstream_id(&j.destination_station_id), at, 3).await {
-                Ok(its) if !its.is_empty() => {
-                    // The earliest the passenger can now reach the destination: the cap (docs/21 §2).
-                    let it = &its[0];
-                    note_earliest_onward(&s.pool, j.id, it.live_arrival.unwrap_or(it.planned_arrival)).await?;
-                    // Toward the next change of the plan: where the connection was going — or,
-                    // when the train in was cancelled and the passenger never left, where that
-                    // one was going.
-                    let change = if ride.cancelled { (ride.exit_station_id.as_str(), ride.exit_station_name.as_str()) } else { (planned_next.to_station_id.as_str(), planned_next.to_station_name.as_str()) };
-                    let next_change = Some(change).filter(|(id, name)| !is_destination(id, name, &j));
-                    match way_on_after_a_miss(s, &j, &transfer_id, next_change, at, &its, &missed_ids).await {
-                        Some(way) => {
-                            proposal = way[0].clone();
-                            new_plan.truncate(leg_no);
-                            new_plan.extend(way);
-                            replanned = true;
-                        }
-                        None => tracing::warn!(journey = %j.id, "transfer: no train on found, keeping the planned connection"),
-                    }
+            let its = match s.train.plan(&s.stations().upstream_id(&transfer_id), &s.stations().upstream_id(&j.destination_station_id), at, 3).await {
+                Ok(its) => its,
+                Err(e) => {
+                    tracing::warn!(journey = %j.id, error = %e, "transfer: the plan to the destination failed");
+                    Vec::new()
                 }
-                Ok(_) => tracing::warn!(journey = %j.id, "transfer: no re-plan found, keeping the planned connection"),
-                Err(e) => tracing::warn!(journey = %j.id, error = %e, "transfer: re-plan failed, keeping the planned connection"),
+            };
+            // The earliest the passenger can now reach the destination: the cap (docs/21 §2).
+            if let Some(it) = its.first() {
+                note_earliest_onward(&s.pool, j.id, it.live_arrival.unwrap_or(it.planned_arrival)).await?;
+            }
+            // Toward the next change of the plan: where the connection was going — or, when the
+            // train in was cancelled and the passenger never left, where that one was going.
+            let change = if ride.cancelled { (ride.exit_station_id.as_str(), ride.exit_station_name.as_str()) } else { (planned_next.to_station_id.as_str(), planned_next.to_station_name.as_str()) };
+            let next_change = Some(change).filter(|(id, name)| !is_destination(id, name, &j));
+            match way_on_after_a_miss(s, &j, &transfer_id, next_change, at, &its, &missed_ids).await {
+                Some(way) => {
+                    // No answer for the destination, and so no cap from it: the way proposed sets
+                    // it, so there is never a proposal without one (#81).
+                    if its.is_empty() {
+                        if let Some(arrives) = arrival_of(&way) {
+                            note_earliest_onward(&s.pool, j.id, arrives).await?;
+                        }
+                    }
+                    proposal = way[0].clone();
+                    new_plan.truncate(leg_no);
+                    new_plan.extend(way);
+                    replanned = true;
+                }
+                None => tracing::warn!(journey = %j.id, "transfer: no train on found, keeping the planned connection"),
             }
         }
         let mut next_json = leg_json(&proposal);
