@@ -46,8 +46,8 @@ class RideBar extends StatelessWidget {
     if (r == null) return const SizedBox.shrink();
     final stops = live!.stops;
     final headsign = stops.isEmpty ? r.exitStationName : stops.last.name;
-    final nextIdx = (r.passedStops + fromIndex(stops, r.fromStationId, r.fromStationName)).clamp(0, stops.isEmpty ? 0 : stops.length - 1);
-    final next = stops.isEmpty ? null : stops[nextIdx];
+    final nextIdx = nextStopIndex(stops, r);
+    final next = nextIdx < 0 ? null : stops[nextIdx];
     // Capped at what the railway caused when the journey was interrupted (docs/21 §2).
     final delay = monitor.journey?.journey.cappedDelay(r.liveDelayMinutes) ?? r.liveDelayMinutes;
     return Row(
@@ -62,12 +62,12 @@ class RideBar extends StatelessWidget {
           const VPill('Ausfall', tone: VPillTone.red)
         else if (delay > 0)
           VDelayPill(delay, unit: false)
-        else
+        else if (onTimeKnown(r))
           const VPill('pünktlich', tone: VPillTone.green),
         const Spacer(),
         if (next != null)
           Text(
-            '${next.name} ${fmtLocal(plannedAt(next)?.add(Duration(minutes: delay)))}',
+            '${next.name} ${fmtLocal(stopTime(next, delay))}',
             style: VText.caption,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,

@@ -164,9 +164,8 @@ class RideSheetBody extends StatelessWidget {
     final stops = monitor.journey?.stops ?? const <ApiStop>[];
     // Where they can actually board: the next stop the train still reaches, else where this
     // leg began — never the exit stop, which on a direct journey is the destination itself.
-    final here = stops.isEmpty
-        ? null
-        : stops[(r.passedStops + fromIndex(stops, r.fromStationId, r.fromStationName)).clamp(0, stops.length - 1)];
+    final next = nextStopIndex(stops, r);
+    final here = next < 0 ? null : stops[next];
     final fromId = here?.stationId ?? r.fromStationId;
     final fromName = here?.name ?? r.fromStationName;
     final toId = j?.destinationStationId ?? r.exitStationId;
@@ -406,10 +405,13 @@ String _minutes(int n) => '$n ${n == 1 ? 'Minute' : 'Minuten'}';
   }
 
   final late = delay > 0 && planned != null ? ' statt ${fmtLocal(planned)}' : '';
+  // Without live data the 0 minutes are the timetable's, not the train's (#78).
+  final known = delay > 0 || onTimeKnown(r);
+  final by = known ? '' : ' laut Fahrplan';
   return (
     eyebrow: j != null && j.legs.length > 1 ? 'Unterwegs · Zug ${j.currentLeg} von ${j.legs.length}' : 'Unterwegs · ${r.line}',
-    title: delay > 0 ? '+${_minutes(delay)}.' : 'Pünktlich unterwegs.',
-    subtitle: next != null ? 'Umstieg in $exit um ${fmtLocal(eta)}$late.' : 'Ankunft in $exit um ${fmtLocal(eta)}$late.',
+    title: delay > 0 ? '+${_minutes(delay)}.' : (known ? 'Pünktlich unterwegs.' : 'Keine Live-Daten.'),
+    subtitle: next != null ? 'Umstieg in $exit$by um ${fmtLocal(eta)}$late.' : 'Ankunft in $exit$by um ${fmtLocal(eta)}$late.',
     track: _track(next?.platform) ?? _track(info?.arrivalPlatform),
   );
 }
@@ -457,7 +459,8 @@ class _RidingView extends StatelessWidget {
             from: boarded,
             // The train runs on past the exit; the passenger does not (docs/26 §4).
             to: exit,
-            passed: r.passedStops - 1 + boarded,
+            // Everything before the next stop is behind the train (#78).
+            passed: nextStopIndex(stops, r) - 1,
             boldIndex: exit,
             // The two stops you have to do something at: get on, get off.
             halos: {boarded, if (exit != null) exit},
@@ -484,7 +487,10 @@ class _RidingView extends StatelessWidget {
                 ? const VPill('Ausfall', tone: VPillTone.red)
                 : shown > 0
                     ? VDelayPill(shown)
-                    : const VPill('pünktlich', tone: VPillTone.green),
+                    // As for the legs ahead: on time only when the feed has said so (#78).
+                    : onTimeKnown(r)
+                        ? const VPill('pünktlich', tone: VPillTone.green)
+                        : null,
             note: r.cause,
             stops: current,
             empty: 'Halte folgen, sobald der Zug im Feed ist.',

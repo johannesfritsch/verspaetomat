@@ -397,8 +397,8 @@ class _RideCard extends StatelessWidget {
     final stops = live!.stops;
     final j = monitor.journey?.journey;
     final headsign = stops.isEmpty ? r.exitStationName : stops.last.name;
-    final nextIdx = (r.passedStops + fromIndex(stops, r.fromStationId, r.fromStationName)).clamp(0, stops.isEmpty ? 0 : stops.length - 1);
-    final next = stops.isEmpty ? null : stops[nextIdx];
+    final nextIdx = nextStopIndex(stops, r);
+    final next = nextIdx < 0 ? null : stops[nextIdx];
     // Capped at what the railway caused when the journey was interrupted (docs/21 §2).
     final delay = j?.cappedDelay(r.liveDelayMinutes) ?? r.liveDelayMinutes;
     final dest = j?.destinationStationName ?? r.exitStationName;
@@ -420,12 +420,12 @@ class _RideCard extends StatelessWidget {
               const VChip('Ausfall', tone: VTone.red)
             else if (delay > 0)
               VDelay(delay, size: VDelaySize.medium)
-            else
+            else if (onTimeKnown(r))
               Text('pünktlich', style: VText.bodySStrong.copyWith(color: VColors.green)),
           ],
         ),
         const SizedBox(height: 12),
-        if (next != null) VKeyValue('Nächster Halt', '${next.name} ${fmtLocal(plannedAt(next)?.add(Duration(minutes: delay)))}', strong: true),
+        if (next != null) VKeyValue('Nächster Halt', '${next.name} ${fmtLocal(stopTime(next, delay))}', strong: true),
         if (next != null) const VRule.soft(),
         VKeyValue('Ziel', '$dest an ${fmtLocal(destAt?.add(Duration(minutes: delay)))}', strong: true),
         const SizedBox(height: 8),

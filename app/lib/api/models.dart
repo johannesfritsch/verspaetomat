@@ -694,6 +694,7 @@ class ApiRide {
     required this.status,
     this.passedStops = 0,
     this.liveDelayMinutes = 0,
+    this.liveKnown,
     this.cause,
     this.finalDelayMinutes,
     this.cancelled = false,
@@ -716,8 +717,14 @@ class ApiRide {
   final DateTime checkedInAt;
   final bool locationVerified;
   final ApiRideStatus status;
+  /// Stops of this leg behind the train, counted from the boarding stop (#78). Use
+  /// `nextStopIndex` (ride_widgets.dart) rather than adding it up by hand.
   final int passedStops;
   final int liveDelayMinutes;
+
+  /// Whether [liveDelayMinutes] comes from a live forecast (#78): only then is 0 „pünktlich".
+  /// Null from a server that does not say, and then the app keeps saying what it always said.
+  final bool? liveKnown;
   final String? cause;
   final int? finalDelayMinutes;
   final bool cancelled;
@@ -745,6 +752,7 @@ class ApiRide {
         status: switch (_s(j['status'])) { 'arrived' => ApiRideStatus.arrived, 'abandoned' => ApiRideStatus.abandoned, _ => ApiRideStatus.riding },
         passedStops: _i(j['passed_stops']),
         liveDelayMinutes: _i(j['live_delay_minutes'] ?? j['live_delay_min']),
+        liveKnown: j['live_known'] == null ? null : _b(j['live_known']),
         cause: _sn(j['cause']),
         finalDelayMinutes: _in(j['final_delay_minutes'] ?? j['final_delay_min']),
         cancelled: _b(j['cancelled']),

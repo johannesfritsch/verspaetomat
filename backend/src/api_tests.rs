@@ -1079,3 +1079,147 @@ async fn a_single_ticket_waits_for_its_price(pool: PgPool) {
     let pot = &v["summary"]["pots"][0];
     assert_eq!((pot["amount_cents"].as_i64(), pot["payable"].as_bool()), (Some(1498), Some(true)), "25 % of 59,90 €: {pot}");
 }
+
+// ---------------------------------------------------------------------------
+// The trip follower on a ride that boarded mid-trip (#78)
+// ---------------------------------------------------------------------------
+
+/// A stand-in for Transitous' `/api/v1/trip`, answering whatever [trip] holds when asked, so a
+/// test can change the train under a running ride.
+async fn transitous_with_trip(trip: Arc<std::sync::RwLock<Value>>) -> String {
+    let app = Router::new().route(
+        "/api/v1/trip",
+        get(move || {
+            let t = trip.clone();
+            async move {
+                let body = t.read().unwrap().to_string();
+                ([("content-type", "application/json")], body)
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+/// The RE 96 of #78 as MOTIS answers for it: Lindau-Reutin to Buchloe, thirteen stops, the
+/// passenger on from Kißlegg (the fifth) to Memmingen (the tenth). [t0] is the 07:47 departure at
+/// Lindau-Reutin; every other time is minutes after it, as in the timetable. Without realtime
+/// MOTIS repeats the timetable as the live times, and so does this.
+fn motis_re96(t0: chrono::DateTime<Utc>, realtime: bool, kisslegg_track: Option<&str>, memmingen_track: Option<&str>) -> Value {
+    let at = |m: i64| json!(t0 + Duration::minutes(m));
+    let place = |name: &str, arr: Option<i64>, dep: Option<i64>, track: Option<&str>| {
+        let mut p = json!({ "name": name, "stopId": format!("test:{name}"), "lat": 47.79, "lon": 9.88 });
+        if let Some(a) = arr {
+            p["scheduledArrival"] = at(a);
+            p["arrival"] = at(a);
+        }
+        if let Some(d) = dep {
+            p["scheduledDeparture"] = at(d);
+            p["departure"] = at(d);
+        }
+        if let Some(t) = track {
+            p["track"] = json!(t);
+        }
+        p
+    };
+    json!({ "legs": [{
+        "mode": "REGIONAL_RAIL", "tripId": "re96", "routeShortName": "RE96 (78914)", "headsign": "Buchloe",
+        "agencyName": "Arverio Bayern", "realTime": realtime, "cancelled": false,
+        "from": place("Lindau-Reutin", None, Some(0), None),
+        "intermediateStops": [
+            place("Lindau-Insel", Some(5), Some(5), None),
+            place("Hergatz", Some(14), Some(14), None),
+            place("Wangen (Allgäu)", Some(22), Some(22), None),
+            place("Kißlegg", Some(32), Some(41), kisslegg_track),
+            place("Leutkirch", Some(49), Some(49), None),
+            place("Aichstetten", Some(55), Some(55), None),
+            place("Aitrach-Marstetten", Some(60), Some(60), None),
+            place("Tannheim (Württ)", Some(65), Some(65), None),
+            place("Memmingen", Some(73), Some(76), memmingen_track),
+            place("Mindelheim", Some(85), Some(85), None),
+            place("Türkheim", Some(92), Some(92), None),
+        ],
+        "to": place("Buchloe", Some(100), None, None),
+    }]})
+}
+
+/// Check in on the RE 96 from Kißlegg to Memmingen, as the app does.
+async fn check_in_re96(app: &Router, token: &str) -> Value {
+    let body = json!({
+        "from_station_id": "test:Kißlegg", "from_station_name": "Kißlegg",
+        "to_station_id": "test:Memmingen", "to_station_name": "Memmingen",
+        "legs": [{ "trip_id": "re96", "from_station_id": "test:Kißlegg", "to_station_id": "test:Memmingen" }],
+    });
+    let (s, v) = call(app, "POST", "/v1/journeys", Some(token), Some(body)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    v
+}
+
+/// One pass of the trip follower over every riding ride, against the stand-in at [base].
+async fn follow_once(pool: &PgPool, base: &str) {
+    let stations: crate::stations::Shared = Arc::new(std::sync::RwLock::new(Arc::new(crate::stations::Index::default())));
+    let source = TrainSource::new(TransitousClient::with_base(base.to_string()), stations);
+    let (announce, _finalised) = tokio::sync::broadcast::channel(8);
+    crate::train::follower::poll_once(pool, &source, &crate::stations::Index::default(), &announce).await.expect("one follower pass");
+}
+
+/// Where a stop is in `journeys/current`'s stops.
+fn stop_index(stops: &Value, name: &str) -> usize {
+    stops.as_array().unwrap().iter().position(|s| s["name"] == name).unwrap_or_else(|| panic!("{name} is not on the trip"))
+}
+
+/// #78: at 08:45 the train has left seven of its stops, three of them since Kißlegg. Every build
+/// of the app takes the boarding stop's index plus `passed_stops` as the next stop, so the figure
+/// has to count from Kißlegg — and the next stop is before Memmingen, never beyond it.
+#[sqlx::test(migrations = "./migrations")]
+async fn passed_stops_count_from_the_boarding_stop_and_the_next_stop_is_before_the_exit(pool: PgPool) {
+    // „08:45" is now: the train left Lindau-Reutin 58 minutes ago.
+    let t0 = Utc::now() - Duration::minutes(58);
+    let trip = Arc::new(std::sync::RwLock::new(motis_re96(t0, false, Some("3"), Some("51"))));
+    let base = transitous_with_trip(trip.clone()).await;
+    let app = app(pool.clone(), Some(base.clone())).await;
+    let (_, token) = device(&app).await;
+    check_in_re96(&app, &token).await;
+
+    follow_once(&pool, &base).await;
+
+    let (s, v) = call(&app, "GET", "/v1/journeys/current", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let stops = &v["stops"];
+    let (boarding, exit) = (stop_index(stops, "Kißlegg"), stop_index(stops, "Memmingen"));
+    assert_eq!(v["ride"]["passed_stops"], 3, "Kißlegg, Leutkirch, Aichstetten: {}", v["ride"]);
+    let next = boarding + v["ride"]["passed_stops"].as_u64().unwrap() as usize;
+    assert!(next < exit, "the next stop lies before the exit, not at index {next}");
+    assert_eq!(stops[next]["name"], "Aitrach-Marstetten", "the next stop by the timetable at 08:45");
+    assert_eq!(v["ride"]["live_known"], false, "no realtime: the 0 minutes are not „pünktlich“");
+    assert_eq!(v["ride"]["live_delay_min"], 0);
+}
+
+/// An exit stop the trip no longer names is nothing to measure against. The delay is written as 0
+/// as it always was — what a ride is finalised with is not changed here — but the follower now
+/// says so in the log, and the 0 is no longer „pünktlich“.
+#[sqlx::test(migrations = "./migrations")]
+async fn an_exit_not_on_the_trip_writes_0_as_before_and_it_is_not_on_time(pool: PgPool) {
+    let t0 = Utc::now() - Duration::minutes(58);
+    let trip = Arc::new(std::sync::RwLock::new(motis_re96(t0, true, None, None)));
+    let base = transitous_with_trip(trip.clone()).await;
+    let app = app(pool.clone(), Some(base.clone())).await;
+    let (me, token) = device(&app).await;
+    check_in_re96(&app, &token).await;
+    sqlx::query("update rides set live_delay_min = 12, live_known = true, exit_station_id = 'test:Augsburg Hbf', exit_station_name = 'Augsburg Hbf' where customer_id = $1")
+        .bind(me)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    follow_once(&pool, &base).await;
+
+    let (delay, known, passed, status): (i32, Option<bool>, i32, String) =
+        sqlx::query_as("select live_delay_min, live_known, passed_stops, status::text from rides where customer_id = $1").bind(me).fetch_one(&pool).await.unwrap();
+    assert_eq!(delay, 0, "today's value: what counts is not changed here");
+    assert_eq!(known, Some(false), "a 0 nobody measured is not „pünktlich“");
+    assert_eq!(passed, 3, "still counted from Kißlegg");
+    assert_eq!(status, "riding");
+}
