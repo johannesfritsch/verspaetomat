@@ -8,17 +8,21 @@ import 'package:verspaetomat/screens/ride/welcher_zug_screen.dart' show WelcherZ
 import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/state/ride_monitor.dart';
 
-/// #82: at a change the sheet offered exactly one train. „Ich bin im Zug" confirmed that one,
-/// „Leider verpasst" swapped it for another, and the way to pick a train yourself — „Welcher
-/// Zug?" for the journey that is running — was only wired to a Weiterfahrt. These pin the way in
-/// at a missed connection and at an ordinary change, and that it opens the picker for *this*
-/// journey rather than a new check-in.
+/// #82: after a missed connection the sheet offered exactly one train. „Ich bin im Zug"
+/// confirmed that one, „Leider verpasst" swapped it for another, and the way to pick a train
+/// yourself — „Welcher Zug?" for the journey that is running — was only wired to a Weiterfahrt.
+/// These pin the way in after a missed connection, that it opens the picker for *this* journey
+/// rather than a new check-in, and that it is offered only where the journey has a cap: at an
+/// ordinary change a later train of one's own choosing would count in full, and whether it
+/// should is a rule nobody has decided yet (docs/17).
 void main() {
   final now = DateTime.now().toUtc();
   String at(int minutes) => now.add(Duration(minutes: minutes)).toIso8601String();
 
-  /// Memmingen, the RE 96 in, the RE 75 at 09:04 gone; the server proposes the RS 7 to Ulm.
-  ApiJourneyLive atMemmingen({required bool missed}) {
+  /// Memmingen, the RE 96 in. [missed]: the RE 75 at 09:04 is gone and the server proposes the
+  /// RS 7 to Ulm, with the cap from that moment unless [cap] is false. Otherwise the RE 75 is
+  /// still there: an ordinary change.
+  ApiJourneyLive atMemmingen({required bool missed, bool cap = true}) {
     final next = {
       'trip_id': missed ? 'rs7' : 're75-0904',
       'line': missed ? 'RS 7' : 'RE 75',
@@ -33,7 +37,7 @@ void main() {
       'platform': '51',
       'cancelled': false,
       'delay_min': 0,
-      'replanned': missed,
+      'replanned': missed && cap,
       'reason': missed ? 'verpasst' : null,
     };
     return ApiJourneyLive.fromJson({
@@ -59,7 +63,7 @@ void main() {
         'next_leg': next,
         'transfer_station_name': 'Memmingen',
         'transfer_reason': 'umstieg',
-        'earliest_onward_arrival': missed ? at(300) : null,
+        'earliest_onward_arrival': missed && cap ? at(300) : null,
         'created_at': at(-60),
       },
       'next_leg': next,
@@ -76,6 +80,14 @@ void main() {
       child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: RideSheetBody(monitor: monitor)))),
     ));
     return monitor;
+  }
+
+  Future<void> openAbortSheet(WidgetTester tester) async {
+    final end = find.text('Anders beenden …');
+    await tester.ensureVisible(end);
+    await tester.tap(end);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
   }
 
   testWidgets('a missed connection offers another train, and opens the picker for this journey', (tester) async {
@@ -106,34 +118,28 @@ void main() {
     expect(find.text('WEITERFAHRT'), findsNothing);
   });
 
-  testWidgets('an ordinary change offers another train too', (tester) async {
+  testWidgets('an ordinary change keeps its answers: no other train', (tester) async {
     await pump(tester, atMemmingen(missed: false));
 
-    final other = find.byKey(const Key('transfer-other-train'));
-    expect(other, findsOneWidget);
-    expect(find.text('RE 75 verpasst'), findsOneWidget);
-
-    await tester.ensureVisible(other);
-    await tester.tap(other);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 600));
-
-    final list = tester.widget<WelcherZugList>(find.byType(WelcherZugList));
-    expect(list.continueJourneyId, 'j-81');
-    expect(list.earliestOnwardArrival, isNull, reason: 'nothing interrupted this journey');
-    expect(find.text('UMSTEIGEN'), findsOneWidget);
+    expect(find.byKey(const Key('transfer-other-train')), findsNothing);
+    expect(find.text('Anderen Zug wählen'), findsNothing);
+    expect(find.byKey(const Key('transfer-in-train')), findsOneWidget);
+    expect(find.text('Leider verpasst'), findsOneWidget, reason: 'as before at an ordinary change');
+    expect(find.byKey(const Key('transfer-end')), findsOneWidget);
   });
 
-  testWidgets('„Anders beenden" at a change points to another train instead of „Ich fahre weiter"', (tester) async {
+  testWidgets('a missed connection without a cap offers no other train either', (tester) async {
+    // The server found no way on and kept the planned train: nothing caps a later one.
+    await pump(tester, atMemmingen(missed: true, cap: false));
+
+    expect(find.byKey(const Key('transfer-other-train')), findsNothing);
+  });
+
+  testWidgets('„Anders beenden" after a missed connection points to another train instead of „Ich fahre weiter"', (tester) async {
     // „Ich fahre weiter" re-plans a journey on a train; between two the server refuses it, and
     // the sheet said „Das ging nicht".
     await pump(tester, atMemmingen(missed: true));
-
-    final end = find.text('Anders beenden …');
-    await tester.ensureVisible(end);
-    await tester.tap(end);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 600));
+    await openAbortSheet(tester);
 
     expect(find.byKey(const Key('abort-weiterfahrt')), findsNothing);
     expect(find.text('Ich fahre weiter'), findsNothing);
@@ -144,5 +150,15 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
     expect(tester.widget<WelcherZugList>(find.byType(WelcherZugList)).continueJourneyId, 'j-81');
+  });
+
+  testWidgets('„Anders beenden" at an ordinary change offers neither „Ich fahre weiter" nor another train', (tester) async {
+    await pump(tester, atMemmingen(missed: false));
+    await openAbortSheet(tester);
+
+    expect(find.byKey(const Key('abort-weiterfahrt')), findsNothing, reason: 'it could only fail here');
+    expect(find.byKey(const Key('abort-anderer-zug')), findsNothing, reason: 'no cap at an ordinary change');
+    expect(find.byKey(const Key('abort-aufgegeben')), findsOneWidget);
+    expect(find.byKey(const Key('abort-nicht-gefahren')), findsOneWidget);
   });
 }
