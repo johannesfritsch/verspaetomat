@@ -23,7 +23,7 @@ Routes:
 | `GET /v1/journeys/plan?from=<stop id>&to=<stop id>[&time=]` | itineraries from Transitous, rail only, grouped by first leg; each with legs, transfers, planned arrival; a `preferred` flag on the itinerary whose first leg departs next |
 | `POST /v1/journeys` `{from, to, itinerary}` | creates the journey with the snapshot and leg 1 (a ride, `riding`); returns journey + current leg. Accepts the optional one-shot location fix like check-in does |
 | `GET /v1/journeys/current` | the journey with legs, status, the next planned leg while in `transfer`, and live data for the current leg (what `rides/current` gives today) |
-| `POST /v1/journeys/{id}/legs` `{trip_id}` | confirms the next leg (the planned one, or a re-planned alternative after a missed connection); creates the ride |
+| `POST /v1/journeys/{id}/legs` `{trip_id, to_station_id?}` | confirms the next leg (the planned one, a re-planned alternative after a missed connection, or any other train from the transfer stop, #82); creates the ride |
 | `POST /v1/journeys/{id}/finish` | manual end: "Ich bin da" or "Abbrechen"; finalises with what is known |
 | `GET /v1/journeys` | history, replaces `GET /v1/rides` for the app's list (rides stay as the leg detail) |
 
@@ -90,7 +90,7 @@ Rail legs only (walks between platforms are folded into the transfer); `preferre
   "created_at": "…", "finalised_at": null }
 ```
 
-**`POST /v1/journeys/{id}/legs`** body `{ "trip_id": "…" }` (the proposed one, or any trip from the transfer stop); response = `journeys/current`. **`POST /v1/journeys/{id}/finish`** body `{ "arrived": true }` ("Ich bin da": finalises now with the delay at the destination, or at the last stop when in transfer) or `{ "arrived": false }` (abort: `abandoned`, no incident); response = the Journey. **`GET /v1/journeys`** → `[Journey…]`, newest first.
+**`POST /v1/journeys/{id}/legs`** body `{ "trip_id": "…" }` (the proposed one, or any trip from the transfer stop), optionally with `"to_station_id"` and `"to_station_name"`: where the passenger leaves a train other than the proposal (#82); response = `journeys/current`. **`POST /v1/journeys/{id}/finish`** body `{ "arrived": true }` ("Ich bin da": finalises now with the delay at the destination, or at the last stop when in transfer) or `{ "arrived": false }` (abort: `abandoned`, no incident); response = the Journey. **`GET /v1/journeys`** → `[Journey…]`, newest first.
 
 **`GET /v1/me/destinations?from=<stop id>`**:
 
@@ -124,6 +124,10 @@ Ergänzt am 6. Oktober 2026 nach einer Fahrt Lindau → Saarbrücken, deren Ansc
 **Die Obergrenze bleibt, wie sie war.** `earliest_onward_arrival` kommt weiter aus der Zielplanung (docs/21 §2): beim Follower aus der ersten Verbindung der Antwort, bei „Leider verpasst" aus der ersten, die nicht mit dem gerade verpassten Zug beginnt. `least` behält einen früheren Wert.
 
 **„Leider verpasst".** Jeder an diesem Umstieg verpasste Zug bleibt ausgeschlossen, auch der geplante Anschluss, den der Follower als verpasst erkannt hat. Die Liste steht als `missed_trip_ids` im Vorschlag (`next_leg`); ein neuer Umstieg bringt einen neuen Vorschlag und damit eine neue Liste. Ältere Builds lesen das Feld nicht. Gibt es keine neue Möglichkeit, ändert sich nichts, es geht keine Mitteilung hinaus, und die Antwort ist wie bisher 404 „keine weitere Verbindung ab hier". Vorher holte ein zweites Tippen den ersten Zug zurück, und jedes Tippen war eine Mitteilung.
+
+## Ein anderer Zug am Umstieg (#82)
+
+**Im Backend.** `POST /v1/journeys/{id}/legs` nimmt wie bisher jeden Zug ab der Umsteigestation. Ist es nicht der Vorschlag, wird der Rest ab seinem Ausstieg neu geplant, statt die Abschnitte stehen zu lassen, die für den Vorschlag gedacht waren (vorher schlug die App in Ulm nach dem RS 7 den ICE vor, der zum RE 75 um 11:02 gehörte). Das optionale `to_station_id`/`to_station_name` sagt, wo der Fahrgast aussteigt: am Umstieg der Verbindung, die er aus der Liste gewählt hat. Ohne die Angabe fährt der Zug wie bisher bis zum Ziel oder bis zur nächsten geplanten Umsteigestation. Die Obergrenze berührt das nicht.
 
 ## Not in this step
 

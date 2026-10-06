@@ -778,6 +778,12 @@ pub async fn destinations(State(s): State<AppState>, c: Customer, Query(q): Quer
 pub struct ConfirmLeg {
     #[serde(default)]
     pub trip_id: Option<String>,
+    /// Where the passenger gets off this train: the change of the connection they picked from
+    /// the list (#82). Optional, so a build that sends only the trip gets what it always got.
+    #[serde(default)]
+    pub to_station_id: Option<String>,
+    #[serde(default)]
+    pub to_station_name: Option<String>,
 }
 
 /// When a leg's train leaves: live when the feed says, else planned.
@@ -869,9 +875,10 @@ async fn journey_of(pool: &PgPool, customer: Uuid, id: Uuid) -> Result<JourneyRo
     j.ok_or_else(|| err(StatusCode::NOT_FOUND, "no such journey"))
 }
 
-/// Confirms the next leg: the proposal, or any trip from the transfer stop that reaches the destination
-/// or the next planned transfer. Shared by `POST /v1/journeys/{id}/legs` and `stellwerk confirm`.
-pub async fn confirm(s: &AppState, customer: &CustomerRow, j: &JourneyRow, trip_id: Option<&str>) -> Result<JourneyRow, (StatusCode, Json<Value>)> {
+/// Confirms the next leg: the proposal, or any trip from the transfer stop that reaches the stop
+/// the passenger names in [exit], the destination or the next planned transfer. Shared by
+/// `POST /v1/journeys/{id}/legs` and `stellwerk confirm`.
+pub async fn confirm(s: &AppState, customer: &CustomerRow, j: &JourneyRow, trip_id: Option<&str>, exit: Option<(&str, &str)>) -> Result<JourneyRow, (StatusCode, Json<Value>)> {
     if j.status != JourneyStatus::Transfer {
         return Err(err(StatusCode::CONFLICT, "journey is not waiting at a transfer"));
     }
@@ -900,9 +907,12 @@ pub async fn confirm(s: &AppState, customer: &CustomerRow, j: &JourneyRow, trip_
             .or_else(|_| leg_from_trip(&t, &ops, &ix, &from_id, &from_name, &p.to_station_id, &p.to_station_name))
             .map_err(|m| err(StatusCode::BAD_REQUEST, &m))?,
         _ => {
-            // Any train from here: to the destination if it gets there, else to the next planned transfer.
-            let dest = leg_from_trip(&t, &ops, &ix, &from_id, &from_name, &j.destination_station_id, &j.destination_station_name);
-            match dest {
+            // Any train from here: to where the passenger says they get off it (the change of
+            // the connection they picked), else to the destination if it gets there, else to
+            // the next planned transfer.
+            let named = exit.and_then(|(id, name)| leg_from_trip(&t, &ops, &ix, &from_id, &from_name, id, name).ok());
+            let dest = || leg_from_trip(&t, &ops, &ix, &from_id, &from_name, &j.destination_station_id, &j.destination_station_name);
+            match named.map(Ok).unwrap_or_else(dest) {
                 Ok(l) => l,
                 Err(_) => {
                     let next_transfer = legs.get(idx + 1).map(|n| (n.from_station_id.clone(), n.from_station_name.clone()));
@@ -914,16 +924,29 @@ pub async fn confirm(s: &AppState, customer: &CustomerRow, j: &JourneyRow, trip_
             }
         }
     };
+    let taken_instead = proposal.as_ref().is_none_or(|p| p.trip_id != trip_id);
     // The effective plan: this leg replaces the planned one at this position.
     if idx < legs.len() {
         legs[idx] = leg.clone();
     } else {
         legs.push(leg.clone());
     }
-    // A leg that reaches the destination ends the plan there.
-    let reaches_destination = leg.to_station_id == j.destination_station_id || crate::train::station_names_match(&leg.to_station_name, &j.destination_station_name);
-    if reaches_destination {
+    if reaches_destination(&leg, j) {
+        // A leg that reaches the destination ends the plan there.
         legs.truncate(idx + 1);
+    } else if taken_instead {
+        // #82: the legs after this one were laid out for the proposed train. Another train
+        // arrives somewhere else or at another time, so the rest is planned from where it
+        // arrives. What counts is not touched: the cap stays where the interruption put it.
+        let on_at = leg.live_arrival.unwrap_or(leg.planned_arrival) + Duration::minutes(1);
+        match s.train.plan(&ix.upstream_id(&leg.to_station_id), &ix.upstream_id(&j.destination_station_id), on_at, 3).await {
+            Ok(on) if !on.is_empty() => {
+                legs.truncate(idx + 1);
+                legs.extend(on[0].legs.iter().cloned());
+            }
+            Ok(_) => tracing::warn!(journey = %j.id, "confirm: nothing on from {}; the planned legs stay", leg.to_station_name),
+            Err(e) => tracing::warn!(journey = %j.id, error = %e, "confirm: the onward plan failed; the planned legs stay"),
+        }
     }
     let is_last = idx + 1 == legs.len();
     let leg_no = j.current_leg + 1;
@@ -946,7 +969,8 @@ pub async fn confirm(s: &AppState, customer: &CustomerRow, j: &JourneyRow, trip_
 /// `POST /v1/journeys/{id}/legs`
 pub async fn confirm_leg(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>, Json(b): Json<ConfirmLeg>) -> ApiResult {
     let j = journey_of(&s.pool, c.0.id, id).await?;
-    let updated = confirm(&s, &c.0, &j, b.trip_id.as_deref()).await?;
+    let exit = b.to_station_id.as_deref().map(|id| (id, b.to_station_name.as_deref().unwrap_or("")));
+    let updated = confirm(&s, &c.0, &j, b.trip_id.as_deref(), exit).await?;
     Ok(Json(current_payload(&s, &updated, false).await.map_err(internal)?))
 }
 
@@ -1180,7 +1204,7 @@ pub async fn change_train(State(s): State<AppState>, c: Customer, Path(id): Path
             // we want the effect, not the answer.
             let _ = replan(State(s.clone()), Customer(c.0.clone()), Path(id), Json(body)).await?;
             let j = journey_of(&s.pool, c.0.id, id).await?;
-            let updated = confirm(&s, &c.0, &j, Some(&b.trip_id)).await?;
+            let updated = confirm(&s, &c.0, &j, Some(&b.trip_id), None).await?;
             Ok(Json(current_payload(&s, &updated, false).await.map_err(internal)?))
         }
     }
