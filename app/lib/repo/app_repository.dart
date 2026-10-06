@@ -3,6 +3,30 @@ import '../api/models.dart';
 
 export '../api/models.dart';
 
+/// A write that may have started, moved or ended a ride (#80): which call it was.
+class RideWrite {
+  const RideWrite(this.call);
+  final String call;
+}
+
+/// The seam both repositories report ride writes through (#80). The screens call
+/// `session.repo.startJourney` and friends from half a dozen places; hooking the repository
+/// catches every one of them without touching a caller — the same reasoning as `onFlags`.
+///
+/// `Session` sets [onRideWrite]. A failed write reports too: a timeout after the server
+/// committed is still a ride that started, and asking once more costs one lookup.
+mixin RideWriteHook {
+  void Function(RideWrite write)? onRideWrite;
+
+  Future<T> rideWrite<T>(String call, Future<T> Function() write) async {
+    try {
+      return await write();
+    } finally {
+      onRideWrite?.call(RideWrite(call));
+    }
+  }
+}
+
 /// Everything a screen may ask for. Two implementations: the built-in demo
 /// (wrapping DemoState and Mock) and the HTTP backend.
 abstract class AppRepository {

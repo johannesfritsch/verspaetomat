@@ -40,6 +40,8 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
     // hook is what covers `GET /v1/me/geofence` on resume — `GeofenceSync` fetches that one and
     // the session never sees the response.
     _http.onFlags = _flags.setPersonal;
+    _http.onRideWrite = _rideWritten;
+    _mock.onRideWrite = _rideWritten;
     _http.client.awaitDevice = () => _deviceReady.future;
     _http.client.onUnauthorized = () async {
       // Only a token the server has refused is thrown away. With nothing readable to send (a
@@ -176,6 +178,19 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Live events from the backend (local mode). Screens refresh what an event names.
   Stream<AppEvent> get events => _eventsOut.stream;
+
+  final _rideWrites = StreamController<RideWrite>.broadcast();
+
+  /// Every write this app made that can start, move or end a ride — a check-in, a leg
+  /// confirmed, an arrival, an abort, a deletion (#80). The geofence sync configures native
+  /// at once on each: the server's `journey` event would tell it too, but only over a stream
+  /// that dies with the app's suspension, and a check-in is followed by the background within
+  /// seconds.
+  Stream<RideWrite> get rideWrites => _rideWrites.stream;
+
+  void _rideWritten(RideWrite w) {
+    if (!_rideWrites.isClosed) _rideWrites.add(w);
+  }
   bool get eventsConnected => _events?.connected ?? false;
 
   AppRepository get repo => mode == BackendMode.local ? _http : _mock;
@@ -581,6 +596,7 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
     _tick?.cancel();
     _events?.dispose();
     _eventsOut.close();
+    _rideWrites.close();
     demo.removeListener(_onDemoChanged);
     if (_observing) WidgetsBinding.instance.removeObserver(this);
     _flags.removeListener(notifyListeners);
