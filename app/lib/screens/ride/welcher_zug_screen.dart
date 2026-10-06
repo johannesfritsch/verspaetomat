@@ -7,6 +7,7 @@ import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'angekommen_screen.dart' show ArrivalArt;
+import 'earlier_page.dart';
 import 'ride_widgets.dart';
 import '../community/community_widgets.dart' show SwitchRow;
 import '../tickets/tickets.dart';
@@ -77,14 +78,10 @@ class _WelcherZugListState extends State<WelcherZugList> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
-  static DateTime? _dep(ApiItinerary it) => it.first.liveDeparture ?? it.plannedDeparture;
-  static DateTime? _arr(ApiItinerary it) => it.liveArrival ?? it.plannedArrival;
-  static String _key(ApiItinerary it) => it.legs.map((l) => '${l.tripId}@${l.plannedDeparture?.toIso8601String()}').join('|');
-
   /// One list, in the order a board has them (issue #9): the train that left twelve minutes ago
   /// stands above the next one, because that is where it belongs in time.
   static List<ApiItinerary> _sorted(Iterable<ApiItinerary> its) => [...its]..sort((a, b) {
-      final da = _dep(a), db = _dep(b);
+      final da = departureOf(a), db = departureOf(b);
       if (da == null || db == null) return 0;
       return da.compareTo(db);
     });
@@ -105,35 +102,27 @@ class _WelcherZugListState extends State<WelcherZugList> {
     }
   }
 
-  /// One page back: an hour before the earliest train on the list, or before the last page if
-  /// that one brought nothing new. A train that has already arrived is left out — nobody is
-  /// sitting in it — and when a page brings only those, there is nothing further back to show.
+  /// One tap on „Früher" (#84): two hours further back per page, until a page brings a train that
+  /// is still under way or shows there is none. earlier_page.dart decides; this only shows it.
   Future<void> _earlier() async {
     final repo = RepoScope.read(context).repo;
-    final shown = _itineraries.map(_dep).whereType<DateTime>();
-    var from = shown.isEmpty ? DateTime.now() : shown.reduce((a, b) => a.isBefore(b) ? a : b);
-    if (_cursor != null && _cursor!.isBefore(from)) from = _cursor!;
-    from = from.subtract(const Duration(hours: 1));
     setState(() => _loadingEarlier = true);
     try {
-      final plan = await repo.planJourney(from: widget.fromStationId, to: widget.toStationId, time: from);
+      final page = await pageBack(
+        shown: _itineraries,
+        lastStart: _cursor,
+        now: DateTime.now(),
+        fetch: (start) async => (await repo.planJourney(from: widget.fromStationId, to: widget.toStationId, time: start)).itineraries,
+      );
       if (!mounted) return;
-      final known = {for (final it in _itineraries) _key(it)};
-      final now = DateTime.now();
-      final fresh = plan.itineraries.where((it) {
-        final a = _arr(it);
-        return !known.contains(_key(it)) && (a == null || a.isAfter(now));
-      }).toList();
+      final fresh = page.fresh;
       setState(() {
-        _cursor = from;
-        if (fresh.isEmpty) {
-          _noEarlier = true;
-        } else {
-          _earlierKeys.addAll(fresh.map(_key));
-          _itineraries = _sorted([..._itineraries, ...fresh]);
-        }
+        _cursor = page.start;
+        if (page.end) _noEarlier = true;
+        _earlierKeys.addAll(fresh.map(connectionKey));
+        _itineraries = _sorted([..._itineraries, ...fresh]);
       });
-      if (fresh.isEmpty) {
+      if (page.end) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Davor fährt keine Verbindung mehr, die noch unterwegs ist.')));
       }
     } catch (e) {
@@ -195,15 +184,15 @@ class _WelcherZugListState extends State<WelcherZugList> {
 
   bool _hasLeft(ApiItinerary it) {
     // The leg's own live departure when there is one: a train ten minutes late has not left yet.
-    final d = _dep(it);
+    final d = departureOf(it);
     if (d == null || !d.isBefore(_now)) return false;
-    return _earlierKeys.contains(_key(it)) || _now.difference(d) <= _justLeft;
+    return _earlierKeys.contains(connectionKey(it)) || _now.difference(d) <= _justLeft;
   }
 
   /// True when this itinerary arrives after the earliest onward connection (docs/21 §2).
   bool _later(ApiItinerary it) {
     final e = widget.earliestOnwardArrival;
-    final a = _arr(it);
+    final a = arrivalOf(it);
     return e != null && a != null && a.isAfter(e);
   }
 
@@ -267,7 +256,7 @@ class _WelcherZugListState extends State<WelcherZugList> {
 
   @override
   Widget build(BuildContext context) {
-    final firstDep = _itineraries.map(_dep).whereType<DateTime>().firstOrNull;
+    final firstDep = _itineraries.map(departureOf).whereType<DateTime>().firstOrNull;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
