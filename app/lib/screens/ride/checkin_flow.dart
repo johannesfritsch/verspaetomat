@@ -598,9 +598,9 @@ class _WohinSheetState extends State<_WohinSheet> {
 
 /// The itineraries as a sheet rather than a screen, so a wrong choice above is one swipe away
 /// instead of a back-navigation (docs/24 §1).
-/// [continueJourneyId] makes this the Weiterfahrt (docs/21 §2) instead of a check-in: the
-/// journey is already running and this confirms its next leg, with the delay ceiling from the
-/// interruption still in force.
+/// [continueJourneyId] makes this the next leg of a journey already running instead of a
+/// check-in: a Weiterfahrt (docs/21 §2) or another train at a change (#82), with the delay
+/// ceiling from an interruption still in force. [eyebrow] names which; a Weiterfahrt when unsaid.
 Future<StepResult<void>?> showWelcherZugSheet(
   BuildContext context, {
   required ApiStation from,
@@ -608,6 +608,7 @@ Future<StepResult<void>?> showWelcherZugSheet(
   String? continueJourneyId,
   DateTime? earliestOnwardArrival,
   int? countedMinutes,
+  String? eyebrow,
 }) {
   return showVSheet<StepResult<void>>(
     context,
@@ -618,6 +619,7 @@ Future<StepResult<void>?> showWelcherZugSheet(
       continueJourneyId: continueJourneyId,
       earliestOnwardArrival: earliestOnwardArrival,
       countedMinutes: countedMinutes,
+      eyebrow: eyebrow,
     ),
   );
 }
@@ -629,12 +631,14 @@ class _WelcherZugSheet extends StatelessWidget {
     this.continueJourneyId,
     this.earliestOnwardArrival,
     this.countedMinutes,
+    this.eyebrow,
   });
   final ApiStation from;
   final ApiStation to;
   final String? continueJourneyId;
   final DateTime? earliestOnwardArrival;
   final int? countedMinutes;
+  final String? eyebrow;
 
   @override
   Widget build(BuildContext context) {
@@ -645,7 +649,7 @@ class _WelcherZugSheet extends StatelessWidget {
         _SheetTop(
           art: VSheetSceneArt.clock,
           child: VSheetHeader(
-            eyebrow: continueJourneyId == null ? 'Check-in · Schritt 3 von 3' : 'Weiterfahrt',
+            eyebrow: continueJourneyId == null ? 'Check-in · Schritt 3 von 3' : (eyebrow ?? 'Weiterfahrt'),
             title: 'Welcher Zug?',
             subtitle: '${from.name} → ${to.name}',
             narrow: true,

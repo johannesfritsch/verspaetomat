@@ -248,7 +248,8 @@ class HttpRepository implements AppRepository {
   @override
   Future<ApiJourneyLive?> currentJourney() => client.currentJourney();
   @override
-  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) => client.confirmLeg(journeyId, tripId);
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId, {String? toStationId, String? toStationName}) =>
+      client.confirmLeg(journeyId, tripId, toStationId: toStationId, toStationName: toStationName);
   @override
   Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) => client.finishJourney(journeyId, arrived: arrived, reason: reason);
   @override

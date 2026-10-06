@@ -376,7 +376,7 @@ class MockRepository implements AppRepository {
   }
 
   @override
-  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) async {
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId, {String? toStationId, String? toStationName}) async {
     final d = _findDeparture(tripId);
     if (d == null) throw StateError('unknown trip $tripId');
     state.confirmLeg(d);

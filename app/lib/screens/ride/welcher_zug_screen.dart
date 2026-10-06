@@ -160,7 +160,9 @@ class _WelcherZugListState extends State<WelcherZugList> {
       HapticFeedback.mediumImpact();
       final continuing = widget.continueJourneyId;
       if (continuing != null) {
-        await session.repo.confirmLeg(continuing, it.legs.first.tripId);
+        // Where this connection changes trains, so the server takes the first train there (#82).
+        final first = it.legs.first;
+        await session.repo.confirmLeg(continuing, first.tripId, toStationId: first.toStationId, toStationName: first.toStationName);
         if (mounted) widget.onStarted();
         return;
       }
@@ -180,7 +182,9 @@ class _WelcherZugListState extends State<WelcherZugList> {
     } catch (e) {
       if (mounted) setState(() => _sending = false);
       if (rethrowErrors) rethrow;
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Check-in nicht möglich: ${shortError(e)}')));
+      // A journey under way is not checked in again: the train simply was not taken.
+      final what = widget.continueJourneyId == null ? 'Check-in nicht möglich' : 'Das ging nicht';
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$what: ${shortError(e)}')));
     }
   }
 
@@ -314,7 +318,13 @@ class _WelcherZugListState extends State<WelcherZugList> {
                   if (!_loading && _error == null && _itineraries.isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: VSpace.l),
-                      child: Text('Gerade keine Verbindung in Sicht. Versuch es gleich noch mal oder nimm ein anderes Ziel.', style: VText.bodyS.copyWith(color: VColors.ink2)),
+                      // A journey under way keeps its destination; there is no other one to pick here.
+                      child: Text(
+                        widget.continueJourneyId == null
+                            ? 'Gerade keine Verbindung in Sicht. Versuch es gleich noch mal oder nimm ein anderes Ziel.'
+                            : 'Gerade keine Verbindung in Sicht. Versuch es gleich noch mal.',
+                        style: VText.bodyS.copyWith(color: VColors.ink2),
+                      ),
                     ),
                   if (widget.continueJourneyId != null && _itineraries.isNotEmpty) ...[
                     Text('Deine Fahrt läuft weiter. Die Verspätung zählt am Ziel.', style: VText.bodyS),
