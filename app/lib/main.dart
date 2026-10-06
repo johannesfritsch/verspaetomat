@@ -77,9 +77,16 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
       // #80, #87: a nudge from before the check-in can still be tapped during the journey. Ask
       // fresh rather than trust a monitor that may not have loaded yet on a cold start.
       final monitor = RideScope.read(shell);
-      await monitor?.refresh(quiet: true);
+      if (monitor != null) {
+        await monitor.refresh(quiet: true);
+        running = monitor.active;
+      } else {
+        // No monitor mounted yet: ask the server the way the geofence sync does.
+        try {
+          running = await GeofenceSync.ridingNow(widget.session.repo);
+        } catch (_) {}
+      }
       if (!shell.mounted) return;
-      running = monitor?.active ?? false;
     }
     switch (n.target(journeyRunning: running)) {
       case NudgeTarget.snooze:

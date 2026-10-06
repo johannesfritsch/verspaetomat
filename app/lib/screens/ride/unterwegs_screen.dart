@@ -831,8 +831,7 @@ class _Action extends StatelessWidget {
 /// Between two legs. With a connection to take (#57): the train on a card — line, destination,
 /// how soon, both ends, the track — and the answers there are, each with what it does: on it,
 /// another train (#82, only where [offersAnotherTrain]), missed it, or end here. A Weiterfahrt
-/// still waiting for a train, and a
-/// transfer with no connection at all, keep the plain view below.
+/// still waiting for a train, and a transfer with no connection at all, keep the plain view below.
 ///
 /// „… verpasst" stays offered before the train's time: the time on the card is the one the
 /// proposal was made with, and nothing refreshes it, so hiding the answer by it would be a guess.
