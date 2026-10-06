@@ -141,7 +141,12 @@ impl TrainSource {
 
     /// Itineraries with the Stellwerk's per-trip delays and cancellations applied to their legs.
     pub async fn plan(&self, from: &str, to: &str, time: DateTime<Utc>, n: usize) -> Result<Vec<Itinerary>> {
-        let mut its = self.inner.plan(from, to, time, n).await?;
+        self.plan_within(from, to, time, n, None).await
+    }
+
+    /// The same, with a search window: every itinerary leaving within it, and at least `n` (#84).
+    pub async fn plan_within(&self, from: &str, to: &str, time: DateTime<Utc>, n: usize, window: Option<std::time::Duration>) -> Result<Vec<Itinerary>> {
+        let mut its = self.inner.plan_within(from, to, time, n, window).await?;
         {
             let ix = crate::stations::snapshot(&self.stations);
             for l in its.iter_mut().flat_map(|it| it.legs.iter_mut()) {

@@ -390,7 +390,11 @@ async fn transitous_with_plan(body: Value) -> String {
 
 /// One MOTIS itinerary with one rail leg Hagen → Lüdenscheid on [trip], leaving in [in_min].
 fn motis_itinerary(trip: &str, line: &str, in_min: i64) -> Value {
-    let dep = Utc::now() + Duration::minutes(in_min);
+    motis_itinerary_at(trip, line, Utc::now() + Duration::minutes(in_min))
+}
+
+/// The same, leaving at [dep].
+fn motis_itinerary_at(trip: &str, line: &str, dep: chrono::DateTime<Utc>) -> Value {
     let arr = dep + Duration::minutes(43);
     json!({"id": trip, "transfers": 0, "legs": [{
         "mode": "REGIONAL_RAIL", "tripId": trip, "routeShortName": line, "headsign": "Lüdenscheid", "agencyName": "DB Regio AG",
@@ -452,6 +456,128 @@ async fn missed_is_only_for_a_journey_at_a_change_and_only_for_its_owner(pool: P
     sqlx::query("update journeys set status = 'riding' where id = $1").bind(journey).execute(&pool).await.unwrap();
     let (s, _) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
     assert_eq!(s, StatusCode::CONFLICT, "riding is not a change");
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/journeys/plan?time=… — „Früher" (#84)
+// ---------------------------------------------------------------------------
+
+/// A stand-in for Transitous' planner that answers the way the real one does (checked against
+/// api.transitous.org on 6 October 2026): from `time` on, the first `numItineraries` trains, and
+/// with a `searchWindow` every train that leaves inside it as well. It keeps every question it was
+/// asked, so a test can see what the backend sent.
+struct Planner {
+    base: String,
+    asked: Arc<std::sync::Mutex<Vec<std::collections::HashMap<String, String>>>>,
+}
+
+impl Planner {
+    async fn start(trains: Vec<(&str, chrono::DateTime<Utc>)>) -> Planner {
+        let trains: Arc<Vec<(String, chrono::DateTime<Utc>)>> = Arc::new(trains.into_iter().map(|(t, d)| (t.to_string(), d)).collect());
+        let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = asked.clone();
+        let app = Router::new().route(
+            "/api/v1/plan",
+            get(move |axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>| {
+                let trains = trains.clone();
+                log.lock().unwrap().push(q.clone());
+                async move {
+                    let time: chrono::DateTime<Utc> = q["time"].parse().expect("an RFC 3339 time");
+                    let n: usize = q.get("numItineraries").map(|v| v.parse().unwrap()).unwrap_or(5);
+                    let window = q.get("searchWindow").map(|v| Duration::seconds(v.parse().unwrap()));
+                    let mut from_then: Vec<&(String, chrono::DateTime<Utc>)> = trains.iter().filter(|(_, d)| *d >= time).collect();
+                    from_then.sort_by_key(|(_, d)| *d);
+                    let its: Vec<Value> = from_then
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, (_, d))| *i < n || window.is_some_and(|w| *d <= time + w))
+                        .map(|(_, (trip, d))| motis_itinerary_at(trip, "S 3", *d))
+                        .collect();
+                    ([("content-type", "application/json")], json!({ "itineraries": its }).to_string())
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        Planner { base: format!("http://{addr}"), asked }
+    }
+
+    /// The last question the planner was asked.
+    fn last(&self) -> std::collections::HashMap<String, String> {
+        self.asked.lock().unwrap().last().cloned().expect("the planner was asked")
+    }
+}
+
+fn trip_ids(plan: &Value) -> Vec<String> {
+    plan["itineraries"].as_array().unwrap().iter().map(|it| it["legs"][0]["trip_id"].as_str().unwrap().to_string()).collect()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn an_earlier_page_holds_every_train_of_its_window(pool: PgPool) {
+    // Bruchsal → Mannheim, „Früher" from 10:10 (#84): six trains in that hour. Asked for only the
+    // first four, the page ended at 10:41, and the train at 10:59 — still under way at 11:35 —
+    // never came into the list.
+    let at = |hhmm: &str| format!("2026-10-02T{hhmm}:00Z").parse::<chrono::DateTime<Utc>>().unwrap();
+    let planner = Planner::start(vec![
+        ("s3-1010", at("08:10")),
+        ("s31-1010", at("08:10")),
+        ("re73-1032", at("08:32")),
+        ("s3-1041", at("08:41")),
+        ("ice798-1059", at("08:59")),
+        ("s3-1110", at("09:10")),
+    ])
+    .await;
+    let app = app(pool.clone(), Some(planner.base.clone())).await;
+    let (_, token) = device(&app).await;
+
+    let (s, v) = call(&app, "GET", "/v1/journeys/plan?from=vs:1&to=vs:2&time=2026-10-02T08:10:00Z", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(trip_ids(&v), ["s3-1010", "s31-1010", "re73-1032", "s3-1041", "ice798-1059", "s3-1110"], "every train of the page's two hours");
+    assert_eq!(planner.last().get("searchWindow").map(String::as_str), Some("7200"));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_full_page_keeps_the_trains_nearest_the_list(pool: PgPool) {
+    // More trains in two hours than a page carries: the earliest go, not the ones just before the
+    // list, which may still be under way.
+    let start = "2026-10-02T06:00:00Z".parse::<chrono::DateTime<Utc>>().unwrap();
+    let names: Vec<String> = (0..70).map(|i| format!("s-{i:02}")).collect();
+    let planner = Planner::start(names.iter().enumerate().map(|(i, t)| (t.as_str(), start + Duration::minutes(i as i64))).collect()).await;
+    let app = app(pool.clone(), Some(planner.base.clone())).await;
+    let (_, token) = device(&app).await;
+
+    let (s, v) = call(&app, "GET", "/v1/journeys/plan?from=vs:1&to=vs:2&time=2026-10-02T06:00:00Z", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let trips = trip_ids(&v);
+    assert_eq!(trips.len(), crate::journeys::PLAN_PAGE_MAX);
+    assert_eq!((trips.first().map(String::as_str), trips.last().map(String::as_str)), (Some("s-10"), Some("s-69")));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn only_an_earlier_page_asks_for_a_window(pool: PgPool) {
+    // The first page and a missed connection ask what they always asked: the next few trains.
+    // The window belongs to „Früher" alone (#84).
+    let now = Utc::now();
+    let planner = Planner::start(vec![("rb52", now - Duration::minutes(5)), ("rb52-next", now + Duration::minutes(55))]).await;
+    let app = app(pool.clone(), Some(planner.base.clone())).await;
+    let (me, token) = device(&app).await;
+
+    let (s, _) = call(&app, "GET", "/v1/journeys/plan?from=vs:1&to=vs:3&lookback=30", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK);
+    let q = planner.last();
+    assert_eq!((q.get("numItineraries").map(String::as_str), q.get("searchWindow")), (Some("7"), None), "the first page, with the last half hour");
+
+    let (s, _) = call(&app, "GET", "/v1/journeys/plan?from=vs:1&to=vs:3", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK);
+    let q = planner.last();
+    assert_eq!((q.get("numItineraries").map(String::as_str), q.get("searchWindow")), (Some("4"), None), "the first page of an older build");
+
+    let (journey, _) = journey_at_transfer(&pool, me).await;
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let q = planner.last();
+    assert_eq!((q.get("numItineraries").map(String::as_str), q.get("searchWindow")), (Some("3"), None), "a missed connection");
 }
 
 // ---------------------------------------------------------------------------
