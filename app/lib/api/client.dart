@@ -291,8 +291,12 @@ class ApiClient {
     }
   }
 
-  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) async =>
-      ApiJourneyLive.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/legs', {'trip_id': tripId})));
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId, {String? toStationId, String? toStationName}) async =>
+      ApiJourneyLive.fromJson(_map(await _post('/v1/journeys/${Uri.encodeComponent(journeyId)}/legs', {
+        'trip_id': tripId,
+        if (toStationId != null) 'to_station_id': toStationId,
+        if (toStationName != null) 'to_station_name': toStationName,
+      })));
 
   /// "Ich bin da" (arrived) or the abort with its reason (docs/21 §1).
   Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) async => ApiJourney.fromJson(

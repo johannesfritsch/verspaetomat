@@ -1269,7 +1269,7 @@ pub async fn confirm(State(s): State<AppState>, _a: Admin, _sim: Simulation, Pat
     let j: Option<JourneyRow> = sqlx::query_as("select * from journeys where customer_id = $1 and status = 'transfer' order by created_at desc limit 1").bind(c.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let Some(j) = j else { return Err(err(StatusCode::CONFLICT, "customer is not waiting at a transfer")) };
     let trip_id = body.and_then(|b| b.0.trip_id);
-    let updated = crate::journeys::confirm(&s, &c, &j, trip_id.as_deref()).await?;
+    let updated = crate::journeys::confirm(&s, &c, &j, trip_id.as_deref(), None).await?;
     let mut v = crate::journeys::current_payload(&s, &updated, false).await.map_err(internal)?;
     v["customer"] = json!(c.nickname);
     Ok(Json(v))

@@ -92,7 +92,10 @@ abstract class AppRepository {
   Future<ApiJourneyLive> startJourney(StartJourneyRequest request);
   /// The current journey (riding, in transfer, or arrived in the last two hours), else null.
   Future<ApiJourneyLive?> currentJourney();
-  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId);
+  /// The next leg: the proposed train, or another one. [toStationId] says where the passenger
+  /// gets off it — the change of the connection picked from the list (#82); without it the
+  /// server takes the train to the destination or to the plan's next change.
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId, {String? toStationId, String? toStationName});
   /// "Ich bin da" (arrived: true) or the abort with its reason (docs/21 §1).
   Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason});
   /// "Ich fahre später weiter": the leg ends here, the journey waits for the next train (docs/21 §2).

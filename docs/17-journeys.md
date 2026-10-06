@@ -9,7 +9,7 @@ Two choices made: **destination first** at check-in (predicted, one tap for comm
 - **Journey**: customer, origin station, destination station, the planned itinerary as a snapshot from Transitous at check-in (legs with trip ids, planned departure and arrival per leg, transfer stops), planned arrival at the destination, status `riding | transfer | arrived | abandoned`, actual arrival at the destination, final delay, `missed_connection`, `incomplete` (finalised without reaching the destination in the app), points.
 - **Leg** = today's `rides` row, plus `journey_id`, `leg_no`, `planned_departure`, `transfer_station_id/name` (where this leg hands over, null on the last leg). The follower works per leg exactly as today.
 - **Delay that counts** = actual arrival of the last leg at the destination − planned arrival at the destination from the snapshot. Points = that delay (cancellation of any leg = at least 60). An incident is created from the journey, not the leg; incidents get `journey_id`; the leg-based path stays only as the `incomplete` fallback (delay at the last confirmed stop against the snapshot's planned arrival there).
-- **Missed connection** = the actual arrival at a transfer stop is later than the planned departure of the next leg (or that leg was cancelled). The next leg is then re-planned from the transfer stop at the actual arrival time.
+- **Missed connection** = the actual arrival at a transfer stop is later than the planned departure of the next leg (or that leg was cancelled). The next leg is then re-planned from the transfer stop at the actual arrival time — toward the plan's next change, not the destination (#81, see „Verpasster Anschluss" below).
 
 ## Backend
 
@@ -23,7 +23,7 @@ Routes:
 | `GET /v1/journeys/plan?from=<stop id>&to=<stop id>[&time=]` | itineraries from Transitous, rail only, grouped by first leg; each with legs, transfers, planned arrival; a `preferred` flag on the itinerary whose first leg departs next |
 | `POST /v1/journeys` `{from, to, itinerary}` | creates the journey with the snapshot and leg 1 (a ride, `riding`); returns journey + current leg. Accepts the optional one-shot location fix like check-in does |
 | `GET /v1/journeys/current` | the journey with legs, status, the next planned leg while in `transfer`, and live data for the current leg (what `rides/current` gives today) |
-| `POST /v1/journeys/{id}/legs` `{trip_id}` | confirms the next leg (the planned one, or a re-planned alternative after a missed connection); creates the ride |
+| `POST /v1/journeys/{id}/legs` `{trip_id, to_station_id?}` | confirms the next leg (the planned one, a re-planned alternative after a missed connection, or any other train from the transfer stop, #82); creates the ride |
 | `POST /v1/journeys/{id}/finish` | manual end: "Ich bin da" or "Abbrechen"; finalises with what is known |
 | `GET /v1/journeys` | history, replaces `GET /v1/rides` for the app's list (rides stay as the leg detail) |
 
@@ -50,9 +50,9 @@ Field names are snake_case like the rest of the API. Times are UTC ISO strings.
   "live_departure": null, "live_arrival": null, "platform": "7", "cancelled": false, "delay_min": 0 }
 ```
 
-In `journey.legs` a leg also carries `leg_no`, `ride_id` (null until confirmed), `status` (`planned | riding | arrived | cancelled | skipped`), `actual_arrival`, `final_delay_min`.
+In `journey.legs` a leg also carries `leg_no`, `ride_id` (null until confirmed), `status` (`planned | riding | arrived | cancelled | skipped`), `actual_arrival`, `final_delay_min`. In `journey.next_leg` it carries `replanned` (true after a missed connection), `reason` (`"verpasst"`, `"ausfall"` or null) and, once a train was missed at this change, `missed_trip_ids` (#81).
 
-Gleise (seit #79): `platform` ist das Abfahrtsgleis am Einstieg, `arrival_platform` (seit #56) das Ankunftsgleis am Ausstieg. Beim Einchecken kommen beide aus dem Trip; für den Abschnitt, der gerade gefahren wird, schreibt der Follower bei jedem Abruf das aktuelle Gleis aus dem Live-Trip in `journeys.plan` zurück, sobald es sich ändert. Nennt der Feed kein Gleis mehr, bleibt das alte stehen. `journeys/current` schickt außerdem in `stops[].track` das Gleis je Halt, live, wo der Feed es hat; die App nimmt dieses zuerst und den Wert am Abschnitt nur, wenn der Halt keins nennt. Die Abschnitte danach zeigen, solange sie noch kommen, das Gleis aus der Planung. In `journey.next_leg` it carries `replanned` (true after a missed connection) and `reason` (`"verpasst"`, `"ausfall"` or null).
+Gleise (seit #79): `platform` ist das Abfahrtsgleis am Einstieg, `arrival_platform` (seit #56) das Ankunftsgleis am Ausstieg. Beim Einchecken kommen beide aus dem Trip; für den Abschnitt, der gerade gefahren wird, schreibt der Follower bei jedem Abruf das aktuelle Gleis aus dem Live-Trip in `journeys.plan` zurück, sobald es sich ändert. Nennt der Feed kein Gleis mehr, bleibt das alte stehen. `journeys/current` schickt außerdem in `stops[].track` das Gleis je Halt, live, wo der Feed es hat; die App nimmt dieses zuerst und den Wert am Abschnitt nur, wenn der Halt keins nennt. Die Abschnitte danach zeigen, solange sie noch kommen, das Gleis aus der Planung.
 
 **`GET /v1/journeys/plan?from=<stop id>&to=<stop id>[&time=<iso>][&first_trip=<trip id>]`**:
 
@@ -92,7 +92,7 @@ Rail legs only (walks between platforms are folded into the transfer); `preferre
   "created_at": "…", "finalised_at": null }
 ```
 
-**`POST /v1/journeys/{id}/legs`** body `{ "trip_id": "…" }` (the proposed one, or any trip from the transfer stop); response = `journeys/current`. **`POST /v1/journeys/{id}/finish`** body `{ "arrived": true }` ("Ich bin da": finalises now with the delay at the destination, or at the last stop when in transfer) or `{ "arrived": false }` (abort: `abandoned`, no incident); response = the Journey. **`GET /v1/journeys`** → `[Journey…]`, newest first.
+**`POST /v1/journeys/{id}/legs`** body `{ "trip_id": "…" }` (the proposed one, or any trip from the transfer stop), optionally with `"to_station_id"` and `"to_station_name"`: where the passenger leaves a train other than the proposal (#82); response = `journeys/current`. **`POST /v1/journeys/{id}/finish`** body `{ "arrived": true }` ("Ich bin da": finalises now with the delay at the destination, or at the last stop when in transfer) or `{ "arrived": false }` (abort: `abandoned`, no incident); response = the Journey. **`GET /v1/journeys`** → `[Journey…]`, newest first.
 
 **`GET /v1/me/destinations?from=<stop id>`**:
 
@@ -110,12 +110,32 @@ Rail legs only (walks between platforms are folded into the transfer); `preferre
 
 - **At a station** (Bahnsteig card): the predicted destinations as one-tap buttons on top ("Nach Hause · Bonn Hbf", "Düsseldorf Hbf", "Anderes Ziel …"), the next departures below as the other way in. Tapping a destination opens **Welcher Zug?**: the itineraries from `plan`, each as a departure row plus a transfer chip ("1× umsteigen in Hagen", "direkt"), the preferred one first; one tap creates the journey. Tapping a departure row instead opens **Wohin?** with the same predictions, then plans with that train as leg 1 (itineraries filtered to that first trip).
 - **Wohin?** replaces "Wo steigst du aus?": predictions, recent destinations, station search. The exit stop is derived from the itinerary, never asked.
-- **Unterwegs** shows the journey: current leg with live delay, the transfer ahead with the planned connection and its live status, then the destination with the planned arrival. In `transfer`: the confirmation card "RE 5 nach Kleve 10:41 · Gleis 3 · Ich bin drin" with the alternative when the connection was missed ("Anschluss verpasst · nächste Möglichkeit RE 5 11:41").
+- **Unterwegs** shows the journey: current leg with live delay, the transfer ahead with the planned connection and its live status, then the destination with the planned arrival. In `transfer`: the confirmation card "RE 5 nach Kleve 10:41 · Gleis 3 · Ich bin drin" with the alternative when the connection was missed ("Anschluss verpasst · nächste Möglichkeit RE 5 11:41"), and, after a missed connection, „Anderen Zug wählen" for any other train (#82, below).
 - **Angekommen** shows the journey delay at the destination, and "Anschluss verpasst in Hagen" when it applies.
 - **Konto / PDF** use journey fields. **Alle Fahrten** lists journeys with their legs collapsed.
 - The transfer confirmation also arrives as a push; tapping it opens Unterwegs on the confirmation card. (A geofence-based nudge at the transfer station is a later step; the push at the planned arrival is enough now.)
 - Demo mode: the mock gets two predicted destinations, one direct and one connecting itinerary, a transfer state.
 - The workflow E2E is rewritten around the new flow: check in via a predicted destination on a direct itinerary; Stellwerk `ff`; the rest unchanged. A second scenario with a connection: `ff` leg 1 → transfer state visible → `stellwerk confirm` → `ff` leg 2 → arrival with the journey delay.
+
+## Verpasster Anschluss: der nächste Zug (#81)
+
+Ergänzt am 6. Oktober 2026 nach einer Fahrt Lindau → Saarbrücken, deren Anschluss in Memmingen verpasst wurde.
+
+**Der Vorschlag.** Nach einem verpassten Anschluss – vom Follower erkannt oder mit „Leider verpasst" gemeldet – ist der Vorschlag der früheste Zug, der weiterbringt. Geplant wird bis zur nächsten Umsteigestation des Plans, also dorthin, wohin der verpasste Zug fahren sollte (ist das das Ziel, bis zum Ziel). Genommen wird der früheste Zug der Antwort, der laut Echtzeit noch nicht abgefahren ist, nicht ausfällt und an diesem Umstieg nicht schon verpasst wurde. Der Rest wird ab seiner Ankunft bis zum Ziel geplant. Bis zum Ziel gefragt, antwortet MOTIS nur mit Verbindungen, die keine andere schlägt: Ein früherer Zug, der denselben Anschlusszug erreicht wie ein späterer, fällt heraus. In Memmingen fehlte so der RS 7 um 09:32 nach Ulm, weil der RE 75 um 10:04 denselben ICE erreicht. Bis Ulm gefragt, sind alle Züge da. Scheitert eine der beiden Anfragen, entscheidet wie bisher die Zielplanung, mit denselben Ausschlüssen.
+
+**Die Obergrenze bleibt, wie sie war.** `earliest_onward_arrival` kommt weiter aus der Zielplanung (docs/21 §2): beim Follower aus der ersten Verbindung der Antwort, bei „Leider verpasst" aus der ersten, die nicht mit dem gerade verpassten Zug beginnt. `least` behält einen früheren Wert. Hat die Zielplanung keine solche Verbindung, die Planung zur Umsteigestation aber einen Zug, kommt die Obergrenze aus der Ankunft des vorgeschlagenen Wegs (der Vorschlag und die dazu geplanten Abschnitte bis zum Ziel). So gibt es nach einem verpassten Anschluss keinen Vorschlag ohne Obergrenze; vorher blieb sie in diesem Fall leer, und alles zählte. **Das ist eine neue Festlegung und muss von Johannes bestätigt werden.**
+
+**„Leider verpasst".** Jeder an diesem Umstieg verpasste Zug bleibt ausgeschlossen, auch der geplante Anschluss, den der Follower als verpasst erkannt hat. Die Liste steht als `missed_trip_ids` im Vorschlag (`next_leg`); ein neuer Umstieg bringt einen neuen Vorschlag und damit eine neue Liste. Ältere Builds lesen das Feld nicht. Gibt es keine neue Möglichkeit, ändert sich nichts, es geht keine Mitteilung hinaus, und die Antwort ist wie bisher 404 „keine weitere Verbindung ab hier". Vorher holte ein zweites Tippen den ersten Zug zurück, und jedes Tippen war eine Mitteilung.
+
+## Ein anderer Zug am Umstieg (#82)
+
+**Im Backend.** `POST /v1/journeys/{id}/legs` nimmt wie bisher jeden Zug ab der Umsteigestation. Ist es nicht der Vorschlag, wird der Rest ab seinem Ausstieg neu geplant, statt die Abschnitte stehen zu lassen, die für den Vorschlag gedacht waren (vorher schlug die App in Ulm nach dem RS 7 den ICE vor, der zum RE 75 um 11:02 gehörte). Das optionale `to_station_id`/`to_station_name` sagt, wo der Fahrgast aussteigt: am Umstieg der Verbindung, die er aus der Liste gewählt hat. Ohne die Angabe fährt der Zug wie bisher bis zum Ziel oder bis zur nächsten geplanten Umsteigestation. Die Obergrenze berührt das nicht.
+
+**In der App.** Nach einem verpassten Anschluss, den der Server neu geplant hat und für den es damit eine Obergrenze gibt, bietet die Umstiegsansicht unter der Karte „Anderen Zug wählen". Das öffnet „Welcher Zug?" für diese Fahrt, ab der Umsteigestation zum selben Ziel, mit der Kopfzeile „Anschluss verpasst". Die App schickt mit, wo die gewählte Verbindung umsteigt. Was die Liste bei einem späteren Zug sagt („Deine Pause zählt nicht mit — es bleiben … Minuten"), stimmt dort, weil die Obergrenze gilt. „Leider verpasst" heißt nach einem verpassten Anschluss nach dem Zug auf der Karte („RS 7 verpasst") und bleibt auch vor dessen Abfahrt sichtbar: Die Zeit auf der Karte ist die, mit der der Vorschlag gemacht wurde, und nichts frischt sie auf; danach auszublenden wäre geraten. Unter „Anders beenden …" steht dort statt „Ich fahre weiter", das der Server am Umstieg ablehnt, „Anderen Zug wählen".
+
+Beim normalen Umstieg bleibt die Ansicht, wie sie war: „Ich bin im Zug", „Leider verpasst", „Fahrt hier abbrechen". Unter „Anders beenden …" fehlt dort „Ich fahre weiter", weil es am Umstieg nur scheitern kann; einen anderen Zug bietet das Blatt dort nicht an.
+
+**Offen, für Johannes.** Soll man auch beim normalen Umstieg einen anderen Zug wählen können? Dort hat die Fahrt keine Obergrenze: Nähme jemand einen späteren Zug, obwohl der Anschluss erreichbar war, zählte die Wartezeit bis zum Ziel mit. Wenn ja, braucht es dafür eine Regel zur Obergrenze (docs/21 §2), etwa die Ankunft mit dem geplanten Anschluss. Ebenso offen bleibt, was „Fahrt hier abbrechen" und „Ich gebe auf" am Umstieg zählen (#83, #85).
 
 ## Not in this step
 

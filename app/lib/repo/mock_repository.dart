@@ -259,7 +259,8 @@ class MockRepository with RideWriteHook implements AppRepository {
   @override
   Future<ApiJourneyLive> startJourney(StartJourneyRequest r) => rideWrite('startJourney', () => _startJourney(r), checkedInAt: r.fromStationId);
   @override
-  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId) => rideWrite('confirmLeg', () => _confirmLeg(journeyId, tripId));
+  Future<ApiJourneyLive> confirmLeg(String journeyId, String tripId, {String? toStationId, String? toStationName}) =>
+      rideWrite('confirmLeg', () => _confirmLeg(journeyId, tripId, toStationId: toStationId, toStationName: toStationName));
   @override
   Future<ApiJourney> finishJourney(String journeyId, {required bool arrived, String? reason}) =>
       rideWrite('finishJourney', () => _finishJourney(journeyId, arrived: arrived, reason: reason));
@@ -398,7 +399,7 @@ class MockRepository with RideWriteHook implements AppRepository {
     return ApiJourneyLive(journey: api, ride: live?.ride, stops: live?.stops ?? const [], eta: live?.eta, justArrived: j.phase == JourneyPhase.arrived);
   }
 
-  Future<ApiJourneyLive> _confirmLeg(String journeyId, String tripId) async {
+  Future<ApiJourneyLive> _confirmLeg(String journeyId, String tripId, {String? toStationId, String? toStationName}) async {
     final d = _findDeparture(tripId);
     if (d == null) throw StateError('unknown trip $tripId');
     state.confirmLeg(d);

@@ -80,7 +80,7 @@ class RideSheetBody extends StatelessWidget {
               onMissed: () => _missed(context),
               onArrived: () => _finish(context, arrived: true),
               onAbort: () => showAbortSheet(context, m),
-              onPickTrain: () => _pickOwnTrain(context, m.journey!.journey),
+              onPickTrain: () => pickAnotherTrain(context, m),
             )
           else
             _RidingView(
@@ -127,23 +127,6 @@ class RideSheetBody extends StatelessWidget {
     }
   }
 
-  /// Weiterfahrt (docs/21 §2): pick the train yourself, from where you stand, same destination.
-  void _pickOwnTrain(BuildContext context, ApiJourney j) {
-    final fromName = j.transferStationName ?? j.originStationName;
-    final fromId = j.legs.isEmpty ? j.originStationId : (j.currentLegInfo?.toStationId ?? j.originStationId);
-    monitor.closeSheet();
-    // The same sheet every other train choice uses (docs/29); the journey id is what makes it
-    // a Weiterfahrt rather than a new check-in.
-    showWelcherZugSheet(
-      context,
-      from: ApiStation(id: fromId, name: fromName),
-      to: ApiStation(id: j.destinationStationId, name: j.destinationStationName),
-      continueJourneyId: j.id,
-      earliestOnwardArrival: j.earliestOnwardArrival,
-      countedMinutes: j.countedCeilingMinutes,
-    );
-  }
-
   Future<void> _simulateArrival(BuildContext context) async {
     final repo = RepoScope.read(context).repo;
     try {
@@ -181,6 +164,46 @@ class RideSheetBody extends StatelessWidget {
     );
   }
 
+}
+
+/// Whether a change offers a train of the passenger's own choosing (#82): only where the journey
+/// has a cap (docs/21 §2), so a later train never counts more than the railway caused. That is
+/// a Weiterfahrt, or a missed connection the server has re-planned. At an ordinary change there
+/// is no cap, and whether waiting for a later train there should count is still open (docs/17).
+bool offersAnotherTrain(ApiJourneyLive live) {
+  final j = live.journey;
+  if (!j.inTransfer || j.earliestOnwardArrival == null) return false;
+  final next = live.nextLeg ?? j.nextLeg;
+  return j.waitingForOwnTrain || next?.replanned == true;
+}
+
+/// Pick the next train yourself, from where you stand to the same destination: the Weiterfahrt
+/// (docs/21 §2), or another train than the one proposed after a missed connection (#82). The
+/// same sheet every other train choice uses (docs/29); the journey id is what makes it the
+/// journey's next leg rather than a new check-in.
+void pickAnotherTrain(BuildContext context, RideMonitor monitor) {
+  final live = monitor.journey;
+  if (live == null) return;
+  final j = live.journey;
+  final next = live.nextLeg ?? j.nextLeg;
+  // Where the proposed train leaves is where the passenger stands. Without one, where the last
+  // leg ended.
+  final fromId = next != null && next.fromStationId.isNotEmpty
+      ? next.fromStationId
+      : (j.legs.isEmpty ? j.originStationId : (j.currentLegInfo?.toStationId ?? j.originStationId));
+  final fromName = j.transferStationName ?? next?.fromStationName ?? j.originStationName;
+  monitor.closeSheet();
+  showWelcherZugSheet(
+    context,
+    from: ApiStation(id: fromId, name: fromName),
+    to: ApiStation(id: j.destinationStationId, name: j.destinationStationName),
+    continueJourneyId: j.id,
+    earliestOnwardArrival: j.earliestOnwardArrival,
+    countedMinutes: j.countedCeilingMinutes,
+    // The same words the ride sheet's title used a moment ago; see [offersAnotherTrain] for
+    // why there is no third case.
+    eyebrow: j.waitingForOwnTrain ? 'Weiterfahrt' : 'Anschluss verpasst',
+  );
 }
 
 /// The drawn header of the change (#57), or null where the plain header stays: riding, arrived,
@@ -806,9 +829,13 @@ class _Action extends StatelessWidget {
 }
 
 /// Between two legs. With a connection to take (#57): the train on a card — line, destination,
-/// how soon, both ends, the track — and the three answers there are, each with what it does.
-/// A Weiterfahrt still waiting for a train, and a transfer with no connection at all, keep the
-/// plain view below.
+/// how soon, both ends, the track — and the answers there are, each with what it does: on it,
+/// another train (#82, only where [offersAnotherTrain]), missed it, or end here. A Weiterfahrt
+/// still waiting for a train, and a
+/// transfer with no connection at all, keep the plain view below.
+///
+/// „… verpasst" stays offered before the train's time: the time on the card is the one the
+/// proposal was made with, and nothing refreshes it, so hiding the answer by it would be a guess.
 class _TransferView extends StatelessWidget {
   const _TransferView({required this.live, required this.busy, required this.onConfirm, required this.onMissed, required this.onArrived, required this.onAbort, required this.onPickTrain});
   final ApiJourneyLive live;
@@ -853,11 +880,25 @@ class _TransferView extends StatelessWidget {
           onTap: busy ? null : () => onConfirm(next),
         ),
         const VGap.s(),
+        if (offersAnotherTrain(live)) ...[
+          _Answer(
+            key: const Key('transfer-other-train'),
+            icon: Icons.swap_horiz,
+            tone: _AnswerTone.grey,
+            title: 'Anderen Zug wählen',
+            body: 'Ab $where mit einem anderen Zug weiter. Die Verspätung zählt am Ziel.',
+            onTap: busy ? null : onPickTrain,
+          ),
+          const VGap.s(),
+        ],
         _Answer(
           key: const Key('transfer-missed'),
           icon: Icons.directions_run,
           tone: _AnswerTone.grey,
-          title: 'Leider verpasst',
+          // The train it is about (#82): under „Anschluss verpasst." a bare „Leider verpasst"
+          // read as the planned connection, when it meant the train on the card. At an ordinary
+          // change there is no such doubt, and the answer stays as it was.
+          title: !missed || next.line.trim().isEmpty ? 'Leider verpasst' : '${next.line.trim()} verpasst',
           body: 'Ich war am Gleis, habe es aber nicht geschafft. Wir suchen die nächste Verbindung ab $where.',
           onTap: busy ? null : onMissed,
         ),
@@ -1227,7 +1268,17 @@ class _TransferViewPlain extends StatelessWidget {
 
 /// "Abbrechen" never ends a journey without asking why. Three answers, each with its
 /// consequence written next to it, because only one of them keeps the claim alive.
+///
+/// At a change there is no train to leave, and „Ich fahre weiter" could only fail there (the
+/// server re-plans a journey on a train, not one between two), so it is not offered. Where the
+/// journey has a cap, the way on from a change is another train, and that is what the first
+/// answer offers instead (#82); at an ordinary change there is none to offer (see
+/// [offersAnotherTrain]).
 Future<void> showAbortSheet(BuildContext context, RideMonitor monitor) {
+  final atChange = monitor.transfer;
+  final live = monitor.journey;
+  final anotherTrain = atChange && live != null && offersAnotherTrain(live);
+  final where = live?.journey.transferStationName;
   return showVSheet(
     context,
     builder: (ctx) => Padding(
@@ -1243,18 +1294,33 @@ Future<void> showAbortSheet(BuildContext context, RideMonitor monitor) {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const VGap.s(),
-                VChoiceCard(
-                  key: const Key('abort-weiterfahrt'),
-                  title: 'Ich fahre weiter',
-                  subtitle: 'Es zählt die Verspätung bis zum frühesten Zug ab hier. Eine längere Pause zählt nicht mit.',
-                  selected: true,
-                  trailing: const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
-                  onTap: () async {
-                    Navigator.of(ctx).pop();
-                    await _abortAction(context, monitor, () => monitor.replan());
-                  },
-                ),
-                const VGap.s(),
+                if (anotherTrain) ...[
+                  VChoiceCard(
+                    key: const Key('abort-anderer-zug'),
+                    title: 'Anderen Zug wählen',
+                    subtitle: '${where == null || where.isEmpty ? 'Von hier' : 'Ab $where'} mit einem anderen Zug weiter. Die Verspätung zählt am Ziel.',
+                    selected: true,
+                    trailing: const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      pickAnotherTrain(context, monitor);
+                    },
+                  ),
+                  const VGap.s(),
+                ] else if (!atChange) ...[
+                  VChoiceCard(
+                    key: const Key('abort-weiterfahrt'),
+                    title: 'Ich fahre weiter',
+                    subtitle: 'Es zählt die Verspätung bis zum frühesten Zug ab hier. Eine längere Pause zählt nicht mit.',
+                    selected: true,
+                    trailing: const Icon(Icons.chevron_right, size: 22, color: VColors.ink2),
+                    onTap: () async {
+                      Navigator.of(ctx).pop();
+                      await _abortAction(context, monitor, () => monitor.replan());
+                    },
+                  ),
+                  const VGap.s(),
+                ],
                 VChoiceCard(
                   key: const Key('abort-aufgegeben'),
                   title: 'Ich gebe auf',

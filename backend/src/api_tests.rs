@@ -28,19 +28,27 @@ use crate::AppState;
 
 /// The app over [pool], with Transitous at [transitous] (a stand-in's address) or nowhere.
 async fn app(pool: PgPool, transitous: Option<String>) -> Router {
+    app_and_events(pool, transitous).await.0
+}
+
+/// The app and its event hub, for a test that has to know what was published. Every push the
+/// server sends starts as one of these events (`push.rs` hangs on the same tap), so an event that
+/// never happened is a push that never went out.
+async fn app_and_events(pool: PgPool, transitous: Option<String>) -> (Router, Arc<crate::events::EventHub>) {
     crate::db::seed(&pool).await.expect("seed");
     let client = TransitousClient::with_base(transitous.unwrap_or_else(|| "http://127.0.0.1:9".into()));
     let stations: crate::stations::Shared = Arc::new(std::sync::RwLock::new(Arc::new(crate::stations::Index::default())));
+    let events = Arc::new(crate::events::EventHub::default());
     let state = AppState {
         pool,
         train: Arc::new(TrainSource::new(client, stations.clone())),
-        events: Arc::new(crate::events::EventHub::default()),
+        events: events.clone(),
         push: Arc::new(crate::push::PushSender::from_env().expect("push sender")),
         stations,
         flags: Arc::new(std::sync::RwLock::new(Arc::new(crate::flags::Table::default()))),
         outline_files: Arc::new(std::sync::RwLock::new(None)),
     };
-    crate::router(state)
+    (crate::router(state), events)
 }
 
 /// One request; the answer's status and JSON body (Null when there is none).
@@ -456,6 +464,446 @@ async fn missed_is_only_for_a_journey_at_a_change_and_only_for_its_owner(pool: P
     sqlx::query("update journeys set status = 'riding' where id = $1").bind(journey).execute(&pool).await.unwrap();
     let (s, _) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
     assert_eq!(s, StatusCode::CONFLICT, "riding is not a change");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn missed_never_offers_a_train_that_has_left(pool: PgPool) {
+    // The feed still lists a train that left two minutes ago. A train that was due three minutes
+    // ago and is running seven late has not left: that one is the next way on.
+    let late = {
+        let mut it = motis_itinerary("rb52-late", "RB 52", -3);
+        it["legs"][0]["realTime"] = json!(true);
+        it["legs"][0]["from"]["departure"] = json!(Utc::now() + Duration::minutes(4));
+        it["legs"][0]["to"]["arrival"] = json!(Utc::now() + Duration::minutes(47));
+        it
+    };
+    let base = transitous_with_plan(json!({"itineraries": [
+        motis_itinerary("rb52", "RB 52", -5),
+        motis_itinerary("rb52-gone", "RB 52", -4),
+        late,
+        motis_itinerary("rb52-next", "RB 52", 55),
+    ]}))
+    .await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    let (journey, _) = journey_at_transfer(&pool, me).await;
+
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let next: Value = sqlx::query_scalar("select next_leg from journeys where id = $1").bind(journey).fetch_one(&pool).await.unwrap();
+    assert_eq!(next["trip_id"], "rb52-late", "not the one that has gone, and not the one an hour later");
+}
+
+// ---------------------------------------------------------------------------
+// The way on after a missed connection (#81, #82)
+// ---------------------------------------------------------------------------
+//
+// Memmingen, 2 October 2026: the RE 96 came in late and the RE 75 at 09:04 to Ulm had gone. The
+// next train that gets anyone on is the RS 7 at 09:32 to Ulm, which reaches the same ICE there as
+// the RE 75 at 10:04. Asked for the destination, MOTIS answers only with connections nothing else
+// beats, and an earlier train that catches the same onward train as a later one is not among
+// them — on the day, all it had left was the RE 75 at 11:02. Asked for Ulm, every train is there.
+// Times below are minutes from now.
+
+const LINDAU: (&str, &str) = ("vs:1", "Lindau-Reutin");
+const MEMMINGEN: (&str, &str) = ("vs:2", "Memmingen");
+const ULM: (&str, &str) = ("vs:4", "Ulm Hbf");
+const SAARBRUECKEN: (&str, &str) = ("vs:3", "Saarbrücken Hbf");
+
+/// One MOTIS leg on [trip] from one stop to another, leaving [dep] minutes from now, [mins] long.
+fn motis_leg(trip: &str, line: &str, from: (&str, &str), to: (&str, &str), dep: i64, mins: i64) -> Value {
+    let d = Utc::now() + Duration::minutes(dep);
+    json!({
+        "mode": "REGIONAL_RAIL", "tripId": trip, "routeShortName": line, "headsign": to.1, "agencyName": "DB Regio AG", "realTime": false,
+        "from": {"name": from.1, "stopId": from.0, "scheduledDeparture": d, "track": "4"},
+        "to": {"name": to.1, "stopId": to.0, "scheduledArrival": d + Duration::minutes(mins), "track": "1"},
+    })
+}
+
+/// A MOTIS itinerary of [legs].
+fn motis_route(legs: Vec<Value>) -> Value {
+    json!({"id": legs[0]["tripId"], "transfers": legs.len() - 1, "legs": legs})
+}
+
+fn rs7() -> Value {
+    motis_leg("rs7", "RS 7", MEMMINGEN, ULM, 20, 51)
+}
+fn re75_1004() -> Value {
+    motis_leg("re75-1004", "RE 75", MEMMINGEN, ULM, 52, 34)
+}
+fn re75_1102() -> Value {
+    motis_leg("re75-1102", "RE 75", MEMMINGEN, ULM, 110, 35)
+}
+fn ice610() -> Value {
+    motis_leg("ice610", "ICE 610", ULM, SAARBRUECKEN, 95, 205)
+}
+fn ice1247() -> Value {
+    motis_leg("ice1247", "ICE 1247", ULM, SAARBRUECKEN, 215, 205)
+}
+
+/// A stand-in for Transitous that answers the way MOTIS does: each `/api/v1/plan` by where it is
+/// asked to go from and to, with what leaves from the time asked for on; `/api/v1/trip` with any
+/// leg it knows. A question it has no route for gets no itineraries.
+async fn transitous_routes(routes: Vec<(&'static str, &'static str, Vec<Value>)>) -> String {
+    use axum::extract::Query;
+    use std::collections::HashMap;
+    let routes = Arc::new(routes);
+    let trips = routes.clone();
+    let app = Router::new()
+        .route(
+            "/api/v1/plan",
+            get(move |Query(q): Query<HashMap<String, String>>| {
+                let routes = routes.clone();
+                async move {
+                    let at = |v: &Value| v.as_str().and_then(|t| t.parse::<chrono::DateTime<Utc>>().ok());
+                    let time = q.get("time").and_then(|t| t.parse::<chrono::DateTime<Utc>>().ok());
+                    let (from, to) = (q.get("fromPlace").cloned().unwrap_or_default(), q.get("toPlace").cloned().unwrap_or_default());
+                    let its: Vec<Value> = routes
+                        .iter()
+                        .filter(|(f, t, _)| *f == from && *t == to)
+                        .flat_map(|(_, _, its)| its.iter().cloned())
+                        .filter(|it| match (time, at(&it["legs"][0]["from"]["scheduledDeparture"])) {
+                            (Some(t), Some(d)) => d >= t,
+                            _ => true,
+                        })
+                        .collect();
+                    axum::Json(json!({ "itineraries": its }))
+                }
+            }),
+        )
+        .route(
+            "/api/v1/trip",
+            get(move |Query(q): Query<HashMap<String, String>>| {
+                let routes = trips.clone();
+                async move {
+                    let id = q.get("tripId").cloned().unwrap_or_default();
+                    let leg = routes
+                        .iter()
+                        .flat_map(|(_, _, its)| its.iter())
+                        .flat_map(|it| it["legs"].as_array().cloned().unwrap_or_default())
+                        .find(|l| l["tripId"] == id.as_str());
+                    match leg {
+                        Some(l) => Ok(axum::Json(json!({ "legs": [l] }))),
+                        None => Err(StatusCode::NOT_FOUND),
+                    }
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+/// Memmingen as Transitous saw it: toward Ulm [to_ulm], toward Saarbrücken [to_saarbruecken],
+/// and from Ulm the two ICEs on.
+async fn memmingen_planner(to_ulm: Vec<Value>, to_saarbruecken: Vec<Value>) -> String {
+    transitous_routes(vec![
+        (MEMMINGEN.0, ULM.0, to_ulm.into_iter().map(|l| motis_route(vec![l])).collect()),
+        (MEMMINGEN.0, SAARBRUECKEN.0, to_saarbruecken),
+        (ULM.0, SAARBRUECKEN.0, vec![motis_route(vec![ice610()]), motis_route(vec![ice1247()])]),
+    ])
+    .await
+}
+
+/// What MOTIS answers for Memmingen → Saarbrücken that morning: the RE 75 at 11:02 and nothing earlier.
+fn only_the_1102() -> Vec<Value> {
+    vec![motis_route(vec![re75_1102(), ice1247()])]
+}
+
+/// Our legs of the journey as booked: the RE 96 into Memmingen, the RE 75 at 09:04 to Ulm (it
+/// left eight minutes ago), the ICE on to Saarbrücken.
+fn booked() -> Vec<Value> {
+    let now = Utc::now();
+    vec![
+        leg("re96", "RE 96", LINDAU, MEMMINGEN, now - Duration::minutes(60), 55),
+        leg("re75-0904", "RE 75", MEMMINGEN, ULM, now - Duration::minutes(8), 34),
+        leg("ice690", "ICE 690", ULM, SAARBRUECKEN, now + Duration::minutes(50), 180),
+    ]
+}
+
+/// One of our plan legs from a MOTIS one, as the server stores them after a re-plan.
+fn planned(motis: &Value) -> Value {
+    let at = |v: &Value| v.as_str().unwrap().parse::<chrono::DateTime<Utc>>().unwrap();
+    let (dep, arr) = (at(&motis["from"]["scheduledDeparture"]), at(&motis["to"]["scheduledArrival"]));
+    leg(
+        motis["tripId"].as_str().unwrap(),
+        motis["routeShortName"].as_str().unwrap(),
+        (motis["from"]["stopId"].as_str().unwrap(), motis["from"]["name"].as_str().unwrap()),
+        (motis["to"]["stopId"].as_str().unwrap(), motis["to"]["name"].as_str().unwrap()),
+        dep,
+        (arr - dep).num_minutes(),
+    )
+}
+
+/// A plan leg as the proposal after a missed connection: `next_leg` carries why.
+fn as_proposal(l: &Value) -> Value {
+    let mut n = l.clone();
+    n["replanned"] = json!(true);
+    n["reason"] = json!("verpasst");
+    n
+}
+
+/// Lindau → Saarbrücken with [plan], the RE 96 into Memmingen done ([riding]: still on it).
+/// At the change, [next] is the proposal.
+async fn memmingen_journey(pool: &PgPool, customer: Uuid, plan: Vec<Value>, next: Option<Value>) -> Uuid {
+    let now = Utc::now();
+    let id = Uuid::new_v4();
+    let riding = next.is_none();
+    sqlx::query(
+        "insert into journeys (id, customer_id, origin_station_id, origin_station_name, destination_station_id, destination_station_name,
+                               itinerary, plan, planned_departure, planned_arrival, ticket, status, current_leg, next_leg, transfer_deadline)
+         values ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, 'deutschlandticket', $10::journey_status, 1, $11, $12)",
+    )
+    .bind(id)
+    .bind(customer)
+    .bind(LINDAU.0)
+    .bind(LINDAU.1)
+    .bind(SAARBRUECKEN.0)
+    .bind(SAARBRUECKEN.1)
+    .bind(json!(plan))
+    .bind(now - Duration::minutes(60))
+    .bind(now + Duration::minutes(230))
+    .bind(if riding { "riding" } else { "transfer" })
+    .bind(&next)
+    .bind(if riding { None } else { Some(now + Duration::hours(2)) })
+    .execute(pool)
+    .await
+    .expect("journey");
+    sqlx::query(
+        "insert into rides (id, customer_id, trip_id, line, operator, category, from_station_id, from_station_name, exit_station_id, exit_station_name,
+                            planned_departure, planned_arrival, actual_arrival, ticket, status, final_delay_min, journey_id, leg_no,
+                            transfer_station_id, transfer_station_name, finalised_at)
+         values ($1, $2, 're96', 'RE 96', 'DB Regio', 're', $3, $4, $5, $6, $7, $8, $9, 'deutschlandticket', $10::ride_status, $11, $12, 1, $5, $6, $9)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(customer)
+    .bind(LINDAU.0)
+    .bind(LINDAU.1)
+    .bind(MEMMINGEN.0)
+    .bind(MEMMINGEN.1)
+    .bind(now - Duration::minutes(60))
+    .bind(now - Duration::minutes(5))
+    .bind(if riding { None } else { Some(now - Duration::minutes(2)) })
+    .bind(if riding { "riding" } else { "arrived" })
+    .bind(if riding { None } else { Some(3) })
+    .bind(id)
+    .execute(pool)
+    .await
+    .expect("leg 1");
+    id
+}
+
+fn trips_of(plan: &Value) -> Vec<String> {
+    plan.as_array().unwrap().iter().map(|l| l["trip_id"].as_str().unwrap().to_string()).collect()
+}
+
+async fn journey_row(pool: &PgPool, id: Uuid) -> (String, Value, Value, bool, Option<chrono::DateTime<Utc>>) {
+    sqlx::query_as("select status::text, coalesce(next_leg, 'null'::jsonb), plan, missed_connection, earliest_onward_arrival from journeys where id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_missed_connection_proposes_the_next_train_onward_not_the_next_best_arrival(pool: PgPool) {
+    let to_saarbruecken = only_the_1102();
+    let cap: chrono::DateTime<Utc> = to_saarbruecken[0]["legs"][1]["to"]["scheduledArrival"].as_str().unwrap().parse().unwrap();
+    let base = memmingen_planner(vec![rs7(), re75_1102()], to_saarbruecken).await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    let journey = memmingen_journey(&pool, me, booked(), None).await;
+
+    // The RE 96 reaches Memmingen a minute ago; the RE 75 at 09:04 left seven minutes before that.
+    let (s, v) = call(&app, "POST", "/v1/rides/current/arrival", Some(&token), Some(json!({"actual_arrival": Utc::now() - Duration::minutes(1)}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    let (status, next, plan, missed, earliest) = journey_row(&pool, journey).await;
+    assert_eq!(status, "transfer");
+    assert!(missed, "the connection was missed");
+    assert_eq!(next["trip_id"], "rs7", "the next train that gets the passenger on, not the next best arrival");
+    assert_eq!(next["replanned"], true);
+    assert_eq!(next["reason"], "verpasst");
+    assert_eq!(trips_of(&plan), ["re96", "rs7", "ice610"], "on from where the RS 7 arrives");
+    // The cap is what it always was: the earliest arrival the destination plan knows (docs/21 §2).
+    let earliest = earliest.expect("the earliest onward arrival is recorded");
+    assert!((earliest - cap).num_seconds().abs() < 1, "cap {earliest} is not the destination plan's {cap}");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn missed_proposes_the_next_train_onward_too(pool: PgPool) {
+    let base = memmingen_planner(vec![rs7(), re75_1102()], only_the_1102()).await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    // The RE 75 at 09:04 was still there when the RE 96 came in, and left without the passenger.
+    let mut plan = booked();
+    plan[1] = leg("re75-0904", "RE 75", MEMMINGEN, ULM, Utc::now() - Duration::minutes(2), 34);
+    let journey = memmingen_journey(&pool, me, plan.clone(), Some(plan[1].clone())).await;
+
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, next, plan, missed, _) = journey_row(&pool, journey).await;
+    assert_eq!(next["trip_id"], "rs7", "the next train toward Ulm, not the next best arrival in Saarbrücken");
+    assert_eq!(next["missed_trip_ids"], json!(["re75-0904"]), "the server remembers what was missed here");
+    assert_eq!(trips_of(&plan), ["re96", "rs7", "ice610"]);
+    assert!(missed);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_second_missed_does_not_bring_back_the_first(pool: PgPool) {
+    // #82: two taps on „Leider verpasst" swapped the RS 7 and the RE 75 back and forth, and
+    // every tap sent a push.
+    let base = memmingen_planner(
+        vec![rs7(), re75_1004(), re75_1102()],
+        vec![motis_route(vec![rs7(), ice610()]), motis_route(vec![re75_1004(), ice610()]), motis_route(vec![re75_1102(), ice1247()])],
+    )
+    .await;
+    let (app, events) = app_and_events(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    let mut plan = booked();
+    plan[1] = planned(&rs7());
+    plan[2] = planned(&ice610());
+    let journey = memmingen_journey(&pool, me, plan.clone(), Some(as_proposal(&plan[1]))).await;
+    let mut tap = events.tap();
+
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, next, _, _, _) = journey_row(&pool, journey).await;
+    assert_eq!(next["trip_id"], "re75-1004");
+    assert_eq!(tap.try_recv().map(|(_, e)| e.kind).ok(), Some("journey"), "a new proposal is news");
+
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, next, plan, _, _) = journey_row(&pool, journey).await;
+    assert_ne!(next["trip_id"], "rs7", "the RS 7 was missed once already");
+    assert_eq!(next["trip_id"], "re75-1102");
+    assert_eq!(next["missed_trip_ids"], json!(["rs7", "re75-1004"]));
+    assert_eq!(trips_of(&plan), ["re96", "re75-1102", "ice1247"], "and the ICE that one reaches");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn missed_with_no_new_train_changes_nothing_and_sends_nothing(pool: PgPool) {
+    let base = memmingen_planner(
+        vec![rs7(), re75_1004(), re75_1102()],
+        vec![motis_route(vec![rs7(), ice610()]), motis_route(vec![re75_1102(), ice1247()])],
+    )
+    .await;
+    let (app, events) = app_and_events(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    // Two taps before this one: the RS 7 and the RE 75 at 10:04 are missed, the 11:02 is proposed.
+    let mut plan = booked();
+    plan[1] = planned(&re75_1102());
+    plan[2] = planned(&ice1247());
+    let mut next = as_proposal(&plan[1]);
+    next["missed_trip_ids"] = json!(["rs7", "re75-1004"]);
+    let journey = memmingen_journey(&pool, me, plan, Some(next)).await;
+    let (_, before, plan_before, _, earliest_before) = journey_row(&pool, journey).await;
+    let mut tap = events.tap();
+
+    let (s, _) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "nothing new to offer");
+    let (_, next, plan, _, earliest) = journey_row(&pool, journey).await;
+    assert_eq!(next, before, "the proposal stays");
+    assert_eq!(plan, plan_before);
+    assert_eq!(earliest, earliest_before);
+    assert!(tap.try_recv().is_err(), "nothing published, so nothing pushed");
+}
+
+/// The arrival in Saarbrücken of the RS 7 and the ICE 610 it reaches in Ulm.
+fn arrival_of_the_rs7_way() -> chrono::DateTime<Utc> {
+    ice610()["to"]["scheduledArrival"].as_str().unwrap().parse().unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_missed_connection_without_an_answer_for_the_destination_still_has_a_cap(pool: PgPool) {
+    // Asked for Saarbrücken, the planner has nothing; asked for Ulm, it has the RS 7. The RS 7
+    // becomes the proposal, and a proposal after a missed connection never comes without the
+    // cap: then it is the arrival of the way proposed.
+    let base = memmingen_planner(vec![rs7(), re75_1102()], vec![]).await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    let journey = memmingen_journey(&pool, me, booked(), None).await;
+
+    let (s, v) = call(&app, "POST", "/v1/rides/current/arrival", Some(&token), Some(json!({"actual_arrival": Utc::now() - Duration::minutes(1)}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (status, next, plan, missed, earliest) = journey_row(&pool, journey).await;
+    assert_eq!(status, "transfer");
+    assert!(missed);
+    assert_eq!(next["trip_id"], "rs7");
+    assert_eq!(trips_of(&plan), ["re96", "rs7", "ice610"]);
+    let earliest = earliest.expect("no proposal after a missed connection without a cap");
+    assert!((earliest - arrival_of_the_rs7_way()).num_seconds().abs() < 1, "cap {earliest}");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn missed_without_an_answer_for_the_destination_still_has_a_cap(pool: PgPool) {
+    // „Leider verpasst" on the RE 75 at 09:04, still there when the RE 96 came in: toward
+    // Saarbrücken the planner offers only that train, toward Ulm the RS 7 as well.
+    let mut plan = booked();
+    plan[1] = leg("re75-0904", "RE 75", MEMMINGEN, ULM, Utc::now() + Duration::minutes(2), 34);
+    let only_the_missed_one = vec![motis_route(vec![motis_leg("re75-0904", "RE 75", MEMMINGEN, ULM, 2, 34), ice610()])];
+    let base = memmingen_planner(vec![rs7(), re75_1102()], only_the_missed_one).await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    let journey = memmingen_journey(&pool, me, plan.clone(), Some(plan[1].clone())).await;
+
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{journey}/missed"), Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, next, _, _, earliest) = journey_row(&pool, journey).await;
+    assert_eq!(next["trip_id"], "rs7");
+    let earliest = earliest.expect("no proposal after a missed connection without a cap");
+    assert!((earliest - arrival_of_the_rs7_way()).num_seconds().abs() < 1, "cap {earliest}");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn confirming_another_train_at_a_change_takes_its_onward_legs(pool: PgPool) {
+    // #82: the plan was laid out for the RE 75 at 11:02 and its ICE at 12:47. The passenger takes
+    // the RS 7 instead; in Ulm the app must expect the ICE the RS 7 reaches, not the 12:47.
+    let base = memmingen_planner(vec![rs7(), re75_1102()], only_the_1102()).await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    let mut plan = booked();
+    plan[1] = planned(&re75_1102());
+    plan[2] = planned(&ice1247());
+    let journey = memmingen_journey(&pool, me, plan.clone(), Some(as_proposal(&plan[1]))).await;
+    let cap = Utc::now() + Duration::minutes(420);
+    sqlx::query("update journeys set earliest_onward_arrival = $2 where id = $1").bind(journey).bind(cap).execute(&pool).await.unwrap();
+    let (_, _, _, _, cap) = journey_row(&pool, journey).await;
+
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{journey}/legs"), Some(&token), Some(json!({"trip_id": "rs7"}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (status, _, plan, _, earliest) = journey_row(&pool, journey).await;
+    assert_eq!(status, "riding");
+    assert_eq!(trips_of(&plan), ["re96", "rs7", "ice610"], "the onward legs of the train taken");
+    assert_eq!(plan[1]["to_station_id"], ULM.0);
+    assert_eq!(earliest, cap, "what counts is not touched");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_train_picked_from_the_list_gets_off_where_its_connection_changes(pool: PgPool) {
+    // „Anderen Zug wählen" lists connections to the destination, and one of them changes in
+    // Neu-Ulm: its first train goes neither to Ulm, the plan's next change, nor to Saarbrücken.
+    // The app says where the passenger gets off it, and the rest is planned from there.
+    const NEU_ULM: (&str, &str) = ("vs:5", "Neu-Ulm");
+    let base = transitous_routes(vec![
+        (MEMMINGEN.0, NEU_ULM.0, vec![motis_route(vec![motis_leg("rb-neu-ulm", "RB 77", MEMMINGEN, NEU_ULM, 30, 45)])]),
+        (NEU_ULM.0, SAARBRUECKEN.0, vec![motis_route(vec![motis_leg("ice-neu-ulm", "ICE 512", NEU_ULM, SAARBRUECKEN, 90, 210)])]),
+    ])
+    .await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (me, token) = device(&app).await;
+    let mut plan = booked();
+    plan[1] = planned(&re75_1102());
+    plan[2] = planned(&ice1247());
+    let journey = memmingen_journey(&pool, me, plan.clone(), Some(as_proposal(&plan[1]))).await;
+
+    let body = json!({"trip_id": "rb-neu-ulm", "to_station_id": NEU_ULM.0, "to_station_name": NEU_ULM.1});
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{journey}/legs"), Some(&token), Some(body)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, _, plan, _, _) = journey_row(&pool, journey).await;
+    assert_eq!(trips_of(&plan), ["re96", "rb-neu-ulm", "ice-neu-ulm"]);
+    assert_eq!(plan[1]["to_station_id"], NEU_ULM.0);
 }
 
 // ---------------------------------------------------------------------------
