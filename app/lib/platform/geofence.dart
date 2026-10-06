@@ -517,6 +517,42 @@ class GeofenceNudge {
     final data = <String, String>{for (final e in m.entries) e.key: '${e.value ?? ''}'};
     return GeofenceNudge(stationId: '${m['stationId'] ?? ''}', stationName: '${m['stationName'] ?? ''}', kind: '${m['kind'] ?? 'station'}', data: data);
   }
+
+  /// Where the tap leads (#87). A station nudge opens the check-in at its station — unless a
+  /// journey is already under way or waiting at a change, which a station nudge from before the
+  /// check-in can still find on the lock screen: then the journey, not a second check-in over it.
+  NudgeTarget target({required bool journeyRunning}) {
+    if (kind == 'snooze') return NudgeTarget.snooze;
+    if (isStation) return journeyRunning ? NudgeTarget.ride : NudgeTarget.checkin;
+    if (isJourney) return journeyArrived ? NudgeTarget.arrival : NudgeTarget.ride;
+    if (kind == 'mail') return NudgeTarget.mail;
+    if (kind != 'station') return NudgeTarget.claims;
+    return NudgeTarget.none;
+  }
+}
+
+/// What a tapped notification opens; see [GeofenceNudge.target].
+enum NudgeTarget {
+  /// „3 Stunden Ruhe" from the notification itself (docs/24 §3): no screen, the pause is set.
+  snooze,
+
+  /// The check-in at the nudge's station, at „Wohin?" (docs/29).
+  checkin,
+
+  /// The ride sheet: a journey push (docs/17), or a station nudge while a journey runs.
+  ride,
+
+  /// The arrival sheet (#63).
+  arrival,
+
+  /// Railway mail: Anträge, scrolled to its claim (docs/11 §10).
+  mail,
+
+  /// Everything else a server push says lands on Anträge.
+  claims,
+
+  /// A station nudge that lost its station: nothing opens.
+  none,
 }
 
 class GeofenceStationConfig {

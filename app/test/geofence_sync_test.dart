@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/events.dart';
 import 'package:verspaetomat/api/models.dart';
 import 'package:verspaetomat/mock/mock_data.dart' show TicketType;
+import 'package:verspaetomat/platform/geofence.dart';
 import 'package:verspaetomat/platform/geofence_sync.dart';
 import 'package:verspaetomat/repo/mock_repository.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
@@ -88,29 +89,58 @@ void main() {
   late Session session;
   late GeofenceSync sync;
 
+  /// What native holds for a nudge tapped while no engine was listening; `status` hands it out once.
+  Map<String, String>? pendingNudge;
+
+  /// What reached `onNudge`.
+  late List<GeofenceNudge> tapped;
+
   /// What native was told about riding, one entry per `configure`.
   List<bool> riding() => [for (final c in calls.where((c) => c.method == 'configure')) (c.arguments as Map)['riding'] as bool];
 
-  Future<void> boot(WidgetTester tester) async {
+  /// [signedIn] false: `/v1/me` has not answered yet. A unit test draws no frames, so the first
+  /// frame is whatever [firstFrame] says, and already there unless a case holds it back.
+  Future<void> boot(WidgetTester tester, {bool signedIn = true, Future<void> Function()? firstFrame}) async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     session = Session(demo: DemoState(), prefs: prefs, apiUrl: '');
-    session.me = await session.repo.getMe();
-    session.healthy = true;
-    sync = GeofenceSync(session: session, onNudge: (_) {}, events: events.stream, repo: lookups)..start();
+    if (signedIn) {
+      session.me = await session.repo.getMe();
+      session.healthy = true;
+    }
+    sync = GeofenceSync(
+      session: session,
+      onNudge: tapped.add,
+      events: events.stream,
+      repo: lookups,
+      firstFrame: firstFrame ?? () async {},
+    )..start();
     // The first sync after launch is debounced like every other.
     await tester.pump(const Duration(seconds: 2));
   }
 
+  /// The native side calling into Dart, as `GeofenceChannel.swift` does for a tap.
+  Future<void> fromNative(String method, Map<String, Object?> args) =>
+      messenger.handlePlatformMessage(channel.name, const StandardMethodCodec().encodeMethodCall(MethodCall(method, args)), (_) {});
+
   setUp(() {
     calls = [];
+    tapped = [];
+    pendingNudge = null;
     lookups = _Lookups();
     events = StreamController<AppEvent>.broadcast();
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
+      final pending = pendingNudge;
+      if (call.method == 'status') pendingNudge = null;
       return switch (call.method) {
         'configure' => {'registered': 1},
-        'status' => {'permission': 'always', 'notifications': true, 'registered': 1},
+        'status' => {
+            'permission': 'always',
+            'notifications': true,
+            'registered': 1,
+            if (pending != null) 'pendingNudge': pending,
+          },
         _ => null,
       };
     });
@@ -228,6 +258,42 @@ void main() {
 
       expect(cleared(), isEmpty);
       await tester.pump(const Duration(seconds: 2));
+    });
+  });
+
+  group('#87: a tapped nudge waits until the app stands', () {
+    const pasing = {'kind': 'station', 'stationId': 'vs:4711', 'stationName': 'München, Pasing'};
+
+    testWidgets('a nudge tapped before launch is handed over once the account has loaded', (tester) async {
+      // The cold start: iOS launched the app for the tap, and native kept it in `pendingNudge`.
+      pendingNudge = pasing;
+      await boot(tester, signedIn: false);
+      expect(tapped, isEmpty, reason: 'no account yet: the check-in it opens has nothing to ask with');
+
+      await session.refresh(); // `/v1/me` answers
+      await tester.pump();
+      expect(tapped.map((n) => n.stationId), ['vs:4711']);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('a tap from a running engine waits for the first frame', (tester) async {
+      final frame = Completer<void>();
+      await boot(tester, firstFrame: () => frame.future);
+
+      await fromNative('nudgeTapped', pasing);
+      await tester.pump();
+      expect(tapped, isEmpty, reason: 'nothing drawn yet: there is no shell to open a sheet in');
+
+      frame.complete();
+      await tester.pump();
+      expect(tapped.map((n) => n.stationId), ['vs:4711']);
+    });
+
+    testWidgets('an app that is up hands a tap over at once', (tester) async {
+      await boot(tester);
+      await fromNative('nudgeTapped', pasing);
+      await tester.pump();
+      expect(tapped.map((n) => n.stationId), ['vs:4711']);
     });
   });
 }

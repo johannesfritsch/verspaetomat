@@ -21,20 +21,30 @@ const noAutoMuteKey = 'debug.noAutoMute';
 /// one (#80). Debounced otherwise, so a burst of changes is one `configure`; a sync still
 /// waiting when the app goes to the background runs on the way out.
 class GeofenceSync with WidgetsBindingObserver {
-  /// [events] and [repo] are the session's own unless a test hands in others.
-  GeofenceSync({required this.session, required this.onNudge, Geofence? geofence, Stream<AppEvent>? events, AppRepository? repo})
-      : _geofence = geofence ?? Geofence.instance,
+  /// [events] and [repo] are the session's own, and [firstFrame] the binding's, unless a test
+  /// hands in others.
+  GeofenceSync({
+    required this.session,
+    required this.onNudge,
+    Geofence? geofence,
+    Stream<AppEvent>? events,
+    AppRepository? repo,
+    Future<void> Function()? firstFrame,
+  })  : _geofence = geofence ?? Geofence.instance,
         _eventsIn = events,
-        _repoIn = repo;
+        _repoIn = repo,
+        _firstFrame = firstFrame ?? (() => WidgetsBinding.instance.waitUntilFirstFrameRasterized);
 
   final Session session;
 
-  /// Called with the station when the customer tapped a nudge notification.
+  /// Called with the station when the customer tapped a nudge notification — once the app has
+  /// drawn its first frame and knows its account (#87).
   final void Function(GeofenceNudge nudge) onNudge;
 
   final Geofence _geofence;
   final Stream<AppEvent>? _eventsIn;
   final AppRepository? _repoIn;
+  final Future<void> Function() _firstFrame;
   AppRepository get _repo => _repoIn ?? session.repo;
 
   Timer? _debounce;
@@ -59,7 +69,7 @@ class GeofenceSync with WidgetsBindingObserver {
     DiagnoseLog.instance.add('app', 'launch');
     WidgetsBinding.instance.addObserver(this);
     session.addListener(scheduleSync);
-    _taps = _geofence.onNudgeTapped.listen(onNudge);
+    _taps = _geofence.onNudgeTapped.listen(_deliver);
     _tokens = _geofence.onPushToken.listen(_sendPushToken);
     // #80: the server's word that a ride started or ended elsewhere — Stellwerk, another
     // phone, the arrival the backend detected itself.
@@ -82,6 +92,9 @@ class GeofenceSync with WidgetsBindingObserver {
 
   void dispose() {
     _disposed = true;
+    for (final stop in [..._accountWaits]) {
+      stop();
+    }
     _debounce?.cancel();
     _snoozeTimer?.cancel();
     _taps?.cancel();
@@ -116,12 +129,63 @@ class GeofenceSync with WidgetsBindingObserver {
   Future<void> _checkPending() async {
     final status = await _geofence.status();
     final pending = status.pendingNudge;
-    if (pending != null && (pending.stationId.isNotEmpty || pending.kind != 'station')) onNudge(pending);
+    if (pending != null && (pending.stationId.isNotEmpty || pending.kind != 'station')) _deliver(pending);
     if (status.pushToken != null) _sendPushToken(status.pushToken!);
     if (!_repaired) {
       _repaired = true;
       _repairPermissions(status);
     }
+  }
+
+  /// How long a tap waits for the account before it is dropped. `_sendPushToken` waits as long.
+  static const _accountWait = Duration(seconds: 10);
+
+  /// A tapped notification, handed to [onNudge] only once the app stands (#87).
+  ///
+  /// A tap on a cold start arrives before anything is drawn: `pendingNudge` is read from
+  /// `initState`, and a tap that wakes the engine is on the channel just as early. Routing then
+  /// and opening a sheet while the app is still being built, before `/v1/me` has answered, is
+  /// the least understood path in the app and the likeliest place for the crash in #87 — no
+  /// test ever walked it. So the tap waits for the first frame and for the account, like the
+  /// push token. Without an account after the wait it is dropped and logged: a check-in sheet
+  /// with no account behind it has nothing to ask with.
+  void _deliver(GeofenceNudge n) => unawaited(_deliverWhenReady(n));
+
+  Future<void> _deliverWhenReady(GeofenceNudge n) async {
+    await _firstFrame();
+    final loaded = await _accountLoaded();
+    if (_disposed) return;
+    if (!loaded) {
+      DiagnoseLog.instance.add('push', 'tap ${n.kind} dropped: no account after ${_accountWait.inSeconds} s', bad: true);
+      return;
+    }
+    onNudge(n);
+  }
+
+  /// The waits for the account still open, each with what ends it, so [dispose] leaves no
+  /// listener on the session and no timer behind.
+  final _accountWaits = <void Function()>{};
+
+  /// True as soon as `session.me` is there, false after [_accountWait] without it.
+  Future<bool> _accountLoaded() {
+    if (session.me != null) return Future.value(true);
+    final done = Completer<bool>();
+    late final Timer limit;
+    late final void Function() stop;
+    void check() {
+      if (session.me != null) stop();
+    }
+
+    stop = () {
+      limit.cancel();
+      session.removeListener(check);
+      _accountWaits.remove(stop);
+      if (!done.isCompleted) done.complete(session.me != null);
+    };
+    limit = Timer(_accountWait, stop);
+    session.addListener(check);
+    _accountWaits.add(stop);
+    return done.future;
   }
 
   /// Once per launch: make the account's settings agree with what the phone actually allows.
