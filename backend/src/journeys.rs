@@ -780,6 +780,90 @@ pub struct ConfirmLeg {
     pub trip_id: Option<String>,
 }
 
+/// When a leg's train leaves: live when the feed says, else planned.
+fn departs(l: &PlanLeg) -> DateTime<Utc> {
+    l.live_departure.unwrap_or(l.planned_departure)
+}
+
+/// Is this station the journey's destination? The legs carry the feed's platform ids, the
+/// journey our station id, so the name decides where the ids differ.
+fn is_destination(id: &str, name: &str, j: &JourneyRow) -> bool {
+    id == j.destination_station_id || crate::train::station_names_match(name, &j.destination_station_name)
+}
+
+fn reaches_destination(leg: &PlanLeg, j: &JourneyRow) -> bool {
+    is_destination(&leg.to_station_id, &leg.to_station_name, j)
+}
+
+/// The trains the passenger has missed at this change (#82), kept inside the proposal itself:
+/// a new change writes a new proposal and starts the list again. Builds that do not know the
+/// field read the proposal as they always did.
+fn missed_trip_ids(next_leg: Option<&Value>) -> Vec<String> {
+    next_leg
+        .and_then(|n| n.get("missed_trip_ids"))
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|t| t.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// The itinerary whose first train is the earliest one still to come: not gone by the live
+/// time, not cancelled, not one the passenger has already missed here.
+fn earliest_usable<'a>(its: &'a [Itinerary], missed: &[String], now: DateTime<Utc>) -> Option<&'a Itinerary> {
+    its.iter()
+        .filter(|it| it.legs.first().is_some_and(|l| !l.cancelled && !missed.contains(&l.trip_id) && departs(l) >= now))
+        .min_by_key(|it| departs(&it.legs[0]))
+}
+
+/// What replaces a missed connection (#81): the legs from the change to the destination, the
+/// first of them the proposal.
+///
+/// The proposal is the earliest train that gets the passenger onward, so it is looked for toward
+/// the next change of the plan, not toward the destination. Asked for the destination, MOTIS
+/// answers only with connections nothing else beats, and an earlier train that reaches the same
+/// onward train as a later one is left out: in Memmingen on 2 October the RS 7 at 09:32 to Ulm
+/// was missing because the RE 75 at 10:04 catches the same ICE there. Toward Ulm every train is
+/// listed. The rest is planned from where the chosen train arrives. When any of that fails, the
+/// destination plan decides, as it did before.
+///
+/// The cap is not made here: it stays the destination plan's (docs/21 §2), noted by the callers.
+async fn way_on_after_a_miss(
+    s: &AppState,
+    j: &JourneyRow,
+    from_id: &str,
+    next_change: Option<(&str, &str)>,
+    at: DateTime<Utc>,
+    dest_its: &[Itinerary],
+    missed: &[String],
+) -> Option<Vec<PlanLeg>> {
+    let now = crate::clock::now();
+    let ix = s.stations();
+    if let Some((change_id, change_name)) = next_change {
+        // Room for the trains already missed here, which the planner still lists.
+        let n = (3 + missed.len()).min(8);
+        match s.train.plan(&ix.upstream_id(from_id), &ix.upstream_id(change_id), at, n).await {
+            Ok(hops) => {
+                if let Some(first) = earliest_usable(&hops, missed, now).map(|it| it.legs[0].clone()) {
+                    if reaches_destination(&first, j) {
+                        return Some(vec![first]);
+                    }
+                    let on_at = first.live_arrival.unwrap_or(first.planned_arrival) + Duration::minutes(1);
+                    match s.train.plan(&ix.upstream_id(&first.to_station_id), &ix.upstream_id(&j.destination_station_id), on_at, 3).await {
+                        Ok(on) if !on.is_empty() => {
+                            let mut legs = vec![first];
+                            legs.extend(on[0].legs.iter().cloned());
+                            return Some(legs);
+                        }
+                        Ok(_) => tracing::warn!(journey = %j.id, "missed connection: nothing on from {}", first.to_station_name),
+                        Err(e) => tracing::warn!(journey = %j.id, error = %e, "missed connection: the onward plan failed"),
+                    }
+                }
+            }
+            Err(e) => tracing::warn!(journey = %j.id, error = %e, "missed connection: the plan toward {change_name} failed"),
+        }
+    }
+    earliest_usable(dest_its, missed, now).map(|it| it.legs.clone())
+}
+
 async fn journey_of(pool: &PgPool, customer: Uuid, id: Uuid) -> Result<JourneyRow, (StatusCode, Json<Value>)> {
     let j: Option<JourneyRow> = sqlx::query_as("select * from journeys where id = $1 and customer_id = $2").bind(id).bind(customer).fetch_optional(pool).await.map_err(internal)?;
     j.ok_or_else(|| err(StatusCode::NOT_FOUND, "no such journey"))
@@ -1184,10 +1268,14 @@ pub async fn replan(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
 ///
 /// The passenger stood at the transfer and the connection left without them. The follower
 /// already does this on its own when the arrival was later than the departure; here the
-/// passenger says it. The next way on from the transfer station becomes the proposed leg, the
-/// plan is cut there and continued with it, and the earliest onward arrival caps what counts
-/// (docs/21 §2) — so a missed train is recorded, and the wait for a later one of the
-/// passenger's choosing is still not billed to the railway.
+/// passenger says it. The next train on from the transfer station becomes the proposed leg
+/// (see [`way_on_after_a_miss`]), the plan is cut there and continued with it, and the earliest
+/// onward arrival caps what counts (docs/21 §2) — so a missed train is recorded, and the wait
+/// for a later one of the passenger's choosing is still not billed to the railway.
+///
+/// Every train missed at this change stays missed (#82): a second tap used to bring the first
+/// one back. Nothing that has already left is offered. When there is nothing new, nothing
+/// changes and nobody is told: 404, as before.
 pub async fn missed(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>) -> ApiResult {
     let j = journey_of(&s.pool, c.0.id, id).await?;
     if j.status != JourneyStatus::Transfer {
@@ -1195,24 +1283,34 @@ pub async fn missed(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
     }
     let Some(next) = next_leg_of(&j) else { return Err(err(StatusCode::CONFLICT, "no connection to miss")) };
     let now = crate::clock::now();
+    let at = now + Duration::minutes(1);
     let its = s
         .train
-        .plan(&s.stations().upstream_id(&next.from_station_id), &s.stations().upstream_id(&j.destination_station_id), now + Duration::minutes(1), 3)
+        .plan(&s.stations().upstream_id(&next.from_station_id), &s.stations().upstream_id(&j.destination_station_id), at, 3)
         .await
         .map_err(|e| err(StatusCode::BAD_GATEWAY, &format!("keine Verbindung gefunden: {e}")))?;
-    // The next option must not be the train just missed.
-    let Some(it) = its.iter().find(|it| it.legs.first().is_some_and(|l| l.trip_id != next.trip_id)) else {
+    let mut missed_ids = missed_trip_ids(j.next_leg.as_ref());
+    if !missed_ids.contains(&next.trip_id) {
+        missed_ids.push(next.trip_id.clone());
+    }
+    let next_change = (!reaches_destination(&next, &j)).then_some((next.to_station_id.as_str(), next.to_station_name.as_str()));
+    let Some(way) = way_on_after_a_miss(&s, &j, &next.from_station_id, next_change, at, &its, &missed_ids).await else {
         return Err(err(StatusCode::NOT_FOUND, "keine weitere Verbindung ab hier"));
     };
-    let proposal = it.legs[0].clone();
+    let proposal = way[0].clone();
+    // The legs before this change are done; everything from here on is the new way.
     let mut new_plan = plan_legs(&j);
-    let cut = new_plan.iter().position(|l| l.trip_id == next.trip_id).unwrap_or(new_plan.len());
-    new_plan.truncate(cut);
-    new_plan.extend(it.legs.iter().cloned());
-    note_earliest_onward(&s.pool, j.id, it.live_arrival.unwrap_or(it.planned_arrival)).await.map_err(internal)?;
+    new_plan.truncate((j.current_leg.max(0) as usize).min(new_plan.len()));
+    new_plan.extend(way);
+    // The cap as it always was: the destination plan's first connection that is not the train
+    // just missed (docs/21 §2). `least` keeps an earlier one.
+    if let Some(it) = its.iter().find(|it| it.legs.first().is_some_and(|l| l.trip_id != next.trip_id)) {
+        note_earliest_onward(&s.pool, j.id, it.live_arrival.unwrap_or(it.planned_arrival)).await.map_err(internal)?;
+    }
     let mut next_json = leg_json(&proposal);
     next_json["replanned"] = json!(true);
     next_json["reason"] = json!("verpasst");
+    next_json["missed_trip_ids"] = json!(missed_ids);
     let deadline = proposal.live_arrival.unwrap_or(proposal.planned_arrival).max(now) + TRANSFER_TIMEOUT;
     let updated: JourneyRow = sqlx::query_as(
         "update journeys set next_leg = $2, transfer_deadline = $3, missed_connection = true, plan = $4 where id = $1 returning *",
@@ -1272,22 +1370,37 @@ pub async fn on_leg_finalised(s: &AppState, ride: &RideRow) -> anyhow::Result<Le
             }
             Err(_) => (planned_next.live_departure.unwrap_or(planned_next.planned_departure), planned_next.cancelled),
         };
-        let missed = ride.cancelled || connection_missed(actual, next_departure, next_cancelled);
+        let connection_gone = connection_missed(actual, next_departure, next_cancelled);
+        let missed = ride.cancelled || connection_gone;
         let mut proposal = planned_next.clone();
         let mut new_plan = legs.clone();
         let mut reason: Option<&str> = None;
         let mut replanned = false;
+        // The planned connection, when it left without the passenger (or will not run): it is
+        // not the way on, now or after a „Leider verpasst" (#82).
+        let missed_ids: Vec<String> = if connection_gone { vec![planned_next.trip_id.clone()] } else { Vec::new() };
         if missed {
             reason = Some(if next_cancelled { "ausfall" } else { "verpasst" });
-            match s.train.plan(&s.stations().upstream_id(&transfer_id), &s.stations().upstream_id(&j.destination_station_id), actual + Duration::minutes(1), 3).await {
+            let at = actual + Duration::minutes(1);
+            match s.train.plan(&s.stations().upstream_id(&transfer_id), &s.stations().upstream_id(&j.destination_station_id), at, 3).await {
                 Ok(its) if !its.is_empty() => {
-                    let it = &its[0];
-                    proposal = it.legs[0].clone();
-                    new_plan.truncate(leg_no);
-                    new_plan.extend(it.legs.iter().cloned());
-                    replanned = true;
                     // The earliest the passenger can now reach the destination: the cap (docs/21 §2).
+                    let it = &its[0];
                     note_earliest_onward(&s.pool, j.id, it.live_arrival.unwrap_or(it.planned_arrival)).await?;
+                    // Toward the next change of the plan: where the connection was going — or,
+                    // when the train in was cancelled and the passenger never left, where that
+                    // one was going.
+                    let change = if ride.cancelled { (ride.exit_station_id.as_str(), ride.exit_station_name.as_str()) } else { (planned_next.to_station_id.as_str(), planned_next.to_station_name.as_str()) };
+                    let next_change = Some(change).filter(|(id, name)| !is_destination(id, name, &j));
+                    match way_on_after_a_miss(s, &j, &transfer_id, next_change, at, &its, &missed_ids).await {
+                        Some(way) => {
+                            proposal = way[0].clone();
+                            new_plan.truncate(leg_no);
+                            new_plan.extend(way);
+                            replanned = true;
+                        }
+                        None => tracing::warn!(journey = %j.id, "transfer: no train on found, keeping the planned connection"),
+                    }
                 }
                 Ok(_) => tracing::warn!(journey = %j.id, "transfer: no re-plan found, keeping the planned connection"),
                 Err(e) => tracing::warn!(journey = %j.id, error = %e, "transfer: re-plan failed, keeping the planned connection"),
@@ -1296,6 +1409,9 @@ pub async fn on_leg_finalised(s: &AppState, ride: &RideRow) -> anyhow::Result<Le
         let mut next_json = leg_json(&proposal);
         next_json["replanned"] = json!(replanned);
         next_json["reason"] = json!(reason);
+        if !missed_ids.is_empty() {
+            next_json["missed_trip_ids"] = json!(missed_ids);
+        }
         let deadline = proposal.live_arrival.unwrap_or(proposal.planned_arrival).max(now) + TRANSFER_TIMEOUT;
         let updated: JourneyRow = sqlx::query_as(
             "update journeys set status = 'transfer', next_leg = $2, transfer_deadline = $3, missed_connection = missed_connection or $4, plan = $5 where id = $1 returning *",

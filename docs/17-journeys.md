@@ -9,7 +9,7 @@ Two choices made: **destination first** at check-in (predicted, one tap for comm
 - **Journey**: customer, origin station, destination station, the planned itinerary as a snapshot from Transitous at check-in (legs with trip ids, planned departure and arrival per leg, transfer stops), planned arrival at the destination, status `riding | transfer | arrived | abandoned`, actual arrival at the destination, final delay, `missed_connection`, `incomplete` (finalised without reaching the destination in the app), points.
 - **Leg** = today's `rides` row, plus `journey_id`, `leg_no`, `planned_departure`, `transfer_station_id/name` (where this leg hands over, null on the last leg). The follower works per leg exactly as today.
 - **Delay that counts** = actual arrival of the last leg at the destination − planned arrival at the destination from the snapshot. Points = that delay (cancellation of any leg = at least 60). An incident is created from the journey, not the leg; incidents get `journey_id`; the leg-based path stays only as the `incomplete` fallback (delay at the last confirmed stop against the snapshot's planned arrival there).
-- **Missed connection** = the actual arrival at a transfer stop is later than the planned departure of the next leg (or that leg was cancelled). The next leg is then re-planned from the transfer stop at the actual arrival time.
+- **Missed connection** = the actual arrival at a transfer stop is later than the planned departure of the next leg (or that leg was cancelled). The next leg is then re-planned from the transfer stop at the actual arrival time — toward the plan's next change, not the destination (#81, see „Verpasster Anschluss" below).
 
 ## Backend
 
@@ -50,7 +50,7 @@ Field names are snake_case like the rest of the API. Times are UTC ISO strings.
   "live_departure": null, "live_arrival": null, "platform": "7", "cancelled": false, "delay_min": 0 }
 ```
 
-In `journey.legs` a leg also carries `leg_no`, `ride_id` (null until confirmed), `status` (`planned | riding | arrived | cancelled | skipped`), `actual_arrival`, `final_delay_min`. In `journey.next_leg` it carries `replanned` (true after a missed connection) and `reason` (`"verpasst"`, `"ausfall"` or null).
+In `journey.legs` a leg also carries `leg_no`, `ride_id` (null until confirmed), `status` (`planned | riding | arrived | cancelled | skipped`), `actual_arrival`, `final_delay_min`. In `journey.next_leg` it carries `replanned` (true after a missed connection), `reason` (`"verpasst"`, `"ausfall"` or null) and, once a train was missed at this change, `missed_trip_ids` (#81).
 
 **`GET /v1/journeys/plan?from=<stop id>&to=<stop id>[&time=<iso>][&first_trip=<trip id>]`**:
 
@@ -114,6 +114,16 @@ Rail legs only (walks between platforms are folded into the transfer); `preferre
 - The transfer confirmation also arrives as a push; tapping it opens Unterwegs on the confirmation card. (A geofence-based nudge at the transfer station is a later step; the push at the planned arrival is enough now.)
 - Demo mode: the mock gets two predicted destinations, one direct and one connecting itinerary, a transfer state.
 - The workflow E2E is rewritten around the new flow: check in via a predicted destination on a direct itinerary; Stellwerk `ff`; the rest unchanged. A second scenario with a connection: `ff` leg 1 → transfer state visible → `stellwerk confirm` → `ff` leg 2 → arrival with the journey delay.
+
+## Verpasster Anschluss: der nächste Zug (#81)
+
+Ergänzt am 6. Oktober 2026 nach einer Fahrt Lindau → Saarbrücken, deren Anschluss in Memmingen verpasst wurde.
+
+**Der Vorschlag.** Nach einem verpassten Anschluss – vom Follower erkannt oder mit „Leider verpasst" gemeldet – ist der Vorschlag der früheste Zug, der weiterbringt. Geplant wird bis zur nächsten Umsteigestation des Plans, also dorthin, wohin der verpasste Zug fahren sollte (ist das das Ziel, bis zum Ziel). Genommen wird der früheste Zug der Antwort, der laut Echtzeit noch nicht abgefahren ist, nicht ausfällt und an diesem Umstieg nicht schon verpasst wurde. Der Rest wird ab seiner Ankunft bis zum Ziel geplant. Bis zum Ziel gefragt, antwortet MOTIS nur mit Verbindungen, die keine andere schlägt: Ein früherer Zug, der denselben Anschlusszug erreicht wie ein späterer, fällt heraus. In Memmingen fehlte so der RS 7 um 09:32 nach Ulm, weil der RE 75 um 10:04 denselben ICE erreicht. Bis Ulm gefragt, sind alle Züge da. Scheitert eine der beiden Anfragen, entscheidet wie bisher die Zielplanung, mit denselben Ausschlüssen.
+
+**Die Obergrenze bleibt, wie sie war.** `earliest_onward_arrival` kommt weiter aus der Zielplanung (docs/21 §2): beim Follower aus der ersten Verbindung der Antwort, bei „Leider verpasst" aus der ersten, die nicht mit dem gerade verpassten Zug beginnt. `least` behält einen früheren Wert.
+
+**„Leider verpasst".** Jeder an diesem Umstieg verpasste Zug bleibt ausgeschlossen, auch der geplante Anschluss, den der Follower als verpasst erkannt hat. Die Liste steht als `missed_trip_ids` im Vorschlag (`next_leg`); ein neuer Umstieg bringt einen neuen Vorschlag und damit eine neue Liste. Ältere Builds lesen das Feld nicht. Gibt es keine neue Möglichkeit, ändert sich nichts, es geht keine Mitteilung hinaus, und die Antwort ist wie bisher 404 „keine weitere Verbindung ab hier". Vorher holte ein zweites Tippen den ersten Zug zurück, und jedes Tippen war eine Mitteilung.
 
 ## Not in this step
 
