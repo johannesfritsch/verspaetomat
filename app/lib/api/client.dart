@@ -426,6 +426,18 @@ class ApiClient {
 
   // -- puzzles (docs/51) ------------------------------------------------------
 
+  /// A finished picture's film (docs/51 §9b), as a stream: with the token, and from byte [from]
+  /// on when a download resumes. The caller reads the status — 200 whole, 206 the rest, 403 not
+  /// finished — and the body.
+  Future<http.StreamedResponse> puzzleVideo(String url, {int from = 0}) async {
+    final uri = url.startsWith('http') ? Uri.parse(url) : _uri(url);
+    final req = http.Request('GET', uri)
+      ..headers.addAll(await _headers(json: false))
+      ..headers['accept'] = 'video/mp4';
+    if (from > 0) req.headers['range'] = 'bytes=$from-';
+    return _http.send(req).timeout(const Duration(seconds: 30));
+  }
+
   Future<ApiPuzzles> puzzles() async => ApiPuzzles.fromJson(_map(await _get('/v1/me/puzzles')));
 
   /// A puzzle picture's bytes. [url] is the `image_url` off a piece, relative to [baseUrl]. No

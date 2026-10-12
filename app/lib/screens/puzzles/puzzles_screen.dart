@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../api/models.dart';
+import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../claims/claims_widgets.dart' show Loader;
@@ -19,11 +20,20 @@ class PuzzlesScreen extends StatelessWidget {
     return Loader<ApiPuzzles>(
       placeholder: (_) => const VScreen(eyebrow: 'Sammlung', title: 'Deine Puzzles', child: Column(children: [VSkeletonCard(), VGap.md(), VSkeletonCard()])),
       load: (repo) => repo.puzzles(),
-      builder: (context, data, refresh) => VScreen(
-        eyebrow: 'Sammlung',
-        title: 'Deine Puzzles',
-        child: PuzzlesBody(puzzles: data),
-      ),
+      builder: (context, data, refresh) {
+        // The films of finished pictures that are not on the phone yet (§9b).
+        final videos = RepoScope.of(context).videos;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          for (final p in data.puzzles) {
+            videos.ensure(p);
+          }
+        });
+        return VScreen(
+          eyebrow: 'Sammlung',
+          title: 'Deine Puzzles',
+          child: PuzzlesBody(puzzles: data),
+        );
+      },
     );
   }
 }
@@ -123,6 +133,11 @@ class _StartedCard extends StatelessWidget {
                     const VGap.xs(),
                     Text(missing, style: VText.bodyS),
                   ],
+                  // docs/51 §4, §9b: the picture becomes a film once it is finished. Said now, quietly.
+                  if (p.hasVideo && !p.complete) ...[
+                    const VGap.xs(),
+                    Text('Bewegt sich, wenn es fertig ist.', style: VText.caption.copyWith(color: VColors.ink2)),
+                  ],
                 ],
               ),
             ),
@@ -143,63 +158,32 @@ class _DoneTile extends StatelessWidget {
     return MergeSemantics(
       child: VCard(
         padding: const EdgeInsets.all(VSpace.cardTight),
-        onTap: () => _show(context, p),
+        onTap: () => showFinishedPicture(context, p),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            PuzzleBoardOf(p, complete: true),
+            // A picture that moves says so in its corner (§9b).
+            Stack(
+              children: [
+                PuzzleBoardOf(p, complete: true),
+                if (p.hasVideo)
+                  Positioned(
+                    right: VSpace.s,
+                    bottom: VSpace.s,
+                    child: Container(
+                      key: const Key('film-badge'),
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(color: VColors.ink.withValues(alpha: 0.7), shape: BoxShape.circle),
+                      child: const Icon(Icons.play_arrow_rounded, size: 16, color: VColors.inkOnDark),
+                    ),
+                  ),
+              ],
+            ),
             const VGap.s(),
             Text(keepLastWord(p.title), style: VText.bodyStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
             const SizedBox(height: 2),
             Text(p.ngoName, style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// The picture large, with the Verein's sentence and the day the last piece came.
-  void _show(BuildContext context, ApiPuzzle p) {
-    showVSheet<void>(
-      context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.only(bottom: VSpace.l),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            VSheetHeader(title: p.title, subtitle: p.ngoName),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(VSpace.sheet, VSpace.s, VSpace.sheet, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // The whole picture as a thing in the hand (§9a): it turns under a finger. As
-                  // large as the sheet allows without pushing the sentence off it, and a little
-                  // smaller than that, so its edge has room when it turns.
-                  LayoutBuilder(
-                    builder: (context, c) {
-                      final maxHeight = MediaQuery.sizeOf(ctx).height * 0.5;
-                      final width = (c.maxWidth < maxHeight * p.aspectRatio ? c.maxWidth : maxHeight * p.aspectRatio) * 0.88;
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: VSpace.m),
-                        child: Center(
-                          child: Semantics(image: true, label: 'Puzzle ${p.title}, fertig. Zum Drehen ziehen.', child: PictureTile(puzzle: p, width: width)),
-                        ),
-                      );
-                    },
-                  ),
-                  if (p.caption.isNotEmpty) ...[
-                    const VGap.m(),
-                    Text(p.caption, style: VText.bodyL),
-                  ],
-                  if (p.completedAt != null) ...[
-                    const VGap.s(),
-                    Text('Fertig am ${finishedOn(p.completedAt!)}', style: VText.caption),
-                  ],
-                ],
-              ),
-            ),
           ],
         ),
       ),

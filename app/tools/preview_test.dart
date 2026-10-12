@@ -6,6 +6,7 @@
 //
 // It lives under tools/ rather than test/ so `flutter test` does not run it in the ordinary
 // suite: it asserts nothing, it only draws.
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -14,12 +15,15 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/models.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
+import 'package:verspaetomat/screens/puzzles/piece_in_hand.dart' show PictureTile;
 import 'package:verspaetomat/screens/puzzles/puzzle_widgets.dart';
 import 'package:verspaetomat/screens/puzzles/puzzles_screen.dart';
 import 'package:verspaetomat/state/demo_state.dart';
+import 'package:verspaetomat/state/puzzle_video_store.dart';
 import 'package:verspaetomat/theme/tokens.dart';
 import 'package:verspaetomat/widgets/kit.dart';
 
@@ -602,6 +606,9 @@ void main() {
           imageUrl: 'assets/demo/puzzles/$ngo.webp',
           width: 900,
           height: 1200,
+          // §9b: every Demo picture moves once it is finished.
+          hasVideo: true,
+          video: owned.length == 12 ? ApiPuzzleVideo(url: 'assets/demo/puzzles/$ngo.mp4', bytes: 0) : null,
         );
     final all = [for (var i = 0; i < 12; i++) i];
     return _withSession(
@@ -681,6 +688,54 @@ void main() {
       ),
     );
   });
+
+  // docs/51 §9b: the button on a finished picture — ready to play, coming in (the ring at 40 %),
+  // and failed (try again) — and the back of a finished picture, set like a card.
+  _preview('puzzle-film-states', width: 900, height: 520, (context) {
+    // The bench runs in fake time, where nothing downloads: the states are shown as they would be.
+    final store = PuzzleVideoStore(directory: () async => Directory.systemTemp, fetch: (url, {from = 0}) => Completer<http.StreamedResponse>().future);
+    ApiPuzzle picture(String id, String url) => ApiPuzzle(
+          imageId: id,
+          rows: 4,
+          cols: 3,
+          owned: [for (var i = 0; i < 12; i++) i],
+          complete: true,
+          title: 'Die erste Reihe am Hang',
+          caption: 'Vierhundert Setzlinge bei Monschau, gepflanzt im Oktober.',
+          ngoId: 'wald',
+          ngoName: 'Wald für morgen e.V.',
+          imageUrl: 'assets/demo/puzzles/wald.webp',
+          width: 900,
+          height: 1200,
+          completedAt: DateTime(2026, 10, 3),
+          hasVideo: true,
+          video: ApiPuzzleVideo(url: url, bytes: 1000, seconds: 20, sha256: 'abcdef01', width: 900, height: 1200),
+        );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // ignore: invalid_use_of_visible_for_testing_member
+      store.debugShow(picture('coming', '/v1/puzzle-videos/coming'), const PuzzleVideoState(VideoPhase.downloading, progress: 0.4));
+      // ignore: invalid_use_of_visible_for_testing_member
+      store.debugShow(picture('failed', '/v1/puzzle-videos/failed'), PuzzleVideoState.failed);
+    });
+    return _withSession(
+      Padding(
+        padding: const EdgeInsets.all(VSpace.xl),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            PictureTile(puzzle: picture('ready', 'assets/demo/puzzles/wald.mp4'), width: 180, tilt: TileTilt.rest),
+            const SizedBox(width: VSpace.xl),
+            PictureTile(puzzle: picture('coming', '/v1/puzzle-videos/coming'), width: 180, tilt: TileTilt.rest),
+            const SizedBox(width: VSpace.xl),
+            PictureTile(puzzle: picture('failed', '/v1/puzzle-videos/failed'), width: 180, tilt: TileTilt.rest),
+            const SizedBox(width: VSpace.xl),
+            PictureTile(puzzle: picture('back', 'assets/demo/puzzles/wald.mp4'), width: 180, tilt: const TileTilt(0.12, 3.0)),
+          ],
+        ),
+      ),
+      videos: store,
+    );
+  });
 }
 
 class _BenchBack extends StatelessWidget {
@@ -695,11 +750,11 @@ class _BenchBack extends StatelessWidget {
 List<PieceTier> _tiers(String s) => [for (final c in s.split('')) c == 'H' ? PieceTier.hour : (c == 'q' ? PieceTier.quarter : PieceTier.minute)];
 
 /// A Demo session around [child], for the pieces that ask the repository for their pictures.
-Widget _withSession(Widget child) => FutureBuilder<SharedPreferences>(
+Widget _withSession(Widget child, {PuzzleVideoStore? videos}) => FutureBuilder<SharedPreferences>(
       future: SharedPreferences.getInstance(),
       builder: (context, prefs) => prefs.data == null
           ? const SizedBox.shrink()
-          : RepoScope(session: Session(demo: DemoState(), prefs: prefs.data!, apiUrl: ''), child: Material(type: MaterialType.transparency, child: child)),
+          : RepoScope(session: Session(demo: DemoState(), prefs: prefs.data!, apiUrl: '', videoStore: videos), child: Material(type: MaterialType.transparency, child: child)),
     );
 
 /// Registers the faces fetched by tools/fetch-preview-fonts.sh, if they are there.

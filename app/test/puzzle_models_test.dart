@@ -65,6 +65,29 @@ void main() {
     expect(ApiPuzzlePiece.fromJson({...piece, 'piece': 4}..remove('tier')).tier, PieceTier.hour);
   });
 
+  test('a picture that moves: promised before it is finished, named once it is', () {
+    final underway = ApiPuzzle.fromJson({...piece, 'has_video': true, 'video': null});
+    expect(underway.hasVideo, isTrue);
+    expect(underway.video, isNull);
+    final done = ApiPuzzle.fromJson({
+      ...piece,
+      'complete': true,
+      'has_video': true,
+      'video': {'url': '/v1/puzzle-videos/x', 'bytes': 2400000, 'seconds': 20.5, 'sha256': 'ab' * 32, 'width': 900, 'height': 1200},
+    });
+    expect(done.video!.url, '/v1/puzzle-videos/x');
+    expect(done.video!.bytes, 2400000);
+    expect(done.video!.seconds, 20.5);
+    expect(done.video!.aspectRatio, 0.75);
+    expect(ApiPuzzlePiece.fromJson({...piece, 'has_video': true}).puzzle.hasVideo, isTrue);
+  });
+
+  test('a server before films: no promise, no film', () {
+    final p = ApiPuzzle.fromJson(piece);
+    expect(p.hasVideo, isFalse);
+    expect(p.video, isNull);
+  });
+
   test('the current journey carries it beside just_arrived, and an older server not at all', () {
     final journey = {'id': 'j1', 'status': 'arrived', 'created_at': '2026-10-12T17:00:00Z'};
     final live = ApiJourneyLive.fromJson({'journey': journey, 'just_arrived': true, 'piece': piece});

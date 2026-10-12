@@ -51,6 +51,7 @@ class IchScreen extends StatelessWidget {
       load: (repo) async {
         // Asked as the load starts, not as the screen was built.
         final puzzlesOn = RepoScope.read(context).puzzlesOn;
+        final videos = RepoScope.read(context).videos;
         final me = await repo.getMe();
         final badges = await repo.badges();
         List<ApiRide> rides = const [];
@@ -64,6 +65,10 @@ class IchScreen extends StatelessWidget {
         } catch (_) {}
         final facts = await repo.shareFacts().catchError((_) => ApiShareFacts.empty);
         final puzzles = puzzlesOn ? await repo.puzzles().catchError((_) => ApiPuzzles.empty) : null;
+        // The films of finished pictures that are not on the phone yet (docs/51 §9b).
+        for (final p in puzzles?.puzzles ?? const <ApiPuzzle>[]) {
+          videos.ensure(p);
+        }
         return _IchData(me, badges, rides, standing, ledger, facts, puzzles);
       },
       builder: (context, data, refresh) {

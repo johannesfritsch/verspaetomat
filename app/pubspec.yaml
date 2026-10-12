@@ -52,6 +52,9 @@ dependencies:
   # docs/51 §9a: the piece in the hand leans with the phone. BSD-3-Clause; CoreMotion on iOS and
   # the sensor manager on Android, neither asks for a permission for the accelerometer.
   sensors_plus: ^7.1.1
+  # docs/51 §9b: a finished picture's film, from the phone's own copy. The Flutter team's plugin;
+  # AVPlayer on iOS, ExoPlayer on Android.
+  video_player: ^2.14.1
 
 dev_dependencies:
   integration_test:

@@ -422,6 +422,12 @@ void main() {
     await shot('puzzle-hand-back');
     await tester.tap(find.byKey(const Key('piece-in-hand-close')));
     await wait(tester, 800);
+    // §9b: a finished picture in its sheet, with its film's button.
+    await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -500));
+    await wait(tester, 600);
+    await tester.tap(find.byKey(const Key('film-badge')).first, warnIfMissed: false);
+    await shot('puzzle-fertig-film');
+    await dismissSheet(tester);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await wait(tester, 600);
     // docs/27: the shareable Fahrkarte. The arrival card, the punctual one (which is a

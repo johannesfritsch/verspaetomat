@@ -9,6 +9,7 @@ import '../api/client.dart';
 import '../api/token_store.dart';
 import '../flags/flag_store.dart';
 import '../flags/flags.dart';
+import '../state/puzzle_video_store.dart';
 import '../state/demo_state.dart';
 import 'app_repository.dart';
 import 'http_repository.dart';
@@ -26,7 +27,7 @@ extension BackendModeX on BackendMode {
 /// The session: which backend is active, who the customer is, and the
 /// small amount of shared state screens need (NGOs, health).
 class Session extends ChangeNotifier with WidgetsBindingObserver {
-  Session({required this.demo, required this.prefs, required this.apiUrl, TokenStore? tokens, FlagStore? flagStore})
+  Session({required this.demo, required this.prefs, required this.apiUrl, TokenStore? tokens, FlagStore? flagStore, this.videoStore})
       // One keychain slot per API host: a build pointed at the local backend and one pointed at
       // the server keep separate device tokens instead of invalidating each other.
       : tokens = tokens ?? TokenStore(namespace: _namespaceFor(apiUrl)) {
@@ -195,6 +196,23 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
 
   AppRepository get repo => mode == BackendMode.local ? _http : _mock;
   bool get isLocal => mode == BackendMode.local;
+
+  /// The films of finished pictures (docs/51 §9b), fetched once and kept on the phone.
+  late final PuzzleVideoStore videos = videoStore ?? PuzzleVideoStore(fetch: (url, {from = 0}) => _http.client.puzzleVideo(url, from: from));
+
+  /// A test's store instead of the real one.
+  final PuzzleVideoStore? videoStore;
+
+  /// At start: the films of finished pictures that are not on the phone yet — a download that a
+  /// closed app cut off, or a picture finished on another phone.
+  Future<void> _fetchFinishedFilms() async {
+    if (!puzzlesOn) return;
+    try {
+      for (final p in (await repo.puzzles()).puzzles) {
+        videos.ensure(p);
+      }
+    } catch (_) {}
+  }
 
   /// Whether the app shows anything of the puzzles (docs/51): always in Demo, where every flag is
   /// false, and against a server only while it awards pieces.
@@ -413,6 +431,7 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
         // mode does not leave the old account's flags standing.
         _flags.setPersonal(me?.flags);
         ngos = await repo.ngos();
+        unawaited(_fetchFinishedFilms());
       }
       await _restartEvents();
     } catch (e) {

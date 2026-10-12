@@ -1,9 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../api/models.dart';
 import '../../repo/repo_scope.dart';
+import '../../state/puzzle_video_store.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import 'puzzle_video.dart';
 import 'puzzle_widgets.dart';
 
 /// The board size a piece's outline is cut on: only its proportions matter.
@@ -222,66 +226,238 @@ class PieceBack extends StatelessWidget {
   }
 }
 
-/// The back of a finished picture: the board it is mounted on, and what it is.
+/// The back of a finished picture, set like the back of a printed card: whose it is, what it
+/// shows, the Verein's sentence, the day it was finished, and that it moves.
 class PictureBack extends StatelessWidget {
   const PictureBack({super.key, required this.puzzle});
   final ApiPuzzle puzzle;
 
   @override
   Widget build(BuildContext context) {
-    final done = puzzle.completedAt;
+    final p = puzzle;
+    final done = p.completedAt;
     return ColoredBox(
       color: VColors.track,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(VSpace.l),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(keepLastWord(puzzle.title), style: VText.title, textAlign: TextAlign.center),
-              const VGap.xs(),
-              Text(puzzle.ngoName, style: VText.bodyS, textAlign: TextAlign.center),
-              if (done != null) ...[
-                const VGap.s(),
-                Text('Fertig am ${finishedOn(done)}', style: VText.caption, textAlign: TextAlign.center),
-              ],
+      child: Padding(
+        padding: const EdgeInsets.all(VSpace.l),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            VEyebrow(p.ngoName),
+            const VGap.s(),
+            Text(keepLastWord(p.title), style: VText.h3),
+            if (p.caption.isNotEmpty) ...[
+              const VGap.s(),
+              Text(p.caption, style: VText.bodyS),
             ],
-          ),
+            const Spacer(),
+            Row(
+              children: [
+                if (done != null) Expanded(child: Text('Fertig am ${finishedOn(done)}', style: VText.caption)) else const Spacer(),
+                if (p.hasVideo) const Icon(Icons.play_circle_outline, size: VControl.chevron, color: VColors.ink2),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// A finished picture as a thing in the hand: a print on board with an edge, that turns (§9a, §9b).
-class PictureTile extends StatelessWidget {
-  const PictureTile({super.key, required this.puzzle, required this.width, this.tilt, this.overlay});
+/// A finished picture as a thing in the hand: a print on board with an edge, that turns (§9a), and
+/// with its film's button on it when it has one (§9b). A tap plays the film once it is here.
+class PictureTile extends StatefulWidget {
+  const PictureTile({super.key, required this.puzzle, required this.width, this.tilt});
   final ApiPuzzle puzzle;
   final double width;
   final TileTilt? tilt;
 
-  /// Laid on the picture: the play button, once a picture can have a video (§9b).
-  final Widget? overlay;
+  @override
+  State<PictureTile> createState() => _PictureTileState();
+}
+
+class _PictureTileState extends State<PictureTile> {
+  final _button = GlobalKey<_FilmButtonState>();
+  bool _asked = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_asked) return;
+    _asked = true;
+    // A finished picture whose film is not on the phone yet: fetch it now (§9b).
+    final p = widget.puzzle;
+    if (p.complete && p.video != null) RepoScope.read(context).videos.ensure(p);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final p = puzzle;
+    final p = widget.puzzle;
     final board = boardFor(p);
     final outline = Path()..addRRect(RRect.fromRectAndRadius(Offset.zero & board, Radius.circular(board.width * VRadius.md / 300)));
+    final session = RepoScope.of(context);
+    final film = p.video != null && p.complete ? session.videos : null;
+    final button = film == null ? null : _FilmButton(key: _button, puzzle: p, store: film);
     return PuzzlePicture(
-      image: RepoScope.of(context).repo.puzzleImage(p),
+      image: session.repo.puzzleImage(p),
       builder: (context, img) => Tile3D(
         key: const Key('picture-tile'),
         cacheKey: '${p.imageId}/picture',
         outline: outline,
         image: img,
         source: pictureSource(img == null ? board : Size(img.width.toDouble(), img.height.toDouble()), board, Offset.zero & board),
-        width: width,
-        depth: 0.025,
-        tilt: tilt,
-        overlay: overlay,
+        width: widget.width,
+        depth: 0.018,
+        tilt: widget.tilt,
+        overlay: button == null ? null : Align(alignment: Alignment.bottomCenter, child: Padding(padding: const EdgeInsets.only(bottom: VSpace.l), child: button)),
+        onTap: button == null ? null : () => _button.currentState?.press(),
         back: (context) => PictureBack(puzzle: p),
       ),
     );
   }
+}
+
+/// The round button on a finished picture with a film: play when it is here, a ring while it
+/// comes, a way to try again when it did not.
+class _FilmButton extends StatefulWidget {
+  const _FilmButton({super.key, required this.puzzle, required this.store});
+  final ApiPuzzle puzzle;
+  final PuzzleVideoStore store;
+
+  @override
+  State<_FilmButton> createState() => _FilmButtonState();
+}
+
+class _FilmButtonState extends State<_FilmButton> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 360));
+
+  /// Play when it is here; while it comes, the ring answers with a pulse; after a failure, again.
+  void press() {
+    final state = widget.store.stateOf(widget.puzzle);
+    switch (state.phase) {
+      case VideoPhase.ready:
+        showPuzzleVideo(context, widget.puzzle, state);
+      case VideoPhase.failed:
+        widget.store.retry(widget.puzzle);
+      case VideoPhase.none:
+        widget.store.ensure(widget.puzzle);
+        _pulse.forward(from: 0);
+      case VideoPhase.queued || VideoPhase.downloading:
+        _pulse.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<PuzzleVideoState>(
+      valueListenable: widget.store.watch(widget.puzzle),
+      builder: (context, state, _) {
+        final loading = state.phase == VideoPhase.queued || state.phase == VideoPhase.downloading || state.phase == VideoPhase.none;
+        final label = switch (state.phase) {
+          VideoPhase.ready => 'Video abspielen',
+          VideoPhase.failed => 'Video nicht geladen, noch einmal versuchen',
+          _ => 'Video lädt',
+        };
+        return Semantics(
+          button: true,
+          label: label,
+          excludeSemantics: true,
+          onTap: press,
+          child: GestureDetector(
+            key: const Key('film-button'),
+            behavior: HitTestBehavior.opaque,
+            onTap: press,
+            child: AnimatedBuilder(
+              animation: _pulse,
+              builder: (context, child) => Transform.scale(scale: 1 + 0.12 * math.sin(math.pi * _pulse.value), child: child),
+              child: SizedBox.square(
+                dimension: VControl.badge,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      width: VControl.badge,
+                      height: VControl.badge,
+                      decoration: BoxDecoration(color: VColors.ink.withValues(alpha: 0.7), shape: BoxShape.circle),
+                      child: Icon(
+                        state.phase == VideoPhase.failed ? Icons.refresh : Icons.play_arrow_rounded,
+                        color: VColors.inkOnDark.withValues(alpha: state.ready || state.phase == VideoPhase.failed ? 1 : 0.55),
+                        size: state.phase == VideoPhase.failed ? VControl.badgeIcon : 30,
+                      ),
+                    ),
+                    if (loading)
+                      SizedBox.square(
+                        dimension: VControl.badge - 4,
+                        child: CircularProgressIndicator(
+                          key: const Key('film-progress'),
+                          value: state.phase == VideoPhase.downloading ? state.progress : null,
+                          strokeWidth: 2.5,
+                          color: VColors.inkOnDark,
+                          backgroundColor: VColors.trackOnDark,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// A finished picture large (docs/51 §6, §9a, §9b): the picture as a thing in the hand, with its
+/// film's play button when it has one, the Verein's sentence and the day the last piece came.
+Future<void> showFinishedPicture(BuildContext context, ApiPuzzle p) {
+  return showVSheet<void>(
+    context,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.only(bottom: VSpace.l),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          VSheetHeader(title: p.title, subtitle: p.ngoName),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(VSpace.sheet, VSpace.s, VSpace.sheet, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // The whole picture as a thing in the hand (§9a): it turns under a finger. As
+                // large as the sheet allows without pushing the sentence off it, and a little
+                // smaller than that, so its edge has room when it turns.
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final maxHeight = MediaQuery.sizeOf(ctx).height * 0.5;
+                    final width = (c.maxWidth < maxHeight * p.aspectRatio ? c.maxWidth : maxHeight * p.aspectRatio) * 0.88;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: VSpace.m),
+                      child: Center(
+                        child: Semantics(image: true, label: 'Puzzle ${p.title}, fertig. Zum Drehen ziehen.', child: PictureTile(puzzle: p, width: width)),
+                      ),
+                    );
+                  },
+                ),
+                if (p.caption.isNotEmpty) ...[
+                  const VGap.m(),
+                  Text(p.caption, style: VText.bodyL),
+                ],
+                if (p.completedAt != null) ...[
+                  const VGap.s(),
+                  Text('Fertig am ${finishedOn(p.completedAt!)}', style: VText.caption),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

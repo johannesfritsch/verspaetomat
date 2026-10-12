@@ -307,8 +307,9 @@ class Tile3D extends StatefulWidget {
     required this.back,
     required this.width,
     this.tier,
-    this.depth = 0.07,
+    this.depth = 0.05,
     this.overlay,
+    this.onTap,
     this.tilt,
     this.start = TileTilt.flat,
   });
@@ -340,6 +341,9 @@ class Tile3D extends StatefulWidget {
 
   /// Laid on the front and turned with it — the play button of a picture with a video (§9b).
   final Widget? overlay;
+
+  /// A tap, as opposed to a drag: a finished picture plays its film (§9b).
+  final VoidCallback? onTap;
 
   /// A fixed tilt: no finger, no sensor, no spring. For still frames.
   final TileTilt? tilt;
@@ -546,6 +550,7 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
     if (widget.tilt != null) return tile;
     tile = GestureDetector(
       behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
       onPanStart: (_) => _physics.dragging = true,
       onPanUpdate: (d) {
         _physics.drag(d.delta, _box.width);

@@ -1236,6 +1236,8 @@ class MockRepository with RideWriteHook implements AppRepository {
         startedAt: state.puzzleStarted[p.id]?.toUtc(),
         lastPieceAt: state.puzzleLastPiece[p.id]?.toUtc(),
         completedAt: state.puzzleCompleted[p.id]?.toUtc(),
+        hasVideo: true,
+        video: state.puzzleComplete(p.id) ? ApiPuzzleVideo(url: p.video, bytes: 0, seconds: 20, width: DemoPuzzle.width, height: DemoPuzzle.height) : null,
       );
 
   ApiPuzzlePiece? _piece(DemoPiece? d) {

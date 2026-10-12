@@ -9,6 +9,7 @@ import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'piece_in_hand.dart';
+import 'puzzle_video.dart';
 
 /// The cut of a picture off the wire.
 PuzzleCut cutOf(ApiPuzzle p) => PuzzleCut(imageId: p.imageId, rows: p.rows, cols: p.cols);
@@ -74,7 +75,7 @@ class PuzzleBoardOf extends StatelessWidget {
 String arrivalPieceLabel(ApiPuzzlePiece piece) {
   final p = piece.puzzle;
   final base = 'Ein ${tierPieceName(piece.tier)} ${piece.ownCause ? 'für' : 'von'} ${p.ngoName}, ${puzzleProgress(p)}';
-  final more = p.complete ? 'Fertig: ${p.title}.' : stillMissing(p);
+  final more = p.complete ? 'Fertig: ${p.title}.${p.hasVideo ? ' Das Bild bewegt sich jetzt.' : ''}' : stillMissing(p);
   return more == null ? base : '$base. $more';
 }
 
@@ -155,6 +156,9 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
     super.didChangeDependencies();
     if (_started) return;
     _started = true;
+    // The last piece of a picture with a film: the film comes now, while the finish plays (§9b).
+    final p = widget.piece.puzzle;
+    if (p.complete && p.video != null) RepoScope.read(context).videos.ensure(p);
     if (_still || MediaQuery.disableAnimationsOf(context)) {
       _c.value = 1;
     } else {
@@ -281,6 +285,11 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
                               const VGap.xs(),
                               Text(p.caption, style: VText.bodyS),
                             ],
+                            if (p.hasVideo) ...[
+                              const VGap.s(),
+                              Text('Das Bild bewegt sich jetzt.', style: VText.bodySStrong),
+                              _WatchLink(puzzle: p),
+                            ],
                           ],
                         ),
                       ),
@@ -289,6 +298,40 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// „Ansehen": the film when it is on the phone, else the finished picture, whose button shows it
+/// coming (docs/51 §9b).
+class _WatchLink extends StatelessWidget {
+  const _WatchLink({required this.puzzle});
+  final ApiPuzzle puzzle;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      key: const Key('arrival-watch'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        final film = RepoScope.read(context).videos.stateOf(puzzle);
+        if (film.ready) {
+          showPuzzleVideo(context, puzzle, film);
+        } else {
+          showFinishedPicture(context, puzzle);
+        }
+      },
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: VControl.touch),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.play_arrow_rounded, size: VControl.chevron, color: VColors.red),
+            const SizedBox(width: VSpace.xs),
+            Text('Ansehen', style: VText.link),
+          ],
         ),
       ),
     );

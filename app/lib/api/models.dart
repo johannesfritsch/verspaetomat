@@ -2272,6 +2272,32 @@ enum PieceTier {
 /// Unknown and absent read as a minute, which is what every slot was before tiers.
 PieceTier pieceTierFromWire(String? s) => PieceTier.values.firstWhere((t) => t.name == s, orElse: () => PieceTier.minute);
 
+/// The film a finished picture turns into (docs/51 §9b). The wire names it only once the picture
+/// is complete; before that a puzzle says no more than [ApiPuzzle.hasVideo].
+class ApiPuzzleVideo {
+  const ApiPuzzleVideo({required this.url, required this.bytes, this.seconds = 0, this.sha256 = '', this.width = 0, this.height = 0});
+
+  /// Relative to the API's base URL, and fetched with the token. Demo mode puts an asset path here.
+  final String url;
+  final int bytes;
+  final double seconds;
+  final String sha256;
+  final int width;
+  final int height;
+
+  /// Width over height, for laying the player out before the first frame.
+  double get aspectRatio => width > 0 && height > 0 ? width / height : 3 / 4;
+
+  factory ApiPuzzleVideo.fromJson(Map<String, dynamic> j) => ApiPuzzleVideo(
+        url: _s(j['url']),
+        bytes: _i(j['bytes']),
+        seconds: _f(j['seconds']),
+        sha256: _s(j['sha256']),
+        width: _i(j['width']),
+        height: _i(j['height']),
+      );
+}
+
 /// A Verein's picture and the pieces of it this passenger has (docs/51 §8, `GET /v1/me/puzzles`).
 /// The server cuts nothing: it sends the whole picture and says which pieces are owned, and the
 /// phone draws the cut.
@@ -2293,6 +2319,8 @@ class ApiPuzzle {
     this.startedAt,
     this.lastPieceAt,
     this.completedAt,
+    this.hasVideo = false,
+    this.video,
   });
   final String imageId;
   final int rows;
@@ -2317,6 +2345,12 @@ class ApiPuzzle {
   final DateTime? startedAt;
   final DateTime? lastPieceAt;
   final DateTime? completedAt;
+
+  /// The picture moves once it is finished (docs/51 §9b) — said from the start, as a promise.
+  final bool hasVideo;
+
+  /// Where the film is: only on a finished picture, and only from a server that has films.
+  final ApiPuzzleVideo? video;
 
   int get pieces => rows * cols;
 
@@ -2348,6 +2382,8 @@ class ApiPuzzle {
         startedAt: _dt(j['started_at']),
         lastPieceAt: _dt(j['last_piece_at']),
         completedAt: _dt(j['completed_at']),
+        hasVideo: _b(j['has_video']),
+        video: _m(j['video']) == null ? null : ApiPuzzleVideo.fromJson(_m(j['video'])!),
       );
 }
 

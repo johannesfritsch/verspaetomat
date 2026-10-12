@@ -1,5 +1,5 @@
 // The piece in the hand on a real engine (docs/51 §9a): the shader's light, a finger turning the
-// piece, the back, and a finished picture in its sheet. Demo mode; no server.
+// piece, the back, a finished picture in its sheet, and its film playing (§9b). Demo mode; no server.
 //
 // flutter test integration_test/piece_hand_test.dart -d <simulator udid> --dart-define=NO_LOCATION=1
 //
@@ -73,5 +73,10 @@ void main() {
     await wait(tester, 600);
     await tester.tap(find.text('Die erste Reihe am Hang'), warnIfMissed: false);
     await shot(tester, 'picture-tile');
+
+    // docs/51 §9b: the finished picture's film, playing.
+    await tester.tap(find.byKey(const Key('film-button')));
+    await wait(tester, 2500);
+    await shot(tester, 'video-playing');
   });
 }

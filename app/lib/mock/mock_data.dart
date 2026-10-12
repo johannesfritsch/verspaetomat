@@ -185,6 +185,10 @@ class DemoPuzzle {
   static const height = 1200;
 
   String get asset => 'assets/demo/puzzles/$ngoId.webp';
+
+  /// The film the picture turns into when it is finished (docs/51 §9b): 20 s, its first frame the
+  /// picture above.
+  String get video => 'assets/demo/puzzles/$ngoId.mp4';
 }
 
 class VBadge {
