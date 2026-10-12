@@ -71,7 +71,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
         final jl = await repo.currentJourney();
         if (jl != null && jl.journey.arrived) {
           journey = jl.journey;
-          piece = jl.piece ?? jl.journey.piece;
+          piece = jl.piece;
         }
       } catch (_) {}
       if (result == null) {

@@ -6,6 +6,7 @@ import '../../repo/repo_scope.dart';
 import '../../state/ride_monitor.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import '../puzzles/puzzle_widgets.dart' show ArrivalPiece;
 import 'angekommen_screen.dart';
 import 'change_train_sheet.dart';
 import 'checkin_flow.dart';
@@ -1331,7 +1332,7 @@ Future<void> showAbortSheet(BuildContext context, RideMonitor monitor) {
                     // The journey's own ticket (#66), not the setting: that was chosen at check-in.
                     final ticket = monitor.journey?.ticket?.legacy ?? RepoScope.read(context).me?.settings.ticket;
                     await _abortAction(context, monitor, () => monitor.finish(arrived: false, reason: 'aufgegeben'));
-                    if (context.mounted) await showGaveUpSheet(context, ticket, monitor.lastAbandonMinutes);
+                    if (context.mounted) await showGaveUpSheet(context, ticket, monitor.lastAbandonMinutes, monitor.lastAbandonPiece);
                   },
                 ),
                 const VGap.s(),
@@ -1368,7 +1369,9 @@ Future<void> _abortAction(BuildContext context, RideMonitor monitor, Future<void
 
 /// After "Ich gebe auf": the right the passenger has instead, which almost nobody knows.
 /// Art. 18 VO (EU) 2021/782 — the fare back, not the compensation (docs/02, docs/21 §0).
-Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket, [int minutes = 0]) {
+///
+/// [piece]: what the waiting brought (docs/51 §3), shown and revealed as on an arrival.
+Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket, [int minutes = 0, ApiPuzzlePiece? piece]) {
   final single = ticket == TicketType.einzelfahrkarte;
   return showVSheet(
     context,
@@ -1387,6 +1390,8 @@ Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket, [int minu
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // No count-up on this sheet: the piece comes in almost at once.
+                ArrivalPiece(piece: piece, delay: const Duration(milliseconds: 300)),
                 const VGap.s(),
                 Text('Ein Anspruch entsteht nicht — die Entschädigung hängt an der Ankunft.', style: VText.bodyS.copyWith(color: VColors.ink2)),
                 const VGap.m(),

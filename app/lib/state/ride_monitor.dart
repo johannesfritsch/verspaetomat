@@ -57,6 +57,9 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
   /// Minutes the last aborted journey counts (docs/22 §1); 0 after an arrival.
   int lastAbandonMinutes = 0;
 
+  /// The puzzle piece the last given-up journey brought, for the same card (docs/51 §3).
+  ApiPuzzlePiece? lastAbandonPiece;
+
   /// The sheet stays open on arrival and shows the reveal; this is that state.
   bool get arrivedInSheet => sheetOpen && arrived;
 
@@ -175,6 +178,9 @@ class RideMonitor extends ChangeNotifier with WidgetsBindingObserver {
         // closing card can name it. Arriving goes through the reveal as before.
         final done = await session.repo.finishJourney(j.journey.id, arrived: arrived, reason: reason);
         lastAbandonMinutes = arrived ? 0 : done.countedMinutes;
+        // Giving up brings a piece too (docs/51 §3): the waiting happened. Arriving shows its
+        // piece in the reveal, which reads it off the current journey.
+        lastAbandonPiece = arrived ? null : done.piece;
         await refresh(quiet: true);
         if (!arrived) sheetOpen = false;
         return null;
