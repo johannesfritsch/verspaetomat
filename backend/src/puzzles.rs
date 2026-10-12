@@ -558,8 +558,10 @@ pub async fn image(State(s): State<AppState>, h: HeaderMap, Path(id): Path<Strin
         Err(e) => return internal(e).into_response(),
     };
     let etag = format!("\"{sha}\"");
+    // A 304 repeats the Cache-Control the 200 would carry (RFC 9110 §15.4.5).
+    let cache = "public, max-age=31536000, immutable";
     if h.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
-        return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
+        return (StatusCode::NOT_MODIFIED, [(header::CACHE_CONTROL, cache.to_string()), (header::ETAG, etag)]).into_response();
     }
     let bytes = match cached(id) {
         Some(b) => b,
@@ -573,8 +575,7 @@ pub async fn image(State(s): State<AppState>, h: HeaderMap, Path(id): Path<Strin
             Err(e) => return internal(e).into_response(),
         },
     };
-    let cache = "public, max-age=31536000, immutable".to_string();
-    ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, cache), (header::ETAG, etag)], bytes).into_response()
+    ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, cache.to_string()), (header::ETAG, etag)], bytes).into_response()
 }
 
 #[cfg(test)]

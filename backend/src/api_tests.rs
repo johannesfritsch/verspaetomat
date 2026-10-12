@@ -2078,9 +2078,10 @@ async fn the_picture_is_public_and_cached_for_good(pool: PgPool) {
     assert_eq!(h["cache-control"], "public, max-age=31536000, immutable");
     let sha: String = sqlx::query_scalar("select sha256 from puzzle_images where id = $1").bind(image).fetch_one(&pool).await.unwrap();
     assert_eq!(h["etag"], format!("\"{sha}\"").as_str());
-    let (s, _, body) = raw_get(&app, &format!("/v1/puzzle-images/{image}"), &[("if-none-match", &format!("\"{sha}\""))]).await;
+    let (s, h, body) = raw_get(&app, &format!("/v1/puzzle-images/{image}"), &[("if-none-match", &format!("\"{sha}\""))]).await;
     assert_eq!(s, StatusCode::NOT_MODIFIED);
     assert!(body.is_empty());
+    assert_eq!(h["cache-control"], "public, max-age=31536000, immutable");
 
     let (s, _, _) = raw_get(&app, &format!("/v1/puzzle-images/{}", Uuid::new_v4()), &[]).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
