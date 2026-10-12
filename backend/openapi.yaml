@@ -353,11 +353,11 @@ paths:
       responses: { '200': { description: '{deleted, deactivated}' }, '404': { description: No such NGO }, '409': { description: Last active NGO } }
   /admin/ngos/{id}/puzzle-images:
     post:
-      summary: "A puzzle picture for this NGO (docs/51 §8). The bytes must be the content_type they claim (magic bytes), at most 1 MB decoded, without an EXIF rotation, and the grid must cut them into roughly square pieces ((width/cols)/(height/rows) within 0.66–1.5). tiers: every slot's tier, row by row; absent, the server lays out docs/51 §2a (max(1, round(n/12)) hours nearest the centre, round(n/4) quarters scattered, the rest minutes)."
+      summary: "A puzzle picture for this NGO (docs/51 §8). The bytes must be the content_type they claim (magic bytes), at most 1 MB decoded, at most 2400 px on the longest side and 6 megapixels, without an EXIF rotation, and the grid must cut them into roughly square pieces ((width/cols)/(height/rows) within 0.66–1.5). tiers: every slot's tier, row by row; absent, the server lays out docs/51 §2a (max(1, round(n/12)) hours nearest the centre, round(n/4) quarters scattered, the rest minutes)."
       security: [{ adminToken: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody: { content: { application/json: { schema: { type: object, required: [title, rows, cols, content_type, data], properties: { title: { type: string }, caption: { type: string }, rows: { type: integer, minimum: 2, maximum: 8 }, cols: { type: integer, minimum: 2, maximum: 8 }, tiers: { type: array, items: { type: string, enum: [minute, quarter, hour] }, description: "rows * cols of them" }, content_type: { type: string, enum: [image/jpeg, image/png, image/webp] }, data: { type: string, description: base64 } } } } } }
-      responses: { '200': { description: PuzzleImage }, '400': { description: 'not base64, not the type it claims, rotated, bad grid, pieces not roughly square, or tiers of the wrong length or with an unknown word' }, '404': { description: No such NGO }, '413': { description: over 1 MB } }
+      responses: { '200': { description: PuzzleImage }, '400': { description: 'not base64, not the type it claims, too many pixels, rotated, bad grid, pieces not roughly square, or tiers of the wrong length or with an unknown word' }, '404': { description: No such NGO }, '413': { description: over 1 MB } }
   /admin/puzzle-images:
     get:
       summary: "Every puzzle picture, retired ones included, without the bytes: {id, ngo_id, ngo_name, title, caption, rows, cols, tiers, content_type, size, width, height, sha256, image_url, retired_at, created_at, pieces_awarded, customers_started, customers_completed}"
