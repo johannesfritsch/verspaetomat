@@ -416,10 +416,15 @@ async fn try_award(pool: &PgPool, customer: &CustomerRow, j: &JourneyRow) -> any
     let dice = Dice::roll();
     // The Stellwerk's pin (docs/51 §9c), read and cleared here, where a piece is about to be
     // chosen: it holds for this one award, used or not.
-    let pinned: Option<Uuid> = sqlx::query_scalar("update customers c set puzzle_next_image = null from (select puzzle_next_image from customers where id = $1) old where c.id = $1 returning old.puzzle_next_image")
-        .bind(customer.id)
-        .fetch_one(&mut *tx)
-        .await?;
+    // Only a customer with a pin is written to: every other award leaves the row alone.
+    let pinned: Option<Uuid> = sqlx::query_scalar::<_, Option<Uuid>>(
+        "update customers c set puzzle_next_image = null from (select puzzle_next_image from customers where id = $1) old
+         where c.id = $1 and c.puzzle_next_image is not null returning old.puzzle_next_image",
+    )
+    .bind(customer.id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
     let from_pin = pinned.and_then(|id| images.iter().find(|i| i.id == id)).and_then(|img| img.slot(Some(tier), &dice).map(|(p, t)| (img.id, p, t)));
     let Some((image, piece, _)) = from_pin.or_else(|| choose(&images, &own, &customer.ngo_id, tier, &dice)) else {
         tx.commit().await?;
@@ -841,7 +846,14 @@ pub fn byte_range(header: &str, len: u64) -> ByteRange {
 /// `GET /v1/puzzle-videos/{id}`: the video of a picture, only for a customer who has finished it
 /// (docs/51 §9b: the reward for the whole picture). In ranges, because a player and a resumed
 /// download ask for them; it never changes, so it caches for good, privately.
-pub async fn video(State(s): State<AppState>, c: Customer, h: HeaderMap, Path(id): Path<String>) -> Response {
+#[derive(serde::Deserialize)]
+pub struct VideoQuery {
+    /// The version the address names (`?v=`, the first eight of its sha256).
+    #[serde(default)]
+    pub v: Option<String>,
+}
+
+pub async fn video(State(s): State<AppState>, c: Customer, h: HeaderMap, Path(id): Path<String>, axum::extract::Query(q): axum::extract::Query<VideoQuery>) -> Response {
     use axum::http::header;
     let refuse = |status: StatusCode, msg: &str| (status, Json(json!({ "error": msg }))).into_response();
     let Ok(id) = id.parse::<Uuid>() else { return refuse(StatusCode::NOT_FOUND, "no such video") };
@@ -860,6 +872,11 @@ pub async fn video(State(s): State<AppState>, c: Customer, h: HeaderMap, Path(id
     };
     if owned < slots as i64 {
         return refuse(StatusCode::FORBIDDEN, "the video comes with the finished picture");
+    }
+    // An address for a video that has since been replaced is gone: a player resuming it must not
+    // be handed ranges of the new file as if they were the old one's.
+    if q.v.as_deref().is_some_and(|v| v != &sha[..8.min(sha.len())]) {
+        return refuse(StatusCode::NOT_FOUND, "this version of the video is gone");
     }
     let etag = format!("\"{sha}\"");
     let cache = "private, max-age=31536000, immutable";

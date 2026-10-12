@@ -1655,16 +1655,40 @@ pub async fn puzzle_image_remove(State(s): State<AppState>, _a: Admin, Path(id):
 
 /// Files an upload has written, removed when it is dropped — unless it was disarmed by emptying it
 /// after the row that names them committed.
-struct Leftovers(Vec<std::path::PathBuf>);
+///
+/// Once the file has its final name, a row may name it although this upload failed: the commit
+/// went through and only its answer was lost (the client hung up), or a second upload of the same
+/// bytes committed meanwhile. So that file is removed only after a look at the row — from a task,
+/// because a drop cannot wait. Two uploads of the same bytes failing and succeeding at the very
+/// same moment can still race past that look; the startup sweep keeps names, never removes a
+/// named file, and the next upload writes the file again.
+struct Leftovers {
+    files: Vec<std::path::PathBuf>,
+    /// The picture and the relative path that, when the row names it, keeps the file.
+    named: Option<(sqlx::PgPool, Uuid, String)>,
+}
+
+fn remove_leftover(p: &std::path::Path) {
+    if let Err(e) = std::fs::remove_file(p) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(path = %p.display(), error = %e, "could not remove an unfinished video upload");
+        }
+    }
+}
 
 impl Drop for Leftovers {
     fn drop(&mut self) {
-        for p in &self.0 {
-            if let Err(e) = std::fs::remove_file(p) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    tracing::warn!(path = %p.display(), error = %e, "could not remove an unfinished video upload");
-                }
+        let files = std::mem::take(&mut self.files);
+        match (self.named.take(), tokio::runtime::Handle::try_current()) {
+            (Some((pool, id, rel)), Ok(rt)) if !files.is_empty() => {
+                rt.spawn(async move {
+                    let kept: Option<bool> = sqlx::query_scalar("select video_path is not distinct from $2 from puzzle_images where id = $1").bind(id).bind(&rel).fetch_optional(&pool).await.unwrap_or(Some(true));
+                    if kept != Some(true) {
+                        files.iter().for_each(|p| remove_leftover(p));
+                    }
+                });
             }
+            _ => files.iter().for_each(|p| remove_leftover(p)),
         }
     }
 }
@@ -1704,7 +1728,7 @@ pub async fn puzzle_video_put(State(s): State<AppState>, _a: Admin, Path(id): Pa
     let incoming = dir.join(format!(".incoming-{}", Uuid::new_v4()));
     // Whatever this upload has put on the disk goes again if it does not end in a committed row —
     // an error, or the client hanging up mid-way, which drops this future at its next await.
-    let mut leftovers = Leftovers(vec![incoming.clone()]);
+    let mut leftovers = Leftovers { files: vec![incoming.clone()], named: None };
     let mut file = tokio::fs::File::create(&incoming).await.map_err(internal)?;
     let (mut size, mut digest) = (0u64, sha2::Sha256::new());
     let mut stream = body.into_data_stream();
@@ -1733,7 +1757,8 @@ pub async fn puzzle_video_put(State(s): State<AppState>, _a: Admin, Path(id): Pa
     // The same bytes again land on the live file. That file is not ours to remove on a failure.
     let existed = tokio::fs::try_exists(&target).await.unwrap_or(true);
     tokio::fs::rename(&incoming, &target).await.map_err(internal)?;
-    leftovers.0 = if existed { Vec::new() } else { vec![target] };
+    leftovers.files = if existed { Vec::new() } else { vec![target] };
+    leftovers.named = Some((s.pool.clone(), id, rel.clone()));
     let saved: Result<Option<Option<String>>, sqlx::Error> = async {
         let mut tx = s.pool.begin().await?;
         let Some(old) = sqlx::query_scalar::<_, Option<String>>("select video_path from puzzle_images where id = $1 for update").bind(id).fetch_optional(&mut *tx).await? else {
@@ -1755,7 +1780,7 @@ pub async fn puzzle_video_put(State(s): State<AppState>, _a: Admin, Path(id): Pa
     .await;
     // The picture went while the video streamed in: nothing to attach it to.
     let old = saved.map_err(internal)?.ok_or_else(|| err(StatusCode::NOT_FOUND, "no such picture"))?;
-    leftovers.0.clear();
+    leftovers.files.clear();
     if let Some(old) = old.filter(|o| *o != rel) {
         crate::storage::remove(&old).await;
     }

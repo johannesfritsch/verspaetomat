@@ -2528,6 +2528,11 @@ async fn the_video_comes_with_the_finished_picture(pool: PgPool) {
     assert_eq!(video["url"], format!("{url}?v={}", &sha[..8]));
     let (s, _, body) = raw_get(&app, video["url"].as_str().unwrap(), &[("authorization", &auth)]).await;
     assert_eq!((s, body.len()), (StatusCode::OK, VIDEO.len()));
+    // Another version's address is gone, ranges included: two files never mix.
+    for v in ["00000000", &sha[..7], &sha] {
+        let (s, _, _) = raw_get(&app, &format!("{url}?v={v}"), &[("authorization", &auth), ("range", "bytes=0-9")]).await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "v={v}");
+    }
     assert_eq!(video["bytes"], VIDEO.len());
     assert_eq!((video["width"].as_i64(), video["height"].as_i64()), (Some(32), Some(32)));
     assert!((video["seconds"].as_f64().unwrap() - 11.0).abs() < 0.1);
