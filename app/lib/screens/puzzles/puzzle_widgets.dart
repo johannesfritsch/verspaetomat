@@ -53,6 +53,7 @@ class PuzzleBoardOf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => PuzzleBoard(
+        semanticLabel: (complete ?? puzzle.complete) ? 'Puzzle ${puzzle.title}, fertig' : 'Puzzle ${puzzle.title}, ${puzzleProgress(puzzle)} Teilen',
         cut: cutOf(puzzle),
         owned: puzzle.owned.toSet(),
         tiers: puzzle.slotTiers,
@@ -60,6 +61,15 @@ class PuzzleBoardOf extends StatelessWidget {
         aspectRatio: puzzle.aspectRatio,
         complete: complete ?? puzzle.complete,
       );
+}
+
+/// What the arrival's card says to a screen reader: „Ein Stunden-Teil für Bahnhofsmission Köln,
+/// 8 von 12", and the sentence under it when there is one.
+String arrivalPieceLabel(ApiPuzzlePiece piece) {
+  final p = piece.puzzle;
+  final base = 'Ein ${tierPieceName(piece.tier)} ${piece.ownCause ? 'für' : 'von'} ${p.ngoName}, ${puzzleProgress(p)}';
+  final more = p.complete ? 'Fertig: ${p.title}.' : stillMissing(p);
+  return more == null ? base : '$base. $more';
 }
 
 /// The piece an arrival brought (docs/51 §5), under the trip — or nothing, when the journey
@@ -167,80 +177,89 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
     final piece = widget.piece;
     final p = piece.puzzle;
     final missing = stillMissing(p);
-    return VCard(
-      key: const Key('arrival-piece'),
+    // One node for a screen reader, whole from the first frame: what the fade shows a moment
+    // later is no news to someone who does not see the fade.
+    return Semantics(
+      container: true,
+      button: true,
+      label: arrivalPieceLabel(piece),
+      excludeSemantics: true,
       onTap: _tap,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Narrow enough that a title like „Nachtschicht am Gleis 1" keeps to one line beside it.
-          SizedBox(
-            width: 100,
-            child: PieceReveal(
-              cut: cutOf(p),
-              owned: p.owned.toSet(),
-              piece: piece.piece,
-              reveal: _reveal,
-              finish: _finish,
-              tiers: p.slotTiers,
-              image: RepoScope.of(context).repo.puzzleImage(p),
-              aspectRatio: p.aspectRatio,
+      child: VCard(
+        key: const Key('arrival-piece'),
+        onTap: _tap,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Narrow enough that a title like „Nachtschicht am Gleis 1" keeps to one line beside it.
+            SizedBox(
+              width: 100,
+              child: PieceReveal(
+                cut: cutOf(p),
+                owned: p.owned.toSet(),
+                piece: piece.piece,
+                reveal: _reveal,
+                finish: _finish,
+                tiers: p.slotTiers,
+                image: RepoScope.of(context).repo.puzzleImage(p),
+                aspectRatio: p.aspectRatio,
+              ),
             ),
-          ),
-          const SizedBox(width: VSpace.m),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                VEyebrow(piece.ownCause ? 'Ein Teil für ${p.ngoName}' : 'Ein Teil von ${p.ngoName}', tone: VEyebrowTone.red),
-                const VGap.xs(),
-                // The finish names the picture itself, a moment later.
-                if (!_completes) Text(keepLastWord(p.title), style: VText.title),
-                if (!piece.ownCause) ...[
+            const SizedBox(width: VSpace.m),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  VEyebrow(piece.ownCause ? 'Ein Teil für ${p.ngoName}' : 'Ein Teil von ${p.ngoName}', tone: VEyebrowTone.red),
                   const VGap.xs(),
-                  Text('Ein Verein, den andere unterstützen.', style: VText.bodyS),
-                ],
-                const VGap.m(),
-                FadeTransition(
-                  opacity: _count,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // docs/51 §5.3: the tier first, then where the picture stands — each whole,
-                      // on the next line when both do not fit.
-                      Wrap(
-                        spacing: VSpace.xs,
-                        children: [
-                          Text('Ein ${tierPieceName(piece.tier)}.', style: VText.bodyStrong),
-                          Text('${puzzleProgress(p)}.', style: VText.bodyStrong),
-                        ],
-                      ),
-                      if (missing != null) ...[
-                        const VGap.xs(),
-                        Text(missing, style: VText.bodyS),
-                      ],
-                    ],
-                  ),
-                ),
-                if (_caption != null)
+                  // The finish names the picture itself, a moment later.
+                  if (!_completes) Text(keepLastWord(p.title), style: VText.title),
+                  if (!piece.ownCause) ...[
+                    const VGap.xs(),
+                    Text('Ein Verein, den andere unterstützen.', style: VText.bodyS),
+                  ],
+                  const VGap.m(),
                   FadeTransition(
-                    opacity: _caption!,
+                    opacity: _count,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const VGap.s(),
-                        Text(keepLastWord('Fertig: ${p.title}.'), style: VText.bodyStrong),
-                        if (p.caption.isNotEmpty) ...[
+                        // docs/51 §5.3: the tier first, then where the picture stands — each whole,
+                        // on the next line when both do not fit.
+                        Wrap(
+                          spacing: VSpace.xs,
+                          children: [
+                            Text('Ein ${tierPieceName(piece.tier)}.', style: VText.bodyStrong),
+                            Text('${puzzleProgress(p)}.', style: VText.bodyStrong),
+                          ],
+                        ),
+                        if (missing != null) ...[
                           const VGap.xs(),
-                          Text(p.caption, style: VText.bodyS),
+                          Text(missing, style: VText.bodyS),
                         ],
                       ],
                     ),
                   ),
-              ],
+                  if (_caption != null)
+                    FadeTransition(
+                      opacity: _caption!,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const VGap.s(),
+                          Text(keepLastWord('Fertig: ${p.title}.'), style: VText.bodyStrong),
+                          if (p.caption.isNotEmpty) ...[
+                            const VGap.xs(),
+                            Text(p.caption, style: VText.bodyS),
+                          ],
+                        ],
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

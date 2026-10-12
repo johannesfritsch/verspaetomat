@@ -68,7 +68,7 @@ class PuzzlesBody extends StatelessWidget {
           const VSectionHeader('Angefangen', onCard: false),
           const VGap.s(),
           for (final p in started) ...[
-            _StartedCard(puzzle: p),
+            _StartedCard(key: ValueKey(p.imageId), puzzle: p),
             const VGap.md(),
           ],
         ],
@@ -80,9 +80,9 @@ class PuzzlesBody extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: _DoneTile(puzzle: done[i])),
+                Expanded(child: _DoneTile(key: ValueKey(done[i].imageId), puzzle: done[i])),
                 const SizedBox(width: VSpace.md),
-                Expanded(child: i + 1 < done.length ? _DoneTile(puzzle: done[i + 1]) : const SizedBox.shrink()),
+                Expanded(child: i + 1 < done.length ? _DoneTile(key: ValueKey(done[i + 1].imageId), puzzle: done[i + 1]) : const SizedBox.shrink()),
               ],
             ),
             const VGap.md(),
@@ -94,59 +94,64 @@ class PuzzlesBody extends StatelessWidget {
 }
 
 class _StartedCard extends StatelessWidget {
-  const _StartedCard({required this.puzzle});
+  const _StartedCard({super.key, required this.puzzle});
   final ApiPuzzle puzzle;
 
   @override
   Widget build(BuildContext context) {
     final p = puzzle;
-    return VCard(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 112, child: PuzzleBoardOf(p)),
-          const SizedBox(width: VSpace.m),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(keepLastWord(p.title), style: VText.title),
-                const VGap.xs(),
-                Text(p.ngoName, style: VText.bodyS),
-                const VGap.m(),
-                Text(puzzleProgress(p), style: VText.title),
-                if (stillMissing(p) case final missing?) ...[
+    // One node per picture for a screen reader: the board's label, the title, the Verein, the count.
+    return MergeSemantics(
+      child: VCard(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: 112, child: PuzzleBoardOf(p)),
+            const SizedBox(width: VSpace.m),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(keepLastWord(p.title), style: VText.title),
                   const VGap.xs(),
-                  Text(missing, style: VText.bodyS),
+                  Text(p.ngoName, style: VText.bodyS),
+                  const VGap.m(),
+                  Text(puzzleProgress(p), style: VText.title),
+                  if (stillMissing(p) case final missing?) ...[
+                    const VGap.xs(),
+                    Text(missing, style: VText.bodyS),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
 class _DoneTile extends StatelessWidget {
-  const _DoneTile({required this.puzzle});
+  const _DoneTile({super.key, required this.puzzle});
   final ApiPuzzle puzzle;
 
   @override
   Widget build(BuildContext context) {
     final p = puzzle;
-    return VCard(
-      padding: const EdgeInsets.all(VSpace.cardTight),
-      onTap: () => _show(context, p),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          PuzzleBoardOf(p, complete: true),
-          const VGap.s(),
-          Text(keepLastWord(p.title), style: VText.bodyStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 2),
-          Text(p.ngoName, style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-        ],
+    return MergeSemantics(
+      child: VCard(
+        padding: const EdgeInsets.all(VSpace.cardTight),
+        onTap: () => _show(context, p),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            PuzzleBoardOf(p, complete: true),
+            const VGap.s(),
+            Text(keepLastWord(p.title), style: VText.bodyStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 2),
+            Text(p.ngoName, style: VText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ],
+        ),
       ),
     );
   }

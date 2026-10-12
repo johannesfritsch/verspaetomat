@@ -183,6 +183,11 @@ class _PuzzlePictureState extends State<PuzzlePicture> {
     final stream = widget.image?.resolve(createLocalImageConfiguration(context));
     if (stream?.key != null && stream?.key == _stream?.key) return;
     _stream?.removeListener(_listener);
+    // Another picture, or none: the old one's pixels must not stand in while it loads.
+    if (_info != null) {
+      _info!.dispose();
+      _info = null;
+    }
     _stream = stream;
     stream?.addListener(_listener);
   }
@@ -214,10 +219,15 @@ class PuzzleBoard extends StatelessWidget {
     this.image,
     this.aspectRatio,
     this.complete = false,
+    this.semanticLabel,
   });
 
   final PuzzleCut cut;
   final Set<int> owned;
+
+  /// What a screen reader says for the picture: „Puzzle Nachtschicht am Gleis 1, 8 von 12
+  /// Teilen". Without one the board is decoration and says nothing.
+  final String? semanticLabel;
 
   /// Every slot's tier, row by row. Null draws no marks at all.
   final List<PieceTier>? tiers;
@@ -229,7 +239,7 @@ class PuzzleBoard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
+    final board = AspectRatio(
       aspectRatio: aspectRatio ?? cut.cols / cut.rows,
       child: PuzzlePicture(
         image: image,
@@ -244,6 +254,8 @@ class PuzzleBoard extends StatelessWidget {
         ),
       ),
     );
+    final label = semanticLabel;
+    return label == null ? board : Semantics(image: true, label: label, child: board);
   }
 }
 

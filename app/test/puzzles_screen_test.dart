@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/models.dart';
@@ -92,6 +93,14 @@ void main() {
       expect(find.textContaining('Fertig am 3. Oktober'), findsOneWidget);
     });
 
+    testWidgets('each picture is one node, and its board says what it shows', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pump(tester, await session(), PuzzlesBody(puzzles: ApiPuzzles(puzzles: [puzzle('a', [0, 3, 7, 9, 10, 11, 2]), puzzle('b', all)])));
+      expect(find.bySemanticsLabel(RegExp(r'^Puzzle Bild a, 7 von 12 Teilen')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Puzzle Bild b, fertig')), findsOneWidget);
+      semantics.dispose();
+    });
+
     testWidgets('nothing yet', (tester) async {
       await pump(tester, await session(), const PuzzlesBody(puzzles: ApiPuzzles()));
       expect(find.text('Deine erste Fahrt bringt das erste Teil.'), findsOneWidget);
@@ -155,6 +164,26 @@ void main() {
       s.flagStore.pin(Flag.puzzles, on: true);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('arrival-piece')), findsOneWidget);
+    });
+
+    testWidgets('a screen reader hears the card whole, from the first frame', (tester) async {
+      final semantics = tester.ensureSemantics();
+      final s = await session();
+      await tester.binding.setSurfaceSize(const Size(393, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(RepoScope(session: s, child: MaterialApp(home: Scaffold(body: ArrivalPiece(piece: piece)))));
+      // Before the piece has come in and „8 von 12" has faded up: the label does not wait for it.
+      await tester.pump();
+      expect(find.bySemanticsLabel('Ein Minuten-Teil für Bahnhofsmission Köln, 8 von 12'), findsOneWidget);
+      await tester.pumpAndSettle();
+      final node = tester.getSemantics(find.bySemanticsLabel('Ein Minuten-Teil für Bahnhofsmission Köln, 8 von 12'));
+      expect(node.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+
+      final waiting = ApiPuzzlePiece(puzzle: puzzle('a', [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11]), piece: 6);
+      await tester.pumpWidget(RepoScope(session: s, child: MaterialApp(home: Scaffold(body: ArrivalPiece(piece: waiting)))));
+      await tester.pumpAndSettle();
+      expect(find.bySemanticsLabel('Ein Viertelstunden-Teil von Bahnhofsmission Köln, 11 von 12. Fehlt noch: das Stunden-Teil.'), findsOneWidget);
+      semantics.dispose();
     });
 
     testWidgets('no piece, no card', (tester) async {
