@@ -52,7 +52,7 @@ class _PieceRoute extends PageRoute<void> {
 }
 
 /// The overlay itself: the room darkened, the piece in the middle, what it is underneath.
-class PieceInHand extends StatelessWidget {
+class PieceInHand extends StatefulWidget {
   const PieceInHand({super.key, required this.puzzle, required this.slot, required this.animation, this.from});
   final ApiPuzzle puzzle;
   final int slot;
@@ -60,8 +60,26 @@ class PieceInHand extends StatelessWidget {
   final Animation<double> animation;
 
   @override
+  State<PieceInHand> createState() => _PieceInHandState();
+}
+
+class _PieceInHandState extends State<PieceInHand> {
+  late final CurvedAnimation _flight = CurvedAnimation(parent: widget.animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+  late final CurvedAnimation _words = CurvedAnimation(parent: widget.animation, curve: const Interval(0.5, 1));
+
+  @override
+  void dispose() {
+    _flight.dispose();
+    _words.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final p = puzzle;
+    final p = widget.puzzle;
+    final slot = widget.slot;
+    final from = widget.from;
+    final animation = widget.animation;
     final tier = p.tierOf(slot);
     final screen = MediaQuery.sizeOf(context);
     final board = boardFor(p);
@@ -71,8 +89,8 @@ class PieceInHand extends StatelessWidget {
     final height = width * bounds.height / bounds.width;
     final target = Rect.fromLTWH((screen.width - width) / 2, screen.height * 0.16, width, height);
     final start = from ?? Rect.fromCenter(center: target.center, width: width * 0.4, height: height * 0.4);
-    final flight = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
-    final words = CurvedAnimation(parent: animation, curve: const Interval(0.5, 1));
+    final flight = _flight;
+    final words = _words;
     void close() => Navigator.of(context).maybePop();
     final label = 'Ein ${tierPieceName(tier)} von ${p.ngoName}, Platz ${slot + 1} von ${p.pieces}';
 

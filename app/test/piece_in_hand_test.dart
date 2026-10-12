@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/models.dart';
@@ -85,6 +86,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('piece-in-hand')), findsOneWidget);
     expect(find.text('Platz 8 von 12'), findsOneWidget);
+  });
+
+  testWidgets('a swipe down beside the piece puts it back', (tester) async {
+    await pump(tester);
+    await tester.tapAt(slotCentre(tester, 4));
+    await tester.pumpAndSettle();
+    await tester.flingFrom(const Offset(40, 780), const Offset(0, 60), 1200);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('piece-in-hand')), findsNothing);
+  });
+
+  testWidgets('a screen reader can take a piece into the hand from the started card', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await pump(tester);
+    final node = tester.getSemantics(find.bySemanticsLabel(RegExp(r'^Puzzle Nachtschicht')));
+    final actions = node.getSemanticsData().customSemanticsActionIds ?? const <int>[];
+    expect(actions.map((id) => CustomSemanticsAction.getAction(id)?.label), contains('Teil in die Hand nehmen'));
+    semantics.dispose();
   });
 
   testWidgets('a gap is not a piece', (tester) async {

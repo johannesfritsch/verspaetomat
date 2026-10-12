@@ -53,6 +53,9 @@ import UIKit
         try? session.setActive(true)
         result(nil)
       case "restore":
+        // Let go of the session first, telling whoever was playing before (a podcast) to carry
+        // on; switching the category while active would interrupt it.
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
         if let (category, options) = self?.savedAudio {
           try? session.setCategory(category, options: options)
         }

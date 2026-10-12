@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Directory;
 
 import '../api/events.dart';
 import 'package:flutter/foundation.dart' show kReleaseMode;
@@ -9,6 +10,7 @@ import '../api/client.dart';
 import '../api/token_store.dart';
 import '../flags/flag_store.dart';
 import '../flags/flags.dart';
+import '../api/puzzle_image.dart' show forgetPuzzlePictures;
 import '../state/puzzle_video_store.dart';
 import '../state/demo_state.dart';
 import 'app_repository.dart';
@@ -113,6 +115,7 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> recoverAccount(String code) async {
     if (!isLocal) throw 'Im Demo-Modus gibt es kein Konto zum Zurückholen.';
     await _http.recover(code);
+    await _forgetPuzzles();
     await _bootstrap();
     // The account was onboarded on the phone it came from; this install should not greet it with
     // Willkommen again at the next start. `init` sets the same flag, but only at startup.
@@ -198,7 +201,19 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
   bool get isLocal => mode == BackendMode.local;
 
   /// The films of finished pictures (docs/51 §9b), fetched once and kept on the phone.
-  late final PuzzleVideoStore videos = videoStore ?? PuzzleVideoStore(fetch: (url, {from = 0}) => _http.client.puzzleVideo(url, from: from));
+  late final PuzzleVideoStore videos =
+      videoStore ?? PuzzleVideoStore(fetch: (url, {from = 0}) => _http.client.puzzleVideo(url, from: from), reload: () => repo.puzzles());
+
+  /// The pictures and films of an account this install no longer is (docs/51): on the phone and
+  /// in memory.
+  Future<void> _forgetPuzzles() async {
+    await videos.clear();
+    await forgetPuzzlePictures(directory: puzzleDirectory);
+  }
+
+  /// Where the pictures are kept; a test points it elsewhere.
+  @visibleForTesting
+  Future<Directory> Function()? puzzleDirectory;
 
   /// A test's store instead of the real one.
   final PuzzleVideoStore? videoStore;
@@ -602,6 +617,7 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
       if (k == _modeKey) continue;
       await prefs.remove(k);
     }
+    await _forgetPuzzles();
     try {
       if (isLocal) await _http.ensureDevice();
       me = await repo.getMe();

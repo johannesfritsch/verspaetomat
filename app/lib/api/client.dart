@@ -434,11 +434,25 @@ class ApiClient {
     // replaced under the same picture.
     final named = Uri.parse(url);
     final uri = named.hasScheme ? named : _uri(named.path, named.hasQuery ? named.queryParameters : null);
-    final req = http.Request('GET', uri)
-      ..headers.addAll(await _headers(json: false))
-      ..headers['accept'] = 'video/mp4';
-    if (from > 0) req.headers['range'] = 'bytes=$from-';
-    return _http.send(req).timeout(const Duration(seconds: 30));
+    // The token goes only to this API's own host: an absolute address elsewhere gets none.
+    final ours = uri.host == Uri.parse(baseUrl).host;
+    Future<http.StreamedResponse> send() async {
+      final req = http.Request('GET', uri)
+        ..headers.addAll(ours ? await _headers(json: false) : const {})
+        ..headers['accept'] = 'video/mp4';
+      if (from > 0) req.headers['range'] = 'bytes=$from-';
+      return _http.send(req).timeout(_timeout);
+    }
+
+    final r = await send();
+    // A token the server no longer knows: the same re-registration as every other call, then once
+    // more.
+    final handler = onUnauthorized;
+    if (r.statusCode != 401 || !ours || handler == null) return r;
+    await r.stream.drain<void>().catchError((_) {});
+    _reauth ??= handler().whenComplete(() => _reauth = null);
+    await _reauth;
+    return send();
   }
 
   Future<ApiPuzzles> puzzles() async => ApiPuzzles.fromJson(_map(await _get('/v1/me/puzzles')));

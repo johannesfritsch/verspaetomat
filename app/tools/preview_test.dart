@@ -50,6 +50,9 @@ void main() {
     // ignore: invalid_use_of_visible_for_testing_member
     SharedPreferences.setMockInitialValues({});
     await _loadFonts();
+    // The tiles' shader loads asynchronously; in the bench's fake time it would not arrive before
+    // the capture, and the tiles would show their fallback light instead.
+    await TileShading.load();
   });
 
   _preview('header-scene-home', height: 210, (context) => const VHeaderScene(height: 190));

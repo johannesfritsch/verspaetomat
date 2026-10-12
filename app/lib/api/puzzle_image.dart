@@ -92,3 +92,15 @@ class PuzzleImageFile extends ImageProvider<PuzzleImageFile> {
   @override
   int get hashCode => imageId.hashCode;
 }
+
+/// Forgets every puzzle picture on the phone and in memory: the account is gone, or another one
+/// came in its place, and its pictures are not this one's.
+Future<void> forgetPuzzlePictures({Future<Directory> Function()? directory}) async {
+  try {
+    final dir = Directory('${(await (directory ?? getApplicationSupportDirectory)()).path}/puzzles');
+    if (dir.existsSync()) await dir.delete(recursive: true);
+  } catch (_) {}
+  PaintingBinding.instance.imageCache
+    ..clear()
+    ..clearLiveImages();
+}
