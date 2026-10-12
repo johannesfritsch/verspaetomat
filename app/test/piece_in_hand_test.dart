@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/models.dart';
@@ -50,6 +51,8 @@ void main() {
     await tester.tapAt(slotCentre(tester, 4));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('piece-in-hand')), findsOneWidget);
+    // On the dark ground the status bar's text is light.
+    expect(find.byWidgetPredicate((w) => w is AnnotatedRegion<SystemUiOverlayStyle> && w.value == SystemUiOverlayStyle.light), findsOneWidget);
     expect(find.text('Ein Stunden-Teil'), findsOneWidget);
     expect(find.text('Platz 5 von 12'), findsOneWidget);
     expect(find.text('Bahnhofsmission Köln'), findsWidgets);

@@ -159,7 +159,7 @@ class _PuzzleVideoPageState extends State<PuzzleVideoPage> {
     final seconds = (v?.seconds ?? 0).round();
     final aspect = playing ? c.value.aspectRatio : (v?.aspectRatio ?? p.aspectRatio);
 
-    return Semantics(
+    final page = Semantics(
       scopesRoute: true,
       namesRoute: true,
       explicitChildNodes: true,
@@ -253,5 +253,8 @@ class _PuzzleVideoPageState extends State<PuzzleVideoPage> {
         ),
       ),
     );
+    // Light status bar icons while the film plays on the dark ground; the route underneath sets its own back when this one
+    // closes. On iOS this is the status bar's text, on Android its icons.
+    return AnnotatedRegion<SystemUiOverlayStyle>(value: SystemUiOverlayStyle.light, child: page);
   }
 }

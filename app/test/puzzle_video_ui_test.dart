@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -106,6 +107,7 @@ void main() {
       await tester.tap(find.byKey(const Key('film-button')));
       await tester.pumpAndSettle();
       expect(find.byType(PuzzleVideoPage), findsOneWidget);
+      expect(find.byWidgetPredicate((w) => w is AnnotatedRegion<SystemUiOverlayStyle> && w.value == SystemUiOverlayStyle.light), findsOneWidget);
       // No player in a test: the picture stands and the way out is there.
       await tester.tap(find.byKey(const Key('puzzle-video-close')));
       await tester.pumpAndSettle();

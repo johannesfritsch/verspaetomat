@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../api/models.dart';
 import '../../repo/repo_scope.dart';
@@ -94,7 +95,7 @@ class _PieceInHandState extends State<PieceInHand> {
     void close() => Navigator.of(context).maybePop();
     final label = 'Ein ${tierPieceName(tier)} von ${p.ngoName}, Platz ${slot + 1} von ${p.pieces}';
 
-    return Semantics(
+    final page = Semantics(
       scopesRoute: true,
       namesRoute: true,
       explicitChildNodes: true,
@@ -199,6 +200,9 @@ class _PieceInHandState extends State<PieceInHand> {
         ),
       ),
     );
+    // Light status bar icons while the room goes dark under the piece; the route underneath sets its own back when this one
+    // closes. On iOS this is the status bar's text, on Android its icons.
+    return AnnotatedRegion<SystemUiOverlayStyle>(value: SystemUiOverlayStyle.light, child: page);
   }
 }
 
