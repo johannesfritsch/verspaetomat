@@ -1,8 +1,8 @@
 //! Deleting an account, for real.
 //!
 //! The foreign keys do most of it: `devices` → `customers` → rides, journeys, incidents, claims,
-//! mails, uploads, badges all cascade (see the migrations). Three things do not, because nothing
-//! points at the customer with a key:
+//! mails, uploads, badges, puzzle pieces all cascade (see the migrations). Three things do not,
+//! because nothing points at the customer with a key:
 //!
 //! - `audit_log` rows name a claim, an incident or a ride by id only;
 //! - `flag_log` rows name the customer by id only;
@@ -66,6 +66,7 @@ pub async fn delete_customer(pool: &PgPool, id: Uuid) -> anyhow::Result<Deleted>
               + (select count(*) from claims where customer_id = $1) + (select count(*) from mails where customer_id = $1)
               + (select count(*) from uploads where customer_id = $1) + (select count(*) from incidents where customer_id = $1)
               + (select count(*) from journeys where customer_id = $1) + (select count(*) from badge_awards where customer_id = $1)
+              + (select count(*) from puzzle_pieces where customer_id = $1)
               + (select count(*) from sim_customer_location where customer_id = $1)",
     )
     .bind(id)

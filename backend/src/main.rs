@@ -24,6 +24,7 @@ mod openai;
 mod pdf;
 mod pots;
 mod push;
+mod puzzles;
 mod redact;
 mod reply;
 mod rules;
@@ -240,6 +241,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/operators", get(handlers::operators))
         .route("/v1/ngos", get(handlers::ngos))
         .route("/v1/badges", get(handlers::badges))
+        // A Verein's picture for the puzzles (docs/51 §8): public, no token, cached for good.
+        .route("/v1/puzzle-images/{id}", get(puzzles::image))
         // The public flag document (#41): unauthenticated, out of memory, ETag and 304. An
         // authenticated read would be a Postgres write per read (auth.rs: `update devices set
         // last_seen_at`), which is the one thing this box cannot have at any interval worth
@@ -256,6 +259,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/me/push-token", put(handlers::put_push_token).delete(handlers::delete_push_token))
         .route("/v1/me/geofence", get(handlers::geofence))
         .route("/v1/me/destinations", get(journeys::destinations))
+        .route("/v1/me/puzzles", get(puzzles::mine))
         .route("/v1/fares", get(tickets::fares_public))
         .route("/v1/me/tickets", get(tickets::list).post(tickets::create))
         .route("/v1/me/tickets/{id}", axum::routing::patch(tickets::patch).delete(tickets::archive))
@@ -328,6 +332,12 @@ pub fn router(state: AppState) -> Router {
         .route("/admin/mails/{id}/reread", post(admin::reread))
         .route("/admin/ngos", get(admin::ngos_list))
         .route("/admin/ngos/{id}", put(admin::ngo_upsert).delete(admin::ngo_remove))
+        // A picture of up to 1 MB arrives in base64, a third larger. Three times the cap, so a
+        // picture somewhat over it still reaches the handler and gets its 413 and its words.
+        .route("/admin/ngos/{id}/puzzle-images", post(admin::puzzle_image_add).layer(DefaultBodyLimit::max(puzzles::MAX_BYTES * 3)))
+        .route("/admin/puzzle-images", get(admin::puzzle_images))
+        .route("/admin/puzzle-images/{id}", delete(admin::puzzle_image_remove))
+        .route("/admin/puzzle-images/{id}/retire", post(admin::puzzle_image_retire))
         .route("/admin/desks", get(admin::desks))
         .route("/admin/fares", get(admin::fares_list))
         .route("/admin/fares/{id}/evaluate", post(admin::fares_evaluate))

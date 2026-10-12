@@ -745,7 +745,7 @@ pub async fn reset(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(
         let _ = s.train.clear_override(&s.pool, t).await;
     }
     // Tickets last: journeys, rides and cases point at them (#66).
-    for table in ["mails", "claims", "incidents", "uploads", "rides", "journeys", "badge_awards", "sim_customer_location", "tickets"] {
+    for table in ["mails", "claims", "incidents", "uploads", "rides", "journeys", "badge_awards", "puzzle_pieces", "sim_customer_location", "tickets"] {
         sqlx::query(&format!("delete from {table} where customer_id = $1")).bind(c.id).execute(&s.pool).await.map_err(internal)?;
     }
     s.events.publish(c.id, "reset", json!({}));
@@ -1148,6 +1148,8 @@ pub async fn backdate(State(s): State<AppState>, _a: Admin, _sim: Simulation, Pa
     crate::rules::audit(&s.pool, "journey", j.id, None, "arrived", "stellwerk backdate").await.map_err(internal)?;
     crate::rules::audit(&s.pool, "ride", ride.id, None, "arrived", "stellwerk backdate").await.map_err(internal)?;
 
+    // No puzzle piece (docs/51 §3): an invented past journey is a ride that already happened,
+    // like a Nachtrag, and it does not go through `finalise_journey`, which awards them.
     let rides = vec![ride.clone()];
     let incident = crate::journeys::create_journey_incident(
         &s.pool,
@@ -1431,7 +1433,8 @@ pub async fn ngo_remove(State(s): State<AppState>, _a: Admin, Path(id): Path<Str
         return Err(err(StatusCode::CONFLICT, "the last active NGO cannot be removed; add another first"));
     }
     let referenced: bool = sqlx::query_scalar(
-        "select exists(select 1 from incidents where ngo_id = $1) or exists(select 1 from customers where ngo_id = $1)",
+        "select exists(select 1 from incidents where ngo_id = $1) or exists(select 1 from customers where ngo_id = $1)
+             or exists(select 1 from puzzle_images where ngo_id = $1)",
     )
     .bind(&id)
     .fetch_one(&s.pool)
@@ -1451,6 +1454,170 @@ pub async fn ngo_remove(State(s): State<AppState>, _a: Admin, Path(id): Path<Str
     }
     crate::rules::audit(&s.pool, "ngo", Uuid::nil(), None, &id, "deleted via admin").await.map_err(internal)?;
     Ok(Json(json!({ "id": id, "deactivated": false, "deleted": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Puzzle pictures (docs/51 §8)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct PuzzleImageBody {
+    pub title: String,
+    #[serde(default)]
+    pub caption: String,
+    pub rows: i32,
+    pub cols: i32,
+    /// The tier of every slot, row by row (`minute`, `quarter`, `hour`). Absent: the default of
+    /// docs/51 §2a, from the new id.
+    #[serde(default)]
+    pub tiers: Option<Vec<String>>,
+    pub content_type: String,
+    /// The picture, base64.
+    pub data: String,
+}
+
+/// One picture without its bytes, with how far the passengers have got with it.
+#[derive(serde::Serialize, sqlx::FromRow)]
+struct PuzzleImageRow {
+    id: Uuid,
+    ngo_id: String,
+    ngo_name: String,
+    title: String,
+    caption: String,
+    rows: i32,
+    cols: i32,
+    tiers: Vec<String>,
+    content_type: String,
+    size: i32,
+    width: i32,
+    height: i32,
+    sha256: String,
+    retired_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    pieces_awarded: i64,
+    customers_started: i64,
+    customers_completed: i64,
+}
+
+async fn puzzle_images_json(pool: &sqlx::PgPool, ngo: Option<&str>, id: Option<Uuid>) -> Result<Vec<Value>, (StatusCode, Json<Value>)> {
+    let rows: Vec<PuzzleImageRow> = sqlx::query_as(
+        "select i.id, i.ngo_id, n.name as ngo_name, i.title, i.caption, i.rows, i.cols, i.tiers, i.content_type, octet_length(i.bytes) as size,
+                i.width, i.height, i.sha256, i.retired_at, i.created_at,
+                (select count(*) from puzzle_pieces p where p.image_id = i.id)::bigint as pieces_awarded,
+                (select count(distinct p.customer_id) from puzzle_pieces p where p.image_id = i.id)::bigint as customers_started,
+                (select count(*) from (select 1 from puzzle_pieces p where p.image_id = i.id group by p.customer_id having count(*) >= i.rows * i.cols) f)::bigint
+                    as customers_completed
+         from puzzle_images i join ngos n on n.id = i.ngo_id
+         where ($1::text is null or i.ngo_id = $1) and ($2::uuid is null or i.id = $2)
+         order by i.ngo_id, i.created_at",
+    )
+    .bind(ngo)
+    .bind(id)
+    .fetch_all(pool)
+    .await
+    .map_err(internal)?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            let mut v = json!(r);
+            v["image_url"] = json!(format!("/v1/puzzle-images/{}", r.id));
+            v
+        })
+        .collect())
+}
+
+/// `POST /admin/ngos/{id}/puzzle-images`: a new picture for this Verein. Its bytes must be the
+/// type they claim, at most 1 MB, upright, and the grid must cut it into roughly square pieces.
+pub async fn puzzle_image_add(State(s): State<AppState>, _a: Admin, Path(ngo): Path<String>, Json(b): Json<PuzzleImageBody>) -> ApiResult {
+    let exists: bool = sqlx::query_scalar("select exists(select 1 from ngos where id = $1)").bind(&ngo).fetch_one(&s.pool).await.map_err(internal)?;
+    if !exists {
+        return Err(err(StatusCode::NOT_FOUND, "no such NGO"));
+    }
+    let title = b.title.trim();
+    if title.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "a picture needs a title"));
+    }
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b.data.trim()).map_err(|_| err(StatusCode::BAD_REQUEST, "data is not base64"))?;
+    if bytes.len() > crate::puzzles::MAX_BYTES {
+        return Err(err(StatusCode::PAYLOAD_TOO_LARGE, &format!("the picture is {} KB; max 1 MB", bytes.len() / 1024)));
+    }
+    let (width, height) = crate::puzzles::inspect(&b.content_type, &bytes, b.rows, b.cols).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+    let id = Uuid::new_v4();
+    let tiers: Vec<&str> = match &b.tiers {
+        Some(given) => {
+            if given.len() as i32 != b.rows * b.cols {
+                return Err(err(StatusCode::BAD_REQUEST, &format!("tiers: {} given, the grid has {}", given.len(), b.rows * b.cols)));
+            }
+            given
+                .iter()
+                .map(|t| crate::puzzles::Tier::parse(t).map(|t| t.as_str()).ok_or_else(|| err(StatusCode::BAD_REQUEST, &format!("tiers: {t:?} is not minute, quarter or hour"))))
+                .collect::<Result<_, _>>()?
+        }
+        None => crate::puzzles::default_tiers(id, b.rows, b.cols).into_iter().map(|t| t.as_str()).collect(),
+    };
+    let sha = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&bytes));
+    sqlx::query(
+        "insert into puzzle_images (id, ngo_id, title, caption, rows, cols, tiers, content_type, bytes, width, height, sha256)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+    )
+    .bind(id).bind(&ngo).bind(title).bind(b.caption.trim()).bind(b.rows).bind(b.cols).bind(&tiers).bind(&b.content_type).bind(&bytes)
+    .bind(width as i32).bind(height as i32).bind(&sha)
+    .execute(&s.pool)
+    .await
+    .map_err(internal)?;
+    crate::rules::audit(&s.pool, "puzzle_image", id, None, "active", &format!("created via admin for {ngo}")).await.map_err(internal)?;
+    let mut v = puzzle_images_json(&s.pool, None, Some(id)).await?;
+    Ok(Json(v.pop().unwrap_or(Value::Null)))
+}
+
+#[derive(Deserialize)]
+pub struct PuzzleImagesQuery {
+    #[serde(default)]
+    pub ngo: Option<String>,
+}
+
+/// `GET /admin/puzzle-images[?ngo=…]`: every picture, retired ones included, by Verein.
+pub async fn puzzle_images(State(s): State<AppState>, _a: Admin, Query(q): Query<PuzzleImagesQuery>) -> ApiResult {
+    Ok(Json(json!(puzzle_images_json(&s.pool, q.ngo.as_deref(), None).await?)))
+}
+
+/// `POST /admin/puzzle-images/{id}/retire`: out of the distribution. Whoever has pieces of it
+/// keeps them and can still finish it (docs/51 §8).
+pub async fn puzzle_image_retire(State(s): State<AppState>, _a: Admin, Path(id): Path<Uuid>) -> ApiResult {
+    let was: Option<Option<chrono::DateTime<chrono::Utc>>> = sqlx::query_scalar("select retired_at from puzzle_images where id = $1").bind(id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(was) = was else { return Err(err(StatusCode::NOT_FOUND, "no such picture")) };
+    if was.is_none() {
+        sqlx::query("update puzzle_images set retired_at = now() where id = $1").bind(id).execute(&s.pool).await.map_err(internal)?;
+        crate::rules::audit(&s.pool, "puzzle_image", id, Some("active"), "retired", "retired via admin").await.map_err(internal)?;
+    }
+    let mut v = puzzle_images_json(&s.pool, None, Some(id)).await?;
+    Ok(Json(v.pop().unwrap_or(Value::Null)))
+}
+
+/// `DELETE /admin/puzzle-images/{id}`: only a picture nobody has a piece of. Otherwise 409, and
+/// the way out is to retire it: a piece is never taken away (docs/51 §3).
+pub async fn puzzle_image_remove(State(s): State<AppState>, _a: Admin, Path(id): Path<Uuid>) -> ApiResult {
+    // One statement, so a piece awarded meanwhile cannot slip between a check and the delete.
+    let n = sqlx::query("delete from puzzle_images where id = $1 and not exists(select 1 from puzzle_pieces where image_id = $1)")
+        .bind(id)
+        .execute(&s.pool)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+    if n == 0 {
+        let awarded: Option<i64> = sqlx::query_scalar("select (select count(*) from puzzle_pieces where image_id = i.id) from puzzle_images i where i.id = $1")
+            .bind(id)
+            .fetch_optional(&s.pool)
+            .await
+            .map_err(internal)?;
+        return Err(match awarded {
+            Some(awarded) => (StatusCode::CONFLICT, Json(json!({ "error": "pieces of this picture were awarded; retire it instead", "pieces_awarded": awarded }))),
+            None => err(StatusCode::NOT_FOUND, "no such picture"),
+        });
+    }
+    crate::puzzles::forget_picture(id);
+    crate::rules::audit(&s.pool, "puzzle_image", id, None, "deleted", "deleted via admin").await.map_err(internal)?;
+    Ok(Json(json!({ "id": id, "deleted": true })))
 }
 
 #[cfg(test)]

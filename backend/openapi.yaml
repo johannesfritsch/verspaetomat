@@ -46,6 +46,11 @@ paths:
     get: { summary: Partner NGOs with confirmed_total_cents and submitted_total_cents, responses: { "200": { description: "[Ngo]" } } }
   /v1/badges:
     get: { summary: Badge catalogue with earned_on for this customer, responses: { "200": { description: "[Badge]" } } }
+  /v1/puzzle-images/{id}:
+    get:
+      summary: "A Verein's picture for the puzzles (docs/51), no token. ETag is its sha256, Cache-Control: public, max-age=31536000, immutable; a picture never changes, a new one gets a new id."
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { "200": { description: "the image (image/jpeg, image/png or image/webp)" }, "304": { description: If-None-Match matched }, "404": { description: no such picture } }
 
   /v1/me:
     get: { summary: "Profile: nickname, relay_address, personal_data?, settings, points_total, points_this_week, level_name, next_level_name, next_level_at, home_station", responses: { "200": { description: Customer } } }
@@ -97,6 +102,10 @@ paths:
       summary: Destinations from the customer's own journeys, by frequency; the home station first when away (docs/18 §2). Nothing seeded, nothing time-of-day.
       parameters: [{ name: from, in: query, schema: { type: string }, description: stop id of the current station }]
       responses: { '200': { description: '{home, predicted[≤4], recent[≤5]}' } }
+  /v1/me/puzzles:
+    get:
+      summary: "The pictures this customer has started (docs/51 §6, §8): growing ones by last_piece_at desc, then finished ones by completed_at desc. more_waiting: whether any piece is left to get. With the flag `puzzles` off: {puzzles: [], more_waiting: false}."
+      responses: { '200': { description: '{puzzles: [Puzzle], more_waiting}' } }
   /v1/journeys/plan:
     get:
       summary: Rail itineraries from one stop to another (Transitous plan), preferred = next departure
@@ -141,7 +150,7 @@ paths:
   /v1/journeys/current:
     get:
       summary: The journey in progress (riding or at a transfer with the proposed next leg), or the arrival of the last two hours
-      responses: { '200': { description: '{journey, ride, stops, eta, next_leg, just_arrived, claim_from_minute}' }, '404': { description: nothing current } }
+      responses: { '200': { description: '{journey, ride, stops, eta, next_leg, just_arrived, piece: Piece | null, claim_from_minute, ticket}' }, '404': { description: nothing current } }
   /v1/journeys/{id}/legs:
     post:
       summary: Confirm the next leg at a transfer (the proposal, or any trip from there that reaches the destination or the next transfer)
@@ -152,8 +161,8 @@ paths:
     post:
       summary: '"Ich bin da" (arrived: true, finalises with the delay now) or abort (arrived: false, no incident)'
       parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { arrived: { type: boolean, default: true } } } } } }
-      responses: { '200': { description: Journey } }
+      requestBody: { content: { application/json: { schema: { type: object, properties: { arrived: { type: boolean, default: true }, reason: { type: string, enum: [aufgegeben, nicht_gefahren] } } } } } }
+      responses: { '200': { description: 'Journey, plus piece: Piece | null (docs/51: arrived or aufgegeben, flag `puzzles` on, at most 3 a Berlin day; its tier from the counted minutes, §2a)' }, '409': { description: already finished } }
   /v1/rides:
     # Since docs/17 a single-train check-in creates a one-leg journey behind the scenes.
     get: { summary: Ride history (newest first), responses: { "200": { description: "[Ride]" } } }
@@ -342,6 +351,31 @@ paths:
       security: [{ adminToken: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: '{deleted, deactivated}' }, '404': { description: No such NGO }, '409': { description: Last active NGO } }
+  /admin/ngos/{id}/puzzle-images:
+    post:
+      summary: "A puzzle picture for this NGO (docs/51 §8). The bytes must be the content_type they claim (magic bytes), at most 1 MB decoded, without an EXIF rotation, and the grid must cut them into roughly square pieces ((width/cols)/(height/rows) within 0.66–1.5). tiers: every slot's tier, row by row; absent, the server lays out docs/51 §2a (max(1, round(n/12)) hours nearest the centre, round(n/4) quarters scattered, the rest minutes)."
+      security: [{ adminToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [title, rows, cols, content_type, data], properties: { title: { type: string }, caption: { type: string }, rows: { type: integer, minimum: 2, maximum: 8 }, cols: { type: integer, minimum: 2, maximum: 8 }, tiers: { type: array, items: { type: string, enum: [minute, quarter, hour] }, description: "rows * cols of them" }, content_type: { type: string, enum: [image/jpeg, image/png, image/webp] }, data: { type: string, description: base64 } } } } } }
+      responses: { '200': { description: PuzzleImage }, '400': { description: 'not base64, not the type it claims, rotated, bad grid, pieces not roughly square, or tiers of the wrong length or with an unknown word' }, '404': { description: No such NGO }, '413': { description: over 1 MB } }
+  /admin/puzzle-images:
+    get:
+      summary: "Every puzzle picture, retired ones included, without the bytes: {id, ngo_id, ngo_name, title, caption, rows, cols, tiers, content_type, size, width, height, sha256, image_url, retired_at, created_at, pieces_awarded, customers_started, customers_completed}"
+      security: [{ adminToken: [] }]
+      parameters: [{ name: ngo, in: query, schema: { type: string } }]
+      responses: { '200': { description: '[PuzzleImage]' } }
+  /admin/puzzle-images/{id}:
+    delete:
+      summary: Delete a picture nobody has a piece of; otherwise 409 (retire it instead)
+      security: [{ adminToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: '{id, deleted}' }, '404': { description: No such picture }, '409': { description: 'Pieces were awarded: {error, pieces_awarded}' } }
+  /admin/puzzle-images/{id}/retire:
+    post:
+      summary: Take a picture out of the distribution; whoever has started it keeps it and can finish it
+      security: [{ adminToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: PuzzleImage }, '404': { description: No such picture } }
   /admin/routes/answers:
     post:
       summary: "The domains a desk's answers may come from, besides the domain its mail goes to (mail_routes.reply_from). Only verified mail from these can accept, refuse or ask. Subdomains count. Free-mail providers are refused unless force is set."
@@ -357,6 +391,34 @@ paths:
 
 components:
   schemas:
+    Piece:
+      type: object
+      description: "The piece a journey brought (docs/51 §8). piece counts row by row from the top left (row * cols + col); owned already holds it."
+      properties:
+        image_id: { type: string, format: uuid }
+        piece: { type: integer }
+        tier: { type: string, enum: [minute, quarter, hour], description: "the tier of the slot it filled (docs/51 §2a): a journey with 60 counted minutes or a cancellation earns hour, from 15 quarter, else minute; it fills a lower slot only when no slot of its own tier is open on either side" }
+        rows: { type: integer }
+        cols: { type: integer }
+        tiers: { type: array, items: { type: string, enum: [minute, quarter, hour] }, description: every slot's tier in the order of piece numbers, fixed at upload }
+        owned: { type: array, items: { type: integer } }
+        complete: { type: boolean }
+        title: { type: string }
+        caption: { type: string }
+        ngo_id: { type: string }
+        ngo_name: { type: string }
+        own_cause: { type: boolean, description: "the picture's Verein is the customer's own: chosen now, or a case or claim went to it" }
+        image_url: { type: string, description: "/v1/puzzle-images/{image_id}" }
+        width: { type: integer }
+        height: { type: integer }
+        awarded_at: { type: string, format: date-time }
+    Puzzle:
+      type: object
+      description: "A started picture: the fields of Piece (tiers included) without piece, tier, own_cause and awarded_at, plus these."
+      properties:
+        started_at: { type: string, format: date-time }
+        last_piece_at: { type: string, format: date-time }
+        completed_at: { type: [string, "null"], format: date-time }
     NewTicket:
       type: object
       required: [product]

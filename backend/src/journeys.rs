@@ -281,6 +281,12 @@ pub async fn current_payload(s: &AppState, j: &JourneyRow, just_arrived: bool) -
             eta = r.actual_arrival;
         }
     }
+    // docs/51: the piece this journey brought. Looked up by the journey, so it is there however
+    // the journey ended — the passenger's „Angekommen" or the follower's arrival.
+    let piece = match j.finalised_at {
+        Some(_) => crate::puzzles::piece_of_journey(&s.pool, j.id).await?,
+        None => None,
+    };
     Ok(json!({
         "journey": journey_json(&s.pool, j).await?,
         "ride": ride,
@@ -288,6 +294,7 @@ pub async fn current_payload(s: &AppState, j: &JourneyRow, just_arrived: bool) -
         "eta": eta,
         "next_leg": j.next_leg,
         "just_arrived": just_arrived,
+        "piece": piece,
         // What builds before tickets read: from here one delay on its own is worth something.
         "claim_from_minute": 60,
         // The journey's ticket and what it is entitled to on the way (#66, docs/49 §2.3).
@@ -1100,13 +1107,14 @@ pub async fn finish(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
     let end_reason = end_reason_for(b.arrived, b.reason.as_deref()).map_err(|m| err(StatusCode::BAD_REQUEST, &m))?;
     let riding: Option<RideRow> = sqlx::query_as("select * from rides where journey_id = $1 and status = 'riding' order by leg_no desc limit 1").bind(j.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let now = crate::clock::now();
-    let (updated, fin) = if b.arrived {
+    let (updated, piece) = if b.arrived {
         if let Some(r) = &riding {
             let delay = r.live_delay_min as i64;
             crate::train::follower::finalise_ride(&s.pool, r.id, delay, r.cancelled, Some(r.planned_arrival + Duration::minutes(delay)), true).await.map_err(internal)?;
         }
         let actual = now;
-        finalise_journey(s.clone(), &j, actual, j.planned_arrival, false, false, "finished by the passenger").await.map_err(internal)?
+        let (u, fin) = finalise_journey(s.clone(), &j, actual, j.planned_arrival, false, false, "finished by the passenger").await.map_err(internal)?;
+        (u, fin.and_then(|f| f.2))
     } else {
         // docs/22 §1: giving up loses the claim (compensation hangs on arriving) but not the
         // patience — the waiting really happened, so the leg keeps its minutes. Having
@@ -1133,15 +1141,20 @@ pub async fn finish(State(s): State<AppState>, c: Customer, Path(id): Path<Uuid>
             .await
             .map_err(internal)?;
         rules::audit(&s.pool, "journey", j.id, Some("riding"), "abandoned", end_reason).await.map_err(internal)?;
+        // Giving up brings a piece too (docs/51 §3); never having boarded does not. Before the
+        // event, as on every other way a journey ends, so whoever reacts to it finds the piece.
+        let piece = crate::puzzles::award(&s.pool, &s.flags(), &c.0, &u).await;
         s.events.publish(c.0.id, "journey", json!({ "journey_id": j.id, "status": "abandoned", "transfer": false, "arrived": false, "finished": true, "missed_connection": u.missed_connection, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null, "end_reason": end_reason, "points": points }));
-        (u, None)
+        (u, piece)
     };
-    let _ = fin;
     if b.arrived {
         sqlx::query("update journeys set end_reason = $2 where id = $1").bind(j.id).bind(end_reason).execute(&s.pool).await.map_err(internal)?;
     }
     let updated: JourneyRow = sqlx::query_as("select * from journeys where id = $1").bind(updated.id).fetch_one(&s.pool).await.map_err(internal)?;
-    Ok(Json(journey_json(&s.pool, &updated).await.map_err(internal)?))
+    let mut v = journey_json(&s.pool, &updated).await.map_err(internal)?;
+    // docs/51 §8: the piece this journey brought, the same as `journeys/current` carries.
+    v["piece"] = json!(piece);
+    Ok(Json(v))
 }
 
 /// The next stop the current leg reaches: the boarding stop's index plus `passed_stops`, the one
@@ -1537,6 +1550,13 @@ pub async fn expire_transfers(s: &AppState) -> anyhow::Result<usize> {
             .fetch_one(&s.pool)
             .await?;
             rules::audit(&s.pool, "journey", j.id, Some("transfer"), "abandoned", "no leg was ever confirmed").await?;
+            // The piece never stops the scan: a failure here is logged, the next journey is due.
+            match sqlx::query_as::<_, CustomerRow>("select * from customers where id = $1").bind(j.customer_id).fetch_one(&s.pool).await {
+                Ok(customer) => {
+                    crate::puzzles::award(&s.pool, &s.flags(), &customer, &u).await;
+                }
+                Err(e) => tracing::warn!(journey = %j.id, error = %e, "puzzle: no customer to award to"),
+            }
             s.events.publish(j.customer_id, "journey", json!({ "journey_id": j.id, "status": "abandoned", "transfer": false, "arrived": false, "finished": true, "missed_connection": u.missed_connection, "final_delay_min": Value::Null, "incident": Value::Null, "next_leg": Value::Null, "end_reason": "aufgegeben" }));
             n += 1;
             continue;
@@ -1559,7 +1579,7 @@ pub async fn finalise_journey(
     cancelled: bool,
     incomplete: bool,
     reason: &str,
-) -> anyhow::Result<(JourneyRow, Option<(Option<IncidentRow>, Option<BadgeRow>)>)> {
+) -> anyhow::Result<(JourneyRow, Option<(Option<IncidentRow>, Option<BadgeRow>, Option<Value>)>)> {
     // A journey interrupted mid-way is claimed only up to the earliest onward connection: the
     // passenger's own waiting is theirs (docs/21 §2). `actual_arrival` keeps the true time.
     let counted = counted_arrival(actual, j.earliest_onward_arrival);
@@ -1594,6 +1614,8 @@ pub async fn finalise_journey(
         Some(r) => crate::handlers::award_badges(&s.pool, j.customer_id, r.id, delay).await?,
         None => None,
     };
+    // docs/51: after the case and the badges, so nothing that counts ever waits on the piece.
+    let piece = crate::puzzles::award(&s.pool, &s.flags(), &customer, &updated).await;
     let rows = rules::refresh_statuses(&s.pool, j.customer_id, crate::clock::today()).await?;
     let incident = incident.and_then(|i| rows.into_iter().find(|x| x.id == i.id));
     // A one-leg journey is announced by its ride's push (same words); only multi-leg journeys speak here.
@@ -1603,7 +1625,7 @@ pub async fn finalise_journey(
         "missed_connection": updated.missed_connection, "final_delay_min": delay, "incident": incident.as_ref().map(|i| i.id),
         "next_leg": Value::Null, "incomplete": incomplete, "cancelled": updated.cancelled, "silent": silent,
     }));
-    Ok((updated, Some((incident, new_badge))))
+    Ok((updated, Some((incident, new_badge, piece))))
 }
 
 /// Whether this delay makes a case on this ticket, and the fare it is computed from. A case is made

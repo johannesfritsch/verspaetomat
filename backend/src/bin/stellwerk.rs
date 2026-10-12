@@ -17,6 +17,7 @@
 //!   stellwerk forget Johannes
 //!   stellwerk route list | set <desk> <address> [--label …] | default <address> | remove <desk>
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
+//!   stellwerk ngo image add <ngo> bild.jpg --title … --caption … [--grid 3x4] [--tiers …] [--yes] | list [<ngo>] | retire <id> | remove <id>
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
 //!   stellwerk stations outlines [--from germany-latest.osm.pbf] [--out <dir>] [--dry-run] [--force]
@@ -312,6 +313,89 @@ enum NgoCmd {
     Import { file: std::path::PathBuf },
     /// Delete an NGO nobody references, otherwise deactivate it
     Remove { id: String },
+    /// The pictures a Verein sends for the puzzles (docs/51): add, list, retire, remove
+    Image {
+        #[command(subcommand)]
+        cmd: NgoImageCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum NgoImageCmd {
+    /// Upload a picture (JPEG, PNG or WebP, at most 1 MB, upright) for a Verein
+    Add {
+        /// The Verein's id
+        ngo: String,
+        /// The picture; its type comes from the extension (.jpg, .jpeg, .png, .webp)
+        file: std::path::PathBuf,
+        #[arg(long)]
+        title: String,
+        /// One sentence on what the picture shows, printed under the finished puzzle
+        #[arg(long, default_value = "")]
+        caption: String,
+        /// COLUMNSxROWS: 3x4 is three pieces across and four down, for a 3:4 portrait picture.
+        /// Each piece must come out roughly square.
+        #[arg(long, default_value = "3x4")]
+        grid: String,
+        /// The tier of every slot, row by row from the top left, comma-separated: minute, quarter,
+        /// hour (or m, q, h). Without it the server lays out docs/51 §2a: hours in the middle,
+        /// quarters scattered.
+        #[arg(long)]
+        tiers: Option<String>,
+        /// The Verein holds the rights to the picture, and nobody on it can be recognised who has
+        /// not agreed to it (docs/51 §4)
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Every picture, or one Verein's, with how many pieces went out and how many finished it
+    List { ngo: Option<String> },
+    /// Take a picture out of the distribution; whoever has started it can still finish it
+    Retire { id: String },
+    /// Delete a picture nobody has a piece of
+    Remove { id: String },
+}
+
+/// "3x4" → (columns, rows).
+fn parse_grid(g: &str) -> anyhow::Result<(i64, i64)> {
+    let (c, r) = g.split_once(['x', 'X', '×']).ok_or_else(|| anyhow::anyhow!("--grid ist SPALTENxZEILEN, etwa 3x4"))?;
+    Ok((c.trim().parse()?, r.trim().parse()?))
+}
+
+/// "m,q,H" or "minute,quarter,hour" → the wire words.
+fn parse_tiers(t: &str) -> anyhow::Result<Vec<String>> {
+    t.split(',')
+        .map(|w| match w.trim().to_lowercase().as_str() {
+            "m" | "minute" => Ok("minute".to_string()),
+            "q" | "quarter" => Ok("quarter".to_string()),
+            "h" | "hour" => Ok("hour".to_string()),
+            other => anyhow::bail!("--tiers: „{other}“ ist weder minute noch quarter noch hour"),
+        })
+        .collect()
+}
+
+fn print_puzzle_image(v: &Value) {
+    println!(
+        "{:<36} {:<20} {:<32} {:>3}×{:<2} {:>4}×{:<4} {:>5} KB {:>6} {:>9} {:>6}  {}",
+        s(v, "id"),
+        s(v, "ngo_id").chars().take(20).collect::<String>(),
+        s(v, "title").chars().take(32).collect::<String>(),
+        s(v, "cols"),
+        s(v, "rows"),
+        s(v, "width"),
+        s(v, "height"),
+        v["size"].as_i64().unwrap_or(0) / 1024,
+        s(v, "pieces_awarded"),
+        s(v, "customers_started"),
+        s(v, "customers_completed"),
+        if v["retired_at"].is_null() { "aktiv" } else { "zurückgezogen" }
+    );
+    // The tiers as the picture lies: m a minute, q a quarter, H the hour (docs/51 §2a).
+    let tiers = strings(&v["tiers"]);
+    let cols = v["cols"].as_u64().unwrap_or(1).max(1) as usize;
+    for row in tiers.chunks(cols) {
+        let cells: Vec<&str> = row.iter().map(|t| match t.as_str() { "hour" => "H", "quarter" => "q", _ => "m" }).collect();
+        println!("{:<36} {}", "", cells.join(" "));
+    }
 }
 
 /// Where claim mail is allowed to go.
@@ -1609,6 +1693,53 @@ async fn main() -> anyhow::Result<()> {
                 let v = api.delete(&format!("/admin/ngos/{id}")).await?;
                 println!("{}", if v["deleted"].as_bool().unwrap_or(false) { "gelöscht" } else { "deaktiviert (wird referenziert)" });
             }
+            NgoCmd::Image { cmd } => match cmd {
+                NgoImageCmd::Add { ngo, file, title, caption, grid, tiers, yes } => {
+                    let (cols, rows) = parse_grid(&grid)?;
+                    let tiers = tiers.as_deref().map(parse_tiers).transpose()?;
+                    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                    let content_type = match ext.as_str() {
+                        "jpg" | "jpeg" => "image/jpeg",
+                        "png" => "image/png",
+                        "webp" => "image/webp",
+                        _ => anyhow::bail!("{}: nur .jpg, .jpeg, .png oder .webp", file.display()),
+                    };
+                    let bytes = std::fs::read(&file)?;
+                    if bytes.len() > 1_000_000 {
+                        anyhow::bail!("{} hat {} KB; höchstens 1 MB", file.display(), bytes.len() / 1024);
+                    }
+                    if !yes {
+                        println!("Hat der Verein die Rechte an diesem Bild, und ist niemand darauf zu erkennen, der nicht eingewilligt hat?");
+                        anyhow::bail!("nichts hochgeladen — wiederhole mit --yes, wenn beides stimmt");
+                    }
+                    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                    let mut body = json!({ "title": title, "caption": caption, "rows": rows, "cols": cols, "content_type": content_type, "data": b64 });
+                    if let Some(t) = tiers {
+                        body["tiers"] = json!(t);
+                    }
+                    let v = api.post(&format!("/admin/ngos/{ngo}/puzzle-images"), body).await?;
+                    print_puzzle_image(&v);
+                }
+                NgoImageCmd::List { ngo } => {
+                    let path = match &ngo {
+                        Some(n) => format!("/admin/puzzle-images?ngo={}", url::form_urlencoded::byte_serialize(n.as_bytes()).collect::<String>()),
+                        None => "/admin/puzzle-images".to_string(),
+                    };
+                    let v = api.get(&path).await?;
+                    println!("{:<36} {:<20} {:<32} {:<6} {:<9} {:>8} {:>6} {:>9} {:>6}  Status", "ID", "Verein", "Titel", "Raster", "Pixel", "Größe", "Teile", "Begonnen", "Fertig");
+                    for i in v.as_array().unwrap_or(&vec![]) {
+                        print_puzzle_image(i);
+                    }
+                }
+                NgoImageCmd::Retire { id } => {
+                    let v = api.post(&format!("/admin/puzzle-images/{id}/retire"), json!({})).await?;
+                    print_puzzle_image(&v);
+                }
+                NgoImageCmd::Remove { id } => {
+                    api.delete(&format!("/admin/puzzle-images/{id}")).await?;
+                    println!("gelöscht");
+                }
+            },
         },
         Cmd::Stations { cmd } => match cmd {
             StationsCmd::Import { from, out, dry_run, force, check } => {

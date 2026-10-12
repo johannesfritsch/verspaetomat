@@ -86,6 +86,16 @@ pub static STATION_PREMISES: BoolFlag = BoolFlag {
            file on the phone is the 300 m guard. The switch for the test trips, and the way back.",
 };
 
+pub static PUZZLES: BoolFlag = BoolFlag {
+    key: "puzzles",
+    wire: true,
+    note: "docs/51. Whether a finished journey brings a puzzle piece from a Verein's picture. \
+           Read by puzzles::award (from finalise_journey, finish's abort branch and \
+           expire_transfers: no piece is awarded while off), by GET /v1/me/puzzles (empty while \
+           off) and by the app, which shows the piece on arrival, the Puzzles row on Ich and the \
+           Puzzles page only while on. Off is what every build before it does.",
+};
+
 pub enum Spec {
     Bool(&'static BoolFlag),
     Int(&'static IntFlag),
@@ -94,7 +104,11 @@ pub enum Spec {
 
 /// Every flag that exists. A key not in here is an orphan: it is never loaded, never served, and
 /// an admin write naming it is a 404 rather than an implicit create.
-pub static ALL: &[Spec] = &[Spec::Bool(&STATIONS_LOCAL), Spec::Bool(&STATION_PREMISES)];
+pub static ALL: &[Spec] = &[
+    Spec::Bool(&STATIONS_LOCAL),
+    Spec::Bool(&STATION_PREMISES),
+    Spec::Bool(&PUZZLES),
+];
 
 impl Spec {
     pub fn key(&self) -> &'static str {
