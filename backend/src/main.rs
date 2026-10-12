@@ -20,6 +20,7 @@ mod handlers;
 mod journeys;
 mod mail;
 mod model;
+mod mp4;
 mod openai;
 mod pdf;
 mod pots;
@@ -260,6 +261,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/me/geofence", get(handlers::geofence))
         .route("/v1/me/destinations", get(journeys::destinations))
         .route("/v1/me/puzzles", get(puzzles::mine))
+        // The video of a finished picture (docs/51 §9b): with a token, only once it is finished.
+        .route("/v1/puzzle-videos/{id}", get(puzzles::video))
         .route("/v1/fares", get(tickets::fares_public))
         .route("/v1/me/tickets", get(tickets::list).post(tickets::create))
         .route("/v1/me/tickets/{id}", axum::routing::patch(tickets::patch).delete(tickets::archive))
@@ -341,6 +344,8 @@ pub fn router(state: AppState) -> Router {
         .route("/admin/puzzle-images", get(admin::puzzle_images))
         .route("/admin/puzzle-images/{id}", delete(admin::puzzle_image_remove))
         .route("/admin/puzzle-images/{id}/retire", post(admin::puzzle_image_retire))
+        // The video streams to disk and the handler counts its 40 MB itself (admin.rs).
+        .route("/admin/puzzle-images/{id}/video", put(admin::puzzle_video_put).delete(admin::puzzle_video_remove))
         .route("/admin/desks", get(admin::desks))
         .route("/admin/fares", get(admin::fares_list))
         .route("/admin/fares/{id}/evaluate", post(admin::fares_evaluate))

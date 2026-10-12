@@ -2402,3 +2402,172 @@ async fn clear_takes_one_picture_or_all(pool: PgPool) {
     assert_eq!(v["removed"], 10);
     assert_eq!(pieces(&pool, id).await, 0);
 }
+
+// ---------------------------------------------------------------------------
+// Puzzle videos (docs/51 §9b)
+// ---------------------------------------------------------------------------
+
+const VIDEO: &[u8] = include_bytes!("../tests/fixtures/puzzle-video.mp4");
+
+/// The raw MP4 as the Stellwerk sends it.
+async fn put_video(app: &Router, image: Uuid, bytes: &[u8], content_type: &str, length: Option<&str>) -> (StatusCode, Value) {
+    let mut req = Request::builder()
+        .method("PUT")
+        .uri(format!("/admin/puzzle-images/{image}/video"))
+        .header("x-admin-token", std::env::var("ADMIN_TOKEN").unwrap_or_else(|_| "stellwerk".into()))
+        .header("content-type", content_type);
+    if let Some(l) = length {
+        req = req.header("content-length", l);
+    }
+    let res = app.clone().oneshot(req.body(Body::from(bytes.to_vec())).unwrap()).await.unwrap();
+    let status = res.status();
+    let body = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+}
+
+/// The fixture with its running time rewritten in `mvhd` (version 0): the same file, longer or
+/// shorter.
+fn video_of_seconds(seconds: u32) -> Vec<u8> {
+    let mut v = VIDEO.to_vec();
+    let at = v.windows(4).position(|w| w == b"mvhd").expect("mvhd") + 4;
+    assert_eq!(v[at], 0, "the fixture's mvhd is version 0");
+    let timescale = u32::from_be_bytes(v[at + 12..at + 16].try_into().unwrap());
+    v[at + 16..at + 20].copy_from_slice(&(timescale * seconds).to_be_bytes());
+    v
+}
+
+fn video_file(path: &Value) -> std::path::PathBuf {
+    crate::storage::dir().join(path.as_str().expect("a path"))
+}
+
+async fn video_path(pool: &PgPool, image: Uuid) -> Value {
+    json!(sqlx::query_scalar::<_, Option<String>>("select video_path from puzzle_images where id = $1").bind(image).fetch_one(pool).await.unwrap())
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_picture_takes_a_short_mp4_and_nothing_else(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let image = picture(&app, "wald", 2, 2).await;
+
+    let (s, v) = put_video(&app, image, VIDEO, "video/mp4", None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["has_video"], true);
+    assert_eq!(v["video_bytes"], VIDEO.len());
+    assert_eq!((v["video_width"].as_i64(), v["video_height"].as_i64()), (Some(32), Some(32)));
+    assert!((v["video_seconds"].as_f64().unwrap() - 11.0).abs() < 0.1, "{v}");
+    let path = video_path(&pool, image).await;
+    assert!(path.as_str().unwrap().starts_with(&format!("puzzle-videos/{image}-")), "{path}");
+    assert_eq!(std::fs::read(video_file(&path)).unwrap(), VIDEO);
+    let (_, list) = admin(&app, "GET", "/admin/puzzle-images?ngo=wald", json!({})).await;
+    assert_eq!(list[0]["has_video"], true);
+
+    // Refused, and the stored video stays as it was.
+    for (bytes, content_type, length, want, says) in [
+        (png(600, 600), "video/mp4", None, StatusCode::BAD_REQUEST, "ftyp"),
+        (video_of_seconds(8), "video/mp4", None, StatusCode::BAD_REQUEST, "runs 8.0 s"),
+        (video_of_seconds(40), "video/mp4", None, StatusCode::BAD_REQUEST, "it must run 10 to 35 s"),
+        (VIDEO.to_vec(), "video/quicktime", None, StatusCode::UNSUPPORTED_MEDIA_TYPE, "video/mp4"),
+        (VIDEO.to_vec(), "video/mp4", Some("50000000"), StatusCode::PAYLOAD_TOO_LARGE, "40 MB"),
+    ] {
+        let (s, v) = put_video(&app, image, &bytes, content_type, length).await;
+        assert_eq!(s, want, "{v}");
+        assert!(v["error"].as_str().unwrap().contains(says), "{v}");
+    }
+    assert_eq!(video_path(&pool, image).await, path);
+    let (s, _) = put_video(&app, Uuid::new_v4(), VIDEO, "video/mp4", None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // A new video replaces the old one, file and all.
+    let (s, _) = put_video(&app, image, &video_of_seconds(20), "video/mp4", None).await;
+    assert_eq!(s, StatusCode::OK);
+    let newer = video_path(&pool, image).await;
+    assert_ne!(newer, path);
+    assert!(!video_file(&path).exists() && video_file(&newer).exists());
+
+    // Removed: the row forgets it and the file goes; then the picture, and nothing is left.
+    let (s, v) = admin(&app, "DELETE", &format!("/admin/puzzle-images/{image}/video"), json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["has_video"], false);
+    assert!(!video_file(&newer).exists());
+    let (s, _) = admin(&app, "DELETE", &format!("/admin/puzzle-images/{image}/video"), json!({})).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    put_video(&app, image, VIDEO, "video/mp4", None).await;
+    let again = video_path(&pool, image).await;
+    let (s, _) = admin(&app, "DELETE", &format!("/admin/puzzle-images/{image}"), json!({})).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(!video_file(&again).exists(), "the picture takes its video with it");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn the_video_comes_with_the_finished_picture(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, token) = device(&app).await;
+    let (_, stranger) = device(&app).await;
+    let image = picture(&app, "bahnhofsmission", 2, 2).await;
+    put_video(&app, image, VIDEO, "video/mp4", None).await;
+    puzzles_on(&app, id).await;
+    let url = format!("/v1/puzzle-videos/{image}");
+    let auth = format!("Bearer {token}");
+
+    // Three of four: the app may say it moves, but not where the video is, and it gets none.
+    admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/{image}/fill"), json!({ "leave": 1 })).await;
+    let (_, v) = call(&app, "GET", "/v1/me/puzzles", Some(&token), None).await;
+    assert_eq!(v["puzzles"][0]["has_video"], true, "{v}");
+    assert_eq!(v["puzzles"][0]["video"], Value::Null);
+    let (s, _, _) = raw_get(&app, &url, &[("authorization", &auth)]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // Finished: the video, whole and in parts.
+    admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/{image}/fill"), json!({})).await;
+    let (_, v) = call(&app, "GET", "/v1/me/puzzles", Some(&token), None).await;
+    let video = &v["puzzles"][0]["video"];
+    let sha = video["sha256"].as_str().unwrap().to_string();
+    assert_eq!(video["url"], url);
+    assert_eq!(video["bytes"], VIDEO.len());
+    assert_eq!((video["width"].as_i64(), video["height"].as_i64()), (Some(32), Some(32)));
+    assert!((video["seconds"].as_f64().unwrap() - 11.0).abs() < 0.1);
+
+    let (s, h, body) = raw_get(&app, &url, &[("authorization", &auth)]).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body, VIDEO);
+    assert_eq!(h["content-type"], "video/mp4");
+    assert_eq!(h["accept-ranges"], "bytes");
+    assert_eq!(h["etag"], format!("\"{sha}\"").as_str());
+    assert_eq!(h["cache-control"], "private, max-age=31536000, immutable");
+    assert_eq!(h["content-length"], VIDEO.len().to_string().as_str());
+
+    let (s, h, body) = raw_get(&app, &url, &[("authorization", &auth), ("range", "bytes=100-199")]).await;
+    assert_eq!(s, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(h["content-range"], format!("bytes 100-199/{}", VIDEO.len()).as_str());
+    assert_eq!(body, &VIDEO[100..200]);
+    let (s, h, body) = raw_get(&app, &url, &[("authorization", &auth), ("range", "bytes=-42")]).await;
+    assert_eq!(s, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(h["content-range"], format!("bytes {}-{}/{}", VIDEO.len() - 42, VIDEO.len() - 1, VIDEO.len()).as_str());
+    assert_eq!(body, &VIDEO[VIDEO.len() - 42..]);
+    let (s, h, _) = raw_get(&app, &url, &[("authorization", &auth), ("range", "bytes=99999-")]).await;
+    assert_eq!(s, StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(h["content-range"], format!("bytes */{}", VIDEO.len()).as_str());
+    // A range for another version of the file is answered with the whole file.
+    let (s, _, body) = raw_get(&app, &url, &[("authorization", &auth), ("range", "bytes=0-9"), ("if-range", "\"other\"")]).await;
+    assert_eq!((s, body.len()), (StatusCode::OK, VIDEO.len()));
+
+    let (s, h, body) = raw_get(&app, &url, &[("authorization", &auth), ("if-none-match", &format!("\"{sha}\""))]).await;
+    assert_eq!(s, StatusCode::NOT_MODIFIED);
+    assert!(body.is_empty());
+    assert_eq!(h["cache-control"], "private, max-age=31536000, immutable");
+
+    // Not without a token, not for someone who has not finished it, not for what is not there.
+    let (s, _, _) = raw_get(&app, &url, &[]).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (s, _, _) = raw_get(&app, &url, &[("authorization", &format!("Bearer {stranger}"))]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _, _) = raw_get(&app, &format!("/v1/puzzle-videos/{}", Uuid::new_v4()), &[("authorization", &auth)]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let plain = picture(&app, "wald", 2, 2).await;
+    let (s, _, _) = raw_get(&app, &format!("/v1/puzzle-videos/{plain}"), &[("authorization", &auth)]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "a picture without a video");
+
+    // The Stellwerk sees the video's facts.
+    let (_, v) = admin(&app, "GET", &format!("/admin/customers/{id}/puzzles"), json!({})).await;
+    assert_eq!(v["puzzles"][0]["video_facts"]["sha256"], sha.as_str());
+}

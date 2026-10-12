@@ -93,6 +93,14 @@ pub async fn remove(path: &str) {
     }
 }
 
+/// Where the puzzle videos live under [`dir`] (docs/51 §9b): `puzzle-videos/<image id>-<sha8>.mp4`.
+pub const PUZZLE_VIDEOS: &str = "puzzle-videos";
+
+/// The file behind a stored relative path, when it is one we could have written.
+pub fn file(rel: &str) -> Option<PathBuf> {
+    is_safe(rel).then(|| dir().join(rel))
+}
+
 /// True if this looks like a PNG. Used where the bytes used to be sniffed in SQL.
 pub fn is_png(data: &[u8]) -> bool {
     data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])

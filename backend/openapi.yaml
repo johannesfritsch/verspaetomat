@@ -102,6 +102,11 @@ paths:
       summary: Destinations from the customer's own journeys, by frequency; the home station first when away (docs/18 §2). Nothing seeded, nothing time-of-day.
       parameters: [{ name: from, in: query, schema: { type: string }, description: stop id of the current station }]
       responses: { '200': { description: '{home, predicted[≤4], recent[≤5]}' } }
+  /v1/puzzle-videos/{id}:
+    get:
+      summary: "The video of a picture (docs/51 §9b), only for a customer who has finished it. Range requests (one range: 206 with Content-Range, Accept-Ranges: bytes, 416 outside the file; If-Range honoured). Content-Type video/mp4, ETag from its sha256, Cache-Control: private, max-age=31536000, immutable, 304 on If-None-Match."
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }, { name: Range, in: header, schema: { type: string } }]
+      responses: { '200': { description: the MP4 }, '206': { description: one range of it }, '304': { description: If-None-Match matched }, '403': { description: the picture is not finished }, '404': { description: no such picture or it has no video }, '416': { description: range outside the file } }
   /v1/me/puzzles:
     get:
       summary: "The pictures this customer has started (docs/51 §6, §8): growing ones by last_piece_at desc, then finished ones by completed_at desc. more_waiting: whether any piece is left to get. With the flag `puzzles` off: {puzzles: [], more_waiting: false}."
@@ -385,7 +390,7 @@ paths:
       responses: { '200': { description: '{image_id, added, left, puzzle: Puzzle | null}' }, '400': { description: bad leave or leave_tier }, '403': { description: production }, '404': { description: no such customer or picture, or nothing of that NGO left to fill } }
   /admin/puzzle-images:
     get:
-      summary: "Every puzzle picture, retired ones included, without the bytes: {id, ngo_id, ngo_name, title, caption, rows, cols, tiers, content_type, size, width, height, sha256, image_url, retired_at, created_at, pieces_awarded, customers_started, customers_completed}"
+      summary: "Every puzzle picture, retired ones included, without the bytes: {id, ngo_id, ngo_name, title, caption, rows, cols, tiers, content_type, size, width, height, sha256, image_url, retired_at, created_at, pieces_awarded, customers_started, customers_completed, has_video, video_bytes, video_seconds, video_width, video_height}"
       security: [{ adminToken: [] }]
       parameters: [{ name: ngo, in: query, schema: { type: string } }]
       responses: { '200': { description: '[PuzzleImage]' } }
@@ -395,6 +400,18 @@ paths:
       security: [{ adminToken: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
       responses: { '200': { description: '{id, deleted}' }, '404': { description: No such picture }, '409': { description: 'Pieces were awarded: {error, pieces_awarded}' } }
+  /admin/puzzle-images/{id}/video:
+    put:
+      summary: "The picture's video (docs/51 §9b): the raw MP4 as the body, Content-Type video/mp4, streamed to the upload volume. An MP4 (ftyp first), 10 to 35 s by its mvhd, at most 40 MB. Replaces the video the picture had; the old file goes. Removing the picture removes its video too."
+      security: [{ adminToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { content: { video/mp4: { schema: { type: string, format: binary } } } }
+      responses: { '200': { description: 'PuzzleImage, with has_video, video_bytes, video_seconds, video_width, video_height' }, '400': { description: 'not an MP4, unreadable, or not 10–35 s' }, '404': { description: No such picture }, '413': { description: over 40 MB }, '415': { description: not sent as video/mp4 } }
+    delete:
+      summary: The picture stays, without its video; the file goes
+      security: [{ adminToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: PuzzleImage }, '404': { description: no such picture, or it has no video } }
   /admin/puzzle-images/{id}/retire:
     post:
       summary: Take a picture out of the distribution; whoever has started it keeps it and can finish it
@@ -437,6 +454,8 @@ components:
         width: { type: integer }
         height: { type: integer }
         awarded_at: { type: string, format: date-time }
+        has_video: { type: boolean, description: "the picture has a video (docs/51 §9b); said before it is finished, so the app can say it will move" }
+        video: { type: [object, "null"], description: "only once the picture is finished: {url: /v1/puzzle-videos/{image_id}, bytes, seconds, sha256, width, height}" }
     Puzzle:
       type: object
       description: "A started picture: the fields of Piece (tiers included) without piece, tier, own_cause and awarded_at, plus these."

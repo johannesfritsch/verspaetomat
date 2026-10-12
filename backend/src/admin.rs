@@ -1497,12 +1497,18 @@ struct PuzzleImageRow {
     pieces_awarded: i64,
     customers_started: i64,
     customers_completed: i64,
+    has_video: bool,
+    video_bytes: Option<i64>,
+    video_seconds: Option<f64>,
+    video_width: Option<i32>,
+    video_height: Option<i32>,
 }
 
 async fn puzzle_images_json(pool: &sqlx::PgPool, ngo: Option<&str>, id: Option<Uuid>) -> Result<Vec<Value>, (StatusCode, Json<Value>)> {
     let rows: Vec<PuzzleImageRow> = sqlx::query_as(
         "select i.id, i.ngo_id, n.name as ngo_name, i.title, i.caption, i.rows, i.cols, i.tiers, i.content_type, octet_length(i.bytes) as size,
                 i.width, i.height, i.sha256, i.retired_at, i.created_at,
+                i.video_path is not null as has_video, i.video_bytes, i.video_seconds, i.video_width, i.video_height,
                 (select count(*) from puzzle_pieces p where p.image_id = i.id)::bigint as pieces_awarded,
                 (select count(distinct p.customer_id) from puzzle_pieces p where p.image_id = i.id)::bigint as customers_started,
                 (select count(*) from (select 1 from puzzle_pieces p where p.image_id = i.id group by p.customer_id having count(*) >= i.rows * i.cols) f)::bigint
@@ -1598,13 +1604,12 @@ pub async fn puzzle_image_retire(State(s): State<AppState>, _a: Admin, Path(id):
 /// the way out is to retire it: a piece is never taken away (docs/51 §3).
 pub async fn puzzle_image_remove(State(s): State<AppState>, _a: Admin, Path(id): Path<Uuid>) -> ApiResult {
     // One statement, so a piece awarded meanwhile cannot slip between a check and the delete.
-    let n = sqlx::query("delete from puzzle_images where id = $1 and not exists(select 1 from puzzle_pieces where image_id = $1)")
+    let gone: Option<Option<String>> = sqlx::query_scalar("delete from puzzle_images where id = $1 and not exists(select 1 from puzzle_pieces where image_id = $1) returning video_path")
         .bind(id)
-        .execute(&s.pool)
+        .fetch_optional(&s.pool)
         .await
-        .map_err(internal)?
-        .rows_affected();
-    if n == 0 {
+        .map_err(internal)?;
+    let Some(video) = gone else {
         let awarded: Option<i64> = sqlx::query_scalar("select (select count(*) from puzzle_pieces where image_id = i.id) from puzzle_images i where i.id = $1")
             .bind(id)
             .fetch_optional(&s.pool)
@@ -1614,10 +1619,147 @@ pub async fn puzzle_image_remove(State(s): State<AppState>, _a: Admin, Path(id):
             Some(awarded) => (StatusCode::CONFLICT, Json(json!({ "error": "pieces of this picture were awarded; retire it instead", "pieces_awarded": awarded }))),
             None => err(StatusCode::NOT_FOUND, "no such picture"),
         });
+    };
+    // Its video goes with it, after the row: a file removed before a failed delete would be a
+    // video gone from a picture that still exists.
+    if let Some(path) = video {
+        crate::storage::remove(&path).await;
     }
     crate::puzzles::forget_picture(id);
     crate::rules::audit(&s.pool, "puzzle_image", id, None, "deleted", "deleted via admin").await.map_err(internal)?;
     Ok(Json(json!({ "id": id, "deleted": true })))
+}
+
+/// `PUT /admin/puzzle-images/{id}/video`: the picture's video, the raw MP4 as the body
+/// (`Content-Type: video/mp4`, docs/51 §9b). Streamed to the upload volume, checked there — an
+/// MP4, 10 to 35 seconds, at most 40 MB — and only then put in place. It replaces the video the
+/// picture had; the old file goes after the row names the new one.
+///
+/// The size is counted here while the body streams: `DefaultBodyLimit` binds only the extractors
+/// that buffer a body, and this one never holds it whole.
+pub async fn puzzle_video_put(State(s): State<AppState>, _a: Admin, Path(id): Path<Uuid>, req: axum::extract::Request) -> ApiResult {
+    use crate::puzzles::{MAX_VIDEO_BYTES, VIDEO_SECONDS};
+    use futures_util::StreamExt;
+    use sha2::Digest;
+    use tokio::io::AsyncWriteExt;
+    // The headers are read before the first await: the request's body is not Sync, so no borrow
+    // of the request may live across one.
+    let (content_type, content_length) = {
+        let header = |name| req.headers().get(name).and_then(|v: &axum::http::HeaderValue| v.to_str().ok()).map(str::to_string);
+        (header(axum::http::header::CONTENT_TYPE), header(axum::http::header::CONTENT_LENGTH))
+    };
+    let body = req.into_body();
+    if content_type.as_deref() != Some("video/mp4") {
+        return Err(err(StatusCode::UNSUPPORTED_MEDIA_TYPE, "send the MP4 as Content-Type: video/mp4"));
+    }
+    let too_large = || err(StatusCode::PAYLOAD_TOO_LARGE, "the video is over 40 MB");
+    if content_length.and_then(|l| l.parse::<u64>().ok()).is_some_and(|l| l > MAX_VIDEO_BYTES) {
+        return Err(too_large());
+    }
+    let exists: bool = sqlx::query_scalar("select exists(select 1 from puzzle_images where id = $1)").bind(id).fetch_one(&s.pool).await.map_err(internal)?;
+    if !exists {
+        return Err(err(StatusCode::NOT_FOUND, "no such picture"));
+    }
+    let dir = crate::storage::dir().join(crate::storage::PUZZLE_VIDEOS);
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let incoming = dir.join(format!(".incoming-{}", Uuid::new_v4()));
+    let mut file = tokio::fs::File::create(&incoming).await.map_err(internal)?;
+    let (mut size, mut digest) = (0u64, sha2::Sha256::new());
+    let mut stream = body.into_data_stream();
+    let streamed: Result<(), (StatusCode, Json<Value>)> = async {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| err(StatusCode::BAD_REQUEST, &format!("the upload broke off: {e}")))?;
+            size += chunk.len() as u64;
+            if size > MAX_VIDEO_BYTES {
+                return Err(too_large());
+            }
+            digest.update(&chunk);
+            file.write_all(&chunk).await.map_err(internal)?;
+        }
+        file.flush().await.map_err(internal)?;
+        Ok(())
+    }
+    .await;
+    drop(file);
+    let checked = match streamed {
+        Ok(()) => {
+            let at = incoming.clone();
+            tokio::task::spawn_blocking(move || std::fs::File::open(&at).map_err(|e| e.to_string()).and_then(|mut f| crate::mp4::facts(&mut f)))
+                .await
+                .map_err(internal)
+                .and_then(|r| r.map_err(|e| err(StatusCode::BAD_REQUEST, &e)))
+                .and_then(|f| {
+                    if f.seconds < VIDEO_SECONDS.0 || f.seconds > VIDEO_SECONDS.1 {
+                        Err(err(StatusCode::BAD_REQUEST, &format!("the video runs {:.1} s; it must run {} to {} s", f.seconds, VIDEO_SECONDS.0, VIDEO_SECONDS.1)))
+                    } else {
+                        Ok(f)
+                    }
+                })
+        }
+        Err(e) => Err(e),
+    };
+    let facts = match checked {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&incoming).await;
+            return Err(e);
+        }
+    };
+    let sha = hex::encode(digest.finalize());
+    let rel = format!("{}/{id}-{}.mp4", crate::storage::PUZZLE_VIDEOS, &sha[..8]);
+    if let Err(e) = tokio::fs::rename(&incoming, crate::storage::dir().join(&rel)).await {
+        let _ = tokio::fs::remove_file(&incoming).await;
+        return Err(internal(e));
+    }
+    let saved: Result<Option<String>, sqlx::Error> = async {
+        let mut tx = s.pool.begin().await?;
+        let old: Option<String> = sqlx::query_scalar("select video_path from puzzle_images where id = $1 for update").bind(id).fetch_one(&mut *tx).await?;
+        sqlx::query("update puzzle_images set video_path = $2, video_bytes = $3, video_seconds = $4, video_sha256 = $5, video_width = $6, video_height = $7 where id = $1")
+            .bind(id)
+            .bind(&rel)
+            .bind(size as i64)
+            .bind(facts.seconds)
+            .bind(&sha)
+            .bind(facts.width as i32)
+            .bind(facts.height as i32)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(old)
+    }
+    .await;
+    match saved {
+        Ok(old) => {
+            if let Some(old) = old.filter(|o| *o != rel) {
+                crate::storage::remove(&old).await;
+            }
+        }
+        Err(e) => {
+            crate::storage::remove(&rel).await;
+            return Err(internal(e));
+        }
+    }
+    crate::rules::audit(&s.pool, "puzzle_image", id, None, "video", &format!("video {:.1} s, {} bytes via admin", facts.seconds, size)).await.map_err(internal)?;
+    let mut v = puzzle_images_json(&s.pool, None, Some(id)).await?;
+    Ok(Json(v.pop().unwrap_or(Value::Null)))
+}
+
+/// `DELETE /admin/puzzle-images/{id}/video`: the picture stays, without a video.
+pub async fn puzzle_video_remove(State(s): State<AppState>, _a: Admin, Path(id): Path<Uuid>) -> ApiResult {
+    let mut tx = s.pool.begin().await.map_err(internal)?;
+    let old: Option<Option<String>> = sqlx::query_scalar("select video_path from puzzle_images where id = $1 for update").bind(id).fetch_optional(&mut *tx).await.map_err(internal)?;
+    let Some(old) = old else { return Err(err(StatusCode::NOT_FOUND, "no such picture")) };
+    let Some(old) = old else { return Err(err(StatusCode::NOT_FOUND, "this picture has no video")) };
+    sqlx::query("update puzzle_images set video_path = null, video_bytes = null, video_seconds = null, video_sha256 = null, video_width = null, video_height = null where id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    crate::storage::remove(&old).await;
+    crate::rules::audit(&s.pool, "puzzle_image", id, Some("video"), "no video", "video removed via admin").await.map_err(internal)?;
+    let mut v = puzzle_images_json(&s.pool, None, Some(id)).await?;
+    Ok(Json(v.pop().unwrap_or(Value::Null)))
 }
 
 // ---------------------------------------------------------------------------

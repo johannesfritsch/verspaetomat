@@ -424,6 +424,7 @@ async fn try_award(pool: &PgPool, customer: &CustomerRow, j: &JourneyRow) -> any
 // ---------------------------------------------------------------------------
 
 /// One picture a customer has started.
+#[derive(sqlx::FromRow)]
 struct Puzzle {
     image_id: Uuid,
     ngo_id: String,
@@ -438,6 +439,11 @@ struct Puzzle {
     owned: Vec<i32>,
     started_at: DateTime<Utc>,
     last_piece_at: DateTime<Utc>,
+    video_bytes: Option<i64>,
+    video_seconds: Option<f64>,
+    video_sha256: Option<String>,
+    video_width: Option<i32>,
+    video_height: Option<i32>,
 }
 
 impl Puzzle {
@@ -453,7 +459,22 @@ impl Puzzle {
             "title": self.title, "caption": self.caption,
             "ngo_id": self.ngo_id, "ngo_name": self.ngo_name,
             "image_url": format!("/v1/puzzle-images/{}", self.image_id), "width": self.width, "height": self.height,
+            // docs/51 §9b: that there is one is said from the start („bewegt sich, wenn es fertig
+            // ist"); where it is, only once the picture is finished.
+            "has_video": self.video_sha256.is_some(),
+            "video": if self.complete() { self.video() } else { Value::Null },
         })
+    }
+
+    /// The video as the wire carries it, whether or not this customer may have it yet.
+    fn video(&self) -> Value {
+        match &self.video_sha256 {
+            Some(sha) => json!({
+                "url": format!("/v1/puzzle-videos/{}", self.image_id), "bytes": self.video_bytes, "seconds": self.video_seconds,
+                "sha256": sha, "width": self.video_width, "height": self.video_height,
+            }),
+            None => Value::Null,
+        }
     }
 
     /// As `GET /v1/me/puzzles` lists it.
@@ -468,9 +489,10 @@ impl Puzzle {
 
 /// The pictures this customer has started; one of them when `image` is set.
 async fn puzzles_of(pool: &PgPool, customer: Uuid, image: Option<Uuid>) -> anyhow::Result<Vec<Puzzle>> {
-    let rows: Vec<(Uuid, String, String, String, String, i32, i32, i32, i32, Vec<String>, Vec<i32>, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
-        "select i.id, i.ngo_id, n.name, i.title, i.caption, i.rows, i.cols, i.width, i.height, i.tiers,
-                array_agg(p.piece order by p.piece), min(p.awarded_at), max(p.awarded_at)
+    Ok(sqlx::query_as(
+        "select i.id as image_id, i.ngo_id, n.name as ngo_name, i.title, i.caption, i.rows, i.cols, i.width, i.height, i.tiers,
+                array_agg(p.piece order by p.piece) as owned, min(p.awarded_at) as started_at, max(p.awarded_at) as last_piece_at,
+                i.video_bytes, i.video_seconds, i.video_sha256, i.video_width, i.video_height
          from puzzle_pieces p
          join puzzle_images i on i.id = p.image_id
          join ngos n on n.id = i.ngo_id
@@ -480,13 +502,7 @@ async fn puzzles_of(pool: &PgPool, customer: Uuid, image: Option<Uuid>) -> anyho
     .bind(customer)
     .bind(image)
     .fetch_all(pool)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|(image_id, ngo_id, ngo_name, title, caption, rows, cols, width, height, tiers, owned, started_at, last_piece_at)| Puzzle {
-            image_id, ngo_id, ngo_name, title, caption, rows, cols, width, height, tiers, owned, started_at, last_piece_at,
-        })
-        .collect())
+    .await?)
 }
 
 /// The piece a journey brought, as `journeys/current` and the finish carry it, or nothing.
@@ -551,7 +567,12 @@ pub async fn stellwerk_view(pool: &PgPool, flags: &crate::flags::Table, customer
     Ok(json!({
         "customer": customer.id, "nickname": customer.nickname,
         "puzzles_flag": flags.bool(&crate::flags::PUZZLES, Some(customer.into())),
-        "puzzles": list.iter().map(Puzzle::listed).collect::<Vec<_>>(),
+        // The video's facts before it is finished too: the Stellwerk shows what is coming.
+        "puzzles": list.iter().map(|p| {
+            let mut v = p.listed();
+            v["video_facts"] = p.video();
+            v
+        }).collect::<Vec<_>>(),
         "more_waiting": more_waiting,
         "today": { "journey_pieces": today, "cap": MAX_PER_DAY },
     }))
@@ -729,6 +750,143 @@ pub async fn image(State(s): State<AppState>, h: HeaderMap, Path(id): Path<Strin
         },
     };
     ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, cache.to_string()), (header::ETAG, etag)], bytes).into_response()
+}
+
+/// The longest a puzzle video may be, and the shortest, in seconds, and its largest size
+/// (docs/51 §9b: 15–30 s are asked for; the Stellwerk warns outside those, the server refuses
+/// outside these).
+pub const VIDEO_SECONDS: (f64, f64) = (10.0, 35.0);
+pub const MAX_VIDEO_BYTES: u64 = 40_000_000;
+
+/// What a `Range` header asks of a file.
+#[derive(Debug, PartialEq)]
+pub enum ByteRange {
+    /// No range, or one we do not serve in parts (several ranges): the whole file is a valid answer.
+    Whole,
+    /// First and last byte, both inclusive.
+    Part(u64, u64),
+    /// Outside the file: 416.
+    Unsatisfiable,
+}
+
+/// The single byte range of `header` for a file of `len` bytes (RFC 9110 §14.1.2). A malformed
+/// header is ignored, as the RFC allows.
+pub fn byte_range(header: &str, len: u64) -> ByteRange {
+    let Some(spec) = header.trim().strip_prefix("bytes=") else { return ByteRange::Whole };
+    let Some((a, b)) = spec.split_once('-').filter(|_| !spec.contains(',')) else { return ByteRange::Whole };
+    let (a, b) = (a.trim(), b.trim());
+    let num = |s: &str| s.parse::<u64>().ok();
+    match (a.is_empty(), b.is_empty()) {
+        (true, true) => ByteRange::Whole,
+        // The last n bytes.
+        (true, false) => match num(b) {
+            Some(0) => ByteRange::Unsatisfiable,
+            Some(_) if len == 0 => ByteRange::Unsatisfiable,
+            Some(n) => ByteRange::Part(len.saturating_sub(n), len - 1),
+            None => ByteRange::Whole,
+        },
+        (false, _) => match (num(a), if b.is_empty() { Some(u64::MAX) } else { num(b) }) {
+            (Some(first), Some(last)) if first > last => ByteRange::Whole,
+            (Some(first), _) if first >= len => ByteRange::Unsatisfiable,
+            (Some(first), Some(last)) => ByteRange::Part(first, last.min(len - 1)),
+            _ => ByteRange::Whole,
+        },
+    }
+}
+
+/// `GET /v1/puzzle-videos/{id}`: the video of a picture, only for a customer who has finished it
+/// (docs/51 §9b: the reward for the whole picture). In ranges, because a player and a resumed
+/// download ask for them; it never changes, so it caches for good, privately.
+pub async fn video(State(s): State<AppState>, c: Customer, h: HeaderMap, Path(id): Path<String>) -> Response {
+    use axum::http::header;
+    let refuse = |status: StatusCode, msg: &str| (status, Json(json!({ "error": msg }))).into_response();
+    let Ok(id) = id.parse::<Uuid>() else { return refuse(StatusCode::NOT_FOUND, "no such video") };
+    let row: Result<Option<(Option<String>, Option<String>, i32, i64)>, _> = sqlx::query_as(
+        "select i.video_path, i.video_sha256, i.rows * i.cols, (select count(*) from puzzle_pieces p where p.image_id = i.id and p.customer_id = $2)
+         from puzzle_images i where i.id = $1",
+    )
+    .bind(id)
+    .bind(c.0.id)
+    .fetch_optional(&s.pool)
+    .await;
+    let (path, sha, slots, owned) = match row {
+        Ok(Some((Some(path), Some(sha), slots, owned))) => (path, sha, slots, owned),
+        Ok(_) => return refuse(StatusCode::NOT_FOUND, "no such video"),
+        Err(e) => return internal(e).into_response(),
+    };
+    if owned < slots as i64 {
+        return refuse(StatusCode::FORBIDDEN, "the video comes with the finished picture");
+    }
+    let etag = format!("\"{sha}\"");
+    let cache = "private, max-age=31536000, immutable";
+    if h.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
+        return (StatusCode::NOT_MODIFIED, [(header::CACHE_CONTROL, cache.to_string()), (header::ETAG, etag)]).into_response();
+    }
+    let opened = match crate::storage::file(&path) {
+        Some(p) => tokio::fs::File::open(&p).await,
+        None => Err(std::io::Error::other("unsafe path")),
+    };
+    let file = match opened {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::error!(image = %id, path, error = %e, "puzzle video file missing");
+            return refuse(StatusCode::NOT_FOUND, "no such video");
+        }
+    };
+    let len = match file.metadata().await {
+        Ok(m) => m.len(),
+        Err(e) => return internal(e).into_response(),
+    };
+    // A range under If-Range only while the file is still the one it names.
+    let ranged = h.get(header::IF_RANGE).is_none_or(|v| v.to_str().ok() == Some(etag.as_str()));
+    let range = match h.get(header::RANGE).and_then(|v| v.to_str().ok()) {
+        Some(r) if ranged => byte_range(r, len),
+        _ => ByteRange::Whole,
+    };
+    let (status, first, last) = match range {
+        ByteRange::Whole if len == 0 => (StatusCode::OK, 0, 0),
+        ByteRange::Whole => (StatusCode::OK, 0, len - 1),
+        ByteRange::Part(a, b) => (StatusCode::PARTIAL_CONTENT, a, b),
+        ByteRange::Unsatisfiable => {
+            return (StatusCode::RANGE_NOT_SATISFIABLE, [(header::CONTENT_RANGE, format!("bytes */{len}")), (header::ACCEPT_RANGES, "bytes".to_string())]).into_response();
+        }
+    };
+    let count = if len == 0 { 0 } else { last - first + 1 };
+    let body = axum::body::Body::from_stream(async_stream::stream! {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        let mut file = file;
+        if let Err(e) = file.seek(std::io::SeekFrom::Start(first)).await {
+            yield Err(e);
+            return;
+        }
+        let mut left = count;
+        let mut buf = vec![0u8; 64 * 1024];
+        while left > 0 {
+            let want = buf.len().min(left as usize);
+            match file.read(&mut buf[..want]).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    left -= n as u64;
+                    yield Ok::<Bytes, std::io::Error>(Bytes::copy_from_slice(&buf[..n]));
+                }
+                Err(e) => {
+                    yield Err(e);
+                    break;
+                }
+            }
+        }
+    });
+    let mut r = (status, body).into_response();
+    let hs = r.headers_mut();
+    hs.insert(header::CONTENT_TYPE, "video/mp4".parse().unwrap());
+    hs.insert(header::ACCEPT_RANGES, "bytes".parse().unwrap());
+    hs.insert(header::CONTENT_LENGTH, count.into());
+    hs.insert(header::CACHE_CONTROL, cache.parse().unwrap());
+    hs.insert(header::ETAG, etag.parse().unwrap());
+    if status == StatusCode::PARTIAL_CONTENT {
+        hs.insert(header::CONTENT_RANGE, format!("bytes {first}-{last}/{len}").parse().unwrap());
+    }
+    r
 }
 
 #[cfg(test)]
@@ -959,6 +1117,23 @@ mod tests {
         assert!(!earns_piece(&journey(JourneyStatus::Abandoned, Some("nicht_gefahren"))));
         assert!(!earns_piece(&journey(JourneyStatus::Riding, None)));
         assert!(!earns_piece(&journey(JourneyStatus::Transfer, None)));
+    }
+
+    #[test]
+    fn one_byte_range_at_a_time() {
+        use ByteRange::*;
+        assert_eq!(byte_range("bytes=0-99", 1000), Part(0, 99));
+        assert_eq!(byte_range("bytes=900-", 1000), Part(900, 999));
+        assert_eq!(byte_range("bytes=900-5000", 1000), Part(900, 999));
+        assert_eq!(byte_range("bytes=-100", 1000), Part(900, 999));
+        assert_eq!(byte_range("bytes=-5000", 1000), Part(0, 999));
+        assert_eq!(byte_range("bytes=0-0", 1000), Part(0, 0));
+        assert_eq!(byte_range("bytes=1000-", 1000), Unsatisfiable);
+        assert_eq!(byte_range("bytes=-0", 1000), Unsatisfiable);
+        assert_eq!(byte_range("bytes=0-1,5-9", 1000), Whole, "several ranges: the whole file");
+        assert_eq!(byte_range("bytes=9-1", 1000), Whole, "malformed: ignored");
+        assert_eq!(byte_range("items=0-1", 1000), Whole);
+        assert_eq!(byte_range("bytes=x-", 1000), Whole);
     }
 
     #[test]

@@ -19,6 +19,7 @@
 //!   stellwerk route list | set <desk> <address> [--label …] | default <address> | remove <desk>
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk ngo image add <ngo> bild.jpg --title … --caption … [--grid 3x4] [--tiers …] [--yes] | list [<ngo>] | retire <id> | remove <id>
+//!   stellwerk ngo image add <ngo> --video clip.mov --title … --yes   |  ngo image video <id> clip.mp4 | --remove
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
 //!   stellwerk stations outlines [--from germany-latest.osm.pbf] [--out <dir>] [--dry-run] [--force]
@@ -327,8 +328,14 @@ enum NgoImageCmd {
     Add {
         /// The Verein's id
         ngo: String,
-        /// The picture; its type comes from the extension (.jpg, .jpeg, .png, .webp)
-        file: std::path::PathBuf,
+        /// The picture; its type comes from the extension (.jpg, .jpeg, .png, .webp). Not with
+        /// --video, whose first frame is the picture
+        #[arg(required_unless_present = "video", conflicts_with = "video")]
+        file: Option<std::path::PathBuf>,
+        /// A clip of 15–30 s (docs/51 §9b): its first frame becomes the picture, and the clip,
+        /// made H.264 and at most 1200 px, the reward for finishing it. Needs ffmpeg
+        #[arg(long)]
+        video: Option<std::path::PathBuf>,
         #[arg(long)]
         title: String,
         /// One sentence on what the picture shows, printed under the finished puzzle
@@ -354,6 +361,100 @@ enum NgoImageCmd {
     Retire { id: String },
     /// Delete a picture nobody has a piece of
     Remove { id: String },
+    /// Give a picture its video, or a new one, or (--remove) none. The same conversion as
+    /// `add --video`; warns when the clip's first frame is not the picture's size
+    Video {
+        id: String,
+        #[arg(required_unless_present = "remove", conflicts_with = "remove")]
+        file: Option<std::path::PathBuf>,
+        #[arg(long)]
+        remove: bool,
+    },
+}
+
+/// A clip made ready for a puzzle (docs/51 §9b): H.264 and AAC, at most 1200 px on the long side,
+/// the index in front so a phone can start before the end; and its first frame as the picture.
+struct PreparedVideo {
+    mp4: PathBuf,
+    frame: Vec<u8>,
+    frame_size: (u32, u32),
+    seconds: f64,
+    _scratch: ScratchDir,
+}
+
+/// Run a tool from ffmpeg, or say how to get it.
+fn ffmpeg_tool(tool: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    let out = Command::new(tool).args(args).output().map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => anyhow::anyhow!("{tool} fehlt — brew install ffmpeg"),
+        _ => anyhow::anyhow!("{tool}: {e}"),
+    })?;
+    if !out.status.success() {
+        anyhow::bail!("{tool} ist gescheitert: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(out)
+}
+
+/// The running time of a clip, in seconds.
+fn clip_seconds(file: &Path) -> anyhow::Result<f64> {
+    let out = ffmpeg_tool("ffprobe", &["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", &file.to_string_lossy()])?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().map_err(|_| anyhow::anyhow!("{}: keine Laufzeit lesbar", file.display()))
+}
+
+/// The scale filter for a long side of at most `max` px, both sides even. ffmpeg has turned the
+/// picture upright by then (it applies a phone's rotation by default), so iw and ih are as seen.
+fn fit(max: u32) -> String {
+    format!("scale=w='if(gte(iw,ih),trunc(min({max},iw)/2)*2,-2)':h='if(gte(iw,ih),-2,trunc(min({max},ih)/2)*2)'")
+}
+
+fn prepare_video(src: &Path) -> anyhow::Result<PreparedVideo> {
+    if !src.exists() {
+        anyhow::bail!("{} gibt es nicht", src.display());
+    }
+    let seconds = clip_seconds(src)?;
+    if !(10.0..=35.0).contains(&seconds) {
+        anyhow::bail!("{} läuft {seconds:.1} s; ein Puzzle-Video läuft 10 bis 35 s (gedacht sind 15 bis 30)", src.display());
+    }
+    if !(15.0..=30.0).contains(&seconds) {
+        eprintln!("Achtung: {} läuft {seconds:.1} s; gedacht sind 15 bis 30 s", src.display());
+    }
+    let dir = std::env::temp_dir().join(format!("stellwerk-video-{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis()));
+    std::fs::create_dir_all(&dir)?;
+    let scratch = ScratchDir(dir.clone());
+    let (input, mp4) = (src.to_string_lossy().to_string(), dir.join("video.mp4"));
+    eprintln!("rechne {} um …", src.display());
+    // `0:a:0?`: the sound when there is one, and no error when there is none.
+    ffmpeg_tool(
+        "ffmpeg",
+        &[
+            "-nostdin", "-v", "error", "-y", "-i", &input, "-map", "0:v:0", "-map", "0:a:0?", "-vf", &fit(1200),
+            "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p", "-crf", "23", "-preset", "slow",
+            "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", &mp4.to_string_lossy(),
+        ],
+    )?;
+    // The first frame from the source, not from the conversion: the picture keeps its pixels.
+    // At most 1 MB for the server; the quality steps down until it fits.
+    let jpg = dir.join("frame.jpg");
+    let mut frame = Vec::new();
+    for q in ["2", "3", "4", "6", "8", "10"] {
+        ffmpeg_tool("ffmpeg", &["-nostdin", "-v", "error", "-y", "-i", &input, "-frames:v", "1", "-vf", &fit(2400), "-q:v", q, &jpg.to_string_lossy()])?;
+        frame = std::fs::read(&jpg)?;
+        if frame.len() <= 1_000_000 {
+            break;
+        }
+    }
+    if frame.len() > 1_000_000 {
+        anyhow::bail!("das erste Bild bleibt über 1 MB");
+    }
+    let size = imagesize::blob_size(&frame).map_err(|e| anyhow::anyhow!("das erste Bild ist nicht lesbar: {e}"))?;
+    Ok(PreparedVideo { mp4, frame, frame_size: (size.width as u32, size.height as u32), seconds, _scratch: scratch })
+}
+
+/// "▶ 20 s, 0.7 MB" for a picture with a video, from the admin list or the pieces view.
+fn video_mark(seconds: &Value, bytes: &Value) -> String {
+    match (seconds.as_f64(), bytes.as_f64()) {
+        (Some(sec), Some(b)) => format!("  ▶ {sec:.0} s, {:.1} MB", b / 1e6).replace('.', ","),
+        _ => String::new(),
+    }
 }
 
 #[derive(Subcommand)]
@@ -416,12 +517,13 @@ fn print_pieces(v: &Value) {
         let tiers = strings(&p["tiers"]);
         let owned: Vec<i64> = p["owned"].as_array().map(|a| a.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
         println!(
-            "  {} · {} · {} von {}{}  ({})",
+            "  {} · {} · {} von {}{}{}  ({})",
             s(p, "title"),
             s(p, "ngo_name"),
             owned.len(),
             tiers.len(),
             if p["complete"].as_bool().unwrap_or(false) { " · fertig" } else { "" },
+            video_mark(&p["video_facts"]["seconds"], &p["video_facts"]["bytes"]),
             s(p, "image_id")
         );
         let cols = p["cols"].as_u64().unwrap_or(1).max(1) as usize;
@@ -473,6 +575,10 @@ fn print_puzzle_image(v: &Value) {
         s(v, "customers_completed"),
         if v["retired_at"].is_null() { "aktiv" } else { "zurückgezogen" }
     );
+    let mark = video_mark(&v["video_seconds"], &v["video_bytes"]);
+    if !mark.is_empty() {
+        println!("{:<36}{mark} ({} × {})", "", s(v, "video_width"), s(v, "video_height"));
+    }
     // The tiers as the picture lies: m a minute, q a quarter, H the hour (docs/51 §2a).
     let tiers = strings(&v["tiers"]);
     let cols = v["cols"].as_u64().unwrap_or(1).max(1) as usize;
@@ -926,6 +1032,13 @@ impl Api {
     }
     async fn put(&self, path: &str, body: Value) -> anyhow::Result<Value> {
         let r = self.http.put(format!("{}{}", self.url, path)).header("x-admin-token", &self.token).json(&body).send().await?;
+        Self::body(r).await
+    }
+    /// A puzzle video as the raw body; patient, because a slow line takes a while for 40 MB.
+    async fn put_video(&self, id: &str, file: &Path) -> anyhow::Result<Value> {
+        let bytes = std::fs::read(file)?;
+        let api = self.patient(600)?;
+        let r = api.http.put(format!("{}/admin/puzzle-images/{id}/video", api.url)).header("x-admin-token", &api.token).header("content-type", "video/mp4").body(bytes).send().await?;
         Self::body(r).await
     }
     async fn delete(&self, path: &str) -> anyhow::Result<Value> {
@@ -1785,31 +1898,54 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", if v["deleted"].as_bool().unwrap_or(false) { "gelöscht" } else { "deaktiviert (wird referenziert)" });
             }
             NgoCmd::Image { cmd } => match cmd {
-                NgoImageCmd::Add { ngo, file, title, caption, grid, tiers, yes } => {
+                NgoImageCmd::Add { ngo, file, video, title, caption, grid, tiers, yes } => {
                     let (cols, rows) = parse_grid(&grid)?;
                     let tiers = tiers.as_deref().map(parse_tiers).transpose()?;
-                    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                    let content_type = match ext.as_str() {
-                        "jpg" | "jpeg" => "image/jpeg",
-                        "png" => "image/png",
-                        "webp" => "image/webp",
-                        _ => anyhow::bail!("{}: nur .jpg, .jpeg, .png oder .webp", file.display()),
-                    };
-                    let bytes = std::fs::read(&file)?;
-                    if bytes.len() > 1_000_000 {
-                        anyhow::bail!("{} hat {} KB; höchstens 1 MB", file.display(), bytes.len() / 1024);
-                    }
                     if !yes {
                         println!("Hat der Verein die Rechte an diesem Bild, und ist niemand darauf zu erkennen, der nicht eingewilligt hat?");
                         anyhow::bail!("nichts hochgeladen — wiederhole mit --yes, wenn beides stimmt");
                     }
+                    let prepared = video.as_deref().map(prepare_video).transpose()?;
+                    let (bytes, content_type) = match (&prepared, &file) {
+                        (Some(p), _) => (p.frame.clone(), "image/jpeg"),
+                        (None, Some(file)) => {
+                            let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                            let content_type = match ext.as_str() {
+                                "jpg" | "jpeg" => "image/jpeg",
+                                "png" => "image/png",
+                                "webp" => "image/webp",
+                                _ => anyhow::bail!("{}: nur .jpg, .jpeg, .png oder .webp", file.display()),
+                            };
+                            let bytes = std::fs::read(file)?;
+                            if bytes.len() > 1_000_000 {
+                                anyhow::bail!("{} hat {} KB; höchstens 1 MB", file.display(), bytes.len() / 1024);
+                            }
+                            (bytes, content_type)
+                        }
+                        (None, None) => anyhow::bail!("ein Bild oder --video"),
+                    };
                     let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
                     let mut body = json!({ "title": title, "caption": caption, "rows": rows, "cols": cols, "content_type": content_type, "data": b64 });
                     if let Some(t) = tiers {
                         body["tiers"] = json!(t);
                     }
                     let v = api.post(&format!("/admin/ngos/{ngo}/puzzle-images"), body).await?;
-                    print_puzzle_image(&v);
+                    let Some(p) = prepared else {
+                        print_puzzle_image(&v);
+                        return Ok(());
+                    };
+                    let id = s(&v, "id");
+                    println!("Bild {id} hochgeladen ({} × {}, erstes Bild des Videos von {:.1} s)", p.frame_size.0, p.frame_size.1, p.seconds);
+                    match api.put_video(&id, &p.mp4).await {
+                        Ok(v) => print_puzzle_image(&v),
+                        Err(e) => {
+                            print_puzzle_image(&v);
+                            anyhow::bail!(
+                                "das Bild ist da, das Video nicht: {e}\nNoch einmal: stellwerk ngo image video {id} {}",
+                                video.as_deref().map(|v| v.display().to_string()).unwrap_or_default()
+                            );
+                        }
+                    }
                 }
                 NgoImageCmd::List { ngo } => {
                     let path = match &ngo {
@@ -1821,6 +1957,30 @@ async fn main() -> anyhow::Result<()> {
                     for i in v.as_array().unwrap_or(&vec![]) {
                         print_puzzle_image(i);
                     }
+                }
+                NgoImageCmd::Video { id, file, remove } => {
+                    if remove {
+                        let v = api.delete(&format!("/admin/puzzle-images/{id}/video")).await?;
+                        println!("Video entfernt");
+                        print_puzzle_image(&v);
+                        return Ok(());
+                    }
+                    let Some(file) = file else { anyhow::bail!("eine Videodatei oder --remove") };
+                    let all = api.get("/admin/puzzle-images").await?;
+                    let picture = all.as_array().and_then(|a| a.iter().find(|i| s(i, "id") == id).cloned()).ok_or_else(|| anyhow::anyhow!("kein Bild {id}"))?;
+                    let p = prepare_video(&file)?;
+                    let (w, h) = (picture["width"].as_u64().unwrap_or(0) as u32, picture["height"].as_u64().unwrap_or(0) as u32);
+                    if (w, h) != p.frame_size {
+                        let (a, b) = (w as f64 / h.max(1) as f64, p.frame_size.0 as f64 / p.frame_size.1.max(1) as f64);
+                        eprintln!(
+                            "Achtung: das erste Bild des Videos ist {} × {}, das Bild {w} × {h}{}",
+                            p.frame_size.0,
+                            p.frame_size.1,
+                            if (a - b).abs() > 0.01 { " — und hat ein anderes Seitenverhältnis" } else { "" }
+                        );
+                    }
+                    let v = api.put_video(&id, &p.mp4).await?;
+                    print_puzzle_image(&v);
                 }
                 NgoImageCmd::Retire { id } => {
                     let v = api.post(&format!("/admin/puzzle-images/{id}/retire"), json!({})).await?;
