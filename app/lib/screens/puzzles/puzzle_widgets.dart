@@ -185,8 +185,11 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
       label: arrivalPieceLabel(piece),
       excludeSemantics: true,
       onTap: _tap,
+      // The arrival and the „Aufgegeben" sheet are white: like the trip and the claim around it,
+      // the card sits below the sheet rather than above it, or it has no edge at all.
       child: VCard(
         key: const Key('arrival-piece'),
+        tone: VCardTone.sunken,
         onTap: _tap,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,

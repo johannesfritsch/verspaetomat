@@ -535,8 +535,8 @@ void main() {
 
   // The arrival's card for each tier: a minute from your own Verein, a quarter from somebody
   // else's, the hour that leaves only a quarter missing, and the last piece — a minute, as the
-  // `complete` variant brings. One long title too.
-  _preview('puzzle-arrival', height: 1460, (context) {
+  // `complete` variant brings. One long title too. On white, as the sheet is.
+  _preview('puzzle-arrival', height: 1460, background: VColors.paperElevated, (context) {
     ApiPuzzlePiece piece(String ngo, String name, String tiers, String title, String caption, List<int> owned, int last, {bool own = true}) => ApiPuzzlePiece(
           puzzle: ApiPuzzle(
             imageId: 'demo-$ngo',
