@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../../api/models.dart';
 import '../../repo/repo_scope.dart';
@@ -111,37 +112,43 @@ class _StartedCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = puzzle;
-    // One node per picture for a screen reader: the board's label, the title, the Verein, the count.
+    // One node per picture for a screen reader: the board's label, the title, the Verein, the count;
+    // and what a finger does on the board — take a piece into the hand — as an action.
     return MergeSemantics(
-      child: VCard(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // A tap on a piece it has lifts it into the hand (docs/51 §9a).
-            SizedBox(width: 112, child: PuzzleBoardOf(p, inHand: true)),
-            const SizedBox(width: VSpace.m),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(keepLastWord(p.title), style: VText.title),
-                  const VGap.xs(),
-                  Text(p.ngoName, style: VText.bodyS),
-                  const VGap.m(),
-                  Text(puzzleProgress(p), style: VText.title),
-                  if (stillMissing(p) case final missing?) ...[
+      child: Semantics(
+        customSemanticsActions: {
+          if (p.owned.isNotEmpty) CustomSemanticsAction(label: 'Teil in die Hand nehmen'): () => showPieceInHand(context, p, p.owned.last),
+        },
+        child: VCard(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // A tap on a piece it has lifts it into the hand (docs/51 §9a).
+              SizedBox(width: 112, child: PuzzleBoardOf(p, inHand: true)),
+              const SizedBox(width: VSpace.m),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(keepLastWord(p.title), style: VText.title),
                     const VGap.xs(),
-                    Text(missing, style: VText.bodyS),
+                    Text(p.ngoName, style: VText.bodyS),
+                    const VGap.m(),
+                    Text(puzzleProgress(p), style: VText.title),
+                    if (stillMissing(p) case final missing?) ...[
+                      const VGap.xs(),
+                      Text(missing, style: VText.bodyS),
+                    ],
+                    // docs/51 §4, §9b: the picture becomes a film once it is finished. Said now, quietly.
+                    if (p.hasVideo && !p.complete) ...[
+                      const VGap.xs(),
+                      Text('Bewegt sich, wenn es fertig ist.', style: VText.caption.copyWith(color: VColors.ink2)),
+                    ],
                   ],
-                  // docs/51 §4, §9b: the picture becomes a film once it is finished. Said now, quietly.
-                  if (p.hasVideo && !p.complete) ...[
-                    const VGap.xs(),
-                    Text('Bewegt sich, wenn es fertig ist.', style: VText.caption.copyWith(color: VColors.ink2)),
-                  ],
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -212,6 +212,7 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
       onTap: _tap,
       customSemanticsActions: {
         CustomSemanticsAction(label: 'Das Teil in die Hand nehmen'): () => showPieceInHand(context, p, piece.piece),
+        if (p.complete && p.hasVideo) CustomSemanticsAction(label: 'Video ansehen'): () => _watch(context, p),
       },
       // A plain detector rather than the card's own ink: the board's piece taps sit inside it and
       // must win where they land on a piece.
@@ -288,7 +289,12 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
                             if (p.hasVideo) ...[
                               const VGap.s(),
                               Text('Das Bild bewegt sich jetzt.', style: VText.bodySStrong),
-                              _WatchLink(puzzle: p),
+                              // Not to be hit before it can be seen.
+                              AnimatedBuilder(
+                                animation: _caption!,
+                                builder: (context, child) => IgnorePointer(ignoring: _caption!.value < 1, child: child),
+                                child: _WatchLink(puzzle: p),
+                              ),
                             ],
                           ],
                         ),
@@ -304,6 +310,16 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
   }
 }
 
+/// The film when it is on the phone, else the finished picture, whose button shows it coming.
+void _watch(BuildContext context, ApiPuzzle p) {
+  final film = RepoScope.read(context).videos.stateOf(p);
+  if (film.ready) {
+    showPuzzleVideo(context, p, film);
+  } else {
+    showFinishedPicture(context, p);
+  }
+}
+
 /// „Ansehen": the film when it is on the phone, else the finished picture, whose button shows it
 /// coming (docs/51 §9b).
 class _WatchLink extends StatelessWidget {
@@ -315,14 +331,7 @@ class _WatchLink extends StatelessWidget {
     return GestureDetector(
       key: const Key('arrival-watch'),
       behavior: HitTestBehavior.opaque,
-      onTap: () {
-        final film = RepoScope.read(context).videos.stateOf(puzzle);
-        if (film.ready) {
-          showPuzzleVideo(context, puzzle, film);
-        } else {
-          showFinishedPicture(context, puzzle);
-        }
-      },
+      onTap: () => _watch(context, puzzle),
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: VControl.touch),
         child: Row(

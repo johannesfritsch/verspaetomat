@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -59,7 +60,9 @@ void main() {
   group('the button on a finished picture', () {
     testWidgets('while it comes: a ring that fills, and a tap only pulses it', (tester) async {
       final body = StreamController<List<int>>();
-      final s = await session((url, {from = 0}) async => http.StreamedResponse(body.stream, 200));
+      var calls = 0;
+      // The first answer streams on; any later one (after the test closes it short) is refused.
+      final s = await session((url, {from = 0}) async => calls++ == 0 ? http.StreamedResponse(body.stream, 200) : http.StreamedResponse(const Stream.empty(), 403));
       await tester.runAsync(() async {
         await pump(tester, s, Center(child: PictureTile(puzzle: puzzle(), width: 240)));
         body.add(List.filled(300, 1));
@@ -126,6 +129,43 @@ void main() {
       expect(find.bySemanticsLabel('Schließen'), findsOneWidget);
       semantics.dispose();
     });
+  });
+
+  testWidgets('on a sheet, a drag on the picture turns it and does not take the sheet away', (tester) async {
+    final s = await session((url, {from = 0}) => throw StateError('Demo fetches nothing'));
+    await tester.binding.setSurfaceSize(const Size(393, 852));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(RepoScope(
+      session: s,
+      child: MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(onPressed: () => showFinishedPicture(context, puzzle(url: 'assets/demo/puzzles/wald.mp4')), child: const Text('go')),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('picture-tile')), findsOneWidget);
+    await tester.drag(find.byKey(const Key('picture-tile')), const Offset(0, 160));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('picture-tile')), findsOneWidget, reason: 'the sheet stays');
+  });
+
+  testWidgets('the arrival offers the film to a screen reader too, and „Ansehen" waits to be seen', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final s = await session((url, {from = 0}) => throw StateError('Demo fetches nothing'));
+    await pump(tester, s, ArrivalPiece(piece: ApiPuzzlePiece(puzzle: puzzle(url: 'assets/demo/puzzles/wald.mp4'), piece: 4, ownCause: true), delay: const Duration(milliseconds: 300)));
+    // Mid-animation: the link is there but takes no taps.
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.ancestor(of: find.byKey(const Key('arrival-watch')), matching: find.byWidgetPredicate((w) => w is IgnorePointer && w.ignoring)), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.ancestor(of: find.byKey(const Key('arrival-watch')), matching: find.byWidgetPredicate((w) => w is IgnorePointer && w.ignoring)), findsNothing);
+    final node = tester.getSemantics(find.byKey(const Key('arrival-piece')));
+    final labels = (node.getSemanticsData().customSemanticsActionIds ?? const <int>[]).map((id) => CustomSemanticsAction.getAction(id)?.label);
+    expect(labels, contains('Video ansehen'));
+    semantics.dispose();
   });
 
   testWidgets('the arrival of the last piece of a picture that moves says so, and starts the film', (tester) async {

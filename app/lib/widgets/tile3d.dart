@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -375,6 +376,12 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
   StreamSubscription<Offset>? _motion;
   Offset _lean = Offset.zero;
   Offset _leanTarget = Offset.zero;
+
+  /// How the phone is usually held, followed slowly: the lean is the change from it, so a phone
+  /// held upright does not cancel the rest tilt, and nothing drifts when the tile opens.
+  Offset? _baseline;
+  DateTime? _lastReading;
+  bool _onTop = true;
   bool _wasFront = true;
   bool _calm = false;
 
@@ -405,10 +412,13 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
     _calm = _still || MediaQuery.disableAnimationsOf(context);
     final interactive = widget.tilt == null;
     if (!interactive) return;
-    if (_calm) {
-      _physics.settle();
+    // Under another route (the film, a sheet over it) nothing here is seen: no sensor, no frames.
+    _onTop = ModalRoute.of(context)?.isCurrent ?? true;
+    if (_calm || !_onTop) {
+      if (_calm) _physics.settle();
       _motion?.cancel();
       _motion = null;
+      _baseline = null;
       if (_ticker.isActive) _ticker.stop();
     } else {
       _listen();
@@ -442,15 +452,32 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
     final source = Tile3D.motion;
     if (source == null) return;
     try {
-      _motion = source().listen((v) {
-        _leanTarget = v;
-        _kick();
-      }, onError: (_) {});
+      _motion = source().listen(_onLean, onError: (_) {});
     } catch (_) {}
   }
 
+  /// A reading of the phone's lean: high-passed against a baseline that follows over a few
+  /// seconds, and ignored below a hundredth, which is the sensor's own noise.
+  void _onLean(Offset raw) {
+    final now = DateTime.now();
+    final base = _baseline;
+    if (base == null) {
+      _baseline = raw;
+      _lastReading = now;
+      return;
+    }
+    final dt = now.difference(_lastReading ?? now).inMicroseconds / 1e6;
+    _lastReading = now;
+    _baseline = Offset.lerp(base, raw, (dt / 3).clamp(0.0, 1.0));
+    final next = raw - _baseline!;
+    final target = Offset(next.dx.clamp(-1.0, 1.0), next.dy.clamp(-1.0, 1.0));
+    if ((target - _leanTarget).distance < 0.01) return;
+    _leanTarget = target;
+    _kick();
+  }
+
   void _kick() {
-    if (!_ticker.isActive && widget.tilt == null && !_calm) {
+    if (!_ticker.isActive && widget.tilt == null && !_calm && _onTop) {
       _last = Duration.zero;
       _ticker.start();
     }
@@ -468,7 +495,7 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
       _wasFront = front;
       HapticFeedback.lightImpact();
     }
-    final leaning = (_lean - _leanTarget).distance > 1e-3;
+    final leaning = (_lean - _leanTarget).distance > 0.005;
     // At rest and level: no frames until a finger or the phone moves it again.
     if (_physics.settled && !leaning) _ticker.stop();
   }
@@ -548,33 +575,54 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
       ),
     );
     if (widget.tilt != null) return tile;
-    tile = GestureDetector(
+    // The pan claims at the touch slop rather than the pan slop (twice as far), so a finger on the
+    // tile turns it before a sheet it stands on decides the drag is its own.
+    tile = RawGestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: widget.onTap,
-      onPanStart: (_) => _physics.dragging = true,
-      onPanUpdate: (d) {
-        _physics.drag(d.delta, _box.width);
-        _frame.tick();
-        final front = _current.front;
-        if (front != _wasFront) {
-          _wasFront = front;
-          HapticFeedback.lightImpact();
-        }
-      },
-      onPanEnd: (d) {
-        // Still frames keep the swipe that turns it over, and skip the motion that gets it there.
-        _physics.release(d.velocity.pixelsPerSecond, _box.width);
-        if (_calm) {
-          _physics.settle();
-          _frame.tick();
-        } else {
-          _kick();
-        }
+      gestures: {
+        if (widget.onTap != null) TapGestureRecognizer: GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(TapGestureRecognizer.new, (r) => r.onTap = widget.onTap),
+        _EagerPan: GestureRecognizerFactoryWithHandlers<_EagerPan>(_EagerPan.new, (r) {
+          r
+            ..onStart = ((_) => _physics.dragging = true)
+            ..onUpdate = _panUpdate
+            ..onEnd = _panEnd;
+        }),
       },
       child: tile,
     );
     return tile;
   }
+
+  void _panUpdate(DragUpdateDetails d) {
+    _physics.drag(d.delta, _box.width);
+    _frame.tick();
+    final front = _current.front;
+    if (front != _wasFront) {
+      _wasFront = front;
+      HapticFeedback.lightImpact();
+    }
+  }
+
+  void _panEnd(DragEndDetails d) {
+    // Still frames keep the swipe that turns it over, and skip the motion that gets it there.
+    _physics.release(d.velocity.pixelsPerSecond, _box.width);
+    if (_calm) {
+      _physics.settle();
+      _frame.tick();
+    } else {
+      _kick();
+    }
+  }
+}
+
+/// A pan that claims at the touch slop, as a vertical or horizontal drag does, instead of at
+/// twice that: on a sheet, the tile wins the drag that starts on it.
+class _EagerPan extends PanGestureRecognizer {
+  _EagerPan() : super(debugOwner: null);
+
+  @override
+  bool hasSufficientGlobalDistanceToAccept(PointerDeviceKind pointerDeviceKind, double? deviceTouchSlop) =>
+      globalDistanceMoved.abs() > computeHitSlop(pointerDeviceKind, gestureSettings);
 }
 
 /// A listenable that says „draw again", without a value to compare.
@@ -732,12 +780,14 @@ class _TilePainter extends CustomPainter {
         ], [0, 0.5, 1]),
     );
     if (tier == PieceTier.quarter || tier == PieceTier.hour) {
+      // The quarter's the finer, as on the board: a fine edge, not an outline.
+      final hour = tier == PieceTier.hour;
       canvas.drawPath(
         outline,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = box.shortestSide * 0.05
-          ..color = _lip,
+          ..strokeWidth = box.shortestSide * (hour ? 0.05 : 0.03)
+          ..color = hour ? _lip : _lip.withValues(alpha: 0.65),
       );
     }
   }
