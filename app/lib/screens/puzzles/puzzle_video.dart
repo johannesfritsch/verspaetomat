@@ -14,7 +14,8 @@ import 'puzzle_widgets.dart';
 Future<void> showPuzzleVideo(BuildContext context, ApiPuzzle puzzle, PuzzleVideoState film) {
   return Navigator.of(context, rootNavigator: true).push(
     PageRouteBuilder<void>(
-      opaque: false,
+      // Opaque: what is under the film stops drawing (and the tile under it stops turning).
+      opaque: true,
       transitionDuration: const Duration(milliseconds: 280),
       reverseTransitionDuration: const Duration(milliseconds: 420),
       pageBuilder: (context, animation, _) => FadeTransition(opacity: animation, child: PuzzleVideoPage(puzzle: puzzle, film: film)),
@@ -48,11 +49,24 @@ class _PuzzleVideoPageState extends State<PuzzleVideoPage> {
     unawaited(_start());
   }
 
+  /// Android has no silent switch an audio session obeys: a phone on silent or vibrate starts the
+  /// film without sound, with a button to turn it on.
+  bool _muted = false;
+
   Future<void> _audio(String method) async {
     if (!Platform.isIOS) return;
     try {
       await PuzzleVideoPage.audio.invokeMethod<void>(method);
     } catch (_) {}
+  }
+
+  Future<bool> _phoneSilent() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await PuzzleVideoPage.audio.invokeMethod<String>('ringerMode') != 'normal';
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _start() async {
@@ -63,18 +77,41 @@ class _PuzzleVideoPageState extends State<PuzzleVideoPage> {
     final c = f.asset != null
         ? VideoPlayerController.asset(f.asset!, videoPlayerOptions: options)
         : VideoPlayerController.file(f.file!, videoPlayerOptions: options);
-    _c = c;
+    // Closed before it started: nothing to start.
+    bool gone() {
+      if (mounted) return false;
+      c.dispose().catchError((_) {});
+      return true;
+    }
+
     try {
       await _audio('remember');
+      if (gone()) return;
+      final silent = await _phoneSilent();
+      if (gone()) return;
+      _c = c;
       await c.initialize();
+      if (!mounted) return;
       await _audio('ambient');
       if (!mounted) return;
+      if (silent) {
+        _muted = true;
+        await c.setVolume(0);
+        if (!mounted) return;
+      }
       c.addListener(_onTick);
       await c.play();
-      setState(() {});
+      if (mounted) setState(() {});
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     }
+  }
+
+  Future<void> _toggleSound() async {
+    final c = _c;
+    if (c == null) return;
+    setState(() => _muted = !_muted);
+    await c.setVolume(_muted ? 0 : 1);
   }
 
   /// At the end, back to the picture.
@@ -152,6 +189,21 @@ class _PuzzleVideoPageState extends State<PuzzleVideoPage> {
                   right: VSpace.l,
                   bottom: VSpace.xxl,
                   child: Text('Das Video lässt sich gerade nicht abspielen.', style: VText.body.copyWith(color: VColors.inkOnDark2), textAlign: TextAlign.center),
+                ),
+              // Only where the film started silent because the phone is: a way to hear it.
+              if (playing && Platform.isAndroid && (_muted || _controls))
+                Positioned(
+                  top: 0,
+                  left: VSpace.s,
+                  child: SafeArea(
+                    child: IconButton(
+                      key: const Key('puzzle-video-sound'),
+                      tooltip: _muted ? 'Ton an' : 'Ton aus',
+                      constraints: const BoxConstraints.tightFor(width: VControl.touch, height: VControl.touch),
+                      icon: Icon(_muted ? Icons.volume_off : Icons.volume_up, color: VColors.inkOnDark),
+                      onPressed: _toggleSound,
+                    ),
+                  ),
                 ),
               if (_controls || _failed || !playing) ...[
                 Positioned(

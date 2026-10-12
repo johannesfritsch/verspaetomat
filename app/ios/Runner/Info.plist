@@ -10,6 +10,8 @@
 	<string>Nur das Bild, das du selbst auswählst. Wir sehen deine Mediathek nicht und merken uns nichts daraus.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Wir schauen nur, ob du an einem Bahnhof stehst. Während der Fahrt folgen wir dem Zug, nicht dir.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Damit sich das Puzzleteil mit dem Telefon neigt.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Nur so können wir dich am Bahnhof erinnern, auch wenn die App zu ist. Wir merken uns keinen Weg.</string>
 	<key>UIBackgroundModes</key>

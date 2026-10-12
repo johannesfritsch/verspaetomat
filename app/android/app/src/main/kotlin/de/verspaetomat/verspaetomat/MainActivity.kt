@@ -1,7 +1,9 @@
 package de.verspaetomat.verspaetomat
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import androidx.core.app.ActivityCompat
@@ -38,6 +40,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        registerAudio(flutterEngine)
         GeofenceManager.umbrellaExitListener = { channel?.invokeMethod("umbrellaExit", null) }
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).also { ch ->
             ch.setMethodCallHandler { call, result ->
@@ -66,7 +69,33 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private var audioChannel: MethodChannel? = null
+
+    // docs/51 §9b: a puzzle's film starts silent when the phone is on silent or vibrate. iOS gets
+    // that from its audio session; Android has no such switch, so the app asks.
+    private fun registerAudio(flutterEngine: FlutterEngine) {
+        audioChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "de.verspaetomat/audio").also { ch ->
+            ch.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "ringerMode" -> {
+                        val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                        result.success(
+                            when (audio?.ringerMode) {
+                                AudioManager.RINGER_MODE_SILENT -> "silent"
+                                AudioManager.RINGER_MODE_VIBRATE -> "vibrate"
+                                else -> "normal"
+                            }
+                        )
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+    }
+
     override fun onDestroy() {
+        audioChannel?.setMethodCallHandler(null)
+        audioChannel = null
         GeofenceManager.umbrellaExitListener = null
         channel?.setMethodCallHandler(null)
         channel = null
