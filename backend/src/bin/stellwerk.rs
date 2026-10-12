@@ -19,7 +19,7 @@
 //!   stellwerk route list | set <desk> <address> [--label …] | default <address> | remove <desk>
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
 //!   stellwerk ngo image add <ngo> bild.jpg --title … --caption … [--grid 3x4] [--tiers …] [--yes] | list [<ngo>] | retire <id> | remove <id>
-//!   stellwerk ngo image add <ngo> --video clip.mov --title … --yes   |  ngo image video <id> clip.mp4 | --remove
+//!   stellwerk ngo image add <ngo> [bild.jpg] --video clip.mov --title … --yes   |  ngo image video <id> clip.mp4 | --remove
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
 //!   stellwerk stations outlines [--from germany-latest.osm.pbf] [--out <dir>] [--dry-run] [--force]
@@ -328,12 +328,13 @@ enum NgoImageCmd {
     Add {
         /// The Verein's id
         ngo: String,
-        /// The picture; its type comes from the extension (.jpg, .jpeg, .png, .webp). Not with
-        /// --video, whose first frame is the picture
-        #[arg(required_unless_present = "video", conflicts_with = "video")]
+        /// The picture; its type comes from the extension (.jpg, .jpeg, .png, .webp). May be left
+        /// out with --video: then the clip's first frame is the picture
+        #[arg(required_unless_present = "video")]
         file: Option<std::path::PathBuf>,
-        /// A clip of 15–30 s (docs/51 §9b): its first frame becomes the picture, and the clip,
-        /// made H.264 and at most 1200 px, the reward for finishing it. Needs ffmpeg
+        /// A clip of 15–30 s (docs/51 §9b), made H.264 and at most 1200 px: the reward for
+        /// finishing the picture. With a picture file, that file is the picture as it is (nothing
+        /// compares the two); without one, the clip's first frame. Needs ffmpeg
         #[arg(long)]
         video: Option<std::path::PathBuf>,
         #[arg(long)]
@@ -373,11 +374,11 @@ enum NgoImageCmd {
 }
 
 /// A clip made ready for a puzzle (docs/51 §9b): H.264 and AAC, at most 1200 px on the long side,
-/// the index in front so a phone can start before the end; and its first frame as the picture.
+/// the index in front so a phone can start before the end; and, when asked for, its first frame
+/// as the picture, with its size.
 struct PreparedVideo {
     mp4: PathBuf,
-    frame: Vec<u8>,
-    frame_size: (u32, u32),
+    frame: Option<(Vec<u8>, (u32, u32))>,
     seconds: f64,
     _scratch: ScratchDir,
 }
@@ -406,7 +407,7 @@ fn fit(max: u32) -> String {
     format!("scale=w='if(gte(iw,ih),trunc(min({max},iw)/2)*2,-2)':h='if(gte(iw,ih),-2,trunc(min({max},ih)/2)*2)'")
 }
 
-fn prepare_video(src: &Path) -> anyhow::Result<PreparedVideo> {
+fn prepare_video(src: &Path, with_frame: bool) -> anyhow::Result<PreparedVideo> {
     if !src.exists() {
         anyhow::bail!("{} gibt es nicht", src.display());
     }
@@ -431,6 +432,9 @@ fn prepare_video(src: &Path) -> anyhow::Result<PreparedVideo> {
             "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", &mp4.to_string_lossy(),
         ],
     )?;
+    if !with_frame {
+        return Ok(PreparedVideo { mp4, frame: None, seconds, _scratch: scratch });
+    }
     // The first frame from the source, not from the conversion: the picture keeps its pixels.
     // At most 1 MB for the server; the quality steps down until it fits.
     let jpg = dir.join("frame.jpg");
@@ -446,7 +450,7 @@ fn prepare_video(src: &Path) -> anyhow::Result<PreparedVideo> {
         anyhow::bail!("das erste Bild bleibt über 1 MB");
     }
     let size = imagesize::blob_size(&frame).map_err(|e| anyhow::anyhow!("das erste Bild ist nicht lesbar: {e}"))?;
-    Ok(PreparedVideo { mp4, frame, frame_size: (size.width as u32, size.height as u32), seconds, _scratch: scratch })
+    Ok(PreparedVideo { mp4, frame: Some((frame, (size.width as u32, size.height as u32))), seconds, _scratch: scratch })
 }
 
 /// "▶ 20 s, 0.7 MB" for a picture with a video, from the admin list or the pieces view.
@@ -1905,10 +1909,9 @@ async fn main() -> anyhow::Result<()> {
                         println!("Hat der Verein die Rechte an diesem Bild, und ist niemand darauf zu erkennen, der nicht eingewilligt hat?");
                         anyhow::bail!("nichts hochgeladen — wiederhole mit --yes, wenn beides stimmt");
                     }
-                    let prepared = video.as_deref().map(prepare_video).transpose()?;
-                    let (bytes, content_type) = match (&prepared, &file) {
-                        (Some(p), _) => (p.frame.clone(), "image/jpeg"),
-                        (None, Some(file)) => {
+                    // A picture file is checked before the clip is converted, which takes a while.
+                    let given = match &file {
+                        Some(file) => {
                             let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
                             let content_type = match ext.as_str() {
                                 "jpg" | "jpeg" => "image/jpeg",
@@ -1920,8 +1923,14 @@ async fn main() -> anyhow::Result<()> {
                             if bytes.len() > 1_000_000 {
                                 anyhow::bail!("{} hat {} KB; höchstens 1 MB", file.display(), bytes.len() / 1024);
                             }
-                            (bytes, content_type)
+                            Some((bytes, content_type))
                         }
+                        None => None,
+                    };
+                    let prepared = video.as_deref().map(|v| prepare_video(v, given.is_none())).transpose()?;
+                    let (bytes, content_type) = match (given, prepared.as_ref().and_then(|p| p.frame.as_ref())) {
+                        (Some(g), _) => g,
+                        (None, Some((frame, _))) => (frame.clone(), "image/jpeg"),
                         (None, None) => anyhow::bail!("ein Bild oder --video"),
                     };
                     let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
@@ -1935,7 +1944,10 @@ async fn main() -> anyhow::Result<()> {
                         return Ok(());
                     };
                     let id = s(&v, "id");
-                    println!("Bild {id} hochgeladen ({} × {}, erstes Bild des Videos von {:.1} s)", p.frame_size.0, p.frame_size.1, p.seconds);
+                    match &p.frame {
+                        Some((_, (w, h))) => println!("Bild {id} hochgeladen ({w} × {h}, erstes Bild des Videos von {:.1} s)", p.seconds),
+                        None => println!("Bild {id} hochgeladen, dazu das Video von {:.1} s", p.seconds),
+                    }
                     match api.put_video(&id, &p.mp4).await {
                         Ok(v) => print_puzzle_image(&v),
                         Err(e) => {
@@ -1968,14 +1980,13 @@ async fn main() -> anyhow::Result<()> {
                     let Some(file) = file else { anyhow::bail!("eine Videodatei oder --remove") };
                     let all = api.get("/admin/puzzle-images").await?;
                     let picture = all.as_array().and_then(|a| a.iter().find(|i| s(i, "id") == id).cloned()).ok_or_else(|| anyhow::anyhow!("kein Bild {id}"))?;
-                    let p = prepare_video(&file)?;
+                    let p = prepare_video(&file, true)?;
                     let (w, h) = (picture["width"].as_u64().unwrap_or(0) as u32, picture["height"].as_u64().unwrap_or(0) as u32);
-                    if (w, h) != p.frame_size {
-                        let (a, b) = (w as f64 / h.max(1) as f64, p.frame_size.0 as f64 / p.frame_size.1.max(1) as f64);
+                    let (fw, fh) = p.frame.as_ref().map(|(_, size)| *size).unwrap_or_default();
+                    if (w, h) != (fw, fh) {
+                        let (a, b) = (w as f64 / h.max(1) as f64, fw as f64 / fh.max(1) as f64);
                         eprintln!(
-                            "Achtung: das erste Bild des Videos ist {} × {}, das Bild {w} × {h}{}",
-                            p.frame_size.0,
-                            p.frame_size.1,
+                            "Achtung: das erste Bild des Videos ist {fw} × {fh}, das Bild {w} × {h}{}",
                             if (a - b).abs() > 0.01 { " — und hat ein anderes Seitenverhältnis" } else { "" }
                         );
                     }
