@@ -53,10 +53,18 @@ typedef VideoFetch = Future<http.StreamedResponse> Function(String url, {int fro
 /// its size is right; a wrong size starts it once more, a broken connection resumes from where it
 /// stopped.
 class PuzzleVideoStore {
-  PuzzleVideoStore({required this.fetch, Future<Directory> Function()? directory}) : _directory = directory ?? getApplicationSupportDirectory;
+  PuzzleVideoStore({required this.fetch, this.reload, Future<Directory> Function()? directory, this.idle = const Duration(seconds: 20)})
+      : _directory = directory ?? getApplicationSupportDirectory;
 
   final VideoFetch fetch;
+
+  /// The pictures as the server has them now: after a 404, the film may have been replaced.
+  final Future<ApiPuzzles> Function()? reload;
   final Future<Directory> Function() _directory;
+
+  /// How long a download may hear nothing before it counts as broken: a train in a tunnel holds a
+  /// connection open that brings no more bytes.
+  final Duration idle;
 
   final Map<String, ValueNotifier<PuzzleVideoState>> _states = {};
 
@@ -107,6 +115,21 @@ class PuzzleVideoStore {
     ensure(p);
   }
 
+  /// Forgets every film: the files on the phone, the states, the queue — the account is gone or
+  /// another one came in its place.
+  Future<void> clear() async {
+    _queue.clear();
+    for (final n in _states.values) {
+      n.value = PuzzleVideoState.none;
+    }
+    _states.clear();
+    _shas.clear();
+    try {
+      final dir = Directory('${(await _directory()).path}/puzzle-videos');
+      if (dir.existsSync()) await dir.delete(recursive: true);
+    } catch (_) {}
+  }
+
   /// Shows [state] for [p] whatever is under way: the preview bench draws each state with it.
   @visibleForTesting
   void debugShow(ApiPuzzle p, PuzzleVideoState state) => _notifier(p).value = state;
@@ -133,15 +156,34 @@ class PuzzleVideoStore {
     return File('${base.path}/puzzle-videos/$id-$sha.mp4');
   }
 
-  /// A replaced film's file goes once the new one is here: the same picture, another digest.
+  /// A replaced film's file goes once the new one is here — the same picture, another digest —
+  /// and so does any half of it.
   Future<void> _forgetOlder(String imageId, File current) async {
     try {
       final id = imageId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
       await for (final f in current.parent.list()) {
         final name = f.uri.pathSegments.last;
-        if (f is File && name.startsWith('$id-') && f.path != current.path && !name.endsWith('.part')) await f.delete();
+        if (f is File && name.startsWith('$id-') && f.path != current.path && f.path != '${current.path}.part') await f.delete();
       }
     } catch (_) {}
+  }
+
+  /// After a 404: true when the server now names another film for the picture, which is then
+  /// queued in this one's place.
+  Future<bool> _replaced(ApiPuzzle p) async {
+    final ask = reload;
+    if (ask == null) return false;
+    try {
+      final now = (await ask()).puzzles.where((x) => x.imageId == p.imageId).firstOrNull;
+      final v = now?.video;
+      if (now == null || v == null || (v.url == p.video!.url && v.sha256 == p.video!.sha256)) return false;
+      final n = _notifier(now);
+      n.value = PuzzleVideoState.queued;
+      _queue.add(now);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _pump() async {
@@ -149,7 +191,14 @@ class PuzzleVideoStore {
     _running = true;
     try {
       while (_queue.isNotEmpty) {
-        await _download(_queue.removeAt(0));
+        final p = _queue.removeAt(0);
+        // One film that throws must not stop the ones behind it.
+        try {
+          await _download(p);
+        } catch (e) {
+          DiagnoseLog.instance.add('video', '${p.imageId} · $e', bad: true);
+          _notifier(p).value = PuzzleVideoState.failed;
+        }
       }
     } finally {
       _running = false;
@@ -183,9 +232,11 @@ class PuzzleVideoStore {
         n.value = PuzzleVideoState(VideoPhase.downloading, progress: v.bytes == 0 ? 0 : have / v.bytes);
         final r = await fetch(v.url, from: have);
         if (r.statusCode != 200 && r.statusCode != 206) {
-          await r.stream.drain<void>();
+          await r.stream.drain<void>().catchError((_) {});
           DiagnoseLog.instance.add('video', '${p.imageId} · HTTP ${r.statusCode}', bad: true);
-          // 403: not finished on the server's side; anything else is no better a second time.
+          // 404: the film may have been replaced since the list was read — ask once more, and
+          // fetch the new one if there is one. 403 (not finished) and the rest: no better twice.
+          if (r.statusCode == 404 && await _replaced(p)) return;
           n.value = PuzzleVideoState.failed;
           return;
         }
@@ -194,7 +245,7 @@ class PuzzleVideoStore {
         final sink = part.openWrite(mode: r.statusCode == 206 ? FileMode.append : FileMode.write);
         var shown = -1;
         try {
-          await for (final chunk in r.stream) {
+          await for (final chunk in r.stream.timeout(idle)) {
             sink.add(chunk);
             have += chunk.length;
             final percent = v.bytes == 0 ? 0 : (have * 100 ~/ v.bytes);

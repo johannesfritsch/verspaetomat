@@ -145,6 +145,100 @@ void main() {
     expect(await state.file!.readAsBytes(), film);
   });
 
+  test('a connection that goes quiet (a tunnel) counts as broken, and the rest is fetched', () async {
+    var n = 0;
+    final s = PuzzleVideoStore(
+      directory: () async => dir,
+      idle: const Duration(milliseconds: 60),
+      fetch: (url, {from = 0}) async {
+        if (n++ == 0) {
+          // 600 bytes, then nothing, and never an end.
+          final c = StreamController<List<int>>();
+          c.add(film.sublist(0, 600));
+          return http.StreamedResponse(c.stream, 200);
+        }
+        return http.StreamedResponse(Stream.value(film.sublist(from)), 206);
+      },
+    );
+    final p = puzzle('t1');
+    s.ensure(p);
+    final state = await settled(s, p);
+    expect(state.phase, VideoPhase.ready);
+    expect(await state.file!.readAsBytes(), film);
+    expect(n, 2);
+  });
+
+  test('a 404 asks for the list again, and fetches the film it names now', () async {
+    final asked = <String>[];
+    final replaced = puzzle('r1', sha: '1122334455667788');
+    final s = PuzzleVideoStore(
+      directory: () async => dir,
+      reload: () async => ApiPuzzles(puzzles: [replaced]),
+      fetch: (url, {from = 0}) async {
+        asked.add(url);
+        return url.contains('v=11223344') ? whole(from) : http.StreamedResponse(const Stream.empty(), 404);
+      },
+    );
+    final old = puzzle('r1');
+    s.ensure(old);
+    // The old film's state is the picture's: it ends where the new one does.
+    final state = await settled(s, replaced);
+    expect(state.phase, VideoPhase.ready);
+    expect(state.file!.path, endsWith('/r1-11223344.mp4'));
+    expect(asked, ['/v1/puzzle-videos/r1?v=abcdef01', '/v1/puzzle-videos/r1?v=11223344']);
+  });
+
+  test('a 404 that names nothing new is a failure, not a loop', () async {
+    var reloads = 0;
+    final s = PuzzleVideoStore(
+      directory: () async => dir,
+      reload: () async {
+        reloads++;
+        return ApiPuzzles(puzzles: [puzzle('r2')]);
+      },
+      fetch: (url, {from = 0}) async => http.StreamedResponse(const Stream.empty(), 404),
+    );
+    final p = puzzle('r2');
+    s.ensure(p);
+    expect((await settled(s, p)).phase, VideoPhase.failed);
+    expect(reloads, 1);
+  });
+
+  test('one film that throws does not stop the ones behind it', () async {
+    final s = PuzzleVideoStore(
+      directory: () async => dir,
+      fetch: (url, {from = 0}) async => url.contains('/bad') ? throw const FileSystemException('disk') : whole(from),
+    );
+    final bad = puzzle('bad'), good = puzzle('good');
+    s.ensure(bad);
+    s.ensure(good);
+    expect((await settled(s, good)).phase, VideoPhase.ready);
+    expect(s.stateOf(bad).phase, VideoPhase.failed);
+  });
+
+  test('a replaced film leaves no half of the old one either', () async {
+    final films = Directory('${dir.path}/puzzle-videos')..createSync(recursive: true);
+    File('${films.path}/p9-abcdef01.mp4.part').writeAsBytesSync([1, 2, 3]);
+    File('${films.path}/p9-0ld0ld00.mp4').writeAsBytesSync([1, 2, 3]);
+    File('${films.path}/other-abcdef01.mp4').writeAsBytesSync([1, 2, 3]);
+    final (s, _) = store([whole]);
+    final p = puzzle('p9', sha: '99887766aabbccdd');
+    s.ensure(p);
+    await settled(s, p);
+    final left = films.listSync().map((f) => f.uri.pathSegments.last).toSet();
+    expect(left, {'p9-99887766.mp4', 'other-abcdef01.mp4'});
+  });
+
+  test('clearing forgets every film, on disk and in the states', () async {
+    final (s, _) = store([whole]);
+    final p = puzzle('c1');
+    s.ensure(p);
+    await settled(s, p);
+    await s.clear();
+    expect(Directory('${dir.path}/puzzle-videos').existsSync(), isFalse);
+    expect(s.stateOf(puzzle('c1', video: false)).phase, VideoPhase.none);
+  });
+
   test('a 403 is no film, and says so', () async {
     final (s, asked) = store([(from) => http.StreamedResponse(const Stream.empty(), 403)]);
     final p = puzzle('w7');
@@ -220,6 +314,36 @@ void main() {
     expect(seen.first.toString(), 'https://api.example/v1/puzzle-videos/x?v=abcdef01', reason: 'the url exactly as named');
     expect(headers[0].containsKey('range'), isFalse);
     expect(headers[1]['range'], 'bytes=600-');
+  });
+
+  test('the token goes only to the API\'s own host', () async {
+    final headers = <Map<String, String>>[];
+    final client = ApiClient(
+      baseUrl: 'https://api.example',
+      tokens: TokenStore.over(_Keychain()),
+      inner: MockClient.streaming((req, body) async {
+        headers.add(req.headers);
+        return http.StreamedResponse(Stream.value(const [1]), 200);
+      }),
+    );
+    await (await client.puzzleVideo('https://api.example/v1/puzzle-videos/x?v=1')).stream.drain<void>();
+    await (await client.puzzleVideo('https://cdn.elsewhere.example/x.mp4')).stream.drain<void>();
+    expect(headers[0]['authorization'], 'Bearer tok');
+    expect(headers[1].containsKey('authorization'), isFalse);
+  });
+
+  test('a 401 re-registers, as every other call does, and asks once more', () async {
+    var calls = 0, reauths = 0;
+    final client = ApiClient(
+      baseUrl: 'https://api.example',
+      tokens: TokenStore.over(_Keychain()),
+      inner: MockClient.streaming((req, body) async => http.StreamedResponse(Stream.value(const [1]), calls++ == 0 ? 401 : 200)),
+    )..onUnauthorized = () async => reauths++;
+    final r = await client.puzzleVideo('/v1/puzzle-videos/x?v=1');
+    await r.stream.drain<void>();
+    expect(r.statusCode, 200);
+    expect(reauths, 1);
+    expect(calls, 2);
   });
 }
 
