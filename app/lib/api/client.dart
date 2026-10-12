@@ -430,11 +430,19 @@ class ApiClient {
 
   /// A puzzle picture's bytes. [url] is the `image_url` off a piece, relative to [baseUrl]. No
   /// token: the picture is a Verein's photo, and the route serves it to anyone.
+  ///
+  /// Only a picture counts. A hotel Wi-Fi's login page answers 200 with HTML, and kept on disk it
+  /// would stand in for the picture for ever — so an empty body or anything that is not `image/…`
+  /// is an error, and nothing is cached.
   Future<Uint8List> puzzleImage(String url) async {
     final uri = url.startsWith('http') ? Uri.parse(url) : _uri(url);
     final r = await _http.get(uri, headers: const {'accept': 'image/*'}).timeout(const Duration(seconds: 30));
-    if (r.statusCode >= 200 && r.statusCode < 300) return r.bodyBytes;
-    throw ApiException(r.statusCode, r.reasonPhrase ?? 'HTTP ${r.statusCode}');
+    if (r.statusCode < 200 || r.statusCode >= 300) throw ApiException(r.statusCode, r.reasonPhrase ?? 'HTTP ${r.statusCode}');
+    final type = r.headers['content-type'] ?? '';
+    if (r.bodyBytes.isEmpty || !type.trimLeft().toLowerCase().startsWith('image/')) {
+      throw ApiException(r.statusCode, 'not a picture: ${type.isEmpty ? 'no content type' : type}, ${r.bodyBytes.length} B');
+    }
+    return r.bodyBytes;
   }
 
 }

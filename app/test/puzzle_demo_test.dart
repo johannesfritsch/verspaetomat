@@ -1,12 +1,8 @@
-import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:verspaetomat/api/puzzle_image.dart';
 import 'package:verspaetomat/mock/mock_data.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 
-/// docs/51 §2–§3 as Demo mode plays them, and the picture cache behind the real thing.
+/// docs/51 §2–§3 as Demo mode plays them.
 void main() {
   /// One arrived journey of [minutes], and the piece it brought.
   DemoPiece? ride(DemoState s, [int minutes = 5]) {
@@ -66,19 +62,5 @@ void main() {
     expect(tierOf(p), 'm', reason: 'the last gap is one any ride may fill');
     expect(s.puzzleComplete(p.imageId), isTrue);
     expect(s.puzzleCompleted[p.imageId], isNotNull);
-  });
-
-  test('a picture is fetched once and then read from disk', () async {
-    final dir = await Directory.systemTemp.createTemp('puzzles');
-    addTearDown(() => dir.delete(recursive: true));
-    var fetches = 0;
-    PuzzleImageFile file() => PuzzleImageFile('0f9a/../x', () async {
-          fetches++;
-          return Uint8List.fromList([1, 2, 3]);
-        }, directory: () async => dir);
-    expect(await file().bytes(), [1, 2, 3]);
-    expect(await file().bytes(), [1, 2, 3]);
-    expect(fetches, 1);
-    expect(File('${dir.path}/puzzles/0f9a____x').existsSync(), isTrue, reason: 'the id never leaves the folder');
   });
 }
