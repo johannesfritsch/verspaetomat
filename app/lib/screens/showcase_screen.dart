@@ -131,6 +131,7 @@ class ShowcaseScreen extends StatelessWidget {
             const _Entry('Woher kommen die Daten?', 'die Tabelle', Routes.dataSources),
             const _Entry('Störung', 'wenn der Server nicht erreichbar ist', Routes.outage),
             const _Entry('Zaunkarte', 'wie die Zäune stehen', Routes.fenceMap),
+            if (RepoScope.of(context).puzzlesOn) const _Entry('Teil in der Hand', 'Licht, Kante, Material', Routes.tile3d),
           ]),
           const VGap.xl(),
           if (!isLocal) ...[

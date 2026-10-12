@@ -22,7 +22,7 @@ import 'package:verspaetomat/screens/community/community_widgets.dart' show Badg
 import 'package:verspaetomat/screens/ride/welcher_zug_screen.dart' show ItineraryTile;
 import 'package:verspaetomat/screens/share/share_moments.dart' show showConfirmedSheet;
 import 'package:verspaetomat/widgets/ticket.dart' show Ticket;
-import 'package:verspaetomat/widgets/kit.dart' show VCard, VDropzone, VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
+import 'package:verspaetomat/widgets/kit.dart' show PuzzleTapArea, Tile3D, VCard, VDropzone, VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
 
 // docs/29: there is one check-in and it is the sheets in `checkin_flow.dart`. The screens that
 // used to be listed here — the departures board, "Wo steigst du aus?", the Wohin? and
@@ -54,6 +54,7 @@ const tour = <(String, String)>[
   ('ich', Routes.me),
   ('historie', Routes.history),
   ('puzzles', Routes.puzzles),
+  ('teil-in-der-hand', Routes.tile3d),
   ('einstellungen', Routes.settings),
   ('daten', Routes.dataSources),
   ('stoerung', Routes.outage),
@@ -409,6 +410,18 @@ void main() {
       await shot(name);
       await dismissSheet(tester);
     }
+    // docs/51 §9a: a piece lifted off the Puzzles page into the hand, at rest and turned over.
+    demo.reset();
+    GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.puzzles);
+    await wait(tester, 1500);
+    final board = tester.getRect(find.byType(PuzzleTapArea).first);
+    // Slot 4, the middle of the second row: Bahnhofsmission's seed has it.
+    await tester.tapAt(board.topLeft + Offset(board.width / 2, board.height * 3 / 8));
+    await shot('puzzle-hand');
+    await tester.fling(find.byType(Tile3D), const Offset(260, 0), 3000);
+    await shot('puzzle-hand-back');
+    await tester.tap(find.byKey(const Key('piece-in-hand-close')));
+    await wait(tester, 800);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await wait(tester, 600);
     // docs/27: the shareable Fahrkarte. The arrival card, the punctual one (which is a

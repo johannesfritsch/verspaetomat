@@ -12,6 +12,7 @@ import 'repo/repo_scope.dart';
 import 'screens/claims/demo_antrag_screen.dart';
 import 'screens/claims/demo_weiter_screen.dart';
 import 'screens/onboarding/wiederherstellen_screen.dart';
+import 'screens/puzzles/tile_showcase.dart';
 import 'screens/showcase_screen.dart';
 import 'widgets/geofence_map_showcase.dart';
 import 'widgets/server_down.dart';
@@ -79,6 +80,9 @@ class Routes {
   /// docs/25 §5: the fence drawing on its own, with an invented set, so it can be looked at
   /// without standing at a station (issue #29). The page itself draws only what the phone says.
   static const fenceMap = '/showcase/fence-map';
+
+  /// docs/51 §9a: the piece in the hand at fixed tilts and to turn, without collecting anything.
+  static const tile3d = '/showcase/tile3d';
 }
 
 /// Where the app opens. `INITIAL_ROUTE` wins (tests, showcase runs). Otherwise a release
@@ -105,6 +109,7 @@ GoRouter buildRouter(DemoState state, {required String initialLocation}) {
       GoRoute(path: '/', redirect: (_, __) => Routes.showcase),
       GoRoute(path: Routes.outage, builder: (context, __) => ServerDownScreen(onRetry: () => context.pop())),
       GoRoute(path: Routes.fenceMap, builder: (_, __) => const GeofenceMapShowcase()),
+      GoRoute(path: Routes.tile3d, builder: (_, __) => const TileShowcase()),
       GoRoute(path: Routes.showcase, builder: (_, __) => const ShowcaseScreen()),
       GoRoute(path: Routes.demoClaim, builder: (_, __) => const DemoAntragScreen()),
       GoRoute(path: Routes.demoClaimNext, builder: (_, __) => const DemoWeiterScreen()),

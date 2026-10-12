@@ -49,6 +49,9 @@ dependencies:
   image_picker: ^1.2.3
   flutter_image_compress: ^2.5.1
   pdf: ^3.13.0
+  # docs/51 §9a: the piece in the hand leans with the phone. BSD-3-Clause; CoreMotion on iOS and
+  # the sensor manager on Android, neither asks for a permission for the accelerometer.
+  sensors_plus: ^7.1.1
 
 dev_dependencies:
   integration_test:
@@ -75,6 +78,10 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # The light on the piece in the hand (docs/51 §9a).
+  shaders:
+    - shaders/tile.frag
+
   assets:
     - assets/beispiel-antrag.pdf
     # The fare catalogue as GET /v1/fares serves it (#66): Demo mode reads it instead of a copy of
@@ -82,6 +89,9 @@ flutter:
     - assets/demo/fares.json
     # Three invented pictures for Demo mode's puzzles (docs/51); real ones come from the server.
     - assets/demo/puzzles/
+    # The piece in the hand's textures (docs/51 §9a), when Johannes sends them; README.md there
+    # names the files. Without them the shader draws the materials itself.
+    - assets/puzzle/
     - assets/achievements/
     - assets/header/
     - assets/sheet/

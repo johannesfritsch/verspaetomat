@@ -4,6 +4,7 @@ import '../../api/models.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../claims/claims_widgets.dart' show Loader;
+import 'piece_in_hand.dart';
 import 'puzzle_widgets.dart';
 
 /// „Deine Puzzles" (docs/51 §6): the pictures under way, then the finished ones.
@@ -106,7 +107,8 @@ class _StartedCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(width: 112, child: PuzzleBoardOf(p)),
+            // A tap on a piece it has lifts it into the hand (docs/51 §9a).
+            SizedBox(width: 112, child: PuzzleBoardOf(p, inHand: true)),
             const SizedBox(width: VSpace.m),
             Expanded(
               child: Column(
@@ -172,12 +174,20 @@ class _DoneTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Center(
-                    child: ConstrainedBox(
-                      // The whole picture on a phone, without pushing the sentence off the sheet.
-                      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.5),
-                      child: PuzzleBoardOf(p, complete: true),
-                    ),
+                  // The whole picture as a thing in the hand (§9a): it turns under a finger. As
+                  // large as the sheet allows without pushing the sentence off it, and a little
+                  // smaller than that, so its edge has room when it turns.
+                  LayoutBuilder(
+                    builder: (context, c) {
+                      final maxHeight = MediaQuery.sizeOf(ctx).height * 0.5;
+                      final width = (c.maxWidth < maxHeight * p.aspectRatio ? c.maxWidth : maxHeight * p.aspectRatio) * 0.88;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: VSpace.m),
+                        child: Center(
+                          child: Semantics(image: true, label: 'Puzzle ${p.title}, fertig. Zum Drehen ziehen.', child: PictureTile(puzzle: p, width: width)),
+                        ),
+                      );
+                    },
                   ),
                   if (p.caption.isNotEmpty) ...[
                     const VGap.m(),
@@ -195,12 +205,4 @@ class _DoneTile extends StatelessWidget {
       ),
     );
   }
-}
-
-/// „3. Oktober", and the year only when it is not this one.
-String finishedOn(DateTime at, {DateTime? now}) {
-  const months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
-  final d = at.toLocal();
-  final year = (now ?? DateTime.now()).year == d.year ? '' : ' ${d.year}';
-  return '${d.day}. ${months[d.month - 1]}$year';
 }

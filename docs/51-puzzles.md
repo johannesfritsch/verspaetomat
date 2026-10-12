@@ -335,6 +335,21 @@ gleich und braucht keine 3D-Engine.
   Kugel, 512 × 512 PNG — die einfachste Art, einem Shader ein Material zu geben), dazu eine
   kachelbare **Normal-Map** für den Karton (1024 × 1024). Bis dahin zeichnet der Shader die
   Materialien selbst.
+- **Wohin die Texturen gehören:** `app/assets/puzzle/matcap_minute.png`,
+  `matcap_quarter.png`, `matcap_hour.png` (je 512 × 512, eine beleuchtete Kugel auf neutralem
+  Grau) und `cardboard_normal.png` (1024 × 1024, kachelbar, Tangentenraum, grün nach oben). Jede
+  Datei, die da ist, wird genommen; jede, die fehlt, zeichnet der Shader (`app/shaders/tile.frag`)
+  selbst. Hineinlegen, neu bauen, fertig — `app/assets/puzzle/README.md` sagt dasselbe.
+- **Gebaut** (Agenda 1): `Tile3D` (`app/lib/widgets/tile3d.dart`) zeichnet Teil und ganzes Bild:
+  die Wand als vierzehn gestapelte Umrisse, nach hinten dunkler, bei Viertelstunde und Stunde vorn
+  mit der Farbe der Lippe; die Vorderseite im Fragment-Shader, die Fase aus einer einmal
+  geblurrten Maske des Umrisses. Neigen mit dem Finger (bis 60°, dann Widerstand; ein schneller
+  Wisch dreht es um), danach Federn zurück auf 8°; der Lagesensor (`sensors_plus`) gibt ±7° dazu.
+  Mit `NO_ANIM` oder „Bewegung reduzieren" steht es still. Wo der Shader nicht in den eigenen
+  Koordinaten des Teils zeichnet (die App prüft das einmal beim Start), gibt es einen Verlauf
+  statt Licht, und das Protokoll sagt es. Ein Tipp auf ein Teil, das du hast — bei der Ankunft,
+  wenn es eingerastet ist, und auf der Puzzles-Seite — hebt es heraus; das fertige Bild liegt im
+  Blatt als `Tile3D`. Zum Ansehen ohne Sammeln: Vorführung → „Teil in der Hand".
 
 ## 9b. Das fertige Bild bewegt sich
 

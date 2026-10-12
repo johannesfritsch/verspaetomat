@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +8,7 @@ import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
+import 'piece_in_hand.dart';
 
 /// The cut of a picture off the wire.
 PuzzleCut cutOf(ApiPuzzle p) => PuzzleCut(imageId: p.imageId, rows: p.rows, cols: p.cols);
@@ -45,11 +47,14 @@ String? stillMissing(ApiPuzzle p) {
 
 /// A picture as a board, its pixels from wherever the repository keeps them.
 class PuzzleBoardOf extends StatelessWidget {
-  const PuzzleBoardOf(this.puzzle, {super.key, this.complete});
+  const PuzzleBoardOf(this.puzzle, {super.key, this.complete, this.inHand = false});
   final ApiPuzzle puzzle;
 
   /// Defaults to the puzzle's own.
   final bool? complete;
+
+  /// A tap on an owned piece lifts it into the hand (docs/51 §9a).
+  final bool inHand;
 
   @override
   Widget build(BuildContext context) => PuzzleBoard(
@@ -60,6 +65,7 @@ class PuzzleBoardOf extends StatelessWidget {
         image: RepoScope.of(context).repo.puzzleImage(puzzle),
         aspectRatio: puzzle.aspectRatio,
         complete: complete ?? puzzle.complete,
+        onPieceTap: inHand ? (slot, rect) => showPieceInHand(context, puzzle, slot, from: rect) : null,
       );
 }
 
@@ -130,7 +136,12 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
     final reveal = (widget.piece.tier == PieceTier.hour ? ArrivalPieceCard._revealHour : ArrivalPieceCard._reveal).inMilliseconds;
     final finish = _completes ? ArrivalPieceCard._finish.inMilliseconds : 0;
     final total = delay + reveal + finish;
-    _c = AnimationController(vsync: this, duration: Duration(milliseconds: total))..addListener(_tick);
+    _c = AnimationController(vsync: this, duration: Duration(milliseconds: total))
+      ..addListener(_tick)
+      // Once the piece is in, its board takes taps: an owned piece goes into the hand.
+      ..addStatusListener((s) {
+        if (s == AnimationStatus.completed && mounted) setState(() {});
+      });
     _reveal = CurvedAnimation(parent: _c, curve: Interval(delay / total, (delay + reveal) / total));
     _count = CurvedAnimation(parent: _reveal, curve: const Interval(0.7, 1));
     if (_completes) {
@@ -179,89 +190,105 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
     final missing = stillMissing(p);
     // One node for a screen reader, whole from the first frame: what the fade shows a moment
     // later is no news to someone who does not see the fade.
+    final board = PieceReveal(
+      cut: cutOf(p),
+      owned: p.owned.toSet(),
+      piece: piece.piece,
+      reveal: _reveal,
+      finish: _finish,
+      tiers: p.slotTiers,
+      image: RepoScope.of(context).repo.puzzleImage(p),
+      aspectRatio: p.aspectRatio,
+    );
     return Semantics(
       container: true,
       button: true,
       label: arrivalPieceLabel(piece),
       excludeSemantics: true,
       onTap: _tap,
-      // The arrival and the „Aufgegeben" sheet are white: like the trip and the claim around it,
-      // the card sits below the sheet rather than above it, or it has no edge at all.
-      child: VCard(
-        key: const Key('arrival-piece'),
-        tone: VCardTone.sunken,
+      customSemanticsActions: {
+        CustomSemanticsAction(label: 'Das Teil in die Hand nehmen'): () => showPieceInHand(context, p, piece.piece),
+      },
+      // A plain detector rather than the card's own ink: the board's piece taps sit inside it and
+      // must win where they land on a piece.
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: _tap,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Narrow enough that a title like „Nachtschicht am Gleis 1" keeps to one line beside it.
-            SizedBox(
-              width: 100,
-              child: PieceReveal(
-                cut: cutOf(p),
-                owned: p.owned.toSet(),
-                piece: piece.piece,
-                reveal: _reveal,
-                finish: _finish,
-                tiers: p.slotTiers,
-                image: RepoScope.of(context).repo.puzzleImage(p),
-                aspectRatio: p.aspectRatio,
+        // The arrival and the „Aufgegeben" sheet are white: like the trip and the claim around it,
+        // the card sits below the sheet rather than above it, or it has no edge at all.
+        child: VCard(
+          key: const Key('arrival-piece'),
+          tone: VCardTone.sunken,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Narrow enough that a title like „Nachtschicht am Gleis 1" keeps to one line beside it.
+              SizedBox(
+                width: 100,
+                child: _c.isCompleted
+                    ? PuzzleTapArea(
+                        cut: cutOf(p),
+                        owned: p.owned.toSet(),
+                        onPieceTap: (slot, rect) => showPieceInHand(context, p, slot, from: rect),
+                        child: board,
+                      )
+                    : board,
               ),
-            ),
-            const SizedBox(width: VSpace.m),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  VEyebrow(piece.ownCause ? 'Ein Teil für ${p.ngoName}' : 'Ein Teil von ${p.ngoName}', tone: VEyebrowTone.red),
-                  const VGap.xs(),
-                  // The finish names the picture itself, a moment later.
-                  if (!_completes) Text(keepLastWord(p.title), style: VText.title),
-                  if (!piece.ownCause) ...[
+              const SizedBox(width: VSpace.m),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    VEyebrow(piece.ownCause ? 'Ein Teil für ${p.ngoName}' : 'Ein Teil von ${p.ngoName}', tone: VEyebrowTone.red),
                     const VGap.xs(),
-                    Text('Ein Verein, den andere unterstützen.', style: VText.bodyS),
-                  ],
-                  const VGap.m(),
-                  FadeTransition(
-                    opacity: _count,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // docs/51 §5.3: the tier first, then where the picture stands — each whole,
-                        // on the next line when both do not fit.
-                        Wrap(
-                          spacing: VSpace.xs,
-                          children: [
-                            Text('Ein ${tierPieceName(piece.tier)}.', style: VText.bodyStrong),
-                            Text('${puzzleProgress(p)}.', style: VText.bodyStrong),
-                          ],
-                        ),
-                        if (missing != null) ...[
-                          const VGap.xs(),
-                          Text(missing, style: VText.bodyS),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (_caption != null)
+                    // The finish names the picture itself, a moment later.
+                    if (!_completes) Text(keepLastWord(p.title), style: VText.title),
+                    if (!piece.ownCause) ...[
+                      const VGap.xs(),
+                      Text('Ein Verein, den andere unterstützen.', style: VText.bodyS),
+                    ],
+                    const VGap.m(),
                     FadeTransition(
-                      opacity: _caption!,
+                      opacity: _count,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const VGap.s(),
-                          Text(keepLastWord('Fertig: ${p.title}.'), style: VText.bodyStrong),
-                          if (p.caption.isNotEmpty) ...[
+                          // docs/51 §5.3: the tier first, then where the picture stands — each whole,
+                          // on the next line when both do not fit.
+                          Wrap(
+                            spacing: VSpace.xs,
+                            children: [
+                              Text('Ein ${tierPieceName(piece.tier)}.', style: VText.bodyStrong),
+                              Text('${puzzleProgress(p)}.', style: VText.bodyStrong),
+                            ],
+                          ),
+                          if (missing != null) ...[
                             const VGap.xs(),
-                            Text(p.caption, style: VText.bodyS),
+                            Text(missing, style: VText.bodyS),
                           ],
                         ],
                       ),
                     ),
-                ],
+                    if (_caption != null)
+                      FadeTransition(
+                        opacity: _caption!,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const VGap.s(),
+                            Text(keepLastWord('Fertig: ${p.title}.'), style: VText.bodyStrong),
+                            if (p.caption.isNotEmpty) ...[
+                              const VGap.xs(),
+                              Text(p.caption, style: VText.bodyS),
+                            ],
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -297,4 +324,12 @@ class PuzzlesRow extends StatelessWidget {
       onTap: () => context.push(Routes.puzzles),
     );
   }
+}
+
+/// „3. Oktober", and the year only when it is not this one.
+String finishedOn(DateTime at, {DateTime? now}) {
+  const months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+  final d = at.toLocal();
+  final year = (now ?? DateTime.now()).year == d.year ? '' : ' ${d.year}';
+  return '${d.day}. ${months[d.month - 1]}$year';
 }

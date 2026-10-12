@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../api/models.dart' show PieceTier;
 import '../theme/tokens.dart';
@@ -220,10 +221,15 @@ class PuzzleBoard extends StatelessWidget {
     this.aspectRatio,
     this.complete = false,
     this.semanticLabel,
+    this.onPieceTap,
   });
 
   final PuzzleCut cut;
   final Set<int> owned;
+
+  /// A tap on an owned piece: its slot and where it is on the screen (docs/51 §9a). Taps elsewhere
+  /// on the board fall through.
+  final void Function(int slot, Rect global)? onPieceTap;
 
   /// What a screen reader says for the picture: „Puzzle Nachtschicht am Gleis 1, 8 von 12
   /// Teilen". Without one the board is decoration and says nothing.
@@ -254,8 +260,10 @@ class PuzzleBoard extends StatelessWidget {
         ),
       ),
     );
+    final tap = onPieceTap;
+    final tappable = tap == null ? board : PuzzleTapArea(cut: cut, owned: complete ? {for (var i = 0; i < cut.pieces; i++) i} : owned, onPieceTap: tap, child: board);
     final label = semanticLabel;
-    return label == null ? board : Semantics(image: true, label: label, child: board);
+    return label == null ? tappable : Semantics(image: true, label: label, child: tappable);
   }
 }
 
@@ -378,13 +386,28 @@ void _drawMark(Canvas canvas, PieceTier tier, Rect slot, Size cell, double alpha
   if (tier == PieceTier.minute || cell.shortestSide < _markMinCell) return;
   final r = (cell.shortestSide * 0.1).clamp(3.5, 7.0);
   final inset = math.max(r + 2.5, cell.shortestSide * 0.17);
-  final c = slot.topLeft + Offset(inset, inset);
+  paintTierClock(canvas, tier, slot.topLeft + Offset(inset, inset), r, alpha: alpha);
+}
+
+/// The station clock of a tier at [c], radius [r]: a quarter filled in ink, or the whole face red.
+/// [hand] draws a minute's clock too — its one hand at twelve — where a minute must show something,
+/// as on the back of a piece in the hand.
+void paintTierClock(Canvas canvas, PieceTier tier, Offset c, double r, {double alpha = 1, bool hand = false}) {
   final ink = VColors.ink.withValues(alpha: alpha);
   final rim = (tier == PieceTier.hour ? VColors.red : VColors.ink).withValues(alpha: alpha);
   canvas.drawCircle(c, r, Paint()..color = VColors.paperElevated.withValues(alpha: alpha));
   switch (tier) {
     case PieceTier.minute:
-      break;
+      if (hand) {
+        canvas.drawLine(
+          c,
+          c - Offset(0, r * 0.72),
+          Paint()
+            ..color = ink
+            ..strokeWidth = math.max(1.0, r * 0.12)
+            ..strokeCap = StrokeCap.round,
+        );
+      }
     case PieceTier.quarter:
       canvas.drawArc(Rect.fromCircle(center: c, radius: r), -math.pi / 2, math.pi / 2, true, Paint()..color = ink);
     case PieceTier.hour:
@@ -398,6 +421,107 @@ void _drawMark(Canvas canvas, PieceTier tier, Rect slot, Size cell, double alpha
       ..strokeWidth = math.max(0.8, r * 0.18)
       ..color = rim,
   );
+}
+
+/// A tier's clock on its own, as large as it is laid out — the back of a piece in the hand.
+class TierClock extends StatelessWidget {
+  const TierClock(this.tier, {super.key, this.size = 48});
+  final PieceTier tier;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(dimension: size, child: CustomPaint(painter: _TierClockPainter(tier)));
+}
+
+class _TierClockPainter extends CustomPainter {
+  _TierClockPainter(this.tier);
+  final PieceTier tier;
+
+  @override
+  void paint(Canvas canvas, Size size) => paintTierClock(canvas, tier, size.center(Offset.zero), size.shortestSide / 2 - 1, hand: true);
+
+  @override
+  bool shouldRepaint(_TierClockPainter old) => old.tier != tier;
+}
+
+/// Taps on the owned pieces of a board, and nowhere else: a tap on a missing piece or on the
+/// empty ground falls through to whatever is under the board — the card it stands on.
+class PuzzleTapArea extends StatelessWidget {
+  const PuzzleTapArea({super.key, required this.cut, required this.owned, required this.onPieceTap, required this.child});
+  final PuzzleCut cut;
+  final Set<int> owned;
+
+  /// The piece's slot, and its rect on the screen — the cell with its knobs.
+  final void Function(int slot, Rect global) onPieceTap;
+  final Widget child;
+
+  /// The owned piece under [local] on a board of [size], or null.
+  static int? pieceAt(PuzzleCut cut, Set<int> owned, Size size, Offset local) {
+    final cell = Size(size.width / cut.cols, size.height / cut.rows);
+    for (final i in owned) {
+      if (cut.piece(i, cell).contains(local)) return i;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _HitOnly(
+      hit: (local, size) => pieceAt(cut, owned, size, local) != null,
+      child: Builder(
+        builder: (context) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (d) {
+            final box = context.findRenderObject() as RenderBox?;
+            if (box == null) return;
+            final slot = pieceAt(cut, owned, box.size, d.localPosition);
+            if (slot == null) return;
+            final cell = Size(box.size.width / cut.cols, box.size.height / cut.rows);
+            final bounds = cut.piece(slot, cell).getBounds();
+            onPieceTap(slot, box.localToGlobal(bounds.topLeft) & bounds.size);
+          },
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Hit-tests its child only where [hit] says so.
+class _HitOnly extends SingleChildRenderObjectWidget {
+  const _HitOnly({required this.hit, super.child});
+  final bool Function(Offset local, Size size) hit;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderHitOnly(hit);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderHitOnly renderObject) => renderObject.hit = hit;
+}
+
+class _RenderHitOnly extends RenderProxyBox {
+  _RenderHitOnly(this.hit);
+  bool Function(Offset local, Size size) hit;
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) => size.contains(position) && hit(position, size) && super.hitTest(result, position: position);
+}
+
+/// One piece lifted off its board (docs/51 §9a): its outline on a board of [board] size, and the
+/// part of a picture of [image] pixels that lies under it, as the board draws it (cover, centred).
+({Path outline, Rect source}) pieceShape(PuzzleCut cut, int slot, Size board, Size image) {
+  final cell = Size(board.width / cut.cols, board.height / cut.rows);
+  final outline = cut.piece(slot, cell);
+  return (outline: outline, source: pictureSource(image, board, outline.getBounds()));
+}
+
+/// The part of a picture of [image] pixels under [part] of a board of [board] size that shows
+/// the picture cropped to cover it, centred.
+Rect pictureSource(Size image, Size board, Rect part) {
+  final fit = applyBoxFit(BoxFit.cover, image, board);
+  final shown = Alignment.center.inscribe(fit.source, Offset.zero & image);
+  final k = shown.width / board.width;
+  return Rect.fromLTWH(shown.left + part.left * k, shown.top + part.top * k, part.width * k, part.height * k);
 }
 
 /// The whole picture over [size], cropped to fill it as `BoxFit.cover` would.

@@ -618,6 +618,77 @@ void main() {
       ),
     );
   });
+  // docs/51 §9a: the piece in the hand at rest, turned 30°, edge-on and from behind — a minute, a
+  // quarter and an hour — and a whole finished picture, lit by the shader where this engine can
+  // run it (TileShading checks; otherwise the gradient light). The simulator shows the same at
+  // /showcase/tile3d.
+  _preview('puzzle-tile-frames', width: 1000, height: 1240, (context) {
+    const cut = PuzzleCut(imageId: 'demo-bahnhofsmission', rows: 4, cols: 3);
+    const image = AssetImage('assets/demo/puzzles/bahnhofsmission.webp');
+    const board = Size(1000, 1000 / 0.75);
+    const tilts = [TileTilt(0, 0), TileTilt.rest, TileTilt(0.14, 0.52), TileTilt(0.1, 1.4), TileTilt(0.14, 3.0)];
+    Widget piece(int slot, PieceTier tier, TileTilt t) => PuzzlePicture(
+          image: image,
+          builder: (context, img) {
+            final shape = pieceShape(cut, slot, board, img == null ? board : Size(img.width.toDouble(), img.height.toDouble()));
+            return Tile3D(
+              cacheKey: 'bench/$slot',
+              outline: shape.outline,
+              image: img,
+              source: shape.source,
+              tier: tier,
+              width: 140,
+              tilt: t,
+              back: (context) => _BenchBack(tier: tier),
+            );
+          },
+        );
+    return Padding(
+      padding: const EdgeInsets.all(VSpace.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final (slot, tier) in const [(1, PieceTier.minute), (5, PieceTier.quarter), (7, PieceTier.hour)]) ...[
+            Row(
+              children: [
+                for (final t in tilts) Padding(padding: const EdgeInsets.only(right: 44), child: SizedBox(width: 140, height: 210, child: Center(child: piece(slot, tier, t)))),
+              ],
+            ),
+            const VGap.l(),
+          ],
+          Row(
+            children: [
+              for (final t in const [TileTilt.rest, TileTilt(0.2, 0.6), TileTilt(0.12, 3.0)])
+                Padding(
+                  padding: const EdgeInsets.only(right: 60),
+                  child: PuzzlePicture(
+                    image: image,
+                    builder: (context, img) => Tile3D(
+                      cacheKey: 'bench/picture',
+                      outline: Path()..addRRect(RRect.fromRectAndRadius(Offset.zero & board, const Radius.circular(33))),
+                      image: img,
+                      source: pictureSource(img == null ? board : Size(img.width.toDouble(), img.height.toDouble()), board, Offset.zero & board),
+                      width: 220,
+                      depth: 0.025,
+                      tilt: t,
+                      back: (context) => ColoredBox(color: VColors.track, child: Center(child: Text('Nachtschicht am Gleis 1', style: VText.title))),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  });
+}
+
+class _BenchBack extends StatelessWidget {
+  const _BenchBack({required this.tier});
+  final PieceTier tier;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(color: VColors.track, child: Center(child: TierClock(tier, size: 34)));
 }
 
 /// A tier map in the demo's shorthand: `m` minute, `q` quarter, `H` hour.
