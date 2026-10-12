@@ -313,8 +313,28 @@ Stand 12. Oktober 2026, Branch `feature/puzzle`, nicht auf Staging.
   mit eingeschaltetem Puzzle, eine Fahrt mit 70 Minuten bis zum Stunden-Teil auf der Ankunft und
   der Puzzles-Seite, und mit ausgeschaltetem Schalter kein Teil und keine Spur in der App
   (`app/integration_test/puzzle_e2e_test.dart`).
-- **Nicht gebaut:** die Hand mit 3D (§9a), Teilen (§10), Puzzle-Teile im Datenexport (wie die
-  Abzeichen fehlen sie dort; beides gehört nach Art. 15 DSGVO eigentlich hinein).
+- **Seit dem Abend des 12. Oktober** (Agenda §9c, Schritte 1–4):
+  - **Teil in der Hand (§9a):** `Tile3D` mit Wand, Fase und Licht aus `shaders/tile.frag`,
+    Material nach Stufe, Drehen mit dem Finger, leichtes Neigen mit dem Lagesensor (relativ zur
+    Haltung, nicht absolut), Rückseite aus Karton. Ein Tipp auf ein eigenes Teil hebt es heraus;
+    das fertige Bild liegt im Blatt als Kachel. Ohne Shader (alte Grafik) zeichnet ein Verlauf.
+  - **Stellwerk zum Testen:** `stellwerk pieces <wer> [give|fill|next|clear]`, auf Produktion
+    abgelehnt; Teile aus dem Stellwerk zählen nicht zur Tagesgrenze; `next` legt fest, wohin das
+    Teil der nächsten Fahrt geht — so ist „die nächste Fahrt macht das Bild fertig" kein Würfelwurf.
+    Rezept in CLAUDE.md.
+  - **Video (§9b):** `ngo image add <verein> [bild] --video clip …` rechnet um, nimmt ohne Bild
+    das erste Bild des Videos, legt das Bild zurückgezogen an und gibt es erst frei, wenn das Video
+    oben ist. Das Video liegt auf dem Upload-Volume, die Adresse trägt die Prüfsumme
+    (`?v=<sha8>`), ausgeliefert nur nach Fertigstellung, mit Range. Die App lädt es nach dem
+    letzten Teil, übersteht Funklöcher (Fortsetzen mit Range), spielt es bildschirmfüllend und
+    stumm, wenn das Telefon stumm ist (iOS-Schalter, Android-Klingelmodus).
+  - **Geprüft:** vier unabhängige Reviews (Backend zweimal, App zweimal), alle Befunde behoben;
+    zwei Ende-zu-Ende-Läufe gegen einen echten Server, der zweite mit Video, Stift und 3D.
+- **Offen, nicht Teil dieses Branches:** Das Upload-Volume (Fahrkarten, Unterschriften, jetzt
+  auch Videos) wird nicht gesichert, nur die Datenbank. Eine App mit veraltetem Schlüssel braucht
+  nach dem Neuanmelden rund 45 s, bis ihre Anfragen wieder durchgehen (im E2E gesehen).
+- **Nicht gebaut:** Teilen (§10), Puzzle-Teile im Datenexport (wie die Abzeichen fehlen sie dort;
+  beides gehört nach Art. 15 DSGVO eigentlich hinein).
 - **Vor Staging:** Bilder der echten Vereine, mit ihrer Zusage zu Rechten und Einwilligung (§4),
   und `stellwerk flags puzzles` erst für Johannes' Testkonto.
 
