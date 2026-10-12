@@ -5,7 +5,7 @@
 //!   stellwerk journey Johannes  |  stellwerk confirm Johannes [--trip <trip id>]
 //!   stellwerk delay Johannes +25
 //!   stellwerk backdate Johannes --delay 70 --days 3 [--count 3] [--from "Bonn Hbf" --to "Köln Hbf"]
-//!   stellwerk pieces Johannes [give [--ngo X] [--image ID] [--slot N] [--tier hour] [--count N] | fill <BILD|VEREIN> [--leave 1 --leave-tier hour] | clear [--image ID]]
+//!   stellwerk pieces Johannes [give [--ngo X] [--image ID] [--slot N] [--tier hour] [--count N] | fill <BILD|VEREIN> [--leave 1 --leave-tier hour] [--next] | next <BILD|VEREIN> | next --clear | clear [--image ID]]
 //!   stellwerk cancel Johannes
 //!   stellwerk ff Johannes
 //!   stellwerk poll
@@ -18,7 +18,7 @@
 //!   stellwerk forget Johannes
 //!   stellwerk route list | set <desk> <address> [--label …] | default <address> | remove <desk>
 //!   stellwerk ngo list | set <id> --name … --holder … --iban … | import ngos.json | remove <id>
-//!   stellwerk ngo image add <ngo> bild.jpg --title … --caption … [--grid 3x4] [--tiers …] [--yes] | list [<ngo>] | retire <id> | remove <id>
+//!   stellwerk ngo image add <ngo> bild.jpg --title … --caption … [--grid 3x4] [--tiers …] [--yes] | list [<ngo>] | retire <id> | unretire <id> | remove <id>
 //!   stellwerk ngo image add <ngo> [bild.jpg] --video clip.mov --title … --yes   |  ngo image video <id> clip.mp4 | --remove
 //!   stellwerk stations import [--from <dir>] [--out stations.json] [--dry-run] [--force]
 //!   stellwerk stations extract [--out <dir>] [--keep 1] [--asset] [--dry-run]
@@ -360,6 +360,8 @@ enum NgoImageCmd {
     List { ngo: Option<String> },
     /// Take a picture out of the distribution; whoever has started it can still finish it
     Retire { id: String },
+    /// Put a retired picture back into the distribution
+    Unretire { id: String },
     /// Delete a picture nobody has a piece of
     Remove { id: String },
     /// Give a picture its video, or a new one, or (--remove) none. The same conversion as
@@ -395,9 +397,15 @@ fn ffmpeg_tool(tool: &str, args: &[&str]) -> anyhow::Result<std::process::Output
     Ok(out)
 }
 
+/// A path as ffmpeg must read it: `file:` in front, or a colon in the name (`clip:1.mov`) would
+/// be taken for a protocol.
+fn ff_path(p: &Path) -> String {
+    format!("file:{}", p.to_string_lossy())
+}
+
 /// The running time of a clip, in seconds.
 fn clip_seconds(file: &Path) -> anyhow::Result<f64> {
-    let out = ffmpeg_tool("ffprobe", &["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", &file.to_string_lossy()])?;
+    let out = ffmpeg_tool("ffprobe", &["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", &ff_path(file)])?;
     String::from_utf8_lossy(&out.stdout).trim().parse().map_err(|_| anyhow::anyhow!("{}: keine Laufzeit lesbar", file.display()))
 }
 
@@ -411,17 +419,10 @@ fn prepare_video(src: &Path, with_frame: bool) -> anyhow::Result<PreparedVideo> 
     if !src.exists() {
         anyhow::bail!("{} gibt es nicht", src.display());
     }
-    let seconds = clip_seconds(src)?;
-    if !(10.0..=35.0).contains(&seconds) {
-        anyhow::bail!("{} läuft {seconds:.1} s; ein Puzzle-Video läuft 10 bis 35 s (gedacht sind 15 bis 30)", src.display());
-    }
-    if !(15.0..=30.0).contains(&seconds) {
-        eprintln!("Achtung: {} läuft {seconds:.1} s; gedacht sind 15 bis 30 s", src.display());
-    }
     let dir = std::env::temp_dir().join(format!("stellwerk-video-{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis()));
     std::fs::create_dir_all(&dir)?;
     let scratch = ScratchDir(dir.clone());
-    let (input, mp4) = (src.to_string_lossy().to_string(), dir.join("video.mp4"));
+    let (input, mp4) = (ff_path(src), dir.join("video.mp4"));
     eprintln!("rechne {} um …", src.display());
     // `0:a:0?`: the sound when there is one, and no error when there is none.
     ffmpeg_tool(
@@ -429,9 +430,18 @@ fn prepare_video(src: &Path, with_frame: bool) -> anyhow::Result<PreparedVideo> 
         &[
             "-nostdin", "-v", "error", "-y", "-i", &input, "-map", "0:v:0", "-map", "0:a:0?", "-vf", &fit(1200),
             "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p", "-crf", "23", "-preset", "slow",
-            "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", &mp4.to_string_lossy(),
+            "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", &ff_path(&mp4),
         ],
     )?;
+    // What the server will measure is the converted file, so that is what is checked, before
+    // anything is uploaded.
+    let seconds = clip_seconds(&mp4)?;
+    if !(10.0..=35.0).contains(&seconds) {
+        anyhow::bail!("{} läuft umgerechnet {seconds:.1} s; ein Puzzle-Video läuft 10 bis 35 s (gedacht sind 15 bis 30)", src.display());
+    }
+    if !(15.0..=30.0).contains(&seconds) {
+        eprintln!("Achtung: {} läuft {seconds:.1} s; gedacht sind 15 bis 30 s", src.display());
+    }
     if !with_frame {
         return Ok(PreparedVideo { mp4, frame: None, seconds, _scratch: scratch });
     }
@@ -440,7 +450,7 @@ fn prepare_video(src: &Path, with_frame: bool) -> anyhow::Result<PreparedVideo> 
     let jpg = dir.join("frame.jpg");
     let mut frame = Vec::new();
     for q in ["2", "3", "4", "6", "8", "10"] {
-        ffmpeg_tool("ffmpeg", &["-nostdin", "-v", "error", "-y", "-i", &input, "-frames:v", "1", "-vf", &fit(2400), "-q:v", q, &jpg.to_string_lossy()])?;
+        ffmpeg_tool("ffmpeg", &["-nostdin", "-v", "error", "-y", "-i", &input, "-frames:v", "1", "-vf", &fit(2400), "-q:v", q, &ff_path(&jpg)])?;
         frame = std::fs::read(&jpg)?;
         if frame.len() <= 1_000_000 {
             break;
@@ -494,6 +504,19 @@ enum PiecesCmd {
         /// Leave slots of this tier open first: minute, quarter or hour
         #[arg(long = "leave-tier")]
         leave_tier: Option<String>,
+        /// And pin the picture: the next journey's piece goes there (see `next`)
+        #[arg(long)]
+        next: bool,
+    },
+    /// Pin a picture (its id, or a Verein's) for the next journey's piece: it goes there if the
+    /// picture has a slot for that journey's tier, by the usual exact-then-lower rule. Once: the
+    /// award clears the pin, used or not. Three a day still apply to it
+    Next {
+        #[arg(value_name = "BILD|VEREIN", required_unless_present = "clear")]
+        picture: Option<String>,
+        /// Take the pin away
+        #[arg(long, conflicts_with = "picture")]
+        clear: bool,
     },
     /// Take the pieces out again, the journeys' too: all, or one picture's
     Clear {
@@ -513,6 +536,9 @@ fn print_pieces(v: &Value) {
         s(&v["today"], "cap"),
         if v["more_waiting"].as_bool().unwrap_or(false) { "" } else { " · alles fertig" }
     );
+    if !v["next_image"].is_null() {
+        println!("  Das nächste Teil aus einer Fahrt geht an „{}“ ({})", s(&v["next_image"], "title"), s(&v["next_image"], "image_id"));
+    }
     let list = v["puzzles"].as_array().cloned().unwrap_or_default();
     if list.is_empty() {
         println!("  noch kein Teil");
@@ -1934,7 +1960,10 @@ async fn main() -> anyhow::Result<()> {
                         (None, None) => anyhow::bail!("ein Bild oder --video"),
                     };
                     let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
-                    let mut body = json!({ "title": title, "caption": caption, "rows": rows, "cols": cols, "content_type": content_type, "data": b64 });
+                    // With a video the picture starts out of the distribution and enters it only
+                    // once its video is attached: a failed video never leaves a live picture
+                    // without one.
+                    let mut body = json!({ "title": title, "caption": caption, "rows": rows, "cols": cols, "content_type": content_type, "data": b64, "retired": prepared.is_some() });
                     if let Some(t) = tiers {
                         body["tiers"] = json!(t);
                     }
@@ -1948,16 +1977,15 @@ async fn main() -> anyhow::Result<()> {
                         Some((_, (w, h))) => println!("Bild {id} hochgeladen ({w} × {h}, erstes Bild des Videos von {:.1} s)", p.seconds),
                         None => println!("Bild {id} hochgeladen, dazu das Video von {:.1} s", p.seconds),
                     }
-                    match api.put_video(&id, &p.mp4).await {
-                        Ok(v) => print_puzzle_image(&v),
-                        Err(e) => {
-                            print_puzzle_image(&v);
-                            anyhow::bail!(
-                                "das Bild ist da, das Video nicht: {e}\nNoch einmal: stellwerk ngo image video {id} {}",
-                                video.as_deref().map(|v| v.display().to_string()).unwrap_or_default()
-                            );
-                        }
+                    if let Err(e) = api.put_video(&id, &p.mp4).await {
+                        print_puzzle_image(&v);
+                        anyhow::bail!(
+                            "das Bild ist da (zurückgezogen), das Video nicht: {e}\nNoch einmal: stellwerk ngo image video {id} {}\nDann: stellwerk ngo image unretire {id}",
+                            video.as_deref().map(|v| v.display().to_string()).unwrap_or_default()
+                        );
                     }
+                    let v = api.delete(&format!("/admin/puzzle-images/{id}/retire")).await?;
+                    print_puzzle_image(&v);
                 }
                 NgoImageCmd::List { ngo } => {
                     let path = match &ngo {
@@ -1991,6 +2019,10 @@ async fn main() -> anyhow::Result<()> {
                         );
                     }
                     let v = api.put_video(&id, &p.mp4).await?;
+                    print_puzzle_image(&v);
+                }
+                NgoImageCmd::Unretire { id } => {
+                    let v = api.delete(&format!("/admin/puzzle-images/{id}/retire")).await?;
                     print_puzzle_image(&v);
                 }
                 NgoImageCmd::Retire { id } => {
@@ -2278,11 +2310,18 @@ async fn main() -> anyhow::Result<()> {
                         println!("{} von {count} vergeben: kein offener Platz mehr, den das darf", pieces.len());
                     }
                 }
-                Some(PiecesCmd::Fill { picture, leave, leave_tier }) => {
-                    let mut body = json!({ "leave": leave });
+                Some(PiecesCmd::Fill { picture, leave, leave_tier, next }) => {
+                    let mut body = json!({ "leave": leave, "next": next });
                     if let Some(t) = leave_tier { body["leave_tier"] = json!(t); }
                     let v = api.post(&format!("{base}/puzzles/{}/fill", url::form_urlencoded::byte_serialize(picture.as_bytes()).collect::<String>()), body).await?;
                     println!("+ {} Teile {}, offen gelassen: {}", v["added"].as_array().map_or(0, Vec::len), v["added"], v["left"]);
+                }
+                Some(PiecesCmd::Next { picture, clear }) => {
+                    let v = match picture.filter(|_| !clear) {
+                        Some(p) => api.put(&format!("{base}/puzzle-next"), json!({ "image": p })).await?,
+                        None => api.delete(&format!("{base}/puzzle-next")).await?,
+                    };
+                    println!("{}", if v["next_image"].is_null() { "kein Bild vorgemerkt".to_string() } else { format!("vorgemerkt: {}", s(&v, "next_image")) });
                 }
                 Some(PiecesCmd::Clear { image }) => {
                     let q = image.map(|i| format!("?image={i}")).unwrap_or_default();

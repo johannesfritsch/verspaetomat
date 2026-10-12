@@ -210,6 +210,10 @@ async fn main() -> anyhow::Result<()> {
     // Fail here rather than on the first passenger's ticket if the volume is not mounted.
     let uploads = storage::init()?;
     tracing::info!("uploads in {}", uploads.display());
+    // Puzzle videos nothing points at any more (docs/51 §9b): not worth failing a start over.
+    if let Err(e) = puzzles::sweep_videos(&pool).await {
+        tracing::warn!(error = %e, "puzzle video sweep failed");
+    }
 
     let addr = std::env::var("BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -330,6 +334,7 @@ pub fn router(state: AppState) -> Router {
         .route("/admin/customers/{key}/puzzles", get(admin::customer_puzzles))
         .route("/admin/customers/{key}/puzzle-pieces", post(admin::puzzle_pieces_give).delete(admin::puzzle_pieces_clear))
         .route("/admin/customers/{key}/puzzles/{image}/fill", post(admin::puzzle_fill))
+        .route("/admin/customers/{key}/puzzle-next", put(admin::puzzle_next_set).delete(admin::puzzle_next_clear))
         .route("/admin/poll", post(admin::poll))
         .route("/admin/scan", post(admin::scan))
         .route("/admin/customers/{key}/mail-test", post(admin::mail_test))
@@ -343,7 +348,7 @@ pub fn router(state: AppState) -> Router {
         .route("/admin/ngos/{id}/puzzle-images", post(admin::puzzle_image_add).layer(DefaultBodyLimit::max(puzzles::MAX_BYTES * 3)))
         .route("/admin/puzzle-images", get(admin::puzzle_images))
         .route("/admin/puzzle-images/{id}", delete(admin::puzzle_image_remove))
-        .route("/admin/puzzle-images/{id}/retire", post(admin::puzzle_image_retire))
+        .route("/admin/puzzle-images/{id}/retire", post(admin::puzzle_image_retire).delete(admin::puzzle_image_unretire))
         // The video streams to disk and the handler counts its 40 MB itself (admin.rs).
         .route("/admin/puzzle-images/{id}/video", put(admin::puzzle_video_put).delete(admin::puzzle_video_remove))
         .route("/admin/desks", get(admin::desks))

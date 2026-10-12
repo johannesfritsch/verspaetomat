@@ -2255,6 +2255,8 @@ async fn the_stellwerks_pieces_are_refused_in_production(pool: PgPool) {
         ("POST", format!("/admin/customers/{id}/puzzle-pieces"), json!({})),
         ("POST", format!("/admin/customers/{id}/puzzles/{image}/fill"), json!({})),
         ("DELETE", format!("/admin/customers/{id}/puzzle-pieces"), json!({})),
+        ("PUT", format!("/admin/customers/{id}/puzzle-next"), json!({ "image": image })),
+        ("DELETE", format!("/admin/customers/{id}/puzzle-next"), json!({})),
     ] {
         let (s, v) = admin(&app, method, &path, body).await;
         assert_eq!(s, StatusCode::FORBIDDEN, "{method} {path}: {v}");
@@ -2522,7 +2524,10 @@ async fn the_video_comes_with_the_finished_picture(pool: PgPool) {
     let (_, v) = call(&app, "GET", "/v1/me/puzzles", Some(&token), None).await;
     let video = &v["puzzles"][0]["video"];
     let sha = video["sha256"].as_str().unwrap().to_string();
-    assert_eq!(video["url"], url);
+    // Versioned by its content, so a replaced video is a new address for every cache.
+    assert_eq!(video["url"], format!("{url}?v={}", &sha[..8]));
+    let (s, _, body) = raw_get(&app, video["url"].as_str().unwrap(), &[("authorization", &auth)]).await;
+    assert_eq!((s, body.len()), (StatusCode::OK, VIDEO.len()));
     assert_eq!(video["bytes"], VIDEO.len());
     assert_eq!((video["width"].as_i64(), video["height"].as_i64()), (Some(32), Some(32)));
     assert!((video["seconds"].as_f64().unwrap() - 11.0).abs() < 0.1);
@@ -2556,6 +2561,13 @@ async fn the_video_comes_with_the_finished_picture(pool: PgPool) {
     assert!(body.is_empty());
     assert_eq!(h["cache-control"], "private, max-age=31536000, immutable");
 
+    // HEAD: the same headers, no body.
+    let res = app.clone().oneshot(Request::builder().method("HEAD").uri(&url).header("authorization", &auth).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["content-length"], VIDEO.len().to_string().as_str());
+    assert_eq!(res.headers()["accept-ranges"], "bytes");
+    assert!(axum::body::to_bytes(res.into_body(), 1024).await.unwrap().is_empty());
+
     // Not without a token, not for someone who has not finished it, not for what is not there.
     let (s, _, _) = raw_get(&app, &url, &[]).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
@@ -2570,4 +2582,120 @@ async fn the_video_comes_with_the_finished_picture(pool: PgPool) {
     // The Stellwerk sees the video's facts.
     let (_, v) = admin(&app, "GET", &format!("/admin/customers/{id}/puzzles"), json!({})).await;
     assert_eq!(v["puzzles"][0]["video_facts"]["sha256"], sha.as_str());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_pinned_picture_takes_the_next_journeys_piece_once(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, token) = device(&app).await;
+    // The customer's own Verein is the Bahnhofsmission; the pin is on another one's picture.
+    picture(&app, "bahnhofsmission", 3, 4).await;
+    let wald = picture(&app, "wald", 3, 4).await;
+    puzzles_on(&app, id).await;
+    let tiers: Vec<String> = sqlx::query_scalar("select tiers from puzzle_images where id = $1").bind(wald).fetch_one(&pool).await.unwrap();
+    let hour = tiers.iter().position(|t| t == "hour").unwrap() as i64;
+
+    let (s, v) = admin(&app, "PUT", &format!("/admin/customers/{id}/puzzle-next"), json!({ "image": wald })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, v) = admin(&app, "GET", &format!("/admin/customers/{id}/puzzles"), json!({})).await;
+    assert_eq!(v["next_image"]["image_id"], json!(wald));
+
+    let j = riding_journey_due(&pool, id, 70).await;
+    let (_, v) = call(&app, "POST", &format!("/v1/journeys/{j}/finish"), Some(&token), Some(json!({ "arrived": true }))).await;
+    assert_eq!((v["piece"]["image_id"].clone(), v["piece"]["piece"].as_i64(), v["piece"]["own_cause"].clone()), (json!(wald), Some(hour), json!(false)), "{v}");
+    let pinned: Option<Uuid> = sqlx::query_scalar("select puzzle_next_image from customers where id = $1").bind(id).fetch_one(&pool).await.unwrap();
+    assert_eq!(pinned, None, "the pin is used up");
+
+    // A pin on a picture with no slot for the journey's tier is used up too, and the rules decide.
+    sqlx::query("insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, stellwerk) select $1, $2, p, now(), true from generate_series(0, 11) p where p <> $3 on conflict do nothing")
+        .bind(id)
+        .bind(wald)
+        .bind(hour as i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("delete from puzzle_pieces where customer_id = $1 and image_id = $2 and piece = $3").bind(id).bind(wald).bind(hour as i32).execute(&pool).await.unwrap();
+    let (s, _) = admin(&app, "PUT", &format!("/admin/customers/{id}/puzzle-next"), json!({ "image": "wald" })).await;
+    assert_eq!(s, StatusCode::OK, "a Verein names its started picture");
+    let v = ride_and_finish(&app, &pool, id, &token, json!({ "arrived": true })).await;
+    assert_eq!(v["piece"]["ngo_id"], "bahnhofsmission", "a minute cannot fill the hour: {v}");
+    let pinned: Option<Uuid> = sqlx::query_scalar("select puzzle_next_image from customers where id = $1").bind(id).fetch_one(&pool).await.unwrap();
+    assert_eq!(pinned, None);
+
+    // `fill … next` pins in the same call; DELETE takes a pin away.
+    let (_, v) = admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/bahnhofsmission/fill"), json!({ "leave": 1, "leave_tier": "hour", "next": true })).await;
+    assert_eq!(v["next"], true, "{v}");
+    let (_, v) = admin(&app, "GET", &format!("/admin/customers/{id}/puzzles"), json!({})).await;
+    assert!(v["next_image"].is_object(), "{v}");
+    let (s, v) = admin(&app, "DELETE", &format!("/admin/customers/{id}/puzzle-next"), json!({})).await;
+    assert_eq!((s, v["next_image"].clone()), (StatusCode::OK, Value::Null));
+    let (s, _) = admin(&app, "PUT", &format!("/admin/customers/{id}/puzzle-next"), json!({ "image": Uuid::new_v4() })).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_customer_key_is_a_prefix_not_a_pattern(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, _) = device(&app).await;
+    let (s, v) = admin(&app, "GET", &format!("/admin/customers/{}/puzzles", &id.to_string()[..4]), json!({})).await;
+    assert_eq!(s, StatusCode::OK, "a short prefix still works: {v}");
+    for (key, want) in [("%25", StatusCode::NOT_FOUND), ("_", StatusCode::NOT_FOUND), ("%20", StatusCode::BAD_REQUEST)] {
+        let (s, v) = admin(&app, "GET", &format!("/admin/customers/{key}/puzzles"), json!({})).await;
+        assert_eq!(s, want, "{key}: {v}");
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_picture_can_start_retired_and_come_back(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let body = json!({ "title": "Baumreihe", "rows": 2, "cols": 2, "content_type": "image/png", "data": b64(&png(600, 600)), "retired": true });
+    let (s, v) = admin(&app, "POST", "/admin/ngos/wald/puzzle-images", body).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["retired_at"].is_string());
+    let image = v["id"].as_str().unwrap().to_string();
+    let (s, v) = admin(&app, "DELETE", &format!("/admin/puzzle-images/{image}/retire"), json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["retired_at"], Value::Null);
+    let (s, _) = admin(&app, "DELETE", &format!("/admin/puzzle-images/{}/retire", Uuid::new_v4()), json!({})).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_video_is_streamed_whole_and_cut_off_past_forty_megabytes(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let image = picture(&app, "wald", 2, 2).await;
+
+    // Over 2 MB: no buffering extractor's limit stands in the way. The fixture with a free box
+    // after it is still the same MP4.
+    let mut big = VIDEO.to_vec();
+    let pad = 2_500_000u32;
+    big.extend_from_slice(&pad.to_be_bytes());
+    big.extend_from_slice(b"free");
+    big.resize(big.len() + pad as usize - 8, 0);
+    let (s, v) = put_video(&app, image, &big, "video/mp4", None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["video_bytes"], big.len());
+
+    // A size that would wrap the walk: refused, not looped on.
+    let mut hostile = VIDEO[..32].to_vec();
+    hostile.extend_from_slice(&1u32.to_be_bytes());
+    hostile.extend_from_slice(b"free");
+    hostile.extend_from_slice(&u64::MAX.to_be_bytes());
+    let (s, v) = put_video(&app, image, &hostile, "video/mp4", None).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+
+    // Chunked, no Content-Length, past 40 MB: refused while it streams.
+    let chunk = axum::body::Bytes::from(vec![0u8; 1024 * 1024]);
+    let stream = futures_util::stream::iter((0..41).map(move |_| Ok::<_, std::io::Error>(chunk.clone())));
+    let req = Request::builder()
+        .method("PUT")
+        .uri(format!("/admin/puzzle-images/{image}/video"))
+        .header("x-admin-token", std::env::var("ADMIN_TOKEN").unwrap_or_else(|_| "stellwerk".into()))
+        .header("content-type", "video/mp4")
+        .body(Body::from_stream(stream))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let (_, v) = admin(&app, "GET", "/admin/puzzle-images?ngo=wald", json!({})).await;
+    assert_eq!(v[0]["video_bytes"], big.len(), "the video before stays");
 }

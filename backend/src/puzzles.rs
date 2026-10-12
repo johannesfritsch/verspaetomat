@@ -140,6 +140,15 @@ impl Image {
     fn complete(&self) -> bool {
         self.owned.len() >= self.tiers.len()
     }
+
+    /// An open slot of exactly `up_to`, else of the highest tier below it (any tier when None),
+    /// by the dice: the rule of §2a within one picture.
+    fn slot(&self, up_to: Option<Tier>, dice: &Dice) -> Option<(i32, Tier)> {
+        Tier::ALL.into_iter().rev().filter(|t| up_to.is_none_or(|want| *t <= want)).find_map(|t| {
+            let open = self.missing(t);
+            (!open.is_empty()).then(|| (open[(dice.piece % open.len() as u64) as usize], t))
+        })
+    }
 }
 
 /// The dice: which side (one in four is another Verein's), which picture when it is down to
@@ -404,7 +413,18 @@ async fn try_award(pool: &PgPool, customer: &CustomerRow, j: &JourneyRow) -> any
     // The journey's counted minutes, as it stored them: `rules::counted_minutes` when it arrived,
     // the waiting when it was given up (`abandon_minutes`).
     let tier = Tier::for_minutes(j.points as i64);
-    let Some((image, piece, _)) = choose(&images, &own, &customer.ngo_id, tier, &Dice::roll()) else { return Ok(None) };
+    let dice = Dice::roll();
+    // The Stellwerk's pin (docs/51 §9c), read and cleared here, where a piece is about to be
+    // chosen: it holds for this one award, used or not.
+    let pinned: Option<Uuid> = sqlx::query_scalar("update customers c set puzzle_next_image = null from (select puzzle_next_image from customers where id = $1) old where c.id = $1 returning old.puzzle_next_image")
+        .bind(customer.id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let from_pin = pinned.and_then(|id| images.iter().find(|i| i.id == id)).and_then(|img| img.slot(Some(tier), &dice).map(|(p, t)| (img.id, p, t)));
+    let Some((image, piece, _)) = from_pin.or_else(|| choose(&images, &own, &customer.ngo_id, tier, &dice)) else {
+        tx.commit().await?;
+        return Ok(None);
+    };
     let own_cause = images.iter().any(|i| i.id == image && own.contains(&i.ngo_id));
     sqlx::query("insert into puzzle_pieces (customer_id, image_id, piece, journey_id, awarded_at, own_cause) values ($1, $2, $3, $4, $5, $6)")
         .bind(customer.id)
@@ -470,7 +490,9 @@ impl Puzzle {
     fn video(&self) -> Value {
         match &self.video_sha256 {
             Some(sha) => json!({
-                "url": format!("/v1/puzzle-videos/{}", self.image_id), "bytes": self.video_bytes, "seconds": self.video_seconds,
+                // Versioned by its content: a new video for the same picture is a new address, so a
+                // cache that keeps the old one for a year never serves it in place of the new.
+                "url": format!("/v1/puzzle-videos/{}?v={}", self.image_id, &sha[..8.min(sha.len())]), "bytes": self.video_bytes, "seconds": self.video_seconds,
                 "sha256": sha, "width": self.video_width, "height": self.video_height,
             }),
             None => Value::Null,
@@ -564,6 +586,11 @@ pub async fn stellwerk_view(pool: &PgPool, flags: &crate::flags::Table, customer
     let (from, to) = berlin_day(crate::clock::now());
     let today: i64 = sqlx::query_scalar(JOURNEY_PIECES_TODAY).bind(customer.id).bind(from).bind(to).fetch_one(pool).await?;
     let more_waiting = !candidates(&images_of(&mut *pool.acquire().await?, customer.id).await?).is_empty();
+    let next: Option<Value> = sqlx::query_as::<_, (Uuid, String)>("select i.id, i.title from customers c join puzzle_images i on i.id = c.puzzle_next_image where c.id = $1")
+        .bind(customer.id)
+        .fetch_optional(pool)
+        .await?
+        .map(|(id, title)| json!({ "image_id": id, "title": title }));
     Ok(json!({
         "customer": customer.id, "nickname": customer.nickname,
         "puzzles_flag": flags.bool(&crate::flags::PUZZLES, Some(customer.into())),
@@ -575,6 +602,7 @@ pub async fn stellwerk_view(pool: &PgPool, flags: &crate::flags::Table, customer
         }).collect::<Vec<_>>(),
         "more_waiting": more_waiting,
         "today": { "journey_pieces": today, "cap": MAX_PER_DAY },
+        "next_image": next,
     }))
 }
 
@@ -609,10 +637,7 @@ pub async fn give(pool: &PgPool, customer: &CustomerRow, g: &Give) -> Result<Opt
                 }
                 Some(p) if img.owned.contains(&p) => return Err(refuse(StatusCode::CONFLICT, &format!("the customer already has piece {p} of this picture"))),
                 Some(p) => Some((id, p)),
-                None => Tier::ALL.into_iter().rev().filter(|t| g.tier.is_none_or(|want| *t <= want)).find_map(|t| {
-                    let open = img.missing(t);
-                    (!open.is_empty()).then(|| (id, open[(dice.piece % open.len() as u64) as usize]))
-                }),
+                None => img.slot(g.tier, &dice).map(|(p, _)| (id, p)),
             }
         }
         (None, _) if g.piece.is_some() => return Err(refuse(StatusCode::BAD_REQUEST, "piece needs image")),
@@ -644,19 +669,11 @@ pub async fn give(pool: &PgPool, customer: &CustomerRow, g: &Give) -> Result<Opt
 /// das Stunden-Teil" is `leave 1, hour`, and the next journey of 60 minutes finishes it. `target`
 /// is a picture's id, or a Verein's, which means its started picture, else its next one. Nothing
 /// the customer holds is taken away. The added and the left slots, and the puzzle as it is now.
-pub async fn fill(pool: &PgPool, customer: &CustomerRow, target: &str, leave: usize, leave_tier: Option<Tier>) -> Result<Value, ApiError> {
+pub async fn fill(pool: &PgPool, customer: &CustomerRow, target: &str, leave: usize, leave_tier: Option<Tier>, pin: bool) -> Result<Value, ApiError> {
     let mut tx = pool.begin().await.map_err(internal)?;
     sqlx::query("select 1 from customers where id = $1 for no key update").bind(customer.id).execute(&mut *tx).await.map_err(internal)?;
     let images = images_of(&mut tx, customer.id).await.map_err(internal)?;
-    let img = match target.parse::<Uuid>() {
-        Ok(id) => images.iter().find(|i| i.id == id).ok_or_else(|| refuse(StatusCode::NOT_FOUND, "no such picture"))?,
-        Err(_) => candidates(&images)
-            .into_iter()
-            .rev()
-            .filter(|i| i.ngo_id == target)
-            .max_by_key(|i| (i.started(), i.owned.len()))
-            .ok_or_else(|| refuse(StatusCode::NOT_FOUND, "this NGO has no picture left to fill"))?,
-    };
+    let img = target_image(&images, target)?;
     let mut open: Vec<i32> = Tier::ALL.into_iter().flat_map(|t| img.missing(t)).collect();
     open.sort_by_key(|&p| (Some(img.tiers[p as usize]) != leave_tier, p));
     let left: Vec<i32> = open.iter().copied().take(leave).collect();
@@ -675,11 +692,38 @@ pub async fn fill(pool: &PgPool, customer: &CustomerRow, target: &str, leave: us
     .execute(&mut *tx)
     .await
     .map_err(internal)?;
+    if pin {
+        sqlx::query("update customers set puzzle_next_image = $2 where id = $1").bind(customer.id).bind(img.id).execute(&mut *tx).await.map_err(internal)?;
+    }
     tx.commit().await.map_err(internal)?;
     let puzzle = puzzles_of(pool, customer.id, Some(img.id)).await.map_err(internal)?.pop();
     let mut left = left;
     left.sort_unstable();
-    Ok(json!({ "image_id": img.id, "added": added, "left": left, "puzzle": puzzle.as_ref().map(Puzzle::listed) }))
+    Ok(json!({ "image_id": img.id, "added": added, "left": left, "next": pin, "puzzle": puzzle.as_ref().map(Puzzle::listed) }))
+}
+
+/// A picture's id, or a Verein's: its started picture, else its next one.
+fn target_image<'a>(images: &'a [Image], target: &str) -> Result<&'a Image, ApiError> {
+    match target.parse::<Uuid>() {
+        Ok(id) => images.iter().find(|i| i.id == id).ok_or_else(|| refuse(StatusCode::NOT_FOUND, "no such picture")),
+        Err(_) => candidates(images)
+            .into_iter()
+            .rev()
+            .filter(|i| i.ngo_id == target)
+            .max_by_key(|i| (i.started(), i.owned.len()))
+            .ok_or_else(|| refuse(StatusCode::NOT_FOUND, "this NGO has no picture left to fill")),
+    }
+}
+
+/// Pin the picture the next journey's piece goes to, or (`None`) take the pin away. The picture
+/// it pins, as the Stellwerk shows it.
+pub async fn pin_next(pool: &PgPool, customer: &CustomerRow, target: Option<&str>) -> Result<Value, ApiError> {
+    let mut tx = pool.begin().await.map_err(internal)?;
+    let images = images_of(&mut tx, customer.id).await.map_err(internal)?;
+    let image = target.map(|t| target_image(&images, t).map(|i| i.id)).transpose()?;
+    sqlx::query("update customers set puzzle_next_image = $2 where id = $1").bind(customer.id).bind(image).execute(&mut *tx).await.map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    Ok(json!({ "customer": customer.nickname, "next_image": image }))
 }
 
 /// Take the Stellwerk's and the journeys' pieces out again, of one picture or of all. How many.
@@ -887,6 +931,34 @@ pub async fn video(State(s): State<AppState>, c: Customer, h: HeaderMap, Path(id
         hs.insert(header::CONTENT_RANGE, format!("bytes {first}-{last}/{len}").parse().unwrap());
     }
     r
+}
+
+/// The files in `dir` that are older than `older_than` and that nothing names: an upload cut off
+/// before it could clean up (`.incoming-…`), or a video whose row went in a crash before its file
+/// did. Removed; the answer is what went. An upload still streaming is younger than any sane
+/// `older_than`, so it is never touched.
+pub fn sweep_video_dir(dir: &std::path::Path, referenced: &std::collections::HashSet<String>, older_than: std::time::Duration) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let now = std::time::SystemTime::now();
+    entries
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| !referenced.contains(&format!("{}/{}", crate::storage::PUZZLE_VIDEOS, e.file_name().to_string_lossy())))
+        .filter(|e| e.metadata().and_then(|m| m.modified()).is_ok_and(|t| now.duration_since(t).is_ok_and(|age| age > older_than)))
+        .map(|e| e.path())
+        .filter(|p| std::fs::remove_file(p).is_ok())
+        .collect()
+}
+
+/// [`sweep_video_dir`] over the upload volume, at startup, with an hour's grace.
+pub async fn sweep_videos(pool: &PgPool) -> anyhow::Result<()> {
+    let referenced: std::collections::HashSet<String> = sqlx::query_scalar::<_, String>("select video_path from puzzle_images where video_path is not null").fetch_all(pool).await?.into_iter().collect();
+    let dir = crate::storage::dir().join(crate::storage::PUZZLE_VIDEOS);
+    let gone = tokio::task::spawn_blocking(move || sweep_video_dir(&dir, &referenced, std::time::Duration::from_secs(3600))).await?;
+    for p in &gone {
+        tracing::info!(path = %p.display(), "puzzle video sweep: removed a file nothing names");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1117,6 +1189,34 @@ mod tests {
         assert!(!earns_piece(&journey(JourneyStatus::Abandoned, Some("nicht_gefahren"))));
         assert!(!earns_piece(&journey(JourneyStatus::Riding, None)));
         assert!(!earns_piece(&journey(JourneyStatus::Transfer, None)));
+    }
+
+    #[test]
+    fn the_sweep_takes_old_files_nothing_names_and_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("puzzle-sweep-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        let file = |name: &str, old: bool| {
+            let p = dir.join(name);
+            std::fs::write(&p, b"x").unwrap();
+            if old {
+                std::fs::File::options().write(true).open(&p).unwrap().set_modified(hour_ago).unwrap();
+            }
+            p
+        };
+        let live = file("a-11111111.mp4", true);
+        let orphan = file("b-22222222.mp4", true);
+        let cut_off = file(".incoming-x", true);
+        let streaming = file(".incoming-y", false);
+        let referenced = std::collections::HashSet::from(["puzzle-videos/a-11111111.mp4".to_string()]);
+        let mut gone = sweep_video_dir(&dir, &referenced, std::time::Duration::from_secs(3600));
+        gone.sort();
+        let mut want = vec![orphan.clone(), cut_off.clone()];
+        want.sort();
+        assert_eq!(gone, want);
+        assert!(live.exists() && streaming.exists() && !orphan.exists() && !cut_off.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(sweep_video_dir(&dir, &referenced, std::time::Duration::ZERO).is_empty(), "no directory, nothing to do");
     }
 
     #[test]

@@ -361,7 +361,7 @@ paths:
       summary: "A puzzle picture for this NGO (docs/51 §8). The bytes must be the content_type they claim (magic bytes), at most 1 MB decoded, at most 2400 px on the longest side and 6 megapixels, without an EXIF rotation, and the grid must cut them into roughly square pieces ((width/cols)/(height/rows) within 0.66–1.5). tiers: every slot's tier, row by row; absent, the server lays out docs/51 §2a (max(1, round(n/12)) hours nearest the centre, round(n/4) quarters scattered, the rest minutes)."
       security: [{ adminToken: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, required: [title, rows, cols, content_type, data], properties: { title: { type: string }, caption: { type: string }, rows: { type: integer, minimum: 2, maximum: 8 }, cols: { type: integer, minimum: 2, maximum: 8 }, tiers: { type: array, items: { type: string, enum: [minute, quarter, hour] }, description: "rows * cols of them" }, content_type: { type: string, enum: [image/jpeg, image/png, image/webp] }, data: { type: string, description: base64 } } } } } }
+      requestBody: { content: { application/json: { schema: { type: object, required: [title, rows, cols, content_type, data], properties: { title: { type: string }, caption: { type: string }, rows: { type: integer, minimum: 2, maximum: 8 }, cols: { type: integer, minimum: 2, maximum: 8 }, tiers: { type: array, items: { type: string, enum: [minute, quarter, hour] }, description: "rows * cols of them" }, content_type: { type: string, enum: [image/jpeg, image/png, image/webp] }, data: { type: string, description: base64 }, retired: { type: boolean, description: "create it out of the distribution (the Stellwerk does until its video is attached)" } } } } } }
       responses: { '200': { description: PuzzleImage }, '400': { description: 'not base64, not the type it claims, too many pixels, rotated, bad grid, pieces not roughly square, or tiers of the wrong length or with an unknown word' }, '404': { description: No such NGO }, '413': { description: over 1 MB } }
   /admin/customers/{key}/puzzles:
     get:
@@ -381,13 +381,25 @@ paths:
       security: [{ adminToken: [] }]
       parameters: [{ name: key, in: path, required: true, schema: { type: string } }, { name: image, in: query, schema: { type: string, format: uuid } }]
       responses: { '200': { description: '{customer, image, removed}' }, '403': { description: production } }
+  /admin/customers/{key}/puzzle-next:
+    put:
+      summary: "Pin the picture (its id, or an NGO id: its started picture, else its next one) the customer's next journey piece goes to, if it has a slot for that journey's tier (exact, then lower). One-shot: the award clears it, used or not; the daily cap still applies. Refused in production."
+      security: [{ adminToken: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [image], properties: { image: { type: string } } } } } }
+      responses: { '200': { description: '{customer, next_image}' }, '403': { description: production }, '404': { description: no such customer or picture } }
+    delete:
+      summary: Take the pin away. Refused in production.
+      security: [{ adminToken: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: '{customer, next_image: null}' }, '403': { description: production } }
   /admin/customers/{key}/puzzles/{image}/fill:
     post:
       summary: "Every open slot of the picture but `leave` of them, leaving slots of leave_tier first (leave 1, hour: the next journey of 60 minutes finishes it). {image} may be an NGO id: its started picture, else its next one. Nothing held is taken away. Refused in production."
       security: [{ adminToken: [] }]
       parameters: [{ name: key, in: path, required: true, schema: { type: string } }, { name: image, in: path, required: true, schema: { type: string } }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { leave: { type: integer, minimum: 0, maximum: 64, default: 0 }, leave_tier: { type: string, enum: [minute, quarter, hour] } } } } } }
-      responses: { '200': { description: '{image_id, added, left, puzzle: Puzzle | null}' }, '400': { description: bad leave or leave_tier }, '403': { description: production }, '404': { description: no such customer or picture, or nothing of that NGO left to fill } }
+      requestBody: { content: { application/json: { schema: { type: object, properties: { leave: { type: integer, minimum: 0, maximum: 64, default: 0 }, leave_tier: { type: string, enum: [minute, quarter, hour] }, next: { type: boolean, description: also pin the filled picture for the next journey piece } } } } } }
+      responses: { '200': { description: '{image_id, added, left, next, puzzle: Puzzle | null}' }, '400': { description: bad leave or leave_tier }, '403': { description: production }, '404': { description: no such customer or picture, or nothing of that NGO left to fill } }
   /admin/puzzle-images:
     get:
       summary: "Every puzzle picture, retired ones included, without the bytes: {id, ngo_id, ngo_name, title, caption, rows, cols, tiers, content_type, size, width, height, sha256, image_url, retired_at, created_at, pieces_awarded, customers_started, customers_completed, has_video, video_bytes, video_seconds, video_width, video_height}"
@@ -415,6 +427,11 @@ paths:
   /admin/puzzle-images/{id}/retire:
     post:
       summary: Take a picture out of the distribution; whoever has started it keeps it and can finish it
+      security: [{ adminToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: PuzzleImage }, '404': { description: No such picture } }
+    delete:
+      summary: Put a retired picture back into the distribution
       security: [{ adminToken: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
       responses: { '200': { description: PuzzleImage }, '404': { description: No such picture } }
@@ -455,7 +472,7 @@ components:
         height: { type: integer }
         awarded_at: { type: string, format: date-time }
         has_video: { type: boolean, description: "the picture has a video (docs/51 §9b); said before it is finished, so the app can say it will move" }
-        video: { type: [object, "null"], description: "only once the picture is finished: {url: /v1/puzzle-videos/{image_id}, bytes, seconds, sha256, width, height}" }
+        video: { type: [object, "null"], description: "only once the picture is finished: {url: /v1/puzzle-videos/{image_id}?v=<first 8 of sha256>, bytes, seconds, sha256, width, height}. The query versions the address (the route ignores it), so a replaced video is never served from a cache in place of the new one" }
     Puzzle:
       type: object
       description: "A started picture: the fields of Piece (tiers included) without piece, tier, own_cause and awarded_at, plus these."

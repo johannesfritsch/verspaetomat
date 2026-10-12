@@ -49,12 +49,19 @@ impl FromRequestParts<AppState> for Admin {
 /// Find a customer by id, id prefix, nickname (case-insensitive) or relay address.
 async fn resolve(s: &AppState, key: &str) -> Result<CustomerRow, (StatusCode, Json<Value>)> {
     let key = key.trim();
+    // Empty would be a prefix of every id: the most recently seen customer, whoever that is.
+    if key.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "name a customer"));
+    }
+    // The prefix is a prefix, not a pattern: `%` and `_` in it mean themselves.
+    let prefix = key.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
     let row: Option<CustomerRow> = sqlx::query_as(
         "select c.* from customers c join devices d on d.id = c.id
-         where c.id::text = $1 or c.id::text like $1 || '%' or lower(c.nickname) = lower($1) or lower(c.relay_address) = lower($1)
+         where c.id::text = $1 or c.id::text like $2 || '%' escape '\\' or lower(c.nickname) = lower($1) or lower(c.relay_address) = lower($1)
          order by d.last_seen_at desc limit 1",
     )
     .bind(key)
+    .bind(prefix)
     .fetch_optional(&s.pool)
     .await
     .map_err(internal)?;
@@ -1474,6 +1481,10 @@ pub struct PuzzleImageBody {
     pub content_type: String,
     /// The picture, base64.
     pub data: String,
+    /// Created out of the distribution: the Stellwerk does this until the video is attached, so a
+    /// failed video never leaves a live picture without one.
+    #[serde(default)]
+    pub retired: bool,
 }
 
 /// One picture without its bytes, with how far the passengers have got with it.
@@ -1563,15 +1574,15 @@ pub async fn puzzle_image_add(State(s): State<AppState>, _a: Admin, Path(ngo): P
     };
     let sha = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&bytes));
     sqlx::query(
-        "insert into puzzle_images (id, ngo_id, title, caption, rows, cols, tiers, content_type, bytes, width, height, sha256)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        "insert into puzzle_images (id, ngo_id, title, caption, rows, cols, tiers, content_type, bytes, width, height, sha256, retired_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, case when $13 then now() end)",
     )
     .bind(id).bind(&ngo).bind(title).bind(b.caption.trim()).bind(b.rows).bind(b.cols).bind(&tiers).bind(&b.content_type).bind(&bytes)
-    .bind(width as i32).bind(height as i32).bind(&sha)
+    .bind(width as i32).bind(height as i32).bind(&sha).bind(b.retired)
     .execute(&s.pool)
     .await
     .map_err(internal)?;
-    crate::rules::audit(&s.pool, "puzzle_image", id, None, "active", &format!("created via admin for {ngo}")).await.map_err(internal)?;
+    crate::rules::audit(&s.pool, "puzzle_image", id, None, if b.retired { "retired" } else { "active" }, &format!("created via admin for {ngo}")).await.map_err(internal)?;
     let mut v = puzzle_images_json(&s.pool, None, Some(id)).await?;
     Ok(Json(v.pop().unwrap_or(Value::Null)))
 }
@@ -1595,6 +1606,18 @@ pub async fn puzzle_image_retire(State(s): State<AppState>, _a: Admin, Path(id):
     if was.is_none() {
         sqlx::query("update puzzle_images set retired_at = now() where id = $1").bind(id).execute(&s.pool).await.map_err(internal)?;
         crate::rules::audit(&s.pool, "puzzle_image", id, Some("active"), "retired", "retired via admin").await.map_err(internal)?;
+    }
+    let mut v = puzzle_images_json(&s.pool, None, Some(id)).await?;
+    Ok(Json(v.pop().unwrap_or(Value::Null)))
+}
+
+/// `DELETE /admin/puzzle-images/{id}/retire`: back into the distribution.
+pub async fn puzzle_image_unretire(State(s): State<AppState>, _a: Admin, Path(id): Path<Uuid>) -> ApiResult {
+    let was: Option<Option<chrono::DateTime<chrono::Utc>>> = sqlx::query_scalar("select retired_at from puzzle_images where id = $1").bind(id).fetch_optional(&s.pool).await.map_err(internal)?;
+    let Some(was) = was else { return Err(err(StatusCode::NOT_FOUND, "no such picture")) };
+    if was.is_some() {
+        sqlx::query("update puzzle_images set retired_at = null where id = $1").bind(id).execute(&s.pool).await.map_err(internal)?;
+        crate::rules::audit(&s.pool, "puzzle_image", id, Some("retired"), "active", "back in the distribution via admin").await.map_err(internal)?;
     }
     let mut v = puzzle_images_json(&s.pool, None, Some(id)).await?;
     Ok(Json(v.pop().unwrap_or(Value::Null)))
@@ -1630,6 +1653,22 @@ pub async fn puzzle_image_remove(State(s): State<AppState>, _a: Admin, Path(id):
     Ok(Json(json!({ "id": id, "deleted": true })))
 }
 
+/// Files an upload has written, removed when it is dropped — unless it was disarmed by emptying it
+/// after the row that names them committed.
+struct Leftovers(Vec<std::path::PathBuf>);
+
+impl Drop for Leftovers {
+    fn drop(&mut self) {
+        for p in &self.0 {
+            if let Err(e) = std::fs::remove_file(p) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(path = %p.display(), error = %e, "could not remove an unfinished video upload");
+                }
+            }
+        }
+    }
+}
+
 /// `PUT /admin/puzzle-images/{id}/video`: the picture's video, the raw MP4 as the body
 /// (`Content-Type: video/mp4`, docs/51 §9b). Streamed to the upload volume, checked there — an
 /// MP4, 10 to 35 seconds, at most 40 MB — and only then put in place. It replaces the video the
@@ -1663,57 +1702,43 @@ pub async fn puzzle_video_put(State(s): State<AppState>, _a: Admin, Path(id): Pa
     let dir = crate::storage::dir().join(crate::storage::PUZZLE_VIDEOS);
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
     let incoming = dir.join(format!(".incoming-{}", Uuid::new_v4()));
+    // Whatever this upload has put on the disk goes again if it does not end in a committed row —
+    // an error, or the client hanging up mid-way, which drops this future at its next await.
+    let mut leftovers = Leftovers(vec![incoming.clone()]);
     let mut file = tokio::fs::File::create(&incoming).await.map_err(internal)?;
     let (mut size, mut digest) = (0u64, sha2::Sha256::new());
     let mut stream = body.into_data_stream();
-    let streamed: Result<(), (StatusCode, Json<Value>)> = async {
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| err(StatusCode::BAD_REQUEST, &format!("the upload broke off: {e}")))?;
-            size += chunk.len() as u64;
-            if size > MAX_VIDEO_BYTES {
-                return Err(too_large());
-            }
-            digest.update(&chunk);
-            file.write_all(&chunk).await.map_err(internal)?;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| err(StatusCode::BAD_REQUEST, &format!("the upload broke off: {e}")))?;
+        size += chunk.len() as u64;
+        if size > MAX_VIDEO_BYTES {
+            return Err(too_large());
         }
-        file.flush().await.map_err(internal)?;
-        Ok(())
+        digest.update(&chunk);
+        file.write_all(&chunk).await.map_err(internal)?;
     }
-    .await;
+    file.flush().await.map_err(internal)?;
     drop(file);
-    let checked = match streamed {
-        Ok(()) => {
-            let at = incoming.clone();
-            tokio::task::spawn_blocking(move || std::fs::File::open(&at).map_err(|e| e.to_string()).and_then(|mut f| crate::mp4::facts(&mut f)))
-                .await
-                .map_err(internal)
-                .and_then(|r| r.map_err(|e| err(StatusCode::BAD_REQUEST, &e)))
-                .and_then(|f| {
-                    if f.seconds < VIDEO_SECONDS.0 || f.seconds > VIDEO_SECONDS.1 {
-                        Err(err(StatusCode::BAD_REQUEST, &format!("the video runs {:.1} s; it must run {} to {} s", f.seconds, VIDEO_SECONDS.0, VIDEO_SECONDS.1)))
-                    } else {
-                        Ok(f)
-                    }
-                })
-        }
-        Err(e) => Err(e),
-    };
-    let facts = match checked {
-        Ok(f) => f,
-        Err(e) => {
-            let _ = tokio::fs::remove_file(&incoming).await;
-            return Err(e);
-        }
-    };
+    let at = incoming.clone();
+    let facts = tokio::task::spawn_blocking(move || std::fs::File::open(&at).map_err(|e| e.to_string()).and_then(|mut f| crate::mp4::facts(&mut f)))
+        .await
+        .map_err(internal)?
+        .map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+    if facts.seconds < VIDEO_SECONDS.0 || facts.seconds > VIDEO_SECONDS.1 {
+        return Err(err(StatusCode::BAD_REQUEST, &format!("the video runs {:.1} s; it must run {} to {} s", facts.seconds, VIDEO_SECONDS.0, VIDEO_SECONDS.1)));
+    }
     let sha = hex::encode(digest.finalize());
     let rel = format!("{}/{id}-{}.mp4", crate::storage::PUZZLE_VIDEOS, &sha[..8]);
-    if let Err(e) = tokio::fs::rename(&incoming, crate::storage::dir().join(&rel)).await {
-        let _ = tokio::fs::remove_file(&incoming).await;
-        return Err(internal(e));
-    }
-    let saved: Result<Option<String>, sqlx::Error> = async {
+    let target = crate::storage::dir().join(&rel);
+    // The same bytes again land on the live file. That file is not ours to remove on a failure.
+    let existed = tokio::fs::try_exists(&target).await.unwrap_or(true);
+    tokio::fs::rename(&incoming, &target).await.map_err(internal)?;
+    leftovers.0 = if existed { Vec::new() } else { vec![target] };
+    let saved: Result<Option<Option<String>>, sqlx::Error> = async {
         let mut tx = s.pool.begin().await?;
-        let old: Option<String> = sqlx::query_scalar("select video_path from puzzle_images where id = $1 for update").bind(id).fetch_one(&mut *tx).await?;
+        let Some(old) = sqlx::query_scalar::<_, Option<String>>("select video_path from puzzle_images where id = $1 for update").bind(id).fetch_optional(&mut *tx).await? else {
+            return Ok(None);
+        };
         sqlx::query("update puzzle_images set video_path = $2, video_bytes = $3, video_seconds = $4, video_sha256 = $5, video_width = $6, video_height = $7 where id = $1")
             .bind(id)
             .bind(&rel)
@@ -1725,19 +1750,14 @@ pub async fn puzzle_video_put(State(s): State<AppState>, _a: Admin, Path(id): Pa
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
-        Ok(old)
+        Ok(Some(old))
     }
     .await;
-    match saved {
-        Ok(old) => {
-            if let Some(old) = old.filter(|o| *o != rel) {
-                crate::storage::remove(&old).await;
-            }
-        }
-        Err(e) => {
-            crate::storage::remove(&rel).await;
-            return Err(internal(e));
-        }
+    // The picture went while the video streamed in: nothing to attach it to.
+    let old = saved.map_err(internal)?.ok_or_else(|| err(StatusCode::NOT_FOUND, "no such picture"))?;
+    leftovers.0.clear();
+    if let Some(old) = old.filter(|o| *o != rel) {
+        crate::storage::remove(&old).await;
     }
     crate::rules::audit(&s.pool, "puzzle_image", id, None, "video", &format!("video {:.1} s, {} bytes via admin", facts.seconds, size)).await.map_err(internal)?;
     let mut v = puzzle_images_json(&s.pool, None, Some(id)).await?;
@@ -1808,21 +1828,36 @@ pub async fn puzzle_pieces_give(State(s): State<AppState>, _a: Admin, _sim: Simu
     }
     let g = crate::puzzles::Give { image: b.image, ngo: b.ngo.clone(), tier: tier_arg(b.tier.as_deref())?, piece: b.piece };
     let mut pieces = Vec::new();
+    let mut failed = None;
     for _ in 0..count {
-        match crate::puzzles::give(&s.pool, &c, &g).await? {
-            Some(p) => pieces.push(p),
-            None => break,
+        match crate::puzzles::give(&s.pool, &c, &g).await {
+            Ok(Some(p)) => pieces.push(p),
+            Ok(None) => break,
+            Err(e) => {
+                failed = Some(e);
+                break;
+            }
         }
+    }
+    // The pieces already given are in the account: they go in the log even when a later one fails.
+    if let (Some(e), true) = (&failed, pieces.is_empty()) {
+        return Err(e.clone());
     }
     let what: Vec<String> = pieces.iter().map(|p| format!("{} #{} {}", p["image_id"].as_str().unwrap_or(""), p["piece"], p["tier"].as_str().unwrap_or(""))).collect();
     crate::rules::audit(&s.pool, "puzzle_pieces", c.id, None, "given", &format!("via stellwerk: {}", if what.is_empty() { "nothing left".into() } else { what.join(", ") }))
         .await
         .map_err(internal)?;
+    if let Some(e) = failed {
+        return Err(e);
+    }
     Ok(Json(json!({ "customer": c.nickname, "asked": count, "pieces": pieces })))
 }
 
 #[derive(Deserialize, Default)]
 pub struct FillBody {
+    /// Also pin the filled picture for the next journey's piece (`pieces … next`).
+    #[serde(default)]
+    pub next: bool,
     #[serde(default)]
     pub leave: Option<i64>,
     #[serde(default)]
@@ -1845,10 +1880,33 @@ pub async fn puzzle_fill(
     if !(0..=64).contains(&leave) {
         return Err(err(StatusCode::BAD_REQUEST, "leave must be 0 to 64"));
     }
-    let v = crate::puzzles::fill(&s.pool, &c, &image, leave as usize, tier_arg(b.leave_tier.as_deref())?).await?;
+    let v = crate::puzzles::fill(&s.pool, &c, &image, leave as usize, tier_arg(b.leave_tier.as_deref())?, b.next).await?;
     crate::rules::audit(&s.pool, "puzzle_pieces", c.id, None, "filled", &format!("via stellwerk: {} +{} left {}", v["image_id"].as_str().unwrap_or(""), v["added"], v["left"]))
         .await
         .map_err(internal)?;
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+pub struct NextBody {
+    /// A picture's id, or a Verein's (its started picture, else its next one).
+    pub image: String,
+}
+
+/// `PUT /admin/customers/{key}/puzzle-next {image}`: the next journey's piece goes to this picture,
+/// if it has a slot for that journey's tier — once; the award clears the pin either way.
+pub async fn puzzle_next_set(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>, Json(b): Json<NextBody>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let v = crate::puzzles::pin_next(&s.pool, &c, Some(&b.image)).await?;
+    crate::rules::audit(&s.pool, "puzzle_pieces", c.id, None, "pinned", &format!("via stellwerk: next piece from {}", v["next_image"])).await.map_err(internal)?;
+    Ok(Json(v))
+}
+
+/// `DELETE /admin/customers/{key}/puzzle-next`: no pin; the next piece by the rules.
+pub async fn puzzle_next_clear(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let v = crate::puzzles::pin_next(&s.pool, &c, None).await?;
+    crate::rules::audit(&s.pool, "puzzle_pieces", c.id, Some("pinned"), "unpinned", "via stellwerk").await.map_err(internal)?;
     Ok(Json(v))
 }
 
