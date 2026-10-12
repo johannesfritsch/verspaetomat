@@ -34,8 +34,10 @@ class IchScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A flag that arrives after the first load (docs/51) loads Ich again, so the row appears.
     final puzzlesOn = RepoScope.of(context).puzzlesOn;
     return Loader<_IchData>(
+      key: ValueKey(puzzlesOn),
       placeholder: (context) => VTabScaffold(
         art: VHeaderSceneArt.landscapeIch,
         header: VTabHeader(
@@ -47,6 +49,8 @@ class IchScreen extends StatelessWidget {
         children: const [VSkeletonBoard(look: VBoardLook.red), VSkeletonCard(), VSkeletonList()],
       ),
       load: (repo) async {
+        // Asked as the load starts, not as the screen was built.
+        final puzzlesOn = RepoScope.read(context).puzzlesOn;
         final me = await repo.getMe();
         final badges = await repo.badges();
         List<ApiRide> rides = const [];

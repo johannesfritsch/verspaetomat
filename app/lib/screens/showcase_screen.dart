@@ -125,7 +125,8 @@ class ShowcaseScreen extends StatelessWidget {
             _Entry('Zweck', 'Bahnhofsmission Köln', '${Routes.cause}?id=bahnhofsmission'),
             const _Entry('Ich', 'Profil, Abzeichen', Routes.me),
             const _Entry('Alle Fahrten', 'Historie', Routes.history),
-            const _Entry('Puzzles', 'angefangen und fertig', Routes.puzzles),
+            // docs/51: only where the app shows puzzles at all — always in Demo, on a server while the flag is on.
+            if (RepoScope.of(context).puzzlesOn) const _Entry('Puzzles', 'angefangen und fertig', Routes.puzzles),
             const _Entry('Einstellungen', 'und Datenschutz', Routes.settings),
             const _Entry('Woher kommen die Daten?', 'die Tabelle', Routes.dataSources),
             const _Entry('Störung', 'wenn der Server nicht erreichbar ist', Routes.outage),
