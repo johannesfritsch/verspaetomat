@@ -318,7 +318,7 @@ Stand 12. Oktober 2026, Branch `feature/puzzle`, nicht auf Staging.
 - **Vor Staging:** Bilder der echten Vereine, mit ihrer Zusage zu Rechten und Einwilligung (§4),
   und `stellwerk flags puzzles` erst für Johannes' Testkonto.
 
-## 9a. Das Teil in der Hand (3D, nächster Schritt)
+## 9a. Das Teil in der Hand (3D)
 
 Johannes: „Maybe we can get 3D in? Like Apple does with their badges? I could provide textures
 later." Apples Abzeichen sind echte 3D-Modelle, die man mit dem Finger dreht und die sich mit dem
@@ -335,6 +335,49 @@ gleich und braucht keine 3D-Engine.
   Kugel, 512 × 512 PNG — die einfachste Art, einem Shader ein Material zu geben), dazu eine
   kachelbare **Normal-Map** für den Karton (1024 × 1024). Bis dahin zeichnet der Shader die
   Materialien selbst.
+
+## 9b. Das fertige Bild bewegt sich
+
+Johannes, 12. Oktober 2026: „The puzzle image is only the first frame of a video. And it should
+also be in 3D. When I tap it, the video should play fullscreen. The app needs to download the
+video. It is only 15–30 s per video. And only downloaded once you have the puzzle piece fully."
+
+- **Ein Bild kann ein Video haben** (15–30 s). Das Puzzlebild ist dann sein erstes Bild: Das
+  Stellwerk nimmt das Video, schneidet das erste Bild heraus und lädt beides hoch — so können sie
+  nicht auseinanderlaufen. Es rechnet das Video vorher einheitlich um (H.264 und AAC, höchstens
+  1200 px an der langen Seite, Anfang der Datei vorn), damit jedes Telefon es abspielt und es klein
+  bleibt (ein paar MB).
+- **Das Video ist der Lohn für das ganze Bild.** Der Server nennt die Adresse erst, wenn du das
+  Bild fertig hast, und liefert es nur dann aus, mit Anmeldung. Die App lädt es einmal, sobald das
+  letzte Teil da ist, und legt es ab.
+- **Das fertige Bild liegt in 3D** wie ein Teil (§9a): ein Bild mit Dicke, das sich neigt. Ein
+  Abspielzeichen zeigt, dass es sich bewegt; solange das Video lädt, ein Ring. Ein Tipp spielt es
+  bildschirmfüllend, mit Ton nur, wenn das Telefon nicht stumm ist; danach steht wieder das Bild da.
+- Ein Bild ohne Video bleibt ein Bild (alle bisherigen).
+
+## 9c. Agenda bis Staging (12. Oktober 2026)
+
+In dieser Reihenfolge; 1 und 2 laufen nebeneinander, weil sie sich nicht berühren.
+
+1. **Das Teil in der Hand (3D, §9a).** Ein Renderer für Teil und ganzes Bild: Dicke, Kante, Licht
+   aus einem Fragment-Shader, Material nach Stufe, Neigen mit Finger und Lagesensor, Rückseite.
+   Erreichbar mit einem Tipp auf ein Teil bei der Ankunft und auf der Puzzles-Seite. Die Texturen
+   (Matcaps, Normal-Map) sind austauschbare Dateien; bis Johannes sie schickt, zeichnet der Shader
+   selbst.
+2. **Stellwerk zum Testen.** Teile ins eigene Konto legen, ohne zu fahren: `stellwerk pieces <wer>`
+   (ansehen), `give` (ein Teil nach den Regeln, oder ein bestimmtes, oder eine Stufe), `fill` (ein
+   Bild füllen, auf Wunsch bis auf das Stunden-Teil, damit die nächste Fahrt es fertig macht) und
+   `clear`. Auf Produktion abgelehnt wie `delay` und `ff`; Teile aus dem Stellwerk zählen nicht zur
+   Tagesgrenze. Das Rezept steht in CLAUDE.md.
+3. **Video (§9b).** Backend (Speicher auf dem Upload-Volume, Auslieferung nur nach Fertigstellung,
+   mit Range), Stellwerk (`--video`, erstes Bild, Umrechnen), App (Laden nach dem letzten Teil, das
+   fertige Bild in 3D, Vollbild-Wiedergabe), Demo mit einem kurzen Video.
+4. **Polieren und Testen.** Zwei unabhängige Reviews (Backend, App), alle Tests, der Ende-zu-Ende-Lauf
+   gegen einen echten Server mit 3D und Video, die Tour, ein Blick auf jeden Bildschirm.
+5. **Staging-Release.** `feature/puzzle` nach `main` (Staging folgt `main`; der Schalter `puzzles`
+   bleibt für alle aus), Staging deployen, drei Bilder mit Video auf Staging hochladen, den Schalter
+   nur für Johannes' Staging-Konto an, ein paar Teile hineinlegen, Staging-App nach TestFlight.
+   Dann Schluss: Produktion erst auf Johannes' Wort.
 
 ## 10. Später
 
