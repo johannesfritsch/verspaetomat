@@ -14,6 +14,12 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:verspaetomat/api/models.dart';
+import 'package:verspaetomat/repo/repo_scope.dart';
+import 'package:verspaetomat/screens/puzzles/puzzle_widgets.dart';
+import 'package:verspaetomat/screens/puzzles/puzzles_screen.dart';
+import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/theme/tokens.dart';
 import 'package:verspaetomat/widgets/kit.dart';
 
@@ -36,6 +42,9 @@ void main() {
     // where things sit. app/tools/fetch-preview-fonts.sh drops static TTFs under the exact family
     // names google_fonts uses; loading them here gives the bench the app's real type.
     GoogleFonts.config.allowRuntimeFetching = false;
+    // The bench is a test that lives outside test/, so the analyzer does not know it is one.
+    // ignore: invalid_use_of_visible_for_testing_member
+    SharedPreferences.setMockInitialValues({});
     await _loadFonts();
   });
 
@@ -453,7 +462,174 @@ void main() {
       ],
     );
   });
+
+  // docs/51 §7: the pieces have to read as a puzzle at every size — on the Puzzles page, in the
+  // arrival card, and as the thumbnail on Ich's row — and a finished picture has no seams.
+  // §2a: every slot shows its tier, owned or missing; the thumbnail drops the marks.
+  _preview('puzzle-boards', height: 560, (context) {
+    const cut = PuzzleCut(imageId: 'demo-bahnhofsmission', rows: 4, cols: 3);
+    const image = AssetImage('assets/demo/puzzles/bahnhofsmission.webp');
+    final tiers = _tiers('qmmmmqmHmmqm');
+    return Padding(
+      padding: const EdgeInsets.all(VSpace.page),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Owned: two quarters (0, 5) and minutes. Missing: the hour (7), a quarter (10), minutes.
+              SizedBox(width: 168, child: PuzzleBoard(cut: cut, image: image, tiers: tiers, owned: const {0, 2, 4, 5, 6, 9, 11})),
+              const SizedBox(width: VSpace.m),
+              SizedBox(
+                width: 168,
+                child: PuzzleBoard(cut: const PuzzleCut(imageId: 'demo-wald', rows: 4, cols: 3), image: const AssetImage('assets/demo/puzzles/wald.webp'), tiers: _tiers('mmqmHmqmmmmq'), complete: true),
+              ),
+            ],
+          ),
+          const VGap.m(),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // The hour owned, the quarters still to come.
+              SizedBox(width: 112, child: PuzzleBoard(cut: cut, image: image, tiers: tiers, owned: const {1, 2, 3, 4, 6, 7, 8, 9, 11})),
+              const SizedBox(width: VSpace.m),
+              const SizedBox(width: 72, child: PuzzleBoard(cut: PuzzleCut(imageId: 'leer', rows: 4, cols: 3))),
+              const SizedBox(width: VSpace.m),
+              SizedBox(width: 33, child: PuzzleBoard(cut: cut, image: image, tiers: tiers, owned: const {0, 2, 4, 5, 6, 9, 11})),
+              const SizedBox(width: VSpace.m),
+              SizedBox(
+                width: 96,
+                child: PuzzleBoard(cut: const PuzzleCut(imageId: 'demo-kinderhospiz', rows: 4, cols: 3), image: const AssetImage('assets/demo/puzzles/kinderhospiz.webp'), tiers: _tiers('mqmqmmmHmqmm'), owned: const {1, 8}),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  });
+
+  // docs/51 §5: the reveal frame by frame — from below, turned and lifted; gliding in; the click
+  // with the red light under it; settled. The bench cannot stop an animation half way, so these
+  // are the reveal held at fixed moments. The second row is the hour piece, whose light lingers.
+  _preview('puzzle-reveal-frames', height: 720, (context) {
+    const cut = PuzzleCut(imageId: 'demo-bahnhofsmission', rows: 4, cols: 3);
+    const image = AssetImage('assets/demo/puzzles/bahnhofsmission.webp');
+    final tiers = _tiers('qmmmmqmHmmqm');
+    Widget row(int piece) => Wrap(
+          spacing: VSpace.m,
+          runSpacing: VSpace.l,
+          children: [
+            for (final t in const [0.03, 0.3, 0.5, 0.7, 0.85, 1.0])
+              SizedBox(
+                width: 104,
+                child: PieceReveal(cut: cut, image: image, tiers: tiers, owned: {0, 2, 4, 5, 6, 9, 11, piece}, piece: piece, reveal: AlwaysStoppedAnimation(t)),
+              ),
+          ],
+        );
+    return Padding(
+      padding: const EdgeInsets.all(VSpace.page),
+      child: Column(children: [row(8), const VGap.xl(), row(7)]),
+    );
+  });
+
+  // The arrival's card for each tier: a minute from your own Verein, a quarter from somebody
+  // else's, the hour that leaves only a quarter missing, and the last piece — a minute, as the
+  // `complete` variant brings. One long title too.
+  _preview('puzzle-arrival', height: 1460, (context) {
+    ApiPuzzlePiece piece(String ngo, String name, String tiers, String title, String caption, List<int> owned, int last, {bool own = true}) => ApiPuzzlePiece(
+          puzzle: ApiPuzzle(
+            imageId: 'demo-$ngo',
+            rows: 4,
+            cols: 3,
+            owned: owned,
+            tiers: _tiers(tiers),
+            complete: owned.length == 12,
+            title: title,
+            caption: caption,
+            ngoId: ngo,
+            ngoName: name,
+            imageUrl: 'assets/demo/puzzles/$ngo.webp',
+            width: 900,
+            height: 1200,
+          ),
+          piece: last,
+          ownCause: own,
+        );
+    const bm = 'qmmmmqmHmmqm';
+    const nacht = 'Nachtschicht am Gleis 1';
+    const tee = 'Um drei Uhr nachts ist hier noch Licht, und der Tee ist heiß.';
+    return _withSession(
+      Padding(
+        // The arrival sheet's own gutter, so the text column is as narrow as on the phone.
+        padding: const EdgeInsets.all(VSpace.sheet),
+        child: Column(
+          children: [
+            ArrivalPieceCard(piece: piece('bahnhofsmission', 'Bahnhofsmission Köln', bm, nacht, tee, [0, 2, 4, 5, 6, 8, 9, 11], 8), delay: Duration.zero),
+            const VGap.md(),
+            ArrivalPieceCard(piece: piece('bahnhofsmission', 'Bahnhofsmission Köln', bm, nacht, tee, [0, 2, 4, 5, 6, 9, 10, 11], 10), delay: Duration.zero),
+            const VGap.md(),
+            ArrivalPieceCard(
+              piece: piece('kinderhospiz', 'Kinderhospiz Rheinland', 'mqmqmmmHmqmm', 'Die Schaukel im Garten am Haus in Ehrenfeld', 'Die Schaukel hängt seit dem Sommer.', [1, 3, 8], 3, own: false),
+              delay: Duration.zero,
+            ),
+            const VGap.md(),
+            ArrivalPieceCard(piece: piece('bahnhofsmission', 'Bahnhofsmission Köln', bm, nacht, tee, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11], 7), delay: Duration.zero),
+            const VGap.md(),
+            ArrivalPieceCard(
+              piece: piece('wald', 'Wald für morgen e.V.', 'mmqmHmqmmmmq', 'Die erste Reihe am Hang', 'Vierhundert Setzlinge bei Monschau, gepflanzt im Oktober.', [for (var i = 0; i < 12; i++) i], 0),
+              delay: Duration.zero,
+            ),
+          ],
+        ),
+      ),
+    );
+  });
+
+  // docs/51 §6: the page, scrolled out in full — a picture under way, one that waits only for
+  // rare pieces, and two finished ones, titles whole.
+  _preview('puzzles-page', height: 1220, (context) {
+    ApiPuzzle p(String ngo, String name, String tiers, String title, List<int> owned) => ApiPuzzle(
+          imageId: 'demo-$ngo',
+          rows: 4,
+          cols: 3,
+          owned: owned,
+          tiers: _tiers(tiers),
+          complete: owned.length == 12,
+          title: title,
+          ngoId: ngo,
+          ngoName: name,
+          imageUrl: 'assets/demo/puzzles/$ngo.webp',
+          width: 900,
+          height: 1200,
+        );
+    final all = [for (var i = 0; i < 12; i++) i];
+    return _withSession(
+      Padding(
+        padding: const EdgeInsets.all(VSpace.l),
+        child: PuzzlesBody(
+          puzzles: ApiPuzzles(puzzles: [
+            p('bahnhofsmission', 'Bahnhofsmission Köln', 'qmmmmqmHmmqm', 'Nachtschicht am Gleis 1', [0, 2, 4, 5, 6, 9, 11]),
+            p('kinderhospiz', 'Kinderhospiz Rheinland', 'mqmqmmmHmqmm', 'Der Garten in Ehrenfeld', [0, 2, 4, 5, 6, 8, 10, 11, 9]),
+            p('wald', 'Wald für morgen e.V.', 'mmqmHmqmmmmq', 'Die erste Reihe am Hang', all),
+            p('kinderhospiz', 'Kinderhospiz Rheinland', 'mqmqmmmHmqmm', 'Der Garten in Ehrenfeld', all),
+          ]),
+        ),
+      ),
+    );
+  });
 }
+
+/// A tier map in the demo's shorthand: `m` minute, `q` quarter, `H` hour.
+List<PieceTier> _tiers(String s) => [for (final c in s.split('')) c == 'H' ? PieceTier.hour : (c == 'q' ? PieceTier.quarter : PieceTier.minute)];
+
+/// A Demo session around [child], for the pieces that ask the repository for their pictures.
+Widget _withSession(Widget child) => FutureBuilder<SharedPreferences>(
+      future: SharedPreferences.getInstance(),
+      builder: (context, prefs) => prefs.data == null
+          ? const SizedBox.shrink()
+          : RepoScope(session: Session(demo: DemoState(), prefs: prefs.data!, apiUrl: ''), child: Material(type: MaterialType.transparency, child: child)),
+    );
 
 /// Registers the faces fetched by tools/fetch-preview-fonts.sh, if they are there.
 ///
@@ -516,6 +692,11 @@ void _preview(
     await tester.runAsync(() async {
       for (final element in find.byType(Image).evaluate()) {
         await precacheImage((element.widget as Image).image, element);
+      }
+      // The puzzle boards resolve their picture themselves rather than through an Image.
+      for (final element in find.byType(PuzzlePicture).evaluate()) {
+        final image = (element.widget as PuzzlePicture).image;
+        if (image != null) await precacheImage(image, element);
       }
     });
     await tester.pumpAndSettle();

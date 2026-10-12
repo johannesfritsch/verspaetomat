@@ -35,6 +35,15 @@ enum Flag {
     about: 'Der Hintergrund überwacht Bahnhofsring und Tastpunkte aus der Gelände-Datei statt '
         '300 m um den Bahnhof mit der 50-m-Wache.',
     readBy: 'iOS: Geofence.swift, Android: GeofenceManager.kt — über das Feld station_premises auf GET /v1/me/geofence',
+  ),
+
+  /// `PUZZLES` in `backend/src/flags.rs` (docs/51). Demo mode shows the puzzles without it; see
+  /// `Session.puzzlesOn`.
+  puzzles(
+    'puzzles',
+    about: 'Jede beendete Reise bringt ein Puzzleteil aus dem Bild eines Vereins. Die App zeigt das '
+        'Teil bei der Ankunft, die Zeile „Puzzles" bei Ich und die Seite dazu.',
+    readBy: 'Ankunft (angekommen_screen.dart), Ich (ich_screen.dart), Puzzles (puzzles_screen.dart) — über Session.puzzlesOn',
   );
 
   const Flag(this.wire, {required this.about, this.readBy});

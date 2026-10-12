@@ -1,8 +1,10 @@
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kReleaseMode;
+import 'package:flutter/painting.dart' show ImageProvider;
 
 import '../api/client.dart';
+import '../api/puzzle_image.dart';
 import '../api/token_store.dart';
 import '../platform/diagnose_log.dart';
 import '../stations/station_store.dart';
@@ -344,4 +346,18 @@ class HttpRepository with RideWriteHook implements AppRepository {
   }
   @override
   Future<List<ApiBoardEntry>> boards(String scope) => client.boards(scope);
+
+  /// An older backend without puzzles answers 404: nothing collected, no error.
+  @override
+  Future<ApiPuzzles> puzzles() async {
+    try {
+      return await client.puzzles();
+    } on ApiException catch (e) {
+      if (e.status == 404) return ApiPuzzles.empty;
+      rethrow;
+    }
+  }
+
+  @override
+  ImageProvider puzzleImage(ApiPuzzle puzzle) => PuzzleImageFile(puzzle.imageId, () => client.puzzleImage(puzzle.imageUrl));
 }

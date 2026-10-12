@@ -424,4 +424,17 @@ class ApiClient {
 
   Future<List<ApiBoardEntry>> boards(String scope) async => _list(await _get('/v1/boards', {'scope': scope})).map(ApiBoardEntry.fromJson).toList();
 
+  // -- puzzles (docs/51) ------------------------------------------------------
+
+  Future<ApiPuzzles> puzzles() async => ApiPuzzles.fromJson(_map(await _get('/v1/me/puzzles')));
+
+  /// A puzzle picture's bytes. [url] is the `image_url` off a piece, relative to [baseUrl]. No
+  /// token: the picture is a Verein's photo, and the route serves it to anyone.
+  Future<Uint8List> puzzleImage(String url) async {
+    final uri = url.startsWith('http') ? Uri.parse(url) : _uri(url);
+    final r = await _http.get(uri, headers: const {'accept': 'image/*'}).timeout(const Duration(seconds: 30));
+    if (r.statusCode >= 200 && r.statusCode < 300) return r.bodyBytes;
+    throw ApiException(r.statusCode, r.reasonPhrase ?? 'HTTP ${r.statusCode}');
+  }
+
 }

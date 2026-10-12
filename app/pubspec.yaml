@@ -80,6 +80,8 @@ flutter:
     # The fare catalogue as GET /v1/fares serves it (#66): Demo mode reads it instead of a copy of
     # the rules. Refresh with `curl https://api.staging.verspaetomat.de/v1/fares > assets/demo/fares.json`.
     - assets/demo/fares.json
+    # Three invented pictures for Demo mode's puzzles (docs/51); real ones come from the server.
+    - assets/demo/puzzles/
     - assets/achievements/
     - assets/header/
     - assets/sheet/

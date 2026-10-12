@@ -12,11 +12,15 @@ import '../share/share_lines.dart';
 import '../share/share_moments.dart';
 import '../share/share_sheet.dart';
 import '../claims/claims_widgets.dart';
+import '../puzzles/puzzle_widgets.dart' show PuzzlesRow;
 import 'community_widgets.dart';
 
 class _IchData {
-  const _IchData(this.me, this.badges, this.rides, this.standing, this.ledger, this.facts);
+  const _IchData(this.me, this.badges, this.rides, this.standing, this.ledger, this.facts, this.puzzles);
   final ApiShareFacts facts;
+
+  /// Null while the puzzles are switched off (docs/51).
+  final ApiPuzzles? puzzles;
   final ApiCustomer me;
   final List<ApiBadge> badges;
   final List<ApiRide> rides;
@@ -30,6 +34,7 @@ class IchScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final puzzlesOn = RepoScope.of(context).puzzlesOn;
     return Loader<_IchData>(
       placeholder: (context) => VTabScaffold(
         art: VHeaderSceneArt.landscapeIch,
@@ -54,7 +59,8 @@ class IchScreen extends StatelessWidget {
           ledger = await repo.incidents();
         } catch (_) {}
         final facts = await repo.shareFacts().catchError((_) => ApiShareFacts.empty);
-        return _IchData(me, badges, rides, standing, ledger, facts);
+        final puzzles = puzzlesOn ? await repo.puzzles().catchError((_) => ApiPuzzles.empty) : null;
+        return _IchData(me, badges, rides, standing, ledger, facts, puzzles);
       },
       builder: (context, data, refresh) {
         final me = data.me;
@@ -188,6 +194,8 @@ class IchScreen extends StatelessWidget {
                 ],
               ),
             ),
+            // docs/51 §6: the collection beside the badges, with the picture under way as its face.
+            if (data.puzzles != null && session.puzzlesOn) PuzzlesRow(puzzles: data.puzzles!),
 
             const VSectionHeader('Meine Statistik', heading: true, onCard: false),
             VCard(

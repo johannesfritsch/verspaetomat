@@ -778,16 +778,24 @@ class ApiRideLive {
 }
 
 class ApiArrivalResult {
-  const ApiArrivalResult({required this.ride, this.incident, this.bundleReady = false, this.newBadge});
+  const ApiArrivalResult({required this.ride, this.incident, this.bundleReady = false, this.newBadge, this.piece});
   final ApiRide ride;
   final ApiIncident? incident;
   final bool bundleReady;
   final ApiBadge? newBadge;
+
+  /// The puzzle piece the journey brought (docs/51). The arrival reads it off the current journey.
+  final ApiPuzzlePiece? piece;
+
+  ApiArrivalResult withPiece(ApiPuzzlePiece? piece) =>
+      ApiArrivalResult(ride: ride, incident: incident, bundleReady: bundleReady, newBadge: newBadge, piece: piece);
+
   factory ApiArrivalResult.fromJson(Map<String, dynamic> j) => ApiArrivalResult(
         ride: ApiRide.fromJson(_m(j['ride'])!),
         incident: _m(j['incident']) == null ? null : ApiIncident.fromJson(_m(j['incident'])!),
         bundleReady: _b(j['bundle_ready']),
         newBadge: _m(j['new_badge']) == null ? null : ApiBadge.fromJson(_m(j['new_badge'])!),
+        piece: _m(j['piece']) == null ? null : ApiPuzzlePiece.fromJson(_m(j['piece'])!),
       );
 }
 
@@ -1595,6 +1603,7 @@ class ApiJourney {
     this.legacy = false,
     required this.createdAt,
     this.finalisedAt,
+    this.piece,
   });
   final String id;
   final ApiJourneyStatus status;
@@ -1663,6 +1672,9 @@ class ApiJourney {
   final DateTime createdAt;
   final DateTime? finalisedAt;
 
+  /// The puzzle piece this journey brought (docs/51 §8), on the answer to `finish`.
+  final ApiPuzzlePiece? piece;
+
   bool get gaveUp => endReason == 'aufgegeben';
   bool get neverTravelled => endReason == 'nicht_gefahren';
 
@@ -1711,12 +1723,13 @@ class ApiJourney {
         legacy: _b(j['legacy']),
         createdAt: _dt(j['created_at']) ?? DateTime.now().toUtc(),
         finalisedAt: _dt(j['finalised_at']),
+        piece: _m(j['piece']) == null ? null : ApiPuzzlePiece.fromJson(_m(j['piece'])!),
       );
 }
 
 /// `GET /v1/journeys/current`: the journey plus the live view of its current leg.
 class ApiJourneyLive {
-  const ApiJourneyLive({required this.journey, this.ride, this.stops = const [], this.eta, this.nextLeg, this.justArrived = false, this.claimFromMinute = 60, this.ticket});
+  const ApiJourneyLive({required this.journey, this.ride, this.stops = const [], this.eta, this.nextLeg, this.justArrived = false, this.claimFromMinute = 60, this.ticket, this.piece});
   final ApiJourney journey;
   final ApiRide? ride;
   final List<ApiStop> stops;
@@ -1728,6 +1741,10 @@ class ApiJourneyLive {
   /// The journey's ticket and what it is entitled to on the way (#66). Null from a server before
   /// tickets.
   final ApiJourneyTicket? ticket;
+
+  /// The puzzle piece this journey brought (docs/51 §8), beside `just_arrived`. Null when it
+  /// brought none, and from a server before puzzles.
+  final ApiPuzzlePiece? piece;
 
   /// The same view the old ride screens consume, for the current leg.
   ApiRideLive? get asRideLive => ride == null ? null : ApiRideLive(ride: ride!, stops: stops, eta: eta);
@@ -1743,6 +1760,7 @@ class ApiJourneyLive {
       justArrived: _b(j['just_arrived']),
       claimFromMinute: _i(j['claim_from_minute'], 60),
       ticket: _m(j['ticket']) == null ? null : ApiJourneyTicket.fromJson(_m(j['ticket'])!),
+      piece: _m(j['piece']) == null ? (_m(jm['piece']) == null ? null : ApiPuzzlePiece.fromJson(_m(jm['piece'])!)) : ApiPuzzlePiece.fromJson(_m(j['piece'])!),
     );
   }
 }
@@ -2231,5 +2249,143 @@ class ApiPot {
         aim: _date(j['aim']),
         deadline: _date(j['deadline']),
         incidentIds: _sl(j['incident_ids']),
+      );
+}
+
+// ---------------------------------------------------------------------------
+// Puzzles (docs/51)
+// ---------------------------------------------------------------------------
+
+/// How rare a piece is (docs/51 §2a): how long the ride that brings it waited. Every slot of a
+/// picture has one, fixed when the picture was uploaded.
+enum PieceTier {
+  /// Any finished ride.
+  minute,
+
+  /// A ride with at least 15 counted minutes.
+  quarter,
+
+  /// A ride with at least 60: the one whose delay becomes a claim.
+  hour,
+}
+
+/// Unknown and absent read as a minute, which is what every slot was before tiers.
+PieceTier pieceTierFromWire(String? s) => PieceTier.values.firstWhere((t) => t.name == s, orElse: () => PieceTier.minute);
+
+/// A Verein's picture and the pieces of it this passenger has (docs/51 §8, `GET /v1/me/puzzles`).
+/// The server cuts nothing: it sends the whole picture and says which pieces are owned, and the
+/// phone draws the cut.
+class ApiPuzzle {
+  const ApiPuzzle({
+    required this.imageId,
+    required this.rows,
+    required this.cols,
+    this.owned = const [],
+    this.tiers = const [],
+    this.complete = false,
+    required this.title,
+    this.caption = '',
+    required this.ngoId,
+    required this.ngoName,
+    required this.imageUrl,
+    this.width = 0,
+    this.height = 0,
+    this.startedAt,
+    this.lastPieceAt,
+    this.completedAt,
+  });
+  final String imageId;
+  final int rows;
+  final int cols;
+
+  /// Piece numbers, row by row from the top left (`row * cols + col`).
+  final List<int> owned;
+
+  /// The tier of every slot, in the same order as the pieces. Use [tierOf]: a server before
+  /// tiers sends none, and then every slot is a minute.
+  final List<PieceTier> tiers;
+  final bool complete;
+  final String title;
+  final String caption;
+  final String ngoId;
+  final String ngoName;
+
+  /// Relative to the API's base URL. Demo mode puts an asset path here.
+  final String imageUrl;
+  final int width;
+  final int height;
+  final DateTime? startedAt;
+  final DateTime? lastPieceAt;
+  final DateTime? completedAt;
+
+  int get pieces => rows * cols;
+
+  PieceTier tierOf(int slot) => slot >= 0 && slot < tiers.length ? tiers[slot] : PieceTier.minute;
+
+  /// Every slot's tier, a minute where the server said nothing.
+  List<PieceTier> get slotTiers => [for (var i = 0; i < pieces; i++) tierOf(i)];
+
+  /// The slots still open.
+  List<int> get missing => [for (var i = 0; i < pieces; i++) if (!owned.contains(i)) i];
+
+  /// Width over height, for laying the board out before the picture has loaded.
+  double get aspectRatio => width > 0 && height > 0 ? width / height : cols / rows;
+
+  factory ApiPuzzle.fromJson(Map<String, dynamic> j) => ApiPuzzle(
+        imageId: _s(j['image_id']),
+        rows: _i(j['rows'], 4),
+        cols: _i(j['cols'], 3),
+        owned: j['owned'] == null ? const [] : (j['owned'] as List).map((e) => _i(e)).toList(),
+        tiers: _sl(j['tiers']).map(pieceTierFromWire).toList(),
+        complete: _b(j['complete']),
+        title: _s(j['title']),
+        caption: _s(j['caption']),
+        ngoId: _s(j['ngo_id']),
+        ngoName: _s(j['ngo_name']),
+        imageUrl: _s(j['image_url']),
+        width: _i(j['width']),
+        height: _i(j['height']),
+        startedAt: _dt(j['started_at']),
+        lastPieceAt: _dt(j['last_piece_at']),
+        completedAt: _dt(j['completed_at']),
+      );
+}
+
+/// The piece a journey brought (docs/51 §8): on `GET /v1/journeys/current` beside `just_arrived`,
+/// and on the journey `POST …/finish` returns. [ApiPuzzle.owned] already holds [piece].
+class ApiPuzzlePiece {
+  ApiPuzzlePiece({required this.puzzle, required this.piece, PieceTier? tier, this.ownCause = false, this.awardedAt}) : tier = tier ?? puzzle.tierOf(piece);
+  final ApiPuzzle puzzle;
+  final int piece;
+
+  /// The tier of the slot just filled: the server's word, else the slot's own.
+  final PieceTier tier;
+
+  /// From one of the passenger's own Vereine (docs/51 §2), rather than one somebody else supports.
+  final bool ownCause;
+  final DateTime? awardedAt;
+
+  factory ApiPuzzlePiece.fromJson(Map<String, dynamic> j) => ApiPuzzlePiece(
+        puzzle: ApiPuzzle.fromJson(j),
+        piece: _i(j['piece']),
+        tier: j['tier'] == null ? null : pieceTierFromWire(_sn(j['tier'])),
+        ownCause: _b(j['own_cause']),
+        awardedAt: _dt(j['awarded_at']),
+      );
+}
+
+/// `GET /v1/me/puzzles`: started pictures by last piece, newest first, then finished ones by
+/// completion. [moreWaiting] is false when there is no piece left anywhere to be had.
+class ApiPuzzles {
+  const ApiPuzzles({this.puzzles = const [], this.moreWaiting = true});
+  final List<ApiPuzzle> puzzles;
+  final bool moreWaiting;
+
+  /// A server before puzzles: nothing collected, and nothing to say about what is left.
+  static const empty = ApiPuzzles();
+
+  factory ApiPuzzles.fromJson(Map<String, dynamic> j) => ApiPuzzles(
+        puzzles: _ml(j['puzzles']).map(ApiPuzzle.fromJson).toList(),
+        moreWaiting: j['more_waiting'] == null ? true : _b(j['more_waiting']),
       );
 }

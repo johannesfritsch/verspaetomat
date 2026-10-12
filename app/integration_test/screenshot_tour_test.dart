@@ -53,6 +53,7 @@ const tour = <(String, String)>[
   ('zweck', '${Routes.cause}?id=bahnhofsmission'),
   ('ich', Routes.me),
   ('historie', Routes.history),
+  ('puzzles', Routes.puzzles),
   ('einstellungen', Routes.settings),
   ('daten', Routes.dataSources),
   ('stoerung', Routes.outage),
@@ -390,6 +391,24 @@ void main() {
       const Offset(0, -220),
     );
     await shot('zaunkarte-nah');
+    // docs/51 §5: the piece an arrival brings stands under the trip, below the fold of the sheet:
+    // an hour, a quarter and a minute piece (§2a), and the last piece of a picture. NO_ANIM shoots
+    // the end state.
+    for (final (name, variant) in const [
+      ('angekommen-teil-stunde', '68'),
+      ('angekommen-teil-viertel', '25'),
+      ('angekommen-teil-minute', '14'),
+      ('angekommen-teil-fertig', 'complete'),
+    ]) {
+      demo.reset();
+      GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
+      await wait(tester, 600);
+      GoRouter.of(tester.element(find.byType(Scaffold).first)).go('${Routes.arrived}?variant=$variant');
+      await wait(tester, 1800);
+      await tester.ensureVisible(find.byKey(const Key('arrival-piece')));
+      await shot(name);
+      await dismissSheet(tester);
+    }
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await wait(tester, 600);
     // docs/27: the shareable Fahrkarte. The arrival card, the punctual one (which is a

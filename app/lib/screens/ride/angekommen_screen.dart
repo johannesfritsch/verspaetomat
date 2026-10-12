@@ -11,6 +11,7 @@ import '../share/share_lines.dart';
 import '../share/share_sheet.dart';
 import '../../widgets/ticket.dart';
 import '../community/community_widgets.dart' show BadgeIcon;
+import '../puzzles/puzzle_widgets.dart' show ArrivalPiece;
 import 'ride_widgets.dart';
 import '../claims/claims_widgets.dart' show potFigure, potMissing;
 
@@ -18,8 +19,10 @@ import '../claims/claims_widgets.dart' show potFigure, potMissing;
 ///
 /// A sheet's body since #63, never a page of its own: inside the ride sheet when the journey
 /// arrives under it, otherwise in [showArrivalSheet]. Fed by an [ApiArrivalResult] (a legacy
-/// ride's arrival), or by the last arrival the repository knows. `variant` = 68 | 14 | 59 |
-/// cancelled | nodata drives the showcase in demo mode.
+/// ride's arrival), or by the last arrival the repository knows. `variant` = 68 | 25 | 14 | 59 |
+/// cancelled | nodata | complete drives the showcase in demo mode. The puzzle piece follows the
+/// minutes (docs/51 §2a): 68 brings an hour piece, 25 a quarter, 14 a minute; `complete` is a 14
+/// whose piece is the last of its picture.
 class AngekommenScreen extends StatefulWidget {
   const AngekommenScreen({super.key, this.variant, this.result, this.onDone});
   final String? variant;
@@ -62,9 +65,14 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       }
       // The journey behind the arrival (docs/17): its delay at the destination is the one that counts.
       ApiJourney? journey;
+      // The puzzle piece the journey brought (docs/51 §8) rides on the current journey.
+      ApiPuzzlePiece? piece;
       try {
         final jl = await repo.currentJourney();
-        if (jl != null && jl.journey.arrived) journey = jl.journey;
+        if (jl != null && jl.journey.arrived) {
+          journey = jl.journey;
+          piece = jl.piece ?? jl.journey.piece;
+        }
       } catch (_) {}
       if (result == null) {
         final live = await repo.currentRide();
@@ -74,6 +82,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
           result = await repo.arrival(const ArrivalRequest());
         }
       }
+      if (result != null && result.piece == null && piece != null) result = result.withPiece(piece);
       final inc = await repo.incidents();
       if (!mounted) return;
       setState(() {
@@ -97,9 +106,11 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
       // longer creates.
       await demoStartJourney(repo);
     }
+    if (v == 'complete' && mounted) RepoScope.read(context).demo.preparePuzzleFinish();
     return switch (v) {
       '68' => repo.arrival(const ArrivalRequest(delayMinutes: 68)),
-      '14' => repo.arrival(const ArrivalRequest(delayMinutes: 14)),
+      '14' || 'complete' => repo.arrival(const ArrivalRequest(delayMinutes: 14)),
+      '25' => repo.arrival(const ArrivalRequest(delayMinutes: 25)),
       '59' => repo.arrival(const ArrivalRequest(delayMinutes: 59)),
       'cancelled' => repo.arrival(const ArrivalRequest(delayMinutes: 60, cancelled: true)),
       'nodata' => repo.arrival(ArrivalRequest(delayMinutes: _enteredDelay ?? 0, selfEntered: true)),
@@ -266,6 +277,8 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
           ],
           const VGap.m(),
           _TripCard(journey: j, ride: r, arrivedAt: cancelled ? null : actual),
+          // docs/51 §5: after the minutes, and only after them — the piece waits for the count-up.
+          ArrivalPiece(piece: result.piece, delay: Duration(milliseconds: delay > 0 && !cancelled ? 1300 : 300)),
           if (result.newBadge != null) ...[
             const VGap.s(),
             VCard(

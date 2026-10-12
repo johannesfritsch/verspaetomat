@@ -167,6 +167,26 @@ class Ngo {
   final String lastReport;
 }
 
+/// A Demo puzzle picture (docs/51): 900 × 1200, three columns by four rows.
+class DemoPuzzle {
+  const DemoPuzzle({required this.id, required this.ngoId, required this.tiers, required this.title, required this.caption});
+  final String id;
+  final String ngoId;
+
+  /// Every slot's tier (docs/51 §2a), row by row: `m` minute, `q` quarter, `H` hour — the server's
+  /// default for twelve: the hour at the heart, three quarters scattered, eight minutes.
+  final String tiers;
+  final String title;
+  final String caption;
+
+  static const rows = 4;
+  static const cols = 3;
+  static const width = 900;
+  static const height = 1200;
+
+  String get asset => 'assets/demo/puzzles/$ngoId.webp';
+}
+
 class VBadge {
   const VBadge({required this.id, required this.name, required this.rule, required this.earned, this.earnedOn});
   final String id;
@@ -722,6 +742,31 @@ class Mock {
   ];
 
   static Ngo ngoById(String id) => ngos.firstWhere((n) => n.id == id, orElse: () => ngos.first);
+
+  /// One invented picture per Verein for the puzzles (docs/51), bundled with the app.
+  static const puzzles = <DemoPuzzle>[
+    DemoPuzzle(
+      id: 'demo-bahnhofsmission',
+      ngoId: 'bahnhofsmission',
+      tiers: 'qmmmmqmHmmqm',
+      title: 'Nachtschicht am Gleis 1',
+      caption: 'Um drei Uhr nachts ist hier noch Licht, und der Tee ist heiß.',
+    ),
+    DemoPuzzle(
+      id: 'demo-wald',
+      ngoId: 'wald',
+      tiers: 'mmqmHmqmmmmq',
+      title: 'Die erste Reihe am Hang',
+      caption: 'Vierhundert Setzlinge bei Monschau, gepflanzt im Oktober.',
+    ),
+    DemoPuzzle(
+      id: 'demo-kinderhospiz',
+      ngoId: 'kinderhospiz',
+      tiers: 'mqmqmmmHmqmm',
+      title: 'Der Garten in Ehrenfeld',
+      caption: 'Die Schaukel hängt seit dem Sommer, der Drachen fliegt bei jedem Wind.',
+    ),
+  ];
 
   static const badges = <VBadge>[
     VBadge(id: 'erste', name: 'Erste Verspätung', rule: 'Erste verspätete Fahrt', earned: true, earnedOn: '14. Mai 2025'),

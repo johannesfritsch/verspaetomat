@@ -196,6 +196,10 @@ class Session extends ChangeNotifier with WidgetsBindingObserver {
   AppRepository get repo => mode == BackendMode.local ? _http : _mock;
   bool get isLocal => mode == BackendMode.local;
 
+  /// Whether the app shows anything of the puzzles (docs/51): always in Demo, where every flag is
+  /// false, and against a server only while it awards pieces.
+  bool get puzzlesOn => !isLocal || flags.on(Flag.puzzles);
+
   Future<void> init() async {
     final stored = prefs.getString(_modeKey);
     const forced = String.fromEnvironment('BACKEND', defaultValue: '');

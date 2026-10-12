@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -70,16 +71,29 @@ class DemoJourney {
   int? finalDelay;
   DateTime date = DateTime.now();
 
+  /// The puzzle piece the journey brought (docs/51 §3): one per journey, set when it ends.
+  DemoPiece? piece;
+
   DemoLeg get current => legs[(currentLeg - 1).clamp(0, legs.length - 1)];
   DemoLeg? get next => currentLeg < legs.length ? legs[currentLeg] : null;
   bool get onLastLeg => currentLeg >= legs.length;
   Stop get plannedArrivalStop => legs.last.exit;
 }
 
+/// A puzzle piece a demo journey brought (docs/51).
+class DemoPiece {
+  const DemoPiece({required this.imageId, required this.piece, required this.ownCause, required this.at});
+  final String imageId;
+  final int piece;
+  final bool ownCause;
+  final DateTime at;
+}
+
 /// One in-memory state for the whole showcase. No persistence.
 class DemoState extends ChangeNotifier {
   DemoState() {
     _refreshReady();
+    _seedPuzzles();
   }
 
   /// Where a claim from this app really goes, read from the server's routing table by whoever
@@ -337,6 +351,8 @@ class DemoState extends ChangeNotifier {
       // docs/22 §1: the claim is gone, the patience is not — except for a trip never taken.
       j.countedMinutes = j.endReason == 'aufgegeben' ? (j.current.departure.cancelled ? (liveDelay < 60 ? 60 : liveDelay) : (liveDelay < 0 ? 0 : liveDelay)) : 0;
       lastAbandonMinutes = j.countedMinutes;
+      // docs/51 §3: whoever waited gets a piece; whoever never travelled does not.
+      if (j.endReason == 'aufgegeben') _awardPiece(j, minutes: j.countedMinutes);
       j.phase = JourneyPhase.abandoned;
       journeyHistory.insert(0, j);
       journey = null;
@@ -352,6 +368,7 @@ class DemoState extends ChangeNotifier {
       j.finalDelay = j.current.finalDelay ?? liveDelay;
       finalDelay = j.finalDelay;
       phase = TripPhase.arrived;
+      _awardPiece(j, minutes: j.finalDelay ?? 0);
       journeyHistory.insert(0, j);
       _refreshReady();
       notifyListeners();
@@ -468,6 +485,8 @@ class DemoState extends ChangeNotifier {
       final plannedArrival = j.plannedArrivalStop.planned.hour * 60 + j.plannedArrivalStop.planned.minute;
       final actualArrival = j.current.exit.planned.hour * 60 + j.current.exit.planned.minute + legDelay;
       j.finalDelay = cancelled ? 60 : (actualArrival - plannedArrival).clamp(legDelay, 24 * 60);
+      // The tier follows the counted minutes (docs/51 §2a): a cancellation counts 60.
+      _awardPiece(j, minutes: j.finalDelay!);
       journeyHistory.insert(0, j);
     }
     finalDelay = j?.finalDelay ?? legDelay;
@@ -511,6 +530,117 @@ class DemoState extends ChangeNotifier {
   }
 
   String? lastLiveIncidentId;
+
+  // -- Puzzles (docs/51) ------------------------------------------------------
+
+  /// The pieces the demo passenger has, by picture. Seeded so the page has a picture under way and
+  /// a finished one, and the arrival reveals a piece in the middle of a picture.
+  final Map<String, Set<int>> puzzlePieces = {};
+
+  /// When each picture got its first piece, its latest, and the one that finished it.
+  final Map<String, DateTime> puzzleStarted = {};
+  final Map<String, DateTime> puzzleLastPiece = {};
+  final Map<String, DateTime> puzzleCompleted = {};
+
+  /// Seeded, so the tour photographs the same pieces on every run.
+  math.Random _dice = math.Random(17);
+
+  /// Set by [preparePuzzleFinish]: the next piece comes from this picture.
+  String? _nextPuzzle;
+
+  void _seedPuzzles() {
+    final today = Mock.today;
+    puzzlePieces
+      ..clear()
+      ..addAll({
+        // Waiting for its hour, one quarter and three minutes.
+        'demo-bahnhofsmission': {0, 2, 4, 5, 6, 9, 11},
+        'demo-wald': {for (var i = 0; i < DemoPuzzle.rows * DemoPuzzle.cols; i++) i},
+        'demo-kinderhospiz': {1, 8},
+      });
+    puzzleStarted
+      ..clear()
+      ..addAll({
+        'demo-bahnhofsmission': today.subtract(const Duration(days: 12)),
+        'demo-wald': today.subtract(const Duration(days: 40)),
+        'demo-kinderhospiz': today.subtract(const Duration(days: 3)),
+      });
+    puzzleLastPiece
+      ..clear()
+      ..addAll({
+        'demo-bahnhofsmission': today.subtract(const Duration(days: 1)),
+        'demo-wald': today.subtract(const Duration(days: 6)),
+        'demo-kinderhospiz': today.subtract(const Duration(days: 3)),
+      });
+    puzzleCompleted
+      ..clear()
+      ..addAll({'demo-wald': today.subtract(const Duration(days: 6))});
+    _dice = math.Random(17);
+    _nextPuzzle = null;
+  }
+
+  bool puzzleComplete(String id) => (puzzlePieces[id]?.length ?? 0) >= DemoPuzzle.rows * DemoPuzzle.cols;
+
+  /// docs/51 §2 and §2a, simplified to one picture per Verein: three pieces in four from your own
+  /// Verein, one from another; a slot of the ride's own tier first, else the next tier down, and
+  /// a side with nothing to fill gives way to the other; a random slot you do not have yet;
+  /// nothing once nothing is left that this ride may fill.
+  void _awardPiece(DemoJourney j, {required int minutes}) {
+    if (j.piece != null) return;
+    final open = Mock.puzzles.where((p) => !puzzleComplete(p.id)).toList();
+    if (open.isEmpty) return;
+    List<int> missing(DemoPuzzle p, String tier) {
+      final have = puzzlePieces[p.id] ?? const <int>{};
+      return [for (var i = 0; i < p.tiers.length; i++) if (p.tiers[i] == tier && !have.contains(i)) i];
+    }
+
+    final forced = open.where((p) => p.id == _nextPuzzle).firstOrNull;
+    _nextPuzzle = null;
+    DemoPuzzle? pick;
+    int? piece;
+    if (forced != null) {
+      pick = forced;
+      piece = [for (final t in const ['m', 'q', 'H']) ...missing(forced, t)].first;
+    } else {
+      final mine = open.where((p) => p.ngoId == ngoId).toList();
+      final others = open.where((p) => p.ngoId != ngoId).toList();
+      final sides = _dice.nextInt(4) < 3 ? [mine, others] : [others, mine];
+      final tiers = minutes >= 60 ? const ['H', 'q', 'm'] : (minutes >= 15 ? const ['q', 'm'] : const ['m']);
+      for (final side in sides) {
+        for (final t in tiers) {
+          final fits = side.where((p) => missing(p, t).isNotEmpty).toList();
+          if (fits.isEmpty) continue;
+          pick = fits[_dice.nextInt(fits.length)];
+          final slots = missing(pick, t);
+          piece = slots[_dice.nextInt(slots.length)];
+          break;
+        }
+        if (pick != null) break;
+      }
+    }
+    if (pick == null || piece == null) return;
+    final now = DateTime.now();
+    puzzlePieces.putIfAbsent(pick.id, () => {}).add(piece);
+    puzzleStarted.putIfAbsent(pick.id, () => now);
+    puzzleLastPiece[pick.id] = now;
+    if (puzzleComplete(pick.id)) puzzleCompleted[pick.id] = now;
+    j.piece = DemoPiece(imageId: pick.id, piece: piece, ownCause: pick.ngoId == ngoId, at: now);
+  }
+
+  /// Showcase: the next journey brings the last piece of a picture, so the finish can be seen.
+  /// Your own Verein's picture when it is still open, otherwise the first one that is. The piece
+  /// left over is a minute, so any ride may bring it.
+  void preparePuzzleFinish() {
+    final open = Mock.puzzles.where((p) => !puzzleComplete(p.id)).toList();
+    final pick = open.where((p) => p.ngoId == ngoId).firstOrNull ?? open.firstOrNull;
+    if (pick == null) return;
+    final have = puzzlePieces.putIfAbsent(pick.id, () => {});
+    final gaps = [for (var i = 0; i < pick.tiers.length; i++) if (!have.contains(i)) i];
+    final last = gaps.lastWhere((i) => pick.tiers[i] == 'm', orElse: () => gaps.last);
+    have.addAll(gaps.where((i) => i != last));
+    puzzleStarted.putIfAbsent(pick.id, () => DateTime.now());
+    _nextPuzzle = pick.id;
+  }
 
   // -- Rides and Nachtrag ---------------------------------------------------
   final List<RideRecord> rides = List.of(Mock.rides);
@@ -833,6 +963,7 @@ class DemoState extends ChangeNotifier {
     mails
       ..clear()
       ..addAll(Mock.mails);
+    _seedPuzzles();
     _refreshReady();
     notifyListeners();
   }

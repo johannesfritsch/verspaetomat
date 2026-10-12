@@ -1,4 +1,7 @@
 import 'dart:typed_data';
+
+import 'package:flutter/painting.dart' show ImageProvider;
+
 import '../api/models.dart';
 
 export '../api/models.dart';
@@ -149,4 +152,12 @@ abstract class AppRepository {
   /// The share cards' figures (issue #49). Empty on a server that predates them.
   Future<ApiShareFacts> shareFacts();
   Future<List<ApiBoardEntry>> boards(String scope);
+
+  // -- puzzles (docs/51) ------------------------------------------------------
+  /// The pictures this passenger has started or finished. Empty on a server that predates them.
+  Future<ApiPuzzles> puzzles();
+
+  /// A puzzle's picture, wherever it comes from: the server's, kept on the phone after the first
+  /// fetch, or Demo mode's bundled one. The board does not care which.
+  ImageProvider puzzleImage(ApiPuzzle puzzle);
 }

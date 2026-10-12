@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 import 'dart:convert';
 
-import 'package:flutter/material.dart' show TimeOfDay;
+import 'package:flutter/material.dart' show AssetImage, ImageProvider, TimeOfDay;
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../content/labels.dart';
@@ -365,6 +365,7 @@ class MockRepository with RideWriteHook implements AppRepository {
       deleteRefusal: _lockedByAClaim(j.date, j.legs.map((l) => l.departure.line)),
       createdAt: j.startedAt.toUtc(),
       finalisedAt: j.phase == JourneyPhase.arrived ? DateTime.now().toUtc() : null,
+      piece: _piece(j.piece),
     );
   }
 
@@ -396,7 +397,7 @@ class MockRepository with RideWriteHook implements AppRepository {
         nextLeg: api.nextLeg,
       );
     }
-    return ApiJourneyLive(journey: api, ride: live?.ride, stops: live?.stops ?? const [], eta: live?.eta, justArrived: j.phase == JourneyPhase.arrived);
+    return ApiJourneyLive(journey: api, ride: live?.ride, stops: live?.stops ?? const [], eta: live?.eta, justArrived: j.phase == JourneyPhase.arrived, piece: api.piece);
   }
 
   Future<ApiJourneyLive> _confirmLeg(String journeyId, String tripId, {String? toStationId, String? toStationName}) async {
@@ -838,6 +839,7 @@ class MockRepository with RideWriteHook implements AppRepository {
       incident: inc == null ? null : _incident(inc),
       bundleReady: inc != null && state.bundleReady(inc.desk),
       newBadge: badge == null ? null : ApiBadge(id: badge.id, name: badge.name, rule: badge.rule, earnedOn: Mock.today),
+      piece: _piece(state.journey?.piece),
     );
   }
 
@@ -1214,5 +1216,45 @@ class MockRepository with RideWriteHook implements AppRepository {
     };
     return list.where((e) => state.showOnBoards || !e.isMe).map((e) => ApiBoardEntry(rank: e.rank, name: e.name, minutes: e.minutes, isMe: e.isMe)).toList();
   }
+
+  // -- puzzles (docs/51) ------------------------------------------------------
+
+  ApiPuzzle _puzzle(DemoPuzzle p) => ApiPuzzle(
+        imageId: p.id,
+        rows: DemoPuzzle.rows,
+        cols: DemoPuzzle.cols,
+        owned: (state.puzzlePieces[p.id] ?? const <int>{}).toList()..sort(),
+        tiers: [for (final c in p.tiers.split('')) c == 'H' ? PieceTier.hour : (c == 'q' ? PieceTier.quarter : PieceTier.minute)],
+        complete: state.puzzleComplete(p.id),
+        title: p.title,
+        caption: p.caption,
+        ngoId: p.ngoId,
+        ngoName: Mock.ngoById(p.ngoId).name,
+        imageUrl: p.asset,
+        width: DemoPuzzle.width,
+        height: DemoPuzzle.height,
+        startedAt: state.puzzleStarted[p.id]?.toUtc(),
+        lastPieceAt: state.puzzleLastPiece[p.id]?.toUtc(),
+        completedAt: state.puzzleCompleted[p.id]?.toUtc(),
+      );
+
+  ApiPuzzlePiece? _piece(DemoPiece? d) {
+    final p = d == null ? null : Mock.puzzles.where((p) => p.id == d.imageId).firstOrNull;
+    if (d == null || p == null) return null;
+    return ApiPuzzlePiece(puzzle: _puzzle(p), piece: d.piece, ownCause: d.ownCause, awardedAt: d.at.toUtc());
+  }
+
+  /// The order the server sends: started pictures by their latest piece, then finished ones by
+  /// when they were finished, newest first. A picture nobody started is not on the page.
+  @override
+  Future<ApiPuzzles> puzzles() async {
+    final all = Mock.puzzles.where((p) => state.puzzlePieces[p.id]?.isNotEmpty ?? false).map(_puzzle).toList();
+    final started = all.where((p) => !p.complete).toList()..sort((a, b) => (b.lastPieceAt ?? DateTime(0)).compareTo(a.lastPieceAt ?? DateTime(0)));
+    final done = all.where((p) => p.complete).toList()..sort((a, b) => (b.completedAt ?? DateTime(0)).compareTo(a.completedAt ?? DateTime(0)));
+    return ApiPuzzles(puzzles: [...started, ...done], moreWaiting: Mock.puzzles.any((p) => !state.puzzleComplete(p.id)));
+  }
+
+  @override
+  ImageProvider puzzleImage(ApiPuzzle puzzle) => AssetImage(puzzle.imageUrl);
 
 }

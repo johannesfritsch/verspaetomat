@@ -19,7 +19,7 @@ import 'nachtrag_screen.dart';
 //   /wohin?station=<from id>&name=<from name>[&departure=<trip id>&line=]   (destination first, docs/17)
 //   /welcher-zug?from=&fromName=&to=&toName=[&departure=]
 //   /checkin/exit?departure=<trip id>&station=<from id>&name=<from name>   (legacy)
-//   /arrived?variant=68|14|59|cancelled|nodata   (demo mode) or `extra: ApiArrivalResult`
+//   /arrived?variant=68|25|14|59|cancelled|nodata|complete   (demo mode) or `extra: ApiArrivalResult`
 
 GoRouterWidgetBuilder bahnsteigBuilder = (_, __) => const BahnsteigScreen();
 

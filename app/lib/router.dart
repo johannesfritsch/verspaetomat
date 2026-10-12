@@ -43,13 +43,14 @@ class Routes {
 
   static const ride = '/ride'; // redirects to Home with the ride sheet open (docs/19)
   static const homeWithRide = '/home?ride=1';
-  static const arrived = '/arrived'; // ?variant=68|14|59|cancelled|nodata (absent = use DemoState)
+  static const arrived = '/arrived'; // ?variant=68|25|14|59|cancelled|nodata|complete (absent = use DemoState)
   static const addRide = '/add-ride';
 
   static const claim = '/claim'; // ?desk=Servicecenter%20Fahrgastrechte | NordWestBahn | Unbekannt
   static const reply = '/reply'; // ?mail=<mail id>  or  ?demo=question|rejected
   static const cause = '/cause'; // ?id=bahnhofsmission
   static const history = '/history';
+  static const puzzles = '/puzzles'; // Deine Puzzles (docs/51), from Ich and from the arrival
   static const settings = '/settings';
   static const tickets = '/settings/tickets'; // Deine Fahrkarten (#66)
   static const dataSources = '/settings/data-sources';

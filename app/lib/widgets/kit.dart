@@ -16,6 +16,7 @@ export 'header_scene.dart';
 export 'inputs.dart';
 export 'marks.dart';
 export 'profile.dart';
+export 'puzzle.dart';
 export 'rows.dart';
 export 'scaffold.dart';
 export 'sheet_scene.dart';

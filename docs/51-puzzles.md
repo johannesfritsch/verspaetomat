@@ -79,11 +79,12 @@ eine aufgegebene Reise zählt das Warten.
 - **Ein Bild kann auf sein seltenes Teil warten.** Fehlt nur noch das Stunden-Teil, bleibt das Bild
   offen — „Fehlt noch: das Stunden-Teil" — und pünktliche Fahrten fangen das nächste Bild des
   Vereins an. Damit gilt §2.2 („ein Bild nach dem anderen") für jede Stufe einzeln.
-- **Die Stufe ist zu sehen.** Jedes Teil trägt eine kleine Bahnhofsuhr: bei der Minute ein
-  Strich, bei der Viertelstunde ein Viertel gefüllt, bei der Stunde die ganze Scheibe. Die
-  Viertelstunde hat einen Rand in Tinte, die Stunde einen roten — Rot heißt in dieser App „das ist
-  Geld" (STYLE.md), und das Stunden-Teil ist genau das. Ein fehlender Platz zeigt seine Uhr auch:
-  Man sieht, worauf das Bild wartet.
+- **Die Stufe ist zu sehen — aber nur, wo sie selten ist.** Ein seltenes Teil trägt in der Ecke eine
+  kleine Bahnhofsuhr: bei der Viertelstunde ein Viertel gefüllt, bei der Stunde die ganze Scheibe in
+  Rot. Die Minute trägt nichts; zwölf Uhren auf einem Bild wären Lärm, und was keine Uhr hat, ist
+  gewöhnlich. Die Viertelstunde hat einen feinen Rand in Tinte, die Stunde einen roten — Rot heißt
+  in dieser App „das ist Geld" (STYLE.md), und das Stunden-Teil ist genau das. Ein fehlender
+  seltener Platz zeigt seine Uhr auch: Man sieht, worauf das Bild wartet.
 - **Mehr Verspätung bringt ein selteneres Teil, nicht mehr Teile.** Eine Fahrt, ein Teil. Sonst
   wäre das Puzzle wieder eine Währung und der Vorrat an Bildern in einer Woche leer.
 
