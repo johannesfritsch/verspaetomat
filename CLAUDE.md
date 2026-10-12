@@ -31,6 +31,13 @@ backend/target/debug/stellwerk stations import --dry-run # what it would change
 backend/target/debug/stellwerk stations                  # count, feed version, last runs
 backend/target/debug/stellwerk backdate <who> --delay 70 --days 3 --count 3   # rides that already happened, with their cases
 
+# Puzzles testen (docs/51 §9c): switch on for one account, upload a picture, fill it up to the
+# hour piece, then a 68-minute ride finishes it. Not on production, like delay and ff.
+backend/target/debug/stellwerk --staging flags puzzles on --for <who>
+backend/target/debug/stellwerk --staging ngo image add wald bild.jpg --title "…" --caption "…" --yes   # | ngo image list
+backend/target/debug/stellwerk --staging pieces <who> fill wald --leave 1 --leave-tier hour   # then: delay <who> 68, ff <who>
+backend/target/debug/stellwerk --staging pieces <who> [give --tier hour | clear]                # look, add, start over
+
 # the fare catalogue (#66, docs/49, backend/fixtures/fares.toml): what each ticket is owed
 backend/target/debug/stellwerk fares list | show deutschlandticket | export
 backend/target/debug/stellwerk fares try deutschlandticket 70 45 25@2026-08-31 --today 2026-10-05   # what these cases are worth

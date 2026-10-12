@@ -5,6 +5,7 @@
 //!   stellwerk journey Johannes  |  stellwerk confirm Johannes [--trip <trip id>]
 //!   stellwerk delay Johannes +25
 //!   stellwerk backdate Johannes --delay 70 --days 3 [--count 3] [--from "Bonn Hbf" --to "Köln Hbf"]
+//!   stellwerk pieces Johannes [give [--ngo X] [--image ID] [--slot N] [--tier hour] [--count N] | fill <BILD|VEREIN> [--leave 1 --leave-tier hour] | clear [--image ID]]
 //!   stellwerk cancel Johannes
 //!   stellwerk ff Johannes
 //!   stellwerk poll
@@ -355,6 +356,89 @@ enum NgoImageCmd {
     Remove { id: String },
 }
 
+#[derive(Subcommand)]
+enum PiecesCmd {
+    /// Put pieces into the account; without options one by the rules of a journey of a minute.
+    /// They never count against the three a day
+    Give {
+        /// Only this Verein's pictures, by the usual rules
+        #[arg(long)]
+        ngo: Option<String>,
+        /// Exactly this picture, retired or not
+        #[arg(long)]
+        image: Option<String>,
+        /// Exactly this slot of --image, counted row by row from the top left
+        #[arg(long, requires = "image")]
+        slot: Option<i32>,
+        /// As if a journey of this tier had ended: minute, quarter or hour
+        #[arg(long)]
+        tier: Option<String>,
+        /// How many, 1 to 64
+        #[arg(long, default_value_t = 1)]
+        count: i64,
+    },
+    /// Fill a picture (its id, or a Verein: its started picture, else its next one), all but
+    /// --leave slots. `--leave 1 --leave-tier hour`: the next journey of 60 minutes finishes it
+    Fill {
+        /// A picture's id, or a Verein's. Not named `target`: clap would take it for the global
+        /// --target and read the config file for it
+        #[arg(value_name = "BILD|VEREIN")]
+        picture: String,
+        #[arg(long, default_value_t = 0)]
+        leave: i64,
+        /// Leave slots of this tier open first: minute, quarter or hour
+        #[arg(long = "leave-tier")]
+        leave_tier: Option<String>,
+    },
+    /// Take the pieces out again, the journeys' too: all, or one picture's
+    Clear {
+        #[arg(long)]
+        image: Option<String>,
+    },
+}
+
+/// A customer's pictures as grids: owned slots in capitals of their tier, open ones in small
+/// letters, and the day's journey pieces against the cap.
+fn print_pieces(v: &Value) {
+    println!(
+        "{} · Puzzles {} · heute {} von {} Teilen aus Fahrten{}",
+        s(v, "nickname"),
+        if v["puzzles_flag"].as_bool().unwrap_or(false) { "an" } else { "aus" },
+        s(&v["today"], "journey_pieces"),
+        s(&v["today"], "cap"),
+        if v["more_waiting"].as_bool().unwrap_or(false) { "" } else { " · alles fertig" }
+    );
+    let list = v["puzzles"].as_array().cloned().unwrap_or_default();
+    if list.is_empty() {
+        println!("  noch kein Teil");
+    }
+    for p in &list {
+        let tiers = strings(&p["tiers"]);
+        let owned: Vec<i64> = p["owned"].as_array().map(|a| a.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
+        println!(
+            "  {} · {} · {} von {}{}  ({})",
+            s(p, "title"),
+            s(p, "ngo_name"),
+            owned.len(),
+            tiers.len(),
+            if p["complete"].as_bool().unwrap_or(false) { " · fertig" } else { "" },
+            s(p, "image_id")
+        );
+        let cols = p["cols"].as_u64().unwrap_or(1).max(1) as usize;
+        for (r, row) in tiers.chunks(cols).enumerate() {
+            let cells: Vec<String> = row
+                .iter()
+                .enumerate()
+                .map(|(c, t)| {
+                    let letter = match t.as_str() { "hour" => "h", "quarter" => "q", _ => "m" };
+                    if owned.contains(&((r * cols + c) as i64)) { letter.to_uppercase() } else { letter.to_string() }
+                })
+                .collect();
+            println!("      {}", cells.join(" "));
+        }
+    }
+}
+
 /// "3x4" → (columns, rows).
 fn parse_grid(g: &str) -> anyhow::Result<(i64, i64)> {
     let (c, r) = g.split_once(['x', 'X', '×']).ok_or_else(|| anyhow::anyhow!("--grid ist SPALTENxZEILEN, etwa 3x4"))?;
@@ -681,6 +765,13 @@ enum Cmd {
     Watch { customer: String },
     /// Send a test push to the customer's device (logged only without APNS_*/FCM_* credentials)
     Push { customer: String, text: Option<String> },
+    /// A customer's puzzle pieces (docs/51 §9c): look, or give, fill and clear them without riding.
+    /// Owned slots print in capitals of their tier (M, Q, H), open ones in small letters
+    Pieces {
+        customer: String,
+        #[command(subcommand)]
+        cmd: Option<PiecesCmd>,
+    },
     /// Invent a ride that already happened, with the delay it had: test data for claims
     Backdate {
         customer: String,
@@ -1996,6 +2087,39 @@ async fn main() -> anyhow::Result<()> {
             let how = if v["configured"].as_bool().unwrap_or(false) { "Provider konfiguriert" } else { "Dry-Run, nur Log" };
             println!("Push an {} ({platform}, {token}, {how}): {}", s(&v, "nickname"), s(&v, "result"));
             println!("  {} – {}", s(&v, "title"), s(&v, "body"));
+        }
+        Cmd::Pieces { customer, cmd } => {
+            let base = format!("/admin/customers/{customer}");
+            match cmd {
+                None => {}
+                Some(PiecesCmd::Give { ngo, image, slot, tier, count }) => {
+                    let mut body = json!({ "count": count });
+                    if let Some(n) = ngo { body["ngo"] = json!(n); }
+                    if let Some(i) = image { body["image"] = json!(i); }
+                    if let Some(p) = slot { body["piece"] = json!(p); }
+                    if let Some(t) = tier { body["tier"] = json!(t); }
+                    let v = api.post(&format!("{base}/puzzle-pieces"), body).await?;
+                    let pieces = v["pieces"].as_array().cloned().unwrap_or_default();
+                    for p in &pieces {
+                        println!("+ Teil {} ({}) von „{}“, {}", s(p, "piece"), s(p, "tier"), s(p, "title"), s(p, "ngo_name"));
+                    }
+                    if (pieces.len() as i64) < count {
+                        println!("{} von {count} vergeben: kein offener Platz mehr, den das darf", pieces.len());
+                    }
+                }
+                Some(PiecesCmd::Fill { picture, leave, leave_tier }) => {
+                    let mut body = json!({ "leave": leave });
+                    if let Some(t) = leave_tier { body["leave_tier"] = json!(t); }
+                    let v = api.post(&format!("{base}/puzzles/{}/fill", url::form_urlencoded::byte_serialize(picture.as_bytes()).collect::<String>()), body).await?;
+                    println!("+ {} Teile {}, offen gelassen: {}", v["added"].as_array().map_or(0, Vec::len), v["added"], v["left"]);
+                }
+                Some(PiecesCmd::Clear { image }) => {
+                    let q = image.map(|i| format!("?image={i}")).unwrap_or_default();
+                    let v = api.delete(&format!("{base}/puzzle-pieces{q}")).await?;
+                    println!("- {} Teile entfernt", s(&v, "removed"));
+                }
+            }
+            print_pieces(&api.get(&format!("{base}/puzzles")).await?);
         }
         Cmd::Backdate { customer, delay, days, count, at, duration, from, to, line, category, operator, ticket, price, cancelled } => {
             if count < 1 {

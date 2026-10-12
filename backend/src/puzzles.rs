@@ -319,6 +319,9 @@ fn tiff_orientation(t: &[u8]) -> Option<u16> {
 // Awarding
 // ---------------------------------------------------------------------------
 
+/// What counts against the daily cap: the pieces journeys brought, not the Stellwerk's.
+const JOURNEY_PIECES_TODAY: &str = "select count(*) from puzzle_pieces where customer_id = $1 and not stellwerk and awarded_at >= $2 and awarded_at < $3";
+
 /// Every picture with the pieces this customer holds of it, oldest first.
 async fn images_of(conn: &mut PgConnection, customer: Uuid) -> anyhow::Result<Vec<Image>> {
     let rows: Vec<(Uuid, String, Vec<String>, bool, Vec<i32>)> = sqlx::query_as(
@@ -387,7 +390,7 @@ async fn try_award(pool: &PgPool, customer: &CustomerRow, j: &JourneyRow) -> any
     }
     let now = crate::clock::now();
     let (from, to) = berlin_day(now);
-    let today: i64 = sqlx::query_scalar("select count(*) from puzzle_pieces where customer_id = $1 and awarded_at >= $2 and awarded_at < $3")
+    let today: i64 = sqlx::query_scalar(JOURNEY_PIECES_TODAY)
         .bind(customer.id)
         .bind(from)
         .bind(to)
@@ -452,6 +455,15 @@ impl Puzzle {
             "image_url": format!("/v1/puzzle-images/{}", self.image_id), "width": self.width, "height": self.height,
         })
     }
+
+    /// As `GET /v1/me/puzzles` lists it.
+    fn listed(&self) -> Value {
+        let mut v = self.json();
+        v["started_at"] = json!(self.started_at);
+        v["last_piece_at"] = json!(self.last_piece_at);
+        v["completed_at"] = json!(self.complete().then_some(self.last_piece_at));
+        v
+    }
 }
 
 /// The pictures this customer has started; one of them when `image` is set.
@@ -479,11 +491,20 @@ async fn puzzles_of(pool: &PgPool, customer: Uuid, image: Option<Uuid>) -> anyho
 
 /// The piece a journey brought, as `journeys/current` and the finish carry it, or nothing.
 pub async fn piece_of_journey(pool: &PgPool, journey: Uuid) -> anyhow::Result<Option<Value>> {
-    let row: Option<(Uuid, Uuid, i32, DateTime<Utc>, bool)> = sqlx::query_as("select customer_id, image_id, piece, awarded_at, own_cause from puzzle_pieces where journey_id = $1")
-        .bind(journey)
+    let row: Option<(Uuid, Uuid, i32)> = sqlx::query_as("select customer_id, image_id, piece from puzzle_pieces where journey_id = $1").bind(journey).fetch_optional(pool).await?;
+    let Some((customer, image, piece)) = row else { return Ok(None) };
+    piece_json(pool, customer, image, piece).await
+}
+
+/// One piece a customer holds, as the wire carries it (docs/51 §8).
+async fn piece_json(pool: &PgPool, customer: Uuid, image: Uuid, piece: i32) -> anyhow::Result<Option<Value>> {
+    let row: Option<(DateTime<Utc>, bool)> = sqlx::query_as("select awarded_at, own_cause from puzzle_pieces where customer_id = $1 and image_id = $2 and piece = $3")
+        .bind(customer)
+        .bind(image)
+        .bind(piece)
         .fetch_optional(pool)
         .await?;
-    let Some((customer, image, piece, awarded_at, own_cause)) = row else { return Ok(None) };
+    let Some((awarded_at, own_cause)) = row else { return Ok(None) };
     let Some(p) = puzzles_of(pool, customer, Some(image)).await?.pop() else { return Ok(None) };
     let mut v = p.json();
     v["piece"] = json!(piece);
@@ -505,17 +526,149 @@ pub async fn mine(State(s): State<AppState>, c: Customer) -> Result<Json<Value>,
     list.sort_by_key(|p| (p.complete(), std::cmp::Reverse(p.last_piece_at)));
     let mut conn = s.pool.acquire().await.map_err(internal)?;
     let more_waiting = !candidates(&images_of(&mut conn, c.0.id).await.map_err(internal)?).is_empty();
-    let puzzles: Vec<Value> = list
-        .iter()
-        .map(|p| {
-            let mut v = p.json();
-            v["started_at"] = json!(p.started_at);
-            v["last_piece_at"] = json!(p.last_piece_at);
-            v["completed_at"] = json!(p.complete().then_some(p.last_piece_at));
-            v
-        })
-        .collect();
+    let puzzles: Vec<Value> = list.iter().map(Puzzle::listed).collect();
     Ok(Json(json!({ "puzzles": puzzles, "more_waiting": more_waiting })))
+}
+
+// ---------------------------------------------------------------------------
+// The Stellwerk's pieces (docs/51 §9c): a picture tested without riding
+// ---------------------------------------------------------------------------
+
+type ApiError = (StatusCode, Json<Value>);
+
+fn refuse(status: StatusCode, msg: &str) -> ApiError {
+    (status, Json(json!({ "error": msg })))
+}
+
+/// One customer's puzzles as the Stellwerk sees them: what the app lists, the switch, and how
+/// many pieces journeys brought today against the cap.
+pub async fn stellwerk_view(pool: &PgPool, flags: &crate::flags::Table, customer: &CustomerRow) -> anyhow::Result<Value> {
+    let mut list = puzzles_of(pool, customer.id, None).await?;
+    list.sort_by_key(|p| (p.complete(), std::cmp::Reverse(p.last_piece_at)));
+    let (from, to) = berlin_day(crate::clock::now());
+    let today: i64 = sqlx::query_scalar(JOURNEY_PIECES_TODAY).bind(customer.id).bind(from).bind(to).fetch_one(pool).await?;
+    let more_waiting = !candidates(&images_of(&mut *pool.acquire().await?, customer.id).await?).is_empty();
+    Ok(json!({
+        "customer": customer.id, "nickname": customer.nickname,
+        "puzzles_flag": flags.bool(&crate::flags::PUZZLES, Some(customer.into())),
+        "puzzles": list.iter().map(Puzzle::listed).collect::<Vec<_>>(),
+        "more_waiting": more_waiting,
+        "today": { "journey_pieces": today, "cap": MAX_PER_DAY },
+    }))
+}
+
+/// What the Stellwerk asks for one piece.
+#[derive(Debug, Clone, Default)]
+pub struct Give {
+    /// Exactly this picture, retired or not.
+    pub image: Option<Uuid>,
+    /// Only this Verein's pictures, by the usual rules.
+    pub ngo: Option<String>,
+    /// As if a journey of this tier had ended. With `image` and without it: any open slot.
+    pub tier: Option<Tier>,
+    /// Exactly this slot of `image`.
+    pub piece: Option<i32>,
+}
+
+/// A piece the Stellwerk puts into an account, as the wire carries it; nothing when there is no
+/// open slot left that the request may fill. Without `image` the rules of a journey decide
+/// ([`choose`], the side roll included); it never counts against the daily cap.
+pub async fn give(pool: &PgPool, customer: &CustomerRow, g: &Give) -> Result<Option<Value>, ApiError> {
+    let mut tx = pool.begin().await.map_err(internal)?;
+    sqlx::query("select 1 from customers where id = $1 for no key update").bind(customer.id).execute(&mut *tx).await.map_err(internal)?;
+    let images = images_of(&mut tx, customer.id).await.map_err(internal)?;
+    let own = own_causes(&mut tx, customer.id).await.map_err(internal)?;
+    let dice = Dice::roll();
+    let chosen = match (g.image, &g.ngo) {
+        (Some(id), _) => {
+            let img = images.iter().find(|i| i.id == id).ok_or_else(|| refuse(StatusCode::NOT_FOUND, "no such picture"))?;
+            match g.piece {
+                Some(p) if p < 0 || p as usize >= img.tiers.len() => {
+                    return Err(refuse(StatusCode::BAD_REQUEST, &format!("piece must be 0 to {} for this picture", img.tiers.len() - 1)));
+                }
+                Some(p) if img.owned.contains(&p) => return Err(refuse(StatusCode::CONFLICT, &format!("the customer already has piece {p} of this picture"))),
+                Some(p) => Some((id, p)),
+                None => Tier::ALL.into_iter().rev().filter(|t| g.tier.is_none_or(|want| *t <= want)).find_map(|t| {
+                    let open = img.missing(t);
+                    (!open.is_empty()).then(|| (id, open[(dice.piece % open.len() as u64) as usize]))
+                }),
+            }
+        }
+        (None, _) if g.piece.is_some() => return Err(refuse(StatusCode::BAD_REQUEST, "piece needs image")),
+        (None, Some(ngo)) => {
+            let of: Vec<Image> = images.iter().filter(|i| &i.ngo_id == ngo).cloned().collect();
+            if of.is_empty() {
+                return Err(refuse(StatusCode::NOT_FOUND, "this NGO has no pictures"));
+            }
+            choose(&of, std::slice::from_ref(ngo), ngo, g.tier.unwrap_or(Tier::Minute), &dice).map(|(i, p, _)| (i, p))
+        }
+        (None, None) => choose(&images, &own, &customer.ngo_id, g.tier.unwrap_or(Tier::Minute), &dice).map(|(i, p, _)| (i, p)),
+    };
+    let Some((image, piece)) = chosen else { return Ok(None) };
+    let own_cause = images.iter().any(|i| i.id == image && own.contains(&i.ngo_id));
+    sqlx::query("insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, own_cause, stellwerk) values ($1, $2, $3, $4, $5, true)")
+        .bind(customer.id)
+        .bind(image)
+        .bind(piece)
+        .bind(crate::clock::now())
+        .bind(own_cause)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    piece_json(pool, customer.id, image, piece).await.map_err(internal)
+}
+
+/// Fill a picture up to `leave` open slots, preferring to leave slots of `leave_tier`: „bis auf
+/// das Stunden-Teil" is `leave 1, hour`, and the next journey of 60 minutes finishes it. `target`
+/// is a picture's id, or a Verein's, which means its started picture, else its next one. Nothing
+/// the customer holds is taken away. The added and the left slots, and the puzzle as it is now.
+pub async fn fill(pool: &PgPool, customer: &CustomerRow, target: &str, leave: usize, leave_tier: Option<Tier>) -> Result<Value, ApiError> {
+    let mut tx = pool.begin().await.map_err(internal)?;
+    sqlx::query("select 1 from customers where id = $1 for no key update").bind(customer.id).execute(&mut *tx).await.map_err(internal)?;
+    let images = images_of(&mut tx, customer.id).await.map_err(internal)?;
+    let img = match target.parse::<Uuid>() {
+        Ok(id) => images.iter().find(|i| i.id == id).ok_or_else(|| refuse(StatusCode::NOT_FOUND, "no such picture"))?,
+        Err(_) => candidates(&images)
+            .into_iter()
+            .rev()
+            .filter(|i| i.ngo_id == target)
+            .max_by_key(|i| (i.started(), i.owned.len()))
+            .ok_or_else(|| refuse(StatusCode::NOT_FOUND, "this NGO has no picture left to fill"))?,
+    };
+    let mut open: Vec<i32> = Tier::ALL.into_iter().flat_map(|t| img.missing(t)).collect();
+    open.sort_by_key(|&p| (Some(img.tiers[p as usize]) != leave_tier, p));
+    let left: Vec<i32> = open.iter().copied().take(leave).collect();
+    let mut added: Vec<i32> = open.into_iter().skip(leave).collect();
+    added.sort_unstable();
+    let own_cause = own_causes(&mut tx, customer.id).await.map_err(internal)?.contains(&img.ngo_id);
+    sqlx::query(
+        "insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, own_cause, stellwerk)
+         select $1, $2, p, $4, $5, true from unnest($3::int[]) p",
+    )
+    .bind(customer.id)
+    .bind(img.id)
+    .bind(&added)
+    .bind(crate::clock::now())
+    .bind(own_cause)
+    .execute(&mut *tx)
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    let puzzle = puzzles_of(pool, customer.id, Some(img.id)).await.map_err(internal)?.pop();
+    let mut left = left;
+    left.sort_unstable();
+    Ok(json!({ "image_id": img.id, "added": added, "left": left, "puzzle": puzzle.as_ref().map(Puzzle::listed) }))
+}
+
+/// Take the Stellwerk's and the journeys' pieces out again, of one picture or of all. How many.
+pub async fn clear(pool: &PgPool, customer: Uuid, image: Option<Uuid>) -> anyhow::Result<u64> {
+    Ok(sqlx::query("delete from puzzle_pieces where customer_id = $1 and ($2::uuid is null or image_id = $2)")
+        .bind(customer)
+        .bind(image)
+        .execute(pool)
+        .await?
+        .rows_affected())
 }
 
 /// The pictures already read, by id, so a phone fetching one does not pull a megabyte out of

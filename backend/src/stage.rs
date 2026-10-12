@@ -39,9 +39,26 @@ impl Stage {
 
 static CURRENT: OnceLock<Stage> = OnceLock::new();
 
+#[cfg(test)]
+thread_local! {
+    /// A test's own stage. `#[sqlx::test]` runs each test on a runtime of one thread, so a
+    /// thread-local reaches every handler the test calls and no other test.
+    static TEST_STAGE: std::cell::Cell<Option<Stage>> = const { std::cell::Cell::new(None) };
+}
+
+/// Pretend to be another stage on this thread, for a test; `None` ends it.
+#[cfg(test)]
+pub fn set_for_test(stage: Option<Stage>) {
+    TEST_STAGE.with(|s| s.set(stage));
+}
+
 /// The stage from `ENVIRONMENT`. A value that is none of the three stops the API at startup
 /// ([`check`]) instead of quietly meaning „development" — which would open the simulation calls.
 pub fn current() -> Stage {
+    #[cfg(test)]
+    if let Some(s) = TEST_STAGE.with(|s| s.get()) {
+        return s;
+    }
     *CURRENT.get_or_init(|| Stage::parse(&std::env::var("ENVIRONMENT").unwrap_or_default()).unwrap_or(Stage::Development))
 }
 

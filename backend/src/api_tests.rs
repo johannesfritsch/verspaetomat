@@ -2235,3 +2235,170 @@ async fn the_stellwerk_may_set_the_tiers(pool: PgPool) {
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["tiers"], json!(["hour", "minute", "quarter", "minute"]));
 }
+
+// ---------------------------------------------------------------------------
+// Puzzle pieces from the Stellwerk (docs/51 §9c)
+// ---------------------------------------------------------------------------
+
+async fn give(app: &Router, customer: Uuid, body: Value) -> (StatusCode, Value) {
+    admin(app, "POST", &format!("/admin/customers/{customer}/puzzle-pieces"), body).await
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn the_stellwerks_pieces_are_refused_in_production(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, _) = device(&app).await;
+    let image = picture(&app, "bahnhofsmission", 3, 4).await;
+    crate::stage::set_for_test(Some(crate::stage::Stage::Production));
+    for (method, path, body) in [
+        ("GET", format!("/admin/customers/{id}/puzzles"), json!({})),
+        ("POST", format!("/admin/customers/{id}/puzzle-pieces"), json!({})),
+        ("POST", format!("/admin/customers/{id}/puzzles/{image}/fill"), json!({})),
+        ("DELETE", format!("/admin/customers/{id}/puzzle-pieces"), json!({})),
+    ] {
+        let (s, v) = admin(&app, method, &path, body).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{method} {path}: {v}");
+        assert_eq!(v["error"], "not in production: this call simulates the world");
+    }
+    crate::stage::set_for_test(None);
+    assert_eq!(pieces(&pool, id).await, 0);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn the_stellwerk_gives_pieces_by_the_rules_or_exactly(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, _) = device(&app).await;
+    let mission = picture(&app, "bahnhofsmission", 3, 4).await;
+    let wald = picture(&app, "wald", 3, 4).await;
+    let tiers: Vec<String> = sqlx::query_scalar("select tiers from puzzle_images where id = $1").bind(mission).fetch_one(&pool).await.unwrap();
+
+    // No fields: one piece by the rules, a minute.
+    let (s, v) = give(&app, id, json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["pieces"].as_array().unwrap().len(), 1);
+    assert_eq!(v["pieces"][0]["tier"], "minute");
+
+    // A Verein, several at once.
+    let (s, v) = give(&app, id, json!({ "ngo": "wald", "count": 3 })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let given = v["pieces"].as_array().unwrap();
+    assert_eq!(given.len(), 3);
+    assert!(given.iter().all(|p| p["image_id"] == json!(wald) && p["own_cause"] == false), "{v}");
+
+    // A tier: the hour slot of the own picture.
+    let hour = tiers.iter().position(|t| t == "hour").unwrap();
+    let (_, v) = give(&app, id, json!({ "tier": "hour", "ngo": "bahnhofsmission" })).await;
+    assert_eq!((v["pieces"][0]["piece"].as_u64(), v["pieces"][0]["tier"].as_str()), (Some(hour as u64), Some("hour")), "{v}");
+
+    // Exactly one slot; twice is a conflict, outside the grid a bad request.
+    let owned: Vec<i32> = sqlx::query_scalar("select piece from puzzle_pieces where customer_id = $1 and image_id = $2").bind(id).bind(wald).fetch_all(&pool).await.unwrap();
+    let slot = (0..12).find(|p| !owned.contains(p)).unwrap();
+    let (s, v) = give(&app, id, json!({ "image": wald, "piece": slot })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["pieces"][0]["piece"], slot);
+    let (s, v) = give(&app, id, json!({ "image": wald, "piece": slot })).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{v}");
+    let (s, v) = give(&app, id, json!({ "image": wald, "piece": 12 })).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["error"], "piece must be 0 to 11 for this picture");
+    for body in [json!({ "piece": 1 }), json!({ "count": 0 }), json!({ "count": 65 }), json!({ "tier": "legendary" }), json!({ "image": wald, "piece": 1, "count": 2 })] {
+        let (s, v) = give(&app, id, body.clone()).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{body}: {v}");
+    }
+    let (s, _) = give(&app, id, json!({ "image": Uuid::new_v4() })).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = give(&app, id, json!({ "ngo": "kinderhospiz" })).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "a Verein without pictures");
+
+    // The view: both pictures, slots and tiers, no journey pieces today.
+    let (s, v) = admin(&app, "GET", &format!("/admin/customers/{id}/puzzles"), json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["puzzles"].as_array().unwrap().len(), 2);
+    assert_eq!(v["today"], json!({ "journey_pieces": 0, "cap": 3 }));
+    assert_eq!(v["puzzles_flag"], false);
+    assert!(v["puzzles"][0]["tiers"].is_array() && v["puzzles"][0]["owned"].is_array());
+    assert!(count(&pool, "select count(*) from audit_log where entity_id = $1 and entity = 'puzzle_pieces'", id).await >= 4);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn the_stellwerks_pieces_do_not_count_against_the_day(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, token) = device(&app).await;
+    picture(&app, "bahnhofsmission", 4, 5).await;
+    puzzles_on(&app, id).await;
+    let (_, v) = give(&app, id, json!({ "count": 5 })).await;
+    assert_eq!(v["pieces"].as_array().unwrap().len(), 5);
+
+    // Three journeys still bring three pieces, the fourth none.
+    for n in 0..4 {
+        let v = ride_and_finish(&app, &pool, id, &token, json!({ "arrived": true })).await;
+        assert_eq!(v["piece"].is_object(), n < 3, "journey {n}: {v}");
+    }
+    let (_, v) = admin(&app, "GET", &format!("/admin/customers/{id}/puzzles"), json!({})).await;
+    assert_eq!(v["today"]["journey_pieces"], 3);
+    assert_eq!(pieces(&pool, id).await, 8);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn fill_leaves_the_hour_for_the_next_late_train(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, token) = device(&app).await;
+    let image = picture(&app, "bahnhofsmission", 3, 4).await;
+    puzzles_on(&app, id).await;
+    let tiers: Vec<String> = sqlx::query_scalar("select tiers from puzzle_images where id = $1").bind(image).fetch_one(&pool).await.unwrap();
+    let hour = tiers.iter().position(|t| t == "hour").unwrap() as i64;
+
+    // By the Verein: its next picture, all but the hour.
+    let (s, v) = admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/bahnhofsmission/fill"), json!({ "leave": 1, "leave_tier": "hour" })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["image_id"], json!(image));
+    assert_eq!(v["left"], json!([hour]));
+    assert_eq!(v["added"].as_array().unwrap().len(), 11);
+    assert_eq!(v["puzzle"]["complete"], false);
+
+    // A minute journey cannot finish it; a 70-minute one does.
+    let v = ride_and_finish(&app, &pool, id, &token, json!({ "arrived": true })).await;
+    assert_eq!(v["piece"], Value::Null, "{v}");
+    let j = riding_journey_due(&pool, id, 70).await;
+    let (_, v) = call(&app, "POST", &format!("/v1/journeys/{j}/finish"), Some(&token), Some(json!({ "arrived": true }))).await;
+    assert_eq!((v["piece"]["piece"].as_i64(), v["piece"]["tier"].as_str()), (Some(hour), Some("hour")), "{v}");
+    assert_eq!(v["piece"]["complete"], true);
+
+    // Without leave it finishes a picture outright; leaving more than is open adds nothing.
+    let other = picture(&app, "wald", 3, 4).await;
+    let (_, v) = admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/{other}/fill"), json!({ "leave": 20 })).await;
+    assert_eq!((v["added"].as_array().unwrap().len(), v["left"].as_array().unwrap().len()), (0, 12), "{v}");
+    assert_eq!(v["puzzle"], Value::Null);
+    let (s, v) = admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/{other}/fill"), json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["puzzle"]["complete"], true);
+    assert_eq!(v["puzzle"]["completed_at"], v["puzzle"]["last_piece_at"]);
+
+    for (target, body, want) in [
+        (Uuid::new_v4().to_string(), json!({}), StatusCode::NOT_FOUND),
+        ("kinderhospiz".to_string(), json!({}), StatusCode::NOT_FOUND),
+        (other.to_string(), json!({ "leave": -1 }), StatusCode::BAD_REQUEST),
+        (other.to_string(), json!({ "leave_tier": "day" }), StatusCode::BAD_REQUEST),
+    ] {
+        let (s, v) = admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/{target}/fill"), body).await;
+        assert_eq!(s, want, "{target}: {v}");
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn clear_takes_one_picture_or_all(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, _) = device(&app).await;
+    let mission = picture(&app, "bahnhofsmission", 3, 4).await;
+    let wald = picture(&app, "wald", 3, 4).await;
+    admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/{mission}/fill"), json!({ "leave": 2 })).await;
+    admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/{wald}/fill"), json!({ "leave": 9 })).await;
+    assert_eq!(pieces(&pool, id).await, 13);
+
+    let (s, v) = admin(&app, "DELETE", &format!("/admin/customers/{id}/puzzle-pieces?image={wald}"), json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["removed"], 3);
+    let (_, v) = admin(&app, "DELETE", &format!("/admin/customers/{id}/puzzle-pieces"), json!({})).await;
+    assert_eq!(v["removed"], 10);
+    assert_eq!(pieces(&pool, id).await, 0);
+}

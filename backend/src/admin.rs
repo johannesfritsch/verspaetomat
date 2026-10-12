@@ -1620,6 +1620,113 @@ pub async fn puzzle_image_remove(State(s): State<AppState>, _a: Admin, Path(id):
     Ok(Json(json!({ "id": id, "deleted": true })))
 }
 
+// ---------------------------------------------------------------------------
+// A customer's puzzle pieces from the Stellwerk (docs/51 §9c): testing without riding. They
+// simulate the world like a delay does, so production refuses them.
+// ---------------------------------------------------------------------------
+
+/// `GET /admin/customers/{key}/puzzles`: the customer's pictures with their slots and tiers, the
+/// switch, and today's journey pieces against the cap.
+pub async fn customer_puzzles(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    Ok(Json(crate::puzzles::stellwerk_view(&s.pool, &s.flags(), &c).await.map_err(internal)?))
+}
+
+#[derive(Deserialize)]
+pub struct PiecesBody {
+    #[serde(default)]
+    pub image: Option<Uuid>,
+    #[serde(default)]
+    pub ngo: Option<String>,
+    /// `minute` | `quarter` | `hour`: as if a journey of that tier had ended.
+    #[serde(default)]
+    pub tier: Option<String>,
+    #[serde(default)]
+    pub piece: Option<i32>,
+    /// 1 to 64; one when absent.
+    #[serde(default)]
+    pub count: Option<i64>,
+}
+
+fn tier_arg(t: Option<&str>) -> Result<Option<crate::puzzles::Tier>, (StatusCode, Json<Value>)> {
+    t.map(|t| crate::puzzles::Tier::parse(t).ok_or_else(|| err(StatusCode::BAD_REQUEST, &format!("tier {t:?} is not minute, quarter or hour")))).transpose()
+}
+
+/// `POST /admin/customers/{key}/puzzle-pieces {image?, ngo?, tier?, piece?, count?}`: pieces put
+/// into the account. Without fields, one by the rules of a journey of a minute. They never count
+/// against the daily cap. Stops early, without an error, when nothing is left to give.
+pub async fn puzzle_pieces_give(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>, Json(b): Json<PiecesBody>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let count = b.count.unwrap_or(1);
+    if !(1..=64).contains(&count) {
+        return Err(err(StatusCode::BAD_REQUEST, "count must be 1 to 64"));
+    }
+    if b.piece.is_some() && count > 1 {
+        return Err(err(StatusCode::BAD_REQUEST, "one piece is one slot: piece and a count over 1 contradict"));
+    }
+    let g = crate::puzzles::Give { image: b.image, ngo: b.ngo.clone(), tier: tier_arg(b.tier.as_deref())?, piece: b.piece };
+    let mut pieces = Vec::new();
+    for _ in 0..count {
+        match crate::puzzles::give(&s.pool, &c, &g).await? {
+            Some(p) => pieces.push(p),
+            None => break,
+        }
+    }
+    let what: Vec<String> = pieces.iter().map(|p| format!("{} #{} {}", p["image_id"].as_str().unwrap_or(""), p["piece"], p["tier"].as_str().unwrap_or(""))).collect();
+    crate::rules::audit(&s.pool, "puzzle_pieces", c.id, None, "given", &format!("via stellwerk: {}", if what.is_empty() { "nothing left".into() } else { what.join(", ") }))
+        .await
+        .map_err(internal)?;
+    Ok(Json(json!({ "customer": c.nickname, "asked": count, "pieces": pieces })))
+}
+
+#[derive(Deserialize, Default)]
+pub struct FillBody {
+    #[serde(default)]
+    pub leave: Option<i64>,
+    #[serde(default)]
+    pub leave_tier: Option<String>,
+}
+
+/// `POST /admin/customers/{key}/puzzles/{image}/fill {leave?, leave_tier?}`: every open slot of
+/// the picture but `leave` of them, preferring to leave slots of `leave_tier`. `{image}` may also
+/// be a Verein's id: its started picture, else its next one.
+pub async fn puzzle_fill(
+    State(s): State<AppState>,
+    _a: Admin,
+    _sim: Simulation,
+    Path((key, image)): Path<(String, String)>,
+    body: Option<Json<FillBody>>,
+) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let b = body.map(|Json(b)| b).unwrap_or_default();
+    let leave = b.leave.unwrap_or(0);
+    if !(0..=64).contains(&leave) {
+        return Err(err(StatusCode::BAD_REQUEST, "leave must be 0 to 64"));
+    }
+    let v = crate::puzzles::fill(&s.pool, &c, &image, leave as usize, tier_arg(b.leave_tier.as_deref())?).await?;
+    crate::rules::audit(&s.pool, "puzzle_pieces", c.id, None, "filled", &format!("via stellwerk: {} +{} left {}", v["image_id"].as_str().unwrap_or(""), v["added"], v["left"]))
+        .await
+        .map_err(internal)?;
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+pub struct PiecesClearQuery {
+    #[serde(default)]
+    pub image: Option<Uuid>,
+}
+
+/// `DELETE /admin/customers/{key}/puzzle-pieces[?image=…]`: every piece of the customer, or of one
+/// picture — the journeys' too. A test account starts over; a real one is never touched by this.
+pub async fn puzzle_pieces_clear(State(s): State<AppState>, _a: Admin, _sim: Simulation, Path(key): Path<String>, Query(q): Query<PiecesClearQuery>) -> ApiResult {
+    let c = resolve(&s, &key).await?;
+    let n = crate::puzzles::clear(&s.pool, c.id, q.image).await.map_err(internal)?;
+    crate::rules::audit(&s.pool, "puzzle_pieces", c.id, None, "cleared", &format!("via stellwerk: {n} of {}", q.image.map(|i| i.to_string()).unwrap_or_else(|| "every picture".into())))
+        .await
+        .map_err(internal)?;
+    Ok(Json(json!({ "customer": c.nickname, "image": q.image, "removed": n })))
+}
+
 #[cfg(test)]
 mod ngo_tests {
     use super::normalise_iban;

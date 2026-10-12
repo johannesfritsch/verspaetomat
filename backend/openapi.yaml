@@ -358,6 +358,31 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody: { content: { application/json: { schema: { type: object, required: [title, rows, cols, content_type, data], properties: { title: { type: string }, caption: { type: string }, rows: { type: integer, minimum: 2, maximum: 8 }, cols: { type: integer, minimum: 2, maximum: 8 }, tiers: { type: array, items: { type: string, enum: [minute, quarter, hour] }, description: "rows * cols of them" }, content_type: { type: string, enum: [image/jpeg, image/png, image/webp] }, data: { type: string, description: base64 } } } } } }
       responses: { '200': { description: PuzzleImage }, '400': { description: 'not base64, not the type it claims, too many pixels, rotated, bad grid, pieces not roughly square, or tiers of the wrong length or with an unknown word' }, '404': { description: No such NGO }, '413': { description: over 1 MB } }
+  /admin/customers/{key}/puzzles:
+    get:
+      summary: "A customer's puzzles for the Stellwerk (docs/51 §9c): {customer, nickname, puzzles_flag, puzzles: [Puzzle], more_waiting, today: {journey_pieces, cap}}. Refused in production (403), like delay and ff."
+      security: [{ adminToken: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: the view }, '403': { description: production }, '404': { description: no such customer } }
+  /admin/customers/{key}/puzzle-pieces:
+    post:
+      summary: "Pieces put into the account without riding (docs/51 §9c). No fields: one by the rules of a journey of a minute (side roll and all). tier: as if a journey of that tier had ended. ngo: only that NGO's pictures, by the rules. image (+ piece): exactly that picture, retired or not, or that slot. count repeats (1–64) and stops early when nothing is left. These pieces never count against the three a day. Refused in production."
+      security: [{ adminToken: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { image: { type: string, format: uuid }, ngo: { type: string }, tier: { type: string, enum: [minute, quarter, hour] }, piece: { type: integer }, count: { type: integer, minimum: 1, maximum: 64 } } } } } }
+      responses: { '200': { description: '{customer, asked, pieces: [Piece]}' }, '400': { description: 'piece out of range, piece without image, piece with count > 1, bad count or tier' }, '403': { description: production }, '404': { description: 'no such customer or picture, or the NGO has no pictures' }, '409': { description: the customer has that slot already } }
+    delete:
+      summary: "Every piece of the customer, or of one picture (?image=), the journeys' too. Refused in production."
+      security: [{ adminToken: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }, { name: image, in: query, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: '{customer, image, removed}' }, '403': { description: production } }
+  /admin/customers/{key}/puzzles/{image}/fill:
+    post:
+      summary: "Every open slot of the picture but `leave` of them, leaving slots of leave_tier first (leave 1, hour: the next journey of 60 minutes finishes it). {image} may be an NGO id: its started picture, else its next one. Nothing held is taken away. Refused in production."
+      security: [{ adminToken: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }, { name: image, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { leave: { type: integer, minimum: 0, maximum: 64, default: 0 }, leave_tier: { type: string, enum: [minute, quarter, hour] } } } } } }
+      responses: { '200': { description: '{image_id, added, left, puzzle: Puzzle | null}' }, '400': { description: bad leave or leave_tier }, '403': { description: production }, '404': { description: no such customer or picture, or nothing of that NGO left to fill } }
   /admin/puzzle-images:
     get:
       summary: "Every puzzle picture, retired ones included, without the bytes: {id, ngo_id, ngo_name, title, caption, rows, cols, tiers, content_type, size, width, height, sha256, image_url, retired_at, created_at, pieces_awarded, customers_started, customers_completed}"
