@@ -294,7 +294,29 @@ erfundene Bilder aus `assets/demo/puzzles/`.
 
 ## 9. Was gebaut ist
 
-Siehe den Abschluss dieses Branches; hier nachgetragen, wenn er steht.
+Stand 12. Oktober 2026, Branch `feature/puzzle`, nicht auf Staging.
+
+- **Backend:** alles aus §2, §2a, §3 und §8. Vergeben wird an jedem Ende einer Reise, das ein Teil
+  bringt; ein seltenes Teil sucht seine Stufe erst auf beiden Seiten, bevor es eine Stufe tiefer
+  geht. Bilder höchstens 1 MB, 2400 px an der langen Seite; ein JPEG mit EXIF-Drehung wird
+  abgelehnt (das Telefon würde es anders herum zeigen, als das Raster geschnitten ist). Das Bild
+  wird mit `ETag` ausgeliefert, ein bekanntes Bild bekommt 304, ohne dass die Bytes gelesen werden,
+  und ein paar Dutzend Bilder liegen im Speicher.
+- **App:** die Karte bei der Ankunft und beim Aufgeben (§5), die Seite „Deine Puzzles" und die
+  Zeile auf Ich (§6), die Teile mit Nasen und den Uhren der Stufen (§7). Ein Bild wird einmal
+  geladen, als Datei abgelegt und begrenzt auf 1200 px dekodiert; eine kaputte Datei (ein
+  WLAN-Anmeldeportal statt eines Bildes) wird gelöscht und neu geholt. Screenreader hören „Ein
+  Stunden-Teil für Bahnhofsmission Köln, 8 von 12". Demo-Modus mit drei erfundenen Bildern und
+  denselben Regeln.
+- **Geprüft:** Unit- und API-Tests im Backend, Widget- und Modelltests in der App, zwei unabhängige
+  Reviews, und ein Durchlauf gegen einen echten Server (Kopie der Dev-Datenbank): der Workflow-E2E
+  mit eingeschaltetem Puzzle, eine Fahrt mit 70 Minuten bis zum Stunden-Teil auf der Ankunft und
+  der Puzzles-Seite, und mit ausgeschaltetem Schalter kein Teil und keine Spur in der App
+  (`app/integration_test/puzzle_e2e_test.dart`).
+- **Nicht gebaut:** die Hand mit 3D (§9a), Teilen (§10), Puzzle-Teile im Datenexport (wie die
+  Abzeichen fehlen sie dort; beides gehört nach Art. 15 DSGVO eigentlich hinein).
+- **Vor Staging:** Bilder der echten Vereine, mit ihrer Zusage zu Rechten und Einwilligung (§4),
+  und `stellwerk flags puzzles` erst für Johannes' Testkonto.
 
 ## 9a. Das Teil in der Hand (3D, nächster Schritt)
 

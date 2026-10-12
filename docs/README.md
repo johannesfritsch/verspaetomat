@@ -80,6 +80,7 @@ series later walked into the same numbers. In prose and in code comments a bare 
 | [46-staging-und-freigabe.md](46-staging-und-freigabe.md) | Staging and production: two servers, two apps, promotion only after Johannes has tested staging |
 | [47-nur-minuten.md](47-nur-minuten.md) | Only minutes: Geduldspunkte are gone, the one rule for what a ride counts |
 | [48-bahnhofsumrisse.md](48-bahnhofsumrisse.md) | Station premises (#64): today's 50 m check measured, feed quays and DB OpenStation ruled out, OSM counted for NRW (97 %), the plan, publishing and ODbL attribution |
+| [51-puzzles.md](51-puzzles.md) | Puzzles: every finished journey brings a piece of a picture a Verein shows of its work; rarity by waiting (Minute, Viertelstunde, Stunde), no coins, no packs, nothing expires |
 
 [sources.md](sources.md) lists the URLs behind the research.
 
