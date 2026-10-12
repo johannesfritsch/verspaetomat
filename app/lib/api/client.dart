@@ -430,7 +430,10 @@ class ApiClient {
   /// on when a download resumes. The caller reads the status — 200 whole, 206 the rest, 403 not
   /// finished — and the body.
   Future<http.StreamedResponse> puzzleVideo(String url, {int from = 0}) async {
-    final uri = url.startsWith('http') ? Uri.parse(url) : _uri(url);
+    // Exactly as the server named it: its query (`?v=<sha8>`) says which film, and a film can be
+    // replaced under the same picture.
+    final named = Uri.parse(url);
+    final uri = named.hasScheme ? named : _uri(named.path, named.hasQuery ? named.queryParameters : null);
     final req = http.Request('GET', uri)
       ..headers.addAll(await _headers(json: false))
       ..headers['accept'] = 'video/mp4';

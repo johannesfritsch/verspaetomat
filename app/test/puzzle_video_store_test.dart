@@ -15,7 +15,7 @@ import 'package:verspaetomat/state/puzzle_video_store.dart';
 void main() {
   final film = List<int>.generate(1000, (i) => i % 251);
 
-  ApiPuzzle puzzle(String id, {bool complete = true, int bytes = 1000, bool video = true}) => ApiPuzzle(
+  ApiPuzzle puzzle(String id, {bool complete = true, int bytes = 1000, bool video = true, String sha = 'abcdef0123456789'}) => ApiPuzzle(
         imageId: id,
         rows: 4,
         cols: 3,
@@ -26,7 +26,7 @@ void main() {
         ngoName: 'Wald für morgen e.V.',
         imageUrl: '/v1/puzzle-images/$id',
         hasVideo: video,
-        video: complete && video ? ApiPuzzleVideo(url: '/v1/puzzle-videos/$id', bytes: bytes, seconds: 20, sha256: 'abcdef0123456789', width: 900, height: 1200) : null,
+        video: complete && video ? ApiPuzzleVideo(url: '/v1/puzzle-videos/$id?v=${sha.substring(0, 8)}', bytes: bytes, seconds: 20, sha256: sha, width: 900, height: 1200) : null,
       );
 
   late Directory dir;
@@ -79,6 +79,22 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 5));
     }
     expect(again.stateOf(p).phase, VideoPhase.ready, reason: 'a new start finds the file on disk');
+  });
+
+  test('a replaced film is fetched anew, and the old one goes', () async {
+    final (s, asked) = store([whole, whole]);
+    final first = puzzle('w8');
+    s.ensure(first);
+    final a = await settled(s, first);
+    expect(a.file!.path, endsWith('/w8-abcdef01.mp4'));
+    // The same picture, a new film: the server names another digest and another url.
+    final second = puzzle('w8', sha: '99887766aabbccdd');
+    s.ensure(second);
+    final b = await settled(s, second);
+    expect(b.phase, VideoPhase.ready);
+    expect(b.file!.path, endsWith('/w8-99887766.mp4'));
+    expect(asked.map((x) => x.$1), ['/v1/puzzle-videos/w8?v=abcdef01', '/v1/puzzle-videos/w8?v=99887766']);
+    expect(a.file!.existsSync(), isFalse, reason: 'the replaced film is not kept');
   });
 
   test('never before the picture is finished', () async {
@@ -161,7 +177,7 @@ void main() {
     s.ensure(c);
     expect(s.stateOf(c).phase, VideoPhase.queued);
     await settled(s, c);
-    expect(order, ['/v1/puzzle-videos/a', '/v1/puzzle-videos/b', '/v1/puzzle-videos/c']);
+    expect(order, ['/v1/puzzle-videos/a?v=abcdef01', '/v1/puzzle-videos/b?v=abcdef01', '/v1/puzzle-videos/c?v=abcdef01']);
     expect(most, 1);
   });
 
@@ -188,17 +204,20 @@ void main() {
 
   test('the client asks with the token, and for the rest with a range', () async {
     final headers = <Map<String, String>>[];
+    final seen = <Uri>[];
     final client = ApiClient(
       baseUrl: 'https://api.example',
       tokens: TokenStore.over(_Keychain()),
       inner: MockClient.streaming((req, body) async {
         headers.add(req.headers);
+        seen.add(req.url);
         return http.StreamedResponse(Stream.value(const [1, 2, 3]), 200);
       }),
     );
-    await (await client.puzzleVideo('/v1/puzzle-videos/x')).stream.drain<void>();
-    await (await client.puzzleVideo('/v1/puzzle-videos/x', from: 600)).stream.drain<void>();
+    await (await client.puzzleVideo('/v1/puzzle-videos/x?v=abcdef01')).stream.drain<void>();
+    await (await client.puzzleVideo('/v1/puzzle-videos/x?v=abcdef01', from: 600)).stream.drain<void>();
     expect(headers[0]['authorization'], 'Bearer tok');
+    expect(seen.first.toString(), 'https://api.example/v1/puzzle-videos/x?v=abcdef01', reason: 'the url exactly as named');
     expect(headers[0].containsKey('range'), isFalse);
     expect(headers[1]['range'], 'bytes=600-');
   });

@@ -59,14 +59,24 @@ class PuzzleVideoStore {
   final Future<Directory> Function() _directory;
 
   final Map<String, ValueNotifier<PuzzleVideoState>> _states = {};
+
+  /// The film each notifier stands for: a picture's film can be replaced, and a new digest starts
+  /// it over.
+  final Map<String, String> _shas = {};
   final List<ApiPuzzle> _queue = [];
   bool _running = false;
 
-  ValueNotifier<PuzzleVideoState> _notifier(ApiPuzzle p) => _states.putIfAbsent(p.imageId, () {
-        final n = ValueNotifier(PuzzleVideoState.none);
-        _look(p, n);
-        return n;
-      });
+  ValueNotifier<PuzzleVideoState> _notifier(ApiPuzzle p) {
+    final sha = p.video?.sha256;
+    final n = _states.putIfAbsent(p.imageId, () => ValueNotifier(PuzzleVideoState.none));
+    if (sha != null && _shas[p.imageId] != sha) {
+      // A film this store has not seen for the picture (or the first look): from the start.
+      _shas[p.imageId] = sha;
+      if (n.value.phase != VideoPhase.downloading && n.value.phase != VideoPhase.queued) n.value = PuzzleVideoState.none;
+      _look(p, n);
+    }
+    return n;
+  }
 
   /// Where this picture's film stands. Starts nothing.
   ValueListenable<PuzzleVideoState> watch(ApiPuzzle p) => _notifier(p);
@@ -118,8 +128,20 @@ class PuzzleVideoStore {
   Future<File> _file(String imageId, ApiPuzzleVideo v) async {
     final base = await _directory();
     final id = imageId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    // Keyed on the digest: a replaced film is another file, never the old one under a new name.
     final sha = v.sha256.length >= 8 ? v.sha256.substring(0, 8) : 'film';
     return File('${base.path}/puzzle-videos/$id-$sha.mp4');
+  }
+
+  /// A replaced film's file goes once the new one is here: the same picture, another digest.
+  Future<void> _forgetOlder(String imageId, File current) async {
+    try {
+      final id = imageId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+      await for (final f in current.parent.list()) {
+        final name = f.uri.pathSegments.last;
+        if (f is File && name.startsWith('$id-') && f.path != current.path && !name.endsWith('.part')) await f.delete();
+      }
+    } catch (_) {}
   }
 
   Future<void> _pump() async {
@@ -146,6 +168,7 @@ class PuzzleVideoStore {
       return;
     }
     if (file.existsSync() && file.lengthSync() == v.bytes) {
+      await _forgetOlder(p.imageId, file);
       n.value = PuzzleVideoState(VideoPhase.ready, file: file);
       return;
     }
@@ -185,6 +208,7 @@ class PuzzleVideoStore {
         }
         if (part.lengthSync() == v.bytes) {
           await part.rename(file.path);
+          await _forgetOlder(p.imageId, file);
           DiagnoseLog.instance.add('video', '${p.imageId} · ${v.bytes} B geladen');
           n.value = PuzzleVideoState(VideoPhase.ready, file: file);
           return;
