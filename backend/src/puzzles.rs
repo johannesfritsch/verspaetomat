@@ -27,6 +27,10 @@ use crate::AppState;
 pub const MAX_PER_DAY: i64 = 3;
 /// The largest picture the admin route takes, decoded.
 pub const MAX_BYTES: usize = 1_000_000;
+/// The most pixels a picture may have: 1 MB of JPEG or a flat PNG can hold far more than a phone
+/// should decode for a card. The longest side, and the whole.
+pub const MAX_SIDE: u32 = 2400;
+pub const MAX_PIXELS: u64 = 6_000_000;
 /// A piece's width over its height, both ends inclusive: roughly square, or the noses look wrong.
 pub const PIECE_ASPECT: (f64, f64) = (0.66, 1.5);
 
@@ -247,6 +251,13 @@ pub fn inspect(content_type: &str, bytes: &[u8], rows: i32, cols: i32) -> Result
     let (w, h) = (size.width as u32, size.height as u32);
     if w == 0 || h == 0 {
         return Err("the picture has no size".into());
+    }
+    if w.max(h) > MAX_SIDE || w as u64 * h as u64 > MAX_PIXELS {
+        return Err(format!(
+            "the picture is {w} × {h} px ({:.1} megapixels); at most {MAX_SIDE} px on its longest side and {} megapixels in all",
+            (w as u64 * h as u64) as f64 / 1e6,
+            MAX_PIXELS / 1_000_000
+        ));
     }
     // The phone turns a picture by its EXIF orientation, and then width and height swap and the
     // grid no longer fits what we stored. Rather than guess, the picture comes upright.
@@ -849,5 +860,9 @@ mod tests {
         assert!(inspect("image/png", &png(900, 1200), 3, 4).unwrap_err().contains("roughly square"));
         assert!(inspect("image/png", &png(900, 1200), 1, 3).is_err());
         assert!(inspect("image/png", &png(900, 1200), 4, 9).is_err());
+        // The pixels are capped as well as the bytes: the longest side, and the whole.
+        assert_eq!(inspect("image/png", &png(1800, 2400), 4, 3), Ok((1800, 2400)));
+        assert!(inspect("image/png", &png(1800, 2401), 4, 3).unwrap_err().contains("1800 × 2401 px"));
+        assert!(inspect("image/png", &png(3000, 4000), 4, 3).unwrap_err().contains("12.0 megapixels"));
     }
 }

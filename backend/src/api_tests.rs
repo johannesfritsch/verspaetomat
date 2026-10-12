@@ -2120,6 +2120,10 @@ async fn the_stellwerk_takes_only_proper_pictures_and_never_deletes_a_started_on
     let (s, v) = admin(&app, "POST", "/admin/ngos/wald/puzzle-images", upload("image/png", png(900, 1200), 4, 3)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
     assert!(v["error"].as_str().unwrap().contains("roughly square"), "{v}");
+    // A megabyte can hold more pixels than a phone should decode for a card.
+    let (s, v) = admin(&app, "POST", "/admin/ngos/wald/puzzle-images", upload("image/png", png(3000, 4000), 3, 4)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["error"], "the picture is 3000 × 4000 px (12.0 megapixels); at most 2400 px on its longest side and 6 megapixels in all");
     let (s, _) = admin(&app, "POST", "/admin/ngos/nobody/puzzle-images", upload("image/png", png(900, 1200), 3, 4)).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
     assert_eq!(sqlx::query_scalar::<_, i64>("select count(*) from puzzle_images").fetch_one(&pool).await.unwrap(), 0);

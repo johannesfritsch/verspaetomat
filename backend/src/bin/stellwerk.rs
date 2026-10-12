@@ -322,7 +322,7 @@ enum NgoCmd {
 
 #[derive(Subcommand)]
 enum NgoImageCmd {
-    /// Upload a picture (JPEG, PNG or WebP, at most 1 MB, upright) for a Verein
+    /// Upload a picture (JPEG, PNG or WebP, at most 1 MB and 2400 px on its longest side, upright) for a Verein
     Add {
         /// The Verein's id
         ngo: String,
