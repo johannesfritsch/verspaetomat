@@ -577,16 +577,33 @@ class DemoState extends ChangeNotifier {
       ..addAll({'demo-wald': today.subtract(const Duration(days: 6))});
     _dice = math.Random(17);
     _nextPuzzle = null;
+    _piecesToday.clear();
   }
 
   bool puzzleComplete(String id) => (puzzlePieces[id]?.length ?? 0) >= DemoPuzzle.rows * DemoPuzzle.cols;
 
-  /// docs/51 §2 and §2a, simplified to one picture per Verein: three pieces in four from your own
-  /// Verein, one from another; a slot of the ride's own tier first, else the next tier down, and
-  /// a side with nothing to fill gives way to the other; a random slot you do not have yet;
-  /// nothing once nothing is left that this ride may fill.
+  /// docs/51 §3: at most this many pieces a day, against checking in and out on the sofa.
+  static const maxPiecesPerDay = 3;
+
+  /// The clock the daily cap reads. Tests move it on a day at a time.
+  @visibleForTesting
+  DateTime Function() puzzleClock = DateTime.now;
+
+  /// When today's pieces came, for the cap. Older ones are dropped as they are found.
+  final List<DateTime> _piecesToday = [];
+
+  /// docs/51 §2 and §2a, simplified to one picture per Verein, in the order the server's
+  /// `puzzles::choose` keeps: the ride's own tier first — on the rolled side, three in four your
+  /// own Verein, then on the other — and only when neither side has a slot of it, the next tier
+  /// down. A random slot you do not have yet; nothing once nothing is left that this ride may
+  /// fill, or once the day's three have come.
   void _awardPiece(DemoJourney j, {required int minutes}) {
+    final forcedId = _nextPuzzle;
+    _nextPuzzle = null;
     if (j.piece != null) return;
+    final now = puzzleClock();
+    _piecesToday.removeWhere((t) => t.year != now.year || t.month != now.month || t.day != now.day);
+    if (_piecesToday.length >= maxPiecesPerDay) return;
     final open = Mock.puzzles.where((p) => !puzzleComplete(p.id)).toList();
     if (open.isEmpty) return;
     List<int> missing(DemoPuzzle p, String tier) {
@@ -594,8 +611,7 @@ class DemoState extends ChangeNotifier {
       return [for (var i = 0; i < p.tiers.length; i++) if (p.tiers[i] == tier && !have.contains(i)) i];
     }
 
-    final forced = open.where((p) => p.id == _nextPuzzle).firstOrNull;
-    _nextPuzzle = null;
+    final forced = open.where((p) => p.id == forcedId).firstOrNull;
     DemoPuzzle? pick;
     int? piece;
     if (forced != null) {
@@ -606,8 +622,8 @@ class DemoState extends ChangeNotifier {
       final others = open.where((p) => p.ngoId != ngoId).toList();
       final sides = _dice.nextInt(4) < 3 ? [mine, others] : [others, mine];
       final tiers = minutes >= 60 ? const ['H', 'q', 'm'] : (minutes >= 15 ? const ['q', 'm'] : const ['m']);
-      for (final side in sides) {
-        for (final t in tiers) {
+      for (final t in tiers) {
+        for (final side in sides) {
           final fits = side.where((p) => missing(p, t).isNotEmpty).toList();
           if (fits.isEmpty) continue;
           pick = fits[_dice.nextInt(fits.length)];
@@ -619,7 +635,7 @@ class DemoState extends ChangeNotifier {
       }
     }
     if (pick == null || piece == null) return;
-    final now = DateTime.now();
+    _piecesToday.add(now);
     puzzlePieces.putIfAbsent(pick.id, () => {}).add(piece);
     puzzleStarted.putIfAbsent(pick.id, () => now);
     puzzleLastPiece[pick.id] = now;
@@ -640,6 +656,8 @@ class DemoState extends ChangeNotifier {
     have.addAll(gaps.where((i) => i != last));
     puzzleStarted.putIfAbsent(pick.id, () => DateTime.now());
     _nextPuzzle = pick.id;
+    // A showcase set-up, not a fourth ride of the day: the finish is what it is there to show.
+    _piecesToday.clear();
   }
 
   // -- Rides and Nachtrag ---------------------------------------------------
