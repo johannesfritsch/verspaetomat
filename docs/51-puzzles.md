@@ -222,8 +222,10 @@ von Ich und von der Karte bei der Ankunft.
     die Mitte gestellt; um diese Mitte dreht es sich auch. Vorher galt der Kasten samt Nasen: eine
     Nase auf nur einer Seite schob das Teil zur anderen, Nasen auf beiden Seiten machten es kleiner.
 - **Fertig:** zwei Spalten, die ganzen Bilder ohne Fugen, Titel und Verein darunter, das neueste
-  zuerst. Ein Tipp
-  öffnet das Bild groß, mit dem Satz des Vereins und dem Tag, an dem das letzte Teil kam.
+  zuerst. Ein Tipp öffnet das Bild groß, mit dem Satz des Vereins und dem Tag, an dem das letzte
+  Teil kam — und mit demselben Umschalter wie ein Bild in Arbeit (Johannes, 13. Oktober 2026):
+  **Puzzle** zeigt das Bild mit seinem Film, **Teile** legt es auseinander, und jedes Teil lässt
+  sich in die Hand nehmen, mit seiner Fahrt auf der Rückseite und „Bekommen am …" darunter.
 - **Leer:** „Deine erste Fahrt bringt das erste Teil." Mit einem leeren Raster als Bild.
 - **Alles fertig:** „Alle Bilder sind fertig. Neue kommen, wenn die Vereine welche schicken."
 
@@ -282,7 +284,9 @@ Server vergibt keine Teile, die App zeigt nichts davon. Im Demo-Modus ist das Pu
   "image_url": "/v1/puzzle-images/…uuid…", "width": 900, "height": 1200,
   "awarded_at": "2026-10-12T17:40:00Z",
   "rides": [{ "piece": 7, "journey_id": "…uuid…", "date": "2026-10-12", "from": "Köln Hbf",
-              "to": "Düsseldorf Hbf", "lines": ["RE 1"], "minutes": 68 }] }
+              "to": "Düsseldorf Hbf", "lines": ["RE 1"], "minutes": 68 }],
+  "awarded": [{ "piece": 0, "at": "2026-10-03T08:12:00Z" }, { "piece": 3, "at": "…" },
+              { "piece": 7, "at": "2026-10-12T17:40:00Z" }] }
 ```
 
 `rides` (seit 13. Oktober 2026, Migration 0052) nennt für jedes Teil die Fahrt auf seiner Rückseite:
@@ -290,7 +294,8 @@ die Fahrt, die es gebracht hat (`journey_id` des Teils), sonst `named_journey_id
 dem Stellwerk und bei denen von vorher vorerst eine zufällige angekommene Fahrt desselben Kunden,
 nie die eines anderen. Ein Teil ohne Fahrt (der Kunde hat keine, oder sie wurde gelöscht) fehlt in
 der Liste; seine Rückseite nennt dann keine Fahrt. `date` ist der Tag in Berlin, `minutes` was die
-Fahrt gezählt hat (docs/47), `lines` die gefahrenen Linien, sonst die geplanten.
+Fahrt gezählt hat (docs/47), `lines` die gefahrenen Linien, sonst die geplanten. `awarded` sagt für
+jedes Teil, wann es kam; die Hand zeigt es unter dem Teil als „Bekommen am 12. Oktober".
 
 `piece` zählt zeilenweise von links oben (`row * cols + col`), `owned` enthält das neue Teil schon.
 `tier` ist `minute`, `quarter` oder `hour` (§2a), `tiers` die Stufe jedes Platzes, in derselben

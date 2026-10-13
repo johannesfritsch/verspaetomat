@@ -471,6 +471,8 @@ struct Puzzle {
     video_height: Option<i32>,
     /// What [PIECE_RIDES] makes: one entry per piece that names a journey.
     rides: Value,
+    /// When each piece came: `[{piece, at}]`, every piece the customer holds.
+    awarded: Value,
 }
 
 /// The ride on the back of each piece (migration 0052): the journey that brought it, else the one
@@ -503,6 +505,8 @@ impl Puzzle {
             "video": if self.complete() { self.video() } else { Value::Null },
             // What stands on the back of each piece. Pieces naming no journey are left out.
             "rides": self.rides,
+            // When each piece came, shown under it in the hand — a finished picture too.
+            "awarded": self.awarded,
         })
     }
 
@@ -534,7 +538,8 @@ async fn puzzles_of(pool: &PgPool, customer: Uuid, image: Option<Uuid>) -> anyho
     Ok(sqlx::query_as(&format!(
         "select i.id as image_id, i.ngo_id, n.name as ngo_name, i.title, i.caption, i.rows, i.cols, i.width, i.height, i.tiers,
                 array_agg(p.piece order by p.piece) as owned, min(p.awarded_at) as started_at, max(p.awarded_at) as last_piece_at,
-                i.video_bytes, i.video_seconds, i.video_sha256, i.video_width, i.video_height, {PIECE_RIDES} as rides
+                i.video_bytes, i.video_seconds, i.video_sha256, i.video_width, i.video_height, {PIECE_RIDES} as rides,
+                jsonb_agg(jsonb_build_object('piece', p.piece, 'at', p.awarded_at) order by p.piece) as awarded
          from puzzle_pieces p
          join puzzle_images i on i.id = p.image_id
          join ngos n on n.id = i.ngo_id

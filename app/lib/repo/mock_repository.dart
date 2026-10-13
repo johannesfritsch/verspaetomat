@@ -1226,10 +1226,14 @@ class MockRepository with RideWriteHook implements AppRepository {
         completedAt: state.puzzleCompleted[p.id]?.toUtc(),
         hasVideo: true,
         video: state.puzzleComplete(p.id) ? ApiPuzzleVideo(url: p.video, bytes: 0, seconds: 20, width: DemoPuzzle.width, height: DemoPuzzle.height) : null,
-        // The demo's rides, one to each piece in turn.
+        // Each piece names the demo's latest ride on or before the day it came, so no piece came
+        // before its ride, and none after the picture was finished.
         rides: {
-          for (final piece in state.puzzlePieces[p.id] ?? const <int>{})
-            piece: _pieceRide(p.id, piece, Mock.rides[piece % Mock.rides.length]),
+          for (final MapEntry(key: piece, value: at) in (state.puzzlePieceAt[p.id] ?? const <int, DateTime>{}).entries)
+            piece: _pieceRide(p.id, piece, Mock.rides.firstWhere((r) => !r.date.isAfter(at), orElse: () => Mock.rides.last)),
+        },
+        awardedAt: {
+          for (final MapEntry(key: piece, value: at) in (state.puzzlePieceAt[p.id] ?? const <int, DateTime>{}).entries) piece: at.toUtc(),
         },
       );
 

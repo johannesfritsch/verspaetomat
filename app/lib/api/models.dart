@@ -2302,6 +2302,7 @@ class ApiPuzzle {
     this.hasVideo = false,
     this.video,
     this.rides = const {},
+    this.awardedAt = const {},
   });
   final String imageId;
   final int rows;
@@ -2336,6 +2337,9 @@ class ApiPuzzle {
   /// The ride on the back of each piece, by slot. A piece naming none, and every piece from a
   /// server before rides, is missing here: its back then names no ride.
   final Map<int, ApiPieceRide> rides;
+
+  /// When each piece came, by slot. Empty from a server before it was sent.
+  final Map<int, DateTime> awardedAt;
 
   int get pieces => rows * cols;
 
@@ -2372,6 +2376,10 @@ class ApiPuzzle {
         rides: {
           for (final r in (j['rides'] as List? ?? const []).whereType<Map>())
             _i(r['piece'], -1): ApiPieceRide.fromJson(Map<String, dynamic>.from(r)),
+        }..remove(-1),
+        awardedAt: {
+          for (final a in (j['awarded'] as List? ?? const []).whereType<Map>())
+            if (_dt(a['at']) case final at?) _i(a['piece'], -1): at,
         }..remove(-1),
       );
 }

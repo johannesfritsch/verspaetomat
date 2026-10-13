@@ -2855,6 +2855,23 @@ async fn a_piece_names_the_journey_that_brought_it(pool: PgPool) {
     assert_eq!(r["minutes"], points);
     let berlin = (Utc::now() - Duration::minutes(35)).with_timezone(&chrono_tz::Europe::Berlin).date_naive();
     assert_eq!(r["date"], berlin.format("%Y-%m-%d").to_string());
+
+    // When it came, for every piece held — a Stellwerk piece without a ride as well.
+    sqlx::query("insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, stellwerk) select $1, image_id, $2, '2026-09-01T08:00:00Z', true from puzzle_pieces where customer_id = $1")
+        .bind(id)
+        .bind(if piece == 0 { 1 } else { 0 })
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (s, v) = call(&app, "GET", "/v1/me/puzzles", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let awarded = v["puzzles"][0]["awarded"].as_array().unwrap_or_else(|| panic!("awarded is a list: {v}"));
+    assert_eq!(awarded.len(), 2, "{v}");
+    let at: chrono::DateTime<Utc> = sqlx::query_scalar("select awarded_at from puzzle_pieces where journey_id = $1").bind(j).fetch_one(&pool).await.unwrap();
+    let earned = awarded.iter().find(|a| a["piece"] == piece).unwrap();
+    assert_eq!(earned["at"].as_str().unwrap().parse::<chrono::DateTime<Utc>>().unwrap(), at);
+    let given = awarded.iter().find(|a| a["piece"] != piece).unwrap();
+    assert_eq!(given["at"].as_str().unwrap().parse::<chrono::DateTime<Utc>>().unwrap(), "2026-09-01T08:00:00Z".parse::<chrono::DateTime<Utc>>().unwrap());
 }
 
 /// A piece from the Stellwerk came from no journey. It names one of the customer's own at random

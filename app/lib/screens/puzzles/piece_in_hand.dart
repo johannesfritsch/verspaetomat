@@ -191,6 +191,10 @@ class _PieceInHandState extends State<PieceInHand> {
                       Text(keepLastWord(p.title), style: VText.body.copyWith(color: VColors.inkOnDark2), textAlign: TextAlign.center),
                       const VGap.s(),
                       Text('Platz ${slot + 1} von ${p.pieces}', style: VText.caption.copyWith(color: VColors.inkOnDark3), textAlign: TextAlign.center),
+                      if (p.awardedAt[slot] case final at?) ...[
+                        const SizedBox(height: 2),
+                        Text('Bekommen am ${finishedOn(at)}', style: VText.caption.copyWith(color: VColors.inkOnDark3), textAlign: TextAlign.center),
+                      ],
                     ],
                   ),
                 ),
@@ -552,53 +556,4 @@ class _FilmButtonState extends State<_FilmButton> with SingleTickerProviderState
       },
     );
   }
-}
-
-/// A finished picture large (docs/51 §6, §9a, §9b): the picture as a thing in the hand, with its
-/// film's play button when it has one, the Verein's sentence and the day the last piece came.
-Future<void> showFinishedPicture(BuildContext context, ApiPuzzle p) {
-  return showVSheet<void>(
-    context,
-    builder: (ctx) => Padding(
-      padding: const EdgeInsets.only(bottom: VSpace.l),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          VSheetHeader(title: p.title, subtitle: p.ngoName),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(VSpace.sheet, VSpace.s, VSpace.sheet, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // The whole picture as a thing in the hand (§9a): it turns under a finger. As
-                // large as the sheet allows without pushing the sentence off it, and a little
-                // smaller than that, so its edge has room when it turns.
-                LayoutBuilder(
-                  builder: (context, c) {
-                    final maxHeight = MediaQuery.sizeOf(ctx).height * 0.5;
-                    final width = (c.maxWidth < maxHeight * p.aspectRatio ? c.maxWidth : maxHeight * p.aspectRatio) * 0.88;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: VSpace.m),
-                      child: Center(
-                        child: Semantics(image: true, label: 'Puzzle ${p.title}, fertig. Zum Drehen ziehen.', child: PictureTile(puzzle: p, width: width)),
-                      ),
-                    );
-                  },
-                ),
-                if (p.caption.isNotEmpty) ...[
-                  const VGap.m(),
-                  Text(p.caption, style: VText.bodyL),
-                ],
-                if (p.completedAt != null) ...[
-                  const VGap.s(),
-                  Text('Fertig am ${finishedOn(p.completedAt!)}', style: VText.caption),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
 }

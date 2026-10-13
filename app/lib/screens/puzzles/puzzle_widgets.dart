@@ -9,6 +9,7 @@ import '../../router.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import 'piece_in_hand.dart';
+import 'puzzle_sheet.dart' show showFinishedPicture;
 import 'puzzle_video.dart';
 
 /// The cut of a picture off the wire.

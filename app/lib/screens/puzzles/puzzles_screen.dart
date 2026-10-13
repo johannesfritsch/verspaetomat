@@ -5,7 +5,6 @@ import '../../repo/repo_scope.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/kit.dart';
 import '../claims/claims_widgets.dart' show Loader;
-import 'piece_in_hand.dart' show showFinishedPicture;
 import 'puzzle_sheet.dart';
 import 'puzzle_widgets.dart';
 

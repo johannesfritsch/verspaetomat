@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/models.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/puzzles/piece_in_hand.dart';
+import 'package:verspaetomat/screens/puzzles/puzzle_sheet.dart' show showFinishedPicture;
 import 'package:verspaetomat/screens/puzzles/puzzle_video.dart';
 import 'package:verspaetomat/screens/puzzles/puzzle_widgets.dart';
 import 'package:verspaetomat/screens/puzzles/puzzles_screen.dart';

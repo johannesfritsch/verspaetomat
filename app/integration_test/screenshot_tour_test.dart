@@ -431,6 +431,13 @@ void main() {
     await wait(tester, 600);
     await tester.tap(find.byKey(const Key('film-badge')).first, warnIfMissed: false);
     await shot('puzzle-fertig-film');
+    // A finished picture laid apart too, and one of its pieces with the day it came.
+    await tester.tap(find.byKey(const Key('segment-Teile')));
+    await shot('puzzle-fertig-teile');
+    await tester.tapAt(spreadSlotCentre(tester, 4));
+    await shot('puzzle-fertig-hand');
+    await tester.tap(find.byKey(const Key('piece-in-hand-close')));
+    await wait(tester, 800);
     await dismissSheet(tester);
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.home);
     await wait(tester, 600);

@@ -7,6 +7,7 @@ import 'package:verspaetomat/api/models.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/puzzles/piece_in_hand.dart' show PieceBack, boardFor;
 import 'package:verspaetomat/screens/puzzles/puzzle_widgets.dart' show ArrivalPiece, cutOf;
+import 'package:verspaetomat/screens/puzzles/puzzle_sheet.dart' show showFinishedPicture;
 import 'package:verspaetomat/screens/puzzles/puzzles_screen.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/widgets/kit.dart' show VSegmented;
@@ -30,6 +31,8 @@ void main() {
     height: 1200,
     // Slot 7 names the ride that brought it; the others name none.
     rides: {7: ApiPieceRide(journeyId: 'j7', date: DateTime(2026, 10, 12), from: 'Köln Hbf', to: 'Düsseldorf Hbf', minutes: 68, lines: ['RE 1'])},
+    // Slot 7 came on the evening of its ride; slot 0 from a server that did not say.
+    awardedAt: {7: DateTime.utc(2026, 10, 12, 17, 40)},
   );
 
   Future<void> pump(WidgetTester tester) async {
@@ -306,5 +309,96 @@ void main() {
     expect(find.descendant(of: find.byType(PieceBack), matching: find.textContaining('→')), findsNothing);
     // „Minuten-Teil" is its tier; a ride's minutes would be a line of their own.
     expect(find.descendant(of: find.byType(PieceBack), matching: find.textContaining(RegExp(r'^\d+ Minuten?$|^pünktlich$'))), findsNothing);
+  });
+
+  testWidgets('under the piece in the hand: the day it came, where the server said', (tester) async {
+    await pump(tester);
+    await openPieces(tester);
+    await tester.tapAt(spreadCentre(tester, 7));
+    await tester.pumpAndSettle();
+    // „12. Oktober", with the year after it once it is not this year's.
+    expect(find.textContaining('Bekommen am 12. Oktober'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('piece-in-hand-close')));
+    await tester.pumpAndSettle();
+    await tester.tapAt(spreadCentre(tester, 0));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Bekommen am'), findsNothing);
+  });
+
+  group('a finished picture', () {
+    final finished = ApiPuzzle(
+      imageId: 'a',
+      rows: 4,
+      cols: 3,
+      owned: [for (var i = 0; i < 12; i++) i],
+      tiers: [for (final c in tiers.split('')) c == 'H' ? PieceTier.hour : (c == 'q' ? PieceTier.quarter : PieceTier.minute)],
+      complete: true,
+      title: 'Nachtschicht am Gleis 1',
+      caption: 'Ein Becher Tee um drei Uhr nachts.',
+      ngoId: 'bahnhofsmission',
+      ngoName: 'Bahnhofsmission Köln',
+      imageUrl: 'assets/demo/puzzles/bahnhofsmission.webp',
+      width: 900,
+      height: 1200,
+      completedAt: DateTime.utc(2026, 10, 13, 9),
+      rides: {2: ApiPieceRide(journeyId: 'j2', date: DateTime(2026, 9, 3), from: 'Kißlegg', to: 'Memmingen', minutes: 25, lines: ['RE 96'])},
+      awardedAt: {2: DateTime.utc(2026, 9, 3, 8, 30)},
+    );
+
+    Future<void> open(WidgetTester tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final session = Session(demo: DemoState(), prefs: await SharedPreferences.getInstance(), apiUrl: '');
+      tester.view
+        ..physicalSize = const Size(393, 852)
+        ..devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(RepoScope(
+        session: session,
+        child: MaterialApp(
+          home: Builder(builder: (context) => Scaffold(body: TextButton(onPressed: () => showFinishedPicture(context, finished), child: const Text('öffnen')))),
+        ),
+      ));
+      await tester.tap(find.text('öffnen'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('opens whole, with the switch the pictures under way have', (tester) async {
+      await open(tester);
+      expect(find.byKey(const Key('picture-tile')), findsOneWidget);
+      expect(find.byKey(const Key('puzzle-view')), findsOneWidget);
+      expect(find.text('Ein Becher Tee um drei Uhr nachts.'), findsOneWidget);
+      expect(find.textContaining('Fertig am'), findsOneWidget);
+      // Finished: no count, nothing missing.
+      expect(find.text('12 von 12'), findsNothing);
+      expect(find.textContaining('Fehlt noch'), findsNothing);
+    });
+
+    testWidgets('laid apart, every piece is a tap away, with its ride on the back and its day under it', (tester) async {
+      await open(tester);
+      await tester.tap(find.byKey(const Key('segment-Teile')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('puzzle-spread')), findsOneWidget);
+      expect(find.byKey(const Key('picture-tile')), findsNothing);
+
+      await tester.tapAt(spreadCentre(tester, 2));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('piece-in-hand')), findsOneWidget);
+      expect(find.text('Platz 3 von 12'), findsOneWidget);
+      expect(find.textContaining('Bekommen am 3. September'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('segment-Rückseite')));
+      await tester.pumpAndSettle();
+      Finder onBack(String text) => find.descendant(of: find.byType(PieceBack), matching: find.text(text));
+      expect(onBack('RE 96'), findsOneWidget);
+      expect(onBack('Kißlegg'), findsOneWidget);
+      expect(onBack('→ Memmingen'), findsOneWidget);
+      expect(onBack('25 Minuten'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('piece-in-hand-close')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('puzzle-spread')), findsOneWidget, reason: 'back on the pieces');
+      await tester.tap(find.byKey(const Key('segment-Puzzle')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('picture-tile')), findsOneWidget);
+    });
   });
 }

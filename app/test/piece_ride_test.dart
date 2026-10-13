@@ -40,4 +40,16 @@ void main() {
     // On time: no „0 Minuten"; without line or day, no empty line.
     expect(pieceRideLines(const ApiPieceRide(journeyId: 'j', from: 'A', to: 'B')), ['A', '→ B', 'pünktlich']);
   });
+
+  test('when each piece came, by slot; nothing from a server before it', () {
+    final p = ApiPuzzle.fromJson(puzzle()..['awarded'] = [
+          {'piece': 0, 'at': '2026-10-12T17:40:00.123456+00:00'},
+          {'piece': 4, 'at': '2026-09-01T08:00:00Z'},
+          {'at': '2026-09-01T08:00:00Z'},
+          {'piece': 7},
+        ]);
+    expect(p.awardedAt.keys, unorderedEquals([0, 4]));
+    expect(p.awardedAt[0], DateTime.utc(2026, 10, 12, 17, 40, 0, 123, 456));
+    expect(ApiPuzzle.fromJson(puzzle()).awardedAt, isEmpty);
+  });
 }

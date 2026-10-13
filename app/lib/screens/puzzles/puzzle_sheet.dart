@@ -7,12 +7,17 @@ import '../../widgets/kit.dart';
 import 'piece_in_hand.dart';
 import 'puzzle_widgets.dart';
 
-/// The two ways of looking at a picture under way.
+/// The two ways of looking at a picture, under way or finished.
 enum PuzzleView { puzzle, pieces }
 
 /// A picture under way, large (docs/51 §6): the board as it stands, in 3D, with a hole for every
 /// piece still missing — or its pieces laid apart, each a tap away from the hand (§9a).
 Future<void> showPuzzle(BuildContext context, ApiPuzzle p) => showVSheet<void>(context, builder: (_) => PuzzleSheet(puzzle: p));
+
+/// A finished picture, large (docs/51 §6, §9a, §9b): the picture as a thing in the hand, with its
+/// film's play button when it has one, the Verein's sentence and the day the last piece came — or
+/// its pieces laid apart like a picture under way, so each still shows its ride and its day.
+Future<void> showFinishedPicture(BuildContext context, ApiPuzzle p) => showPuzzle(context, p);
 
 class PuzzleSheet extends StatefulWidget {
   const PuzzleSheet({super.key, required this.puzzle, this.view = PuzzleView.puzzle});
@@ -31,7 +36,7 @@ class _PuzzleSheetState extends State<PuzzleSheet> {
   @override
   Widget build(BuildContext context) {
     final p = widget.puzzle;
-    final missing = stillMissing(p);
+    final missing = p.complete ? null : stillMissing(p);
     final pieces = _view == PuzzleView.pieces;
     return Padding(
       padding: const EdgeInsets.only(bottom: VSpace.l),
@@ -71,21 +76,35 @@ class _PuzzleSheetState extends State<PuzzleSheet> {
                               )
                             : Center(
                                 key: const ValueKey('puzzle'),
-                                child: Semantics(
-                                  image: true,
-                                  label: 'Puzzle ${p.title}, ${puzzleProgress(p)} Teilen. Zum Drehen ziehen.',
-                                  child: PuzzleTile(puzzle: p, width: width),
-                                ),
+                                // Finished, the picture itself with its film's button; under way,
+                                // the board with its holes.
+                                child: p.complete
+                                    ? Semantics(image: true, label: 'Puzzle ${p.title}, fertig. Zum Drehen ziehen.', child: PictureTile(puzzle: p, width: width))
+                                    : Semantics(
+                                        image: true,
+                                        label: 'Puzzle ${p.title}, ${puzzleProgress(p)} Teilen. Zum Drehen ziehen.',
+                                        child: PuzzleTile(puzzle: p, width: width),
+                                      ),
                               ),
                       ),
                     );
                   },
                 ),
                 const VGap.m(),
-                Text(puzzleProgress(p), style: VText.title),
-                if (missing != null) ...[
-                  const VGap.xs(),
-                  Text(missing, style: VText.bodyS),
+                // Finished: the Verein's sentence and the day the last piece came. Under way: how
+                // far it has come, and what it still waits for.
+                if (p.complete) ...[
+                  if (p.caption.isNotEmpty) Text(p.caption, style: VText.bodyL),
+                  if (p.completedAt != null) ...[
+                    const VGap.s(),
+                    Text('Fertig am ${finishedOn(p.completedAt!)}', style: VText.caption),
+                  ],
+                ] else ...[
+                  Text(puzzleProgress(p), style: VText.title),
+                  if (missing != null) ...[
+                    const VGap.xs(),
+                    Text(missing, style: VText.bodyS),
+                  ],
                 ],
                 const VGap.xs(),
                 Text(

@@ -542,6 +542,10 @@ class DemoState extends ChangeNotifier {
   final Map<String, DateTime> puzzleLastPiece = {};
   final Map<String, DateTime> puzzleCompleted = {};
 
+  /// When each piece came, by picture and slot: the seeded ones spread from the first piece to the
+  /// last, in slot order; one from a ride in this session, the moment it came.
+  final Map<String, Map<int, DateTime>> puzzlePieceAt = {};
+
   /// Seeded, so the tour photographs the same pieces on every run.
   math.Random _dice = math.Random(17);
 
@@ -562,7 +566,8 @@ class DemoState extends ChangeNotifier {
       ..clear()
       ..addAll({
         'demo-bahnhofsmission': today.subtract(const Duration(days: 12)),
-        'demo-wald': today.subtract(const Duration(days: 40)),
+        // Inside the demo's ride history (from 25 August), so each piece has a ride before it.
+        'demo-wald': today.subtract(const Duration(days: 15)),
         'demo-kinderhospiz': today.subtract(const Duration(days: 3)),
       });
     puzzleLastPiece
@@ -575,6 +580,17 @@ class DemoState extends ChangeNotifier {
     puzzleCompleted
       ..clear()
       ..addAll({'demo-wald': today.subtract(const Duration(days: 6))});
+    puzzlePieceAt
+      ..clear()
+      ..addAll({
+        for (final MapEntry(key: id, value: slots) in puzzlePieces.entries)
+          id: {
+            for (final (i, slot) in (slots.toList()..sort()).indexed)
+              slot: slots.length == 1
+                  ? puzzleLastPiece[id]!
+                  : puzzleStarted[id]!.add(puzzleLastPiece[id]!.difference(puzzleStarted[id]!) * (i / (slots.length - 1))),
+          },
+      });
     _dice = math.Random(17);
     _nextPuzzle = null;
     _piecesToday.clear();
@@ -639,6 +655,7 @@ class DemoState extends ChangeNotifier {
     puzzlePieces.putIfAbsent(pick.id, () => {}).add(piece);
     puzzleStarted.putIfAbsent(pick.id, () => now);
     puzzleLastPiece[pick.id] = now;
+    puzzlePieceAt.putIfAbsent(pick.id, () => {})[piece] = now;
     if (puzzleComplete(pick.id)) puzzleCompleted[pick.id] = now;
     j.piece = DemoPiece(imageId: pick.id, piece: piece, ownCause: pick.ngoId == ngoId, at: now);
   }
@@ -653,8 +670,11 @@ class DemoState extends ChangeNotifier {
     final have = puzzlePieces.putIfAbsent(pick.id, () => {});
     final gaps = [for (var i = 0; i < pick.tiers.length; i++) if (!have.contains(i)) i];
     final last = gaps.lastWhere((i) => pick.tiers[i] == 'm', orElse: () => gaps.last);
-    have.addAll(gaps.where((i) => i != last));
-    puzzleStarted.putIfAbsent(pick.id, () => DateTime.now());
+    final added = gaps.where((i) => i != last).toList();
+    have.addAll(added);
+    final now = DateTime.now();
+    puzzleStarted.putIfAbsent(pick.id, () => now);
+    puzzlePieceAt.putIfAbsent(pick.id, () => {}).addAll({for (final i in added) i: now});
     _nextPuzzle = pick.id;
     // A showcase set-up, not a fourth ride of the day: the finish is what it is there to show.
     _piecesToday.clear();
