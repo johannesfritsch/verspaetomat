@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../repo/app_repository.dart';
 import '../community/community_widgets.dart' show showMyMinutesSource;
+import '../puzzles/puzzle_widgets.dart' show HomePuzzlesCard;
 import '../../api/events.dart';
 import '../../platform/geofence_sync.dart' show GeofenceSync;
 import '../share/share_moments.dart';
@@ -38,6 +39,19 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
 
   /// The share cards' figures (#49). Empty until loaded, and on a server without the endpoint.
   ApiShareFacts _facts = ApiShareFacts.empty;
+
+  /// The collection, for the card where „Deine Woche" stood (docs/51 §6). Null until loaded, and
+  /// while the puzzles are switched off.
+  ApiPuzzles? _puzzles;
+
+  /// The flag as the last load saw it: one that arrives later loads the card.
+  bool _puzzlesOn = false;
+
+  /// The first load failed: no card rather than a skeleton that never fills. A pull tries again.
+  bool _puzzlesFailed = false;
+
+  /// Which load is the latest: an older answer that comes back last does not overwrite it.
+  int _puzzlesGen = 0;
   late final ShareMoments _moments = ShareMoments(_session.prefs);
   bool _recordNew = false;
   bool _monthDue = false;
@@ -117,6 +131,32 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
       _lastMeStamp = stamp;
       _loadStanding();
     }
+    if (_session.puzzlesOn != _puzzlesOn) _loadPuzzles();
+  }
+
+  Future<void> _loadPuzzles() async {
+    final on = _session.puzzlesOn;
+    _puzzlesOn = on;
+    final gen = ++_puzzlesGen;
+    if (!on) {
+      if (_puzzles != null) setState(() => _puzzles = null);
+      return;
+    }
+    try {
+      final p = await _session.repo.puzzles();
+      if (!mounted || !_session.puzzlesOn || gen != _puzzlesGen) return;
+      setState(() {
+        _puzzles = p;
+        _puzzlesFailed = false;
+      });
+      // The films of finished pictures that are not on the phone yet (docs/51 §9b).
+      for (final x in p.puzzles) {
+        _session.videos.ensure(x);
+      }
+    } catch (_) {
+      // Keep the last ones.
+      if (mounted && gen == _puzzlesGen) setState(() => _puzzlesFailed = true);
+    }
   }
 
   Future<void> _loadStanding() async {
@@ -167,6 +207,7 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
         _error = null;
       });
       unawaited(_loadFacts());
+      unawaited(_loadPuzzles());
     } catch (e) {
       if (mounted) setState(() => _error = shortError(e));
     } finally {
@@ -316,7 +357,14 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
             },
           ),
 
-        _Momentum(standing: st, onTap: () => context.go(Routes.me)),
+        // docs/51 §6: the picture under way where the week stood; the week's figure is on Ich.
+        // With the puzzles switched off, the week as it always was.
+        if (!session.puzzlesOn)
+          _Momentum(standing: st, onTap: () => context.go(Routes.me))
+        else if (_puzzles != null)
+          HomePuzzlesCard(puzzles: _puzzles!)
+        else if (!_puzzlesFailed)
+          const VSkeletonCard(),
 
         // What the minutes are for. The mockup puts it at the foot of Home, and it is the one
         // line on this screen that is about somebody other than you.

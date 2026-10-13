@@ -12,7 +12,7 @@ import '../share/share_lines.dart';
 import '../share/share_moments.dart';
 import '../share/share_sheet.dart';
 import '../claims/claims_widgets.dart';
-import '../puzzles/puzzle_widgets.dart' show PuzzlesRow;
+import '../puzzles/puzzle_widgets.dart' show PuzzlesStrip;
 import 'community_widgets.dart';
 
 class _IchData {
@@ -179,6 +179,19 @@ class IchScreen extends StatelessWidget {
               ),
             ),
 
+            // docs/51 §6: the collection above the badges, under a heading of the same kind.
+            if (data.puzzles != null && session.puzzlesOn) ...[
+              VSectionHeader(
+                'Puzzles',
+                key: const Key('ich-puzzles'),
+                heading: true,
+                onCard: false,
+                linkLabel: 'Alle ansehen',
+                onLink: () => context.push(Routes.puzzles).then((_) => refresh()),
+              ),
+              PuzzlesStrip(puzzles: data.puzzles!),
+            ],
+
             VSectionHeader(
               'Abzeichen',
               heading: true,
@@ -203,8 +216,6 @@ class IchScreen extends StatelessWidget {
                 ],
               ),
             ),
-            // docs/51 §6: the collection beside the badges, with the picture under way as its face.
-            if (data.puzzles != null && session.puzzlesOn) PuzzlesRow(puzzles: data.puzzles!),
 
             const VSectionHeader('Meine Statistik', heading: true, onCard: false),
             VCard(

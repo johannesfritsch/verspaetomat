@@ -46,8 +46,10 @@ class PuzzlesBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final started = puzzles.puzzles.where((p) => !p.complete).toList();
-    final done = puzzles.puzzles.where((p) => p.complete).toList();
+    // The one most recently added to first, the newest finished first (§6).
+    final ordered = puzzlesInOrder(puzzles);
+    final started = ordered.where((p) => !p.complete).toList();
+    final done = ordered.where((p) => p.complete).toList();
 
     if (started.isEmpty && done.isEmpty) {
       return Padding(

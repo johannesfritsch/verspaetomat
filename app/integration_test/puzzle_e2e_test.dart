@@ -81,7 +81,7 @@ Future<void> rideSeventy(WidgetTester tester, Stellwerk sw, String customer) asy
   await settle(tester, 4000);
 }
 
-/// Ich, then its Puzzles row: the page.
+/// Ich, then „Alle ansehen" beside its Puzzles heading: the page.
 Future<void> openPuzzles(WidgetTester tester) async {
   await tapIcon(tester, Icons.person_outline);
   await pumpUntilFound(tester, find.textContaining('Meine Statistik'), timeout: const Duration(seconds: 40));
@@ -90,7 +90,7 @@ Future<void> openPuzzles(WidgetTester tester) async {
   await pumpUntilFound(tester, row, timeout: const Duration(seconds: 20));
   await tester.ensureVisible(row);
   await settle(tester, 800);
-  await tester.tap(row, warnIfMissed: false);
+  await tester.tap(find.descendant(of: row, matching: find.text('Alle ansehen')), warnIfMissed: false);
   await pumpUntilFound(tester, find.text('Deine Puzzles'), timeout: const Duration(seconds: 20));
   await settle(tester, 2500);
 }
@@ -127,6 +127,24 @@ void main() {
     }
     await tapInSheet(tester, 'Fertig');
     await pumpUntilFound(tester, homeIdle, timeout: const Duration(seconds: 40));
+
+    // Home: the picture under way where „Deine Woche" stood — or the week, with the flag off.
+    final homeCard = find.byKey(const Key('home-puzzles'));
+    if (puzzlesExpected) {
+      await pumpUntilFound(tester, homeCard, timeout: const Duration(seconds: 20));
+      await tester.ensureVisible(homeCard);
+      await settle(tester, 1500);
+      expect(find.text('DEINE WOCHE'), findsNothing);
+      expect(find.descendant(of: homeCard, matching: find.textContaining(RegExp(r'^(\d+ von 12|Fertig)$'))), findsOneWidget);
+      await shot(tester, 'home');
+    } else {
+      final week = find.text('DEINE WOCHE');
+      await pumpUntilFound(tester, week, timeout: const Duration(seconds: 20));
+      await tester.ensureVisible(week);
+      await settle(tester, 1500);
+      expect(homeCard, findsNothing);
+      await shot(tester, 'home-off');
+    }
 
     // Ich: the Puzzles row, and through it the page.
     if (puzzlesExpected) {
@@ -198,6 +216,24 @@ void main() {
     await pumpUntilGone(tester, find.byKey(const Key('puzzle-video')), timeout: const Duration(seconds: 40));
     await tapInSheet(tester, 'Fertig');
     await pumpUntilFound(tester, homeIdle, timeout: const Duration(seconds: 40));
+
+    // Home: the picture under way where „Deine Woche" stood — or the week, with the flag off.
+    final homeCard = find.byKey(const Key('home-puzzles'));
+    if (puzzlesExpected) {
+      await pumpUntilFound(tester, homeCard, timeout: const Duration(seconds: 20));
+      await tester.ensureVisible(homeCard);
+      await settle(tester, 1500);
+      expect(find.text('DEINE WOCHE'), findsNothing);
+      expect(find.descendant(of: homeCard, matching: find.textContaining(RegExp(r'^(\d+ von 12|Fertig)$'))), findsOneWidget);
+      await shot(tester, 'home');
+    } else {
+      final week = find.text('DEINE WOCHE');
+      await pumpUntilFound(tester, week, timeout: const Duration(seconds: 20));
+      await tester.ensureVisible(week);
+      await settle(tester, 1500);
+      expect(homeCard, findsNothing);
+      await shot(tester, 'home-off');
+    }
 
     // The finished picture from the Puzzles page, with its film's button.
     await openPuzzles(tester);

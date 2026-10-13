@@ -294,10 +294,10 @@ void main() {
     // docs/30: Home is the same square of paper wherever the phone thinks it is — no station,
     // no destinations, one button. The stations are the check-in's own first question now.
     await home('bahnsteig-wir-und-einchecken');
-    // docs/30: Wir is at the top now and Deine Woche wears the same box, which is below the
-    // fold — so the tour scrolls to it rather than leaving the change unphotographed.
+    // docs/51 §6: the puzzle card where Deine Woche stood (docs/30), below the fold — so the tour
+    // scrolls to it rather than leaving the change unphotographed. Demo has the puzzles on.
     await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -420));
-    await shot('bahnsteig-deine-woche');
+    await shot('bahnsteig-puzzles');
     await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, 420));
     await wait(tester, 400);
     // docs/24 §1 · docs/30: the button on Home opens the first of the three sheets, the same
@@ -458,6 +458,12 @@ void main() {
     demo.reset();
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.me);
     await wait(tester, 900);
+    // The Puzzles sit above the badges now (docs/51 §6), which puts both below the fold.
+    await Scrollable.ensureVisible(tester.element(find.byKey(const Key('ich-puzzles'))), alignment: 0.05);
+    await wait(tester, 600);
+    await shot('ich-puzzles');
+    await tester.ensureVisible(find.byType(BadgeIcon).first);
+    await wait(tester, 400);
     await tester.tap(find.byType(BadgeIcon).first, warnIfMissed: false);
     await wait(tester, 900);
     await tester.tap(find.widgetWithText(VGhostButton, 'Als Karte teilen').first, warnIfMissed: false);

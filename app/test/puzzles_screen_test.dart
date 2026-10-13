@@ -15,7 +15,7 @@ import 'package:verspaetomat/widgets/puzzle.dart';
 void main() {
   // The server's default for twelve: the hour at 4, quarters at 1, 6 and 10.
   const tiers = 'mqmmHmqmmmqm';
-  ApiPuzzle puzzle(String id, List<int> owned, {DateTime? completedAt}) => ApiPuzzle(
+  ApiPuzzle puzzle(String id, List<int> owned, {DateTime? completedAt, DateTime? lastPieceAt, bool hasVideo = false}) => ApiPuzzle(
         imageId: id,
         rows: 4,
         cols: 3,
@@ -30,6 +30,8 @@ void main() {
         width: 900,
         height: 1200,
         completedAt: completedAt,
+        lastPieceAt: lastPieceAt,
+        hasVideo: hasVideo,
       );
   final all = [for (var i = 0; i < 12; i++) i];
 
@@ -203,6 +205,68 @@ void main() {
       expect(find.text('12 von 12.'), findsOneWidget);
       expect(find.text('Fertig: Bild\u00A0a.'), findsOneWidget);
       expect(find.text('Satz zu a.'), findsOneWidget);
+    });
+  });
+
+  group('Home and Ich', () {
+    final mon = DateTime.utc(2026, 10, 5);
+    final tue = DateTime.utc(2026, 10, 6);
+
+    test('the picture most recently added to comes first, then the finished ones, newest first', () {
+      final order = puzzlesInOrder(ApiPuzzles(puzzles: [
+        puzzle('alt', all, completedAt: mon),
+        puzzle('b', [0], lastPieceAt: mon),
+        puzzle('neu', all, completedAt: tue),
+        puzzle('c', [0, 1], lastPieceAt: tue),
+      ]));
+      expect(order.map((p) => p.imageId), ['c', 'b', 'neu', 'alt']);
+    });
+
+    testWidgets('Home shows the picture under way, how far it is and what it waits for', (tester) async {
+      await pump(tester, await session(), HomePuzzlesCard(puzzles: ApiPuzzles(puzzles: [
+        puzzle('fertig', all, completedAt: tue),
+        puzzle('a', [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11], lastPieceAt: mon, hasVideo: true),
+      ])));
+      expect(find.text('DEINE PUZZLES'), findsOneWidget);
+      expect(find.text('Alle ansehen'), findsOneWidget);
+      expect(find.text('Bild\u00A0a'), findsOneWidget);
+      expect(find.text('11 von 12'), findsOneWidget);
+      expect(find.text('Fehlt noch: das Stunden-Teil.'), findsOneWidget);
+      expect(find.text('Bild fertig'), findsNothing);
+    });
+
+    testWidgets('Home promises the film while minutes would still do', (tester) async {
+      await pump(tester, await session(), HomePuzzlesCard(puzzles: ApiPuzzles(puzzles: [puzzle('a', [0, 3], lastPieceAt: mon, hasVideo: true)])));
+      expect(find.text('2 von 12'), findsOneWidget);
+      expect(find.text('Bewegt sich, wenn es fertig ist.'), findsOneWidget);
+    });
+
+    testWidgets('Home with everything finished shows the newest', (tester) async {
+      await pump(tester, await session(), HomePuzzlesCard(puzzles: ApiPuzzles(puzzles: [puzzle('alt', all, completedAt: mon), puzzle('neu', all, completedAt: tue, hasVideo: true)])));
+      expect(find.text('Bild\u00A0neu'), findsOneWidget);
+      expect(find.text('Fertig'), findsOneWidget);
+      expect(find.text('Das Bild bewegt sich jetzt.'), findsOneWidget);
+    });
+
+    testWidgets('Home before the first piece', (tester) async {
+      await pump(tester, await session(), const HomePuzzlesCard(puzzles: ApiPuzzles()));
+      expect(find.text('Deine erste Fahrt bringt das erste Teil.'), findsOneWidget);
+      await pump(tester, await session(), const HomePuzzlesCard(puzzles: ApiPuzzles(moreWaiting: false)));
+      expect(find.text('Noch keine Bilder.'), findsOneWidget);
+    });
+
+    testWidgets('Ich: one board per picture, the count under it', (tester) async {
+      await pump(tester, await session(), PuzzlesStrip(puzzles: ApiPuzzles(puzzles: [puzzle('fertig', all, completedAt: tue), puzzle('a', [0, 3], lastPieceAt: mon)])));
+      expect(find.byType(PuzzleBoard), findsNWidgets(2));
+      expect(find.text('2 von 12'), findsOneWidget);
+      expect(find.text('Fertig'), findsOneWidget);
+      // The one under way first.
+      expect(tester.getTopLeft(find.text('2 von 12')).dx, lessThan(tester.getTopLeft(find.text('Fertig')).dx));
+    });
+
+    testWidgets('Ich before the first piece', (tester) async {
+      await pump(tester, await session(), const PuzzlesStrip(puzzles: ApiPuzzles()));
+      expect(find.text('Deine erste Fahrt bringt das erste Teil.'), findsOneWidget);
     });
   });
 }

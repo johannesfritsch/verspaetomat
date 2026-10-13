@@ -190,12 +190,21 @@ Keine Konfetti: Die gehören dem Antrag (docs/27 §4).
 
 ## 6. Die Seite „Puzzles"
 
-Unterseite mit dem Standardkopf (Eyebrow „SAMMLUNG", Titel „Deine Puzzles"), erreichbar von Ich
-(Zeile „Puzzles" mit dem angefangenen Bild als Vorschau) und von der Karte bei der Ankunft.
+Unterseite mit dem Standardkopf (Eyebrow „SAMMLUNG", Titel „Deine Puzzles"), erreichbar von Home,
+von Ich und von der Karte bei der Ankunft.
+
+- **Home:** Die Karte „Deine Puzzles" steht, wo „Deine Woche" stand (die Minuten der Woche bleiben
+  auf Ich): das Bild, das zuletzt gewachsen ist, mit Verein, Titel, „8 von 12" und „Fehlt noch: …"
+  bzw. „Bewegt sich, wenn es fertig ist."; ist alles fertig, das neueste fertige Bild. Ein Tipp
+  öffnet die Seite. Bei ausgeschaltetem Flag bleibt „Deine Woche".
+- **Ich:** Überschrift „Puzzles" über „Abzeichen", gesetzt wie diese, mit „Alle ansehen"; darunter
+  die Bilder als Regal, vier nebeneinander, „7 von 12" oder „Fertig" darunter. Ein fertiges öffnet
+  sich groß, ein angefangenes öffnet die Seite.
 
 - **Angefangen:** je Bild eine Karte — das Bild im Raster mit Lücken, Titel, Verein, „7 von 12".
   Das zuletzt gewachsene oben.
-- **Fertig:** zwei Spalten, die ganzen Bilder ohne Fugen, Titel und Verein darunter. Ein Tipp
+- **Fertig:** zwei Spalten, die ganzen Bilder ohne Fugen, Titel und Verein darunter, das neueste
+  zuerst. Ein Tipp
   öffnet das Bild groß, mit dem Satz des Vereins und dem Tag, an dem das letzte Teil kam.
 - **Leer:** „Deine erste Fahrt bringt das erste Teil." Mit einem leeren Raster als Bild.
 - **Alles fertig:** „Alle Bilder sind fertig. Neue kommen, wenn die Vereine welche schicken."

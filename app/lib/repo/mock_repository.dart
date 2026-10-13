@@ -1246,8 +1246,9 @@ class MockRepository with RideWriteHook implements AppRepository {
     return ApiPuzzlePiece(puzzle: _puzzle(p), piece: d.piece, ownCause: d.ownCause, awardedAt: d.at.toUtc());
   }
 
-  /// The order the server sends: started pictures by their latest piece, then finished ones by
-  /// when they were finished, newest first. A picture nobody started is not on the page.
+  /// Started pictures by their latest piece, then finished ones by when they were finished, newest
+  /// first; the server sends no order, and the screens sort with `puzzlesInOrder` either way. A
+  /// picture nobody started is not on the page.
   @override
   Future<ApiPuzzles> puzzles() async {
     final all = Mock.puzzles.where((p) => state.puzzlePieces[p.id]?.isNotEmpty ?? false).map(_puzzle).toList();

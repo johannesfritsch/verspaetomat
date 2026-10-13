@@ -347,33 +347,165 @@ class _WatchLink extends StatelessWidget {
   }
 }
 
-/// Ich's door to the Puzzles (docs/51 §6), with the picture under way as its preview.
-class PuzzlesRow extends StatelessWidget {
-  const PuzzlesRow({super.key, required this.puzzles});
+/// The pictures in the order a glance wants them: the one most recently added to first, then the
+/// finished ones, newest first. The server lists them in no particular order.
+List<ApiPuzzle> puzzlesInOrder(ApiPuzzles puzzles) {
+  final epoch = DateTime.fromMillisecondsSinceEpoch(0);
+  final started = puzzles.puzzles.where((p) => !p.complete).toList()..sort((a, b) => (b.lastPieceAt ?? epoch).compareTo(a.lastPieceAt ?? epoch));
+  final done = puzzles.puzzles.where((p) => p.complete).toList()
+    ..sort((a, b) => (b.completedAt ?? b.lastPieceAt ?? epoch).compareTo(a.completedAt ?? a.lastPieceAt ?? epoch));
+  return [...started, ...done];
+}
+
+/// Home's look at the collection (docs/51 §6): the picture under way, big enough to see what is
+/// missing, and how far it is. Where „Deine Woche" stood; the week's figure lives on Ich.
+class HomePuzzlesCard extends StatelessWidget {
+  const HomePuzzlesCard({super.key, required this.puzzles});
   final ApiPuzzles puzzles;
 
   @override
   Widget build(BuildContext context) {
-    final started = puzzles.puzzles.where((p) => !p.complete).firstOrNull;
-    final done = puzzles.puzzles.where((p) => p.complete).firstOrNull;
-    final shown = started ?? done;
-    final String subtitle;
-    if (started != null) {
-      subtitle = '${started.ngoName} · ${puzzleProgress(started)}';
-    } else if (done != null) {
-      subtitle = 'Fertig: ${done.title}';
+    final ordered = puzzlesInOrder(puzzles);
+    final shown = ordered.firstOrNull;
+    final String headline;
+    final String? line;
+    if (shown == null && !puzzles.moreWaiting) {
+      headline = 'Noch keine Bilder.';
+      line = 'Sie kommen, wenn die Vereine welche schicken.';
+    } else if (shown == null) {
+      headline = 'Deine erste Fahrt bringt das erste Teil.';
+      line = 'Jede Fahrt bringt ein Stück von einem Bild, das ein Verein geschickt hat.';
+    } else if (!shown.complete) {
+      headline = puzzleProgress(shown);
+      line = stillMissing(shown) ?? (shown.hasVideo ? 'Bewegt sich, wenn es fertig ist.' : null);
     } else {
-      subtitle = 'Deine erste Fahrt bringt das erste Teil.';
+      headline = 'Fertig';
+      line = shown.hasVideo ? 'Das Bild bewegt sich jetzt.' : null;
     }
-    return VListCard(
-      key: const Key('ich-puzzles'),
-      leading: SizedBox(
-        width: 33,
-        child: shown == null ? const PuzzleBoard(cut: PuzzleCut(imageId: 'leer', rows: 4, cols: 3)) : PuzzleBoardOf(shown),
-      ),
-      title: 'Puzzles',
-      subtitle: subtitle,
+    return VCard(
+      key: const Key('home-puzzles'),
       onTap: () => context.push(Routes.puzzles),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          VSectionHeader('Deine Puzzles', linkLabel: 'Alle ansehen', onLink: () => context.push(Routes.puzzles)),
+          const VGap.s(),
+          VPanel(
+            tone: VPanelTone.neutral,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 84,
+                  child: shown == null ? const PuzzleBoard(cut: PuzzleCut(imageId: 'leer', rows: 4, cols: 3)) : PuzzleBoardOf(shown, complete: shown.complete),
+                ),
+                const SizedBox(width: VSpace.m),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (shown != null) ...[
+                        VEyebrow(shown.ngoName, size: VEyebrowSize.s),
+                        const VGap.xs(),
+                        Text(keepLastWord(shown.title), style: VText.bodyStrong, maxLines: 2, overflow: TextOverflow.ellipsis),
+                        const VGap.s(),
+                      ],
+                      Text(headline, style: shown == null ? VText.bodyStrong : VText.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                      if (line != null) ...[
+                        const VGap.xs(),
+                        Text(line, style: VText.bodyS, maxLines: 3, overflow: TextOverflow.ellipsis),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Ich's shelf of pictures, beside the badges and drawn like them (docs/51 §6): four across, the
+/// one under way first. A finished picture opens itself; one under way opens the Puzzles.
+class PuzzlesStrip extends StatelessWidget {
+  const PuzzlesStrip({super.key, required this.puzzles, this.visible = 4});
+  final ApiPuzzles puzzles;
+  final int visible;
+
+  @override
+  Widget build(BuildContext context) {
+    final ordered = puzzlesInOrder(puzzles);
+    if (ordered.isEmpty) {
+      return VCard(
+        onTap: () => context.push(Routes.puzzles),
+        child: Row(
+          children: [
+            const SizedBox(width: 44, child: PuzzleBoard(cut: PuzzleCut(imageId: 'leer', rows: 4, cols: 3))),
+            const SizedBox(width: VSpace.m),
+            Expanded(
+              child: Text(
+                puzzles.moreWaiting ? 'Deine erste Fahrt bringt das erste Teil.' : 'Noch keine Bilder. Sie kommen, wenn die Vereine welche schicken.',
+                style: VText.bodyS,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return VCard(
+      padding: const EdgeInsets.symmetric(horizontal: VSpace.card, vertical: VSpace.cardTight),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final slots = visible < 1 ? 1 : visible;
+          final fitted = constraints.hasBoundedWidth ? (constraints.maxWidth - (slots - 1) * VSpace.m) / slots : 64.0;
+          final width = fitted < 56 ? 56.0 : fitted;
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            // The card keeps the page's width with fewer pictures than slots, as the badges' does.
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: constraints.hasBoundedWidth ? constraints.maxWidth : 0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var i = 0; i < ordered.length; i++) ...[
+                    if (i > 0) const SizedBox(width: VSpace.m),
+                    SizedBox(width: width, child: _StripItem(puzzle: ordered[i])),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _StripItem extends StatelessWidget {
+  const _StripItem({required this.puzzle});
+  final ApiPuzzle puzzle;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = puzzle;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => p.complete ? showFinishedPicture(context, p) : context.push(Routes.puzzles),
+      child: Column(
+        children: [
+          PuzzleBoardOf(p),
+          const VGap.xs(),
+          Text(
+            p.complete ? 'Fertig' : puzzleProgress(p),
+            style: VText.caption.copyWith(color: p.complete ? VColors.ink : VColors.ink2),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 }
