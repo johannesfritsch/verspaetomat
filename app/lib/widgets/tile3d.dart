@@ -313,6 +313,7 @@ class Tile3D extends StatefulWidget {
     this.onTap,
     this.tilt,
     this.start = TileTilt.flat,
+    this.side,
   });
 
   /// Names the outline for the height-map cache: the picture and the slot.
@@ -351,6 +352,10 @@ class Tile3D extends StatefulWidget {
 
   /// Where an interactive tile starts before it springs to rest — flat when it rises out of its slot.
   final TileTilt start;
+
+  /// Which side it rests on, for a switch beside it: false the front, true the back. Setting it
+  /// turns the tile over; a swipe that turns it over writes it back.
+  final ValueNotifier<bool>? side;
 
   /// The phone's lean, as a fraction of full tilt in x and y (−1 … 1). Null: no sensor — tests set it.
   static Stream<Offset> Function()? motion = _accelerometer;
@@ -395,6 +400,8 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
     super.initState();
     _ticker = createTicker(_onTick);
     _layout();
+    widget.side?.addListener(_onSide);
+    _physics.back = widget.side?.value ?? false;
     final ready = TileShading.ready;
     if (ready != null) {
       _shader = ready.program.fragmentShader();
@@ -430,6 +437,24 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
   void didUpdateWidget(Tile3D old) {
     super.didUpdateWidget(old);
     if (old.outline != widget.outline || old.width != widget.width) _layout();
+    if (old.side != widget.side) {
+      old.side?.removeListener(_onSide);
+      widget.side?.addListener(_onSide);
+      _onSide();
+    }
+  }
+
+  /// The switch beside the tile was set: turn over to that side.
+  void _onSide() {
+    final back = widget.side?.value ?? false;
+    if (_physics.back == back) return;
+    _physics.back = back;
+    if (_calm || !_onTop) {
+      _physics.settle();
+      _frame.tick();
+    } else {
+      _kick();
+    }
   }
 
   void _layout() {
@@ -510,6 +535,7 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
 
   @override
   void dispose() {
+    widget.side?.removeListener(_onSide);
     _motion?.cancel();
     _ticker.dispose();
     _shader?.dispose();
@@ -606,6 +632,8 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
   void _panEnd(DragEndDetails d) {
     // Still frames keep the swipe that turns it over, and skip the motion that gets it there.
     _physics.release(d.velocity.pixelsPerSecond, _box.width);
+    final side = widget.side;
+    if (side != null && side.value != _physics.back) side.value = _physics.back;
     if (_calm) {
       _physics.settle();
       _frame.tick();

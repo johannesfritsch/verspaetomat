@@ -660,43 +660,11 @@ class DemoState extends ChangeNotifier {
     _piecesToday.clear();
   }
 
-  // -- Rides and Nachtrag ---------------------------------------------------
+  // -- Rides -----------------------------------------------------------------
   final List<RideRecord> rides = List.of(Mock.rides);
 
   /// Minutes counted in this session on top of the mocked figures.
   int bonusMinutes = 0;
-
-  /// E4: a ride entered after the fact. Counts its minutes, claimable, never ranks (docs/47).
-  void addNachtrag({required Departure departure, required Stop exitStop, required DateTime date}) {
-    final delay = departure.cancelled ? 60 : departure.delay;
-    rides.insert(0, RideRecord(date: date, line: departure.line, from: Mock.homeStation, to: exitStop.name, delay: delay, cancelled: departure.cancelled, verified: false));
-    bonusMinutes += delay;
-    if (delay >= 60) {
-      incidents.insert(
-        0,
-        Incident(
-          id: 'i-nachtrag-${DateTime.now().millisecondsSinceEpoch}',
-          date: date,
-          line: departure.line,
-          from: Mock.homeStation,
-          to: exitStop.name,
-          delayMinutes: delay,
-          amount: claimAmountFor(ticket, departure.category, delay),
-          ticket: ticket,
-          operator: departure.operator,
-          desk: Mock.deskFor(departure.operator),
-          status: IncidentStatus.gesammelt,
-          plannedArrival: exitStop.planned,
-          actualArrival: _add(exitStop.planned, delay),
-          cancelled: departure.cancelled,
-          ngoId: ngoId,
-          fare: ticket == TicketType.einzelfahrkarte ? 39.9 : null,
-        ),
-      );
-    }
-    _refreshReady();
-    notifyListeners();
-  }
 
   /// Marks open incidents "bereit" when their desk's bundle can be sent.
   void _refreshReady() {

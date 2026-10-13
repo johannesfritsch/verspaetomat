@@ -11,7 +11,7 @@ The block list from docs/16 was right in content and wrong in density. Home now 
 3. **Deine Anträge**: the four-step cycle strip (Sammeln → Antrag bereit → Eingereicht → Bestätigt), the one status line beneath the active step, the primary button when a bundle is ready. Tap → Anträge.
 4. **Wir**: one line, `1.208.316 Minuten haben wir gewartet · 1.372 davon deine`. Tap → Wir.
 
-Gone from Home: the standing/rank line (it moves to Wir next to the boards), the "next thing" card (mail → the Anträge badge, deadline → Anträge, badge → Ich), the community euro line. The only conditional extra: a small caption link `Gestern vergessen einzuchecken?` under the card when the nachtrag rule applies (rides on ≥ 3 of the last 14 days, none yesterday).
+Gone from Home: the standing/rank line (it moves to Wir next to the boards), the "next thing" card (mail → the Anträge badge, deadline → Anträge, badge → Ich), the community euro line. The caption link `Gestern vergessen einzuchecken?` that stood under the card is gone too (13 October 2026, docs/11 E4).
 
 ## 2. The Einchecken card: destinations from history only
 

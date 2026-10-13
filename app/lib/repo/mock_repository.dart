@@ -846,18 +846,6 @@ class MockRepository with RideWriteHook implements AppRepository {
   @override
   Future<void> dismissRide() async => state.dismissArrival();
 
-  @override
-  Future<ApiArrivalResult> nachtrag(NachtragRequest n) async {
-    if (n.ticketId != null) await _useTicket([JourneyTicketChoice.existing(n.ticketId!)]);
-    final d = _findDeparture(n.tripId);
-    if (d == null) throw StateError('unknown trip ${n.tripId}');
-    final stop = d.stops.firstWhere((s) => s.name == n.exitStationName, orElse: () => d.stops.last);
-    state.addNachtrag(departure: d, exitStop: stop, date: n.date);
-    final rec = state.rides.first;
-    final inc = d.delay >= 60 ? state.incidents.first : null;
-    return ApiArrivalResult(ride: _rideRecord(rec, 0), incident: inc == null ? null : _incident(inc));
-  }
-
   // -- ledger and claims ----------------------------------------------------
 
   @override

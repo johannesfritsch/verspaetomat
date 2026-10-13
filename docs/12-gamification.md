@@ -56,7 +56,7 @@ Badges that depend on the operator's stated cause (Stellwerksstörung, Personen 
 - **Meine Linie**: the seven-day patience board for one line, e.g. "RE 7 Krefeld–Rheine". Winnable, recognisable, the one people screenshot.
 - **Meine Stadt**: seven-day board per city.
 - **Deutschland**: for the curious. Never the default.
-- Boards rank the counted minutes of the last seven days, and only rides verified by a location fix at the station. Unverified rides (and every Nachtrag) still count their minutes and euros for the customer; they just do not rank.
+- Boards rank the counted minutes of the last seven days, and only rides verified by a location fix at the station. Unverified rides (and the old Nachträge, a feature removed on 13 October 2026) still count their minutes and euros for the customer; they just do not rank.
 - Everyone can hide themselves from boards with one switch.
 
 ## What we deliberately do not do

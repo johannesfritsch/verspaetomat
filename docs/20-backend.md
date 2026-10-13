@@ -121,7 +121,7 @@ One binary, several loops:
 - Monthly cap: at most 25 % of the ticket price per D-Ticket month; incidents beyond the cap are recorded but marked `gedeckelt` (in ride order per calendar month, rejected and expired ones not counted; released when an earlier one drops out). Enforced in `rules::apply_monthly_cap` on every status refresh.
 - Deadlines: legal 3 months from the ride, warning at 21 days before, expiry at the deadline; DB's 12-month goodwill is noted on the incident but never relied on.
 - Status machine for incidents: `gesammelt → bereit → eingereicht → bestätigt | abgelehnt`, plus `verfallen` from any open state, plus `gedeckelt`.
-- Points: one per minute late from minute 1; cancellation counts as 60; Nachtrag earns 1; only rides with a location fix at the station rank on boards.
+- Points: one per minute late from minute 1; cancellation counts as 60; only rides with a location fix at the station rank on boards.
 - Relay discipline: nothing is sent without a signed claim and an explicit send call; the server never composes mail to a railway on its own; every inbound mail is forwarded whole.
 - **Where mail goes is data, not code.** The destination of every outbound claim mail comes from the
   `mail_routes` table and from nowhere else — no fixture seeds it, no migration inserts into it, and

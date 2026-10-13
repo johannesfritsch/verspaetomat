@@ -230,22 +230,13 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
 
     return VTabScaffold(
       onRefresh: _load,
-      header: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // The masthead carries the app's own name and the gear. Home is the one tab that wears
-          // it: the other three are places inside the app, and this is the front door.
-          VAppMasthead(
-            onSettings: () => context.push(Routes.settings).then((_) => _load()),
-            caption: _nearby.simulated ? 'Standort: Stellwerk · ${_nearby.label ?? ''}' : null,
-          ),
-          const VGap.l(),
-          const VTabHeader(
-            title: 'Willkommen',
-            subtitle: 'Jede verspätete Minute kann etwas bewegen.',
-            narrow: true,
-          ),
-        ],
+      // Home's word is the greeting. The app's own name is the mark beside it, as on every tab.
+      header: VTabHeader(
+        title: 'Willkommen',
+        subtitle: 'Jede verspätete Minute kann etwas bewegen.',
+        caption: _nearby.simulated ? 'Standort: Stellwerk · ${_nearby.label ?? ''}' : null,
+        narrow: true,
+        onSettings: () => context.push(Routes.settings).then((_) => _load()),
       ),
       children: [
         if (_error != null) ...[
@@ -306,21 +297,6 @@ class _BahnsteigScreenState extends State<BahnsteigScreen> {
           LocationNudgeCard(
             onOpen: () => showLocationNudgeSheet(context, _nudge),
             onDismiss: _nudge.remindLater,
-          ),
-
-        // Under the card: yesterday's forgotten check-in, only for people who ride most days.
-        if (st.next?.kind == 'nachtrag')
-          VCard(
-            padding: const EdgeInsets.all(VSpace.cardTight),
-            onTap: () => context.push(Routes.addRide),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text('Gestern vergessen einzuchecken?', style: VText.bodyS),
-                ),
-                const VChevron(),
-              ],
-            ),
           ),
 
         // #49: a new longest delay, and last month once it is over. Each once; both live on Ich.

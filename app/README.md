@@ -32,7 +32,7 @@ lib/
   screens/
     showcase_screen.dart  the index of every screen
     onboarding/           Willkommen, Berechtigungen, Setup
-    ride/                 Bahnsteig, Einchecken, Ausstieg, Unterwegs, Angekommen, Nachtrag
+    ride/                 Bahnsteig, Einchecken, Ausstieg, Unterwegs, Angekommen
     claims/               Konto, Antrag (5 Schritte), Antwort, Zweck
     community/            Wir, Team, Ich, Historie, Einstellungen, Datenherkunft
 ```

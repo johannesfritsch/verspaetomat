@@ -48,7 +48,6 @@ const tour = <(String, String)>[
   ('antwort-ok', '${Routes.reply}?mail=m-0718-in'),
   ('antwort-frage', '${Routes.reply}?demo=question'),
   ('antwort-nein', '${Routes.reply}?demo=rejected'),
-  ('nachtrag', Routes.addRide),
   ('wir', Routes.community),
   ('zweck', '${Routes.cause}?id=bahnhofsmission'),
   ('ich', Routes.me),

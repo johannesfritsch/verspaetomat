@@ -80,7 +80,6 @@ Since docs/18 §4 every claim has its own address `antrag-<8 hex>@RELAY_DOMAIN` 
 | Wo steigst du aus? | trip stops | exit stop |
 | Unterwegs | current ride live state (delay, passed stops, cause, ETA) | change train |
 | Angekommen | final delay, points, new badge, claim amount and bundle state for the desk | dismiss; manual arrival time when no data |
-| Nachtrag | past departures for a date and station | Nachtrag ride |
 | Konto | incidents grouped by desk with summary, confirmed and submitted totals, deadline, sent dates and expected reply per bundle, evidence per incident | start a draft |
 | Antrag | draft, desk address, personal data, ticket months required, NGO account details, form preview, mail preview with BCC | personal data, attachments, NGO override, signature, send |
 | Antwort | mails for a claim, classification, amount, templates | customer reply, postal reply upload |

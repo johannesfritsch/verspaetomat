@@ -97,7 +97,7 @@ gewollt (Johannes: „So it takes a bit to complete"), und es entschärft den Na
 - **Jede beendete Reise bringt ein Teil, einmal pro Reise** (nicht pro Zug, wie die Minuten,
   docs/17): angekommen, aufgegeben (man hat gewartet, docs/22 §1) oder ausgefallen. Dass ein Teil
   kommt, belohnt, dass du da warst; wie selten es ist, sagt die Verspätung (§2a).
-- **Kein Teil** für einen Nachtrag (er rankt auch nicht, docs/47), für „nicht mitgefahren" und
+- **Kein Teil** für einen alten Nachtrag (er rankt auch nicht, docs/47; neue gibt es seit 13. Oktober 2026 nicht mehr), für „nicht mitgefahren" und
   für eine Fahrt, die vor dem Ende gelöscht wird.
 - **Höchstens drei Teile am Tag** (Berliner Zeit). Gegen das Ein- und Auschecken am Sofa; ein
   Pendler mit Hinweg, Rückweg und einer Erledigung merkt die Grenze nie.

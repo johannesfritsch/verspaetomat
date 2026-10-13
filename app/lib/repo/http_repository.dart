@@ -229,7 +229,6 @@ class HttpRepository with RideWriteHook implements AppRepository {
   @override
   Future<void> dismissRide() => client.dismissRide();
   @override
-  Future<ApiArrivalResult> nachtrag(NachtragRequest request) => client.nachtrag(request);
 
   // Journeys: an older backend without the routes answers 404 → empty, never an error.
   @override

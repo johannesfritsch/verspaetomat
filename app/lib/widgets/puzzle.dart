@@ -689,3 +689,302 @@ class _PiecePainter extends CustomPainter {
   @override
   bool shouldRepaint(_PiecePainter old) => old.t != t || old.image != image || old.index != index || old.cut != cut || old.tier != tier;
 }
+
+// ---------------------------------------------------------------------------
+// The whole picture as it stands, and its pieces laid apart
+// ---------------------------------------------------------------------------
+
+/// The picture as far as it has come, as one outline on a board of [board] size: a board with
+/// rounded corners of [radius], and a hole where each piece not in [owned] belongs. Its bounds are
+/// the board's unless a whole outer row or column is still missing.
+Path boardOutline(PuzzleCut cut, Set<int> owned, Size board, {double radius = 0}) {
+  final whole = Path()..addRRect(RRect.fromRectAndRadius(Offset.zero & board, Radius.circular(radius)));
+  final cell = Size(board.width / cut.cols, board.height / cut.rows);
+  final gaps = Path();
+  var any = false;
+  for (var i = 0; i < cut.pieces; i++) {
+    if (owned.contains(i)) continue;
+    gaps.addPath(cut.piece(i, cell), Offset.zero);
+    any = true;
+  }
+  return any ? Path.combine(PathOperation.difference, whole, gaps) : whole;
+}
+
+/// What lies on the face of a board with holes: the seams between its pieces and the rims and
+/// clocks of the rare ones (docs/51 §2a). Drawn over [bounds] of a board of [board] size, stretched
+/// to the painter's size — the part of the board a tile of [boardOutline] shows.
+class PuzzleMarksPainter extends CustomPainter {
+  PuzzleMarksPainter({required this.cut, required this.owned, required this.board, required this.bounds, required this.outline, this.tiers});
+  final PuzzleCut cut;
+  final Set<int> owned;
+  final Size board;
+  final Rect bounds;
+  final Path outline;
+  final List<PieceTier>? tiers;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (bounds.isEmpty) return;
+    final s = size.width / bounds.width;
+    canvas
+      ..save()
+      ..scale(s)
+      ..translate(-bounds.left, -bounds.top)
+      ..clipPath(outline);
+    final cell = Size(board.width / cut.cols, board.height / cut.rows);
+    // As thick as the board's seams look at the size it is drawn.
+    final line = _line(Size(cell.width * s, cell.height * s)) / s;
+    final light = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = line
+      ..color = VColors.paperElevated.withValues(alpha: 0.35);
+    final seam = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = line
+      ..color = VColors.ink.withValues(alpha: 0.3);
+    for (final i in owned) {
+      final path = cut.piece(i, cell);
+      canvas.drawPath(path.shift(Offset(line, line)), light);
+      canvas.drawPath(path, seam);
+    }
+    final t = tiers;
+    if (t != null) {
+      for (final i in owned) {
+        if (i >= t.length) continue;
+        // The rim and the clock at the size they have on a board this large on the screen.
+        canvas.save();
+        final slot = cut.cellRect(i, cell);
+        canvas.translate(slot.left, slot.top);
+        canvas.scale(1 / s);
+        final shown = Size(cell.width * s, cell.height * s);
+        _drawRim(canvas, cut.slotPath(i ~/ cut.cols, i % cut.cols, shown), t[i], shown, 1);
+        _drawMark(canvas, t[i], Offset.zero & shown, shown, 1);
+        canvas.restore();
+      }
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(PuzzleMarksPainter old) =>
+      old.cut != cut || old.board != board || old.bounds != bounds || old.tiers != tiers || old.owned.length != owned.length || !old.owned.containsAll(owned);
+}
+
+/// A picture's pieces laid apart on the table (docs/51 §6): each where it belongs, with room
+/// between them, the ones not yet here as grey slots. Flat — a tap on a piece you have hands it
+/// to [onPieceTap], which lifts it into the hand.
+class PuzzleSpread extends StatelessWidget {
+  const PuzzleSpread({
+    super.key,
+    required this.cut,
+    required this.owned,
+    required this.pieceLabel,
+    this.tiers,
+    this.image,
+    this.aspectRatio,
+    this.onPieceTap,
+  });
+
+  final PuzzleCut cut;
+  final Set<int> owned;
+  final List<PieceTier>? tiers;
+  final ImageProvider? image;
+
+  /// Width over height of the picture. The grid's own when null.
+  final double? aspectRatio;
+
+  /// What a screen reader says for each piece you have.
+  final String Function(int slot) pieceLabel;
+
+  /// The piece's slot, and its rect on the screen.
+  final void Function(int slot, Rect global)? onPieceTap;
+
+  /// The room between two pieces, as a share of a cell's shorter side: more than a knob reaches,
+  /// so no two pieces touch.
+  static const gap = 0.4;
+
+  /// The cell size and the gap that fit the spread into [box].
+  static ({Size cell, double gap}) fit(PuzzleCut cut, double aspectRatio, Size box) {
+    // A cell one unit high, and its width from the picture's proportions.
+    final w = aspectRatio * cut.rows / cut.cols;
+    final g = gap * math.min(w, 1.0);
+    final across = cut.cols * w + (cut.cols - 1) * g;
+    final down = cut.rows + (cut.rows - 1) * g;
+    final k = math.min(box.width / across, box.height / down);
+    return (cell: Size(w * k, k), gap: g * k);
+  }
+
+  /// Where slot [index] is moved to from its place on the board.
+  static Offset shift(PuzzleCut cut, int index, double gap) => Offset((index % cut.cols) * gap, (index ~/ cut.cols) * gap);
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final ratio = aspectRatio ?? cut.cols / cut.rows;
+        final f = fit(cut, ratio, c.biggest);
+        final size = Size(cut.cols * f.cell.width + (cut.cols - 1) * f.gap, cut.rows * f.cell.height + (cut.rows - 1) * f.gap);
+        int? at(Offset local) {
+          for (final i in owned) {
+            if (cut.piece(i, f.cell).shift(shift(cut, i, f.gap)).contains(local)) return i;
+          }
+          return null;
+        }
+
+        final tap = onPieceTap;
+        return Center(
+          child: SizedBox.fromSize(
+            size: size,
+            child: Builder(
+              builder: (context) => GestureDetector(
+                key: const Key('puzzle-spread'),
+                behavior: HitTestBehavior.opaque,
+                onTapUp: tap == null
+                    ? null
+                    : (d) {
+                        final slot = at(d.localPosition);
+                        if (slot == null) return;
+                        final box = context.findRenderObject() as RenderBox?;
+                        if (box == null) return;
+                        final bounds = cut.piece(slot, f.cell).shift(shift(cut, slot, f.gap)).getBounds();
+                        tap(slot, box.localToGlobal(bounds.topLeft) & bounds.size);
+                      },
+                child: PuzzlePicture(
+                  image: image,
+                  builder: (context, img) => CustomPaint(
+                    size: size,
+                    painter: _SpreadPainter(
+                      cut: cut,
+                      owned: owned,
+                      tiers: tiers,
+                      image: img,
+                      cell: f.cell,
+                      gap: f.gap,
+                      label: pieceLabel,
+                      onTap: tap == null
+                          ? null
+                          : (slot) {
+                              final box = context.findRenderObject() as RenderBox?;
+                              final bounds = cut.piece(slot, f.cell).shift(shift(cut, slot, f.gap)).getBounds();
+                              tap(slot, box == null ? bounds : box.localToGlobal(bounds.topLeft) & bounds.size);
+                            },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SpreadPainter extends CustomPainter {
+  _SpreadPainter({
+    required this.cut,
+    required this.owned,
+    required this.tiers,
+    required this.image,
+    required this.cell,
+    required this.gap,
+    required this.label,
+    required this.onTap,
+  });
+  final PuzzleCut cut;
+  final Set<int> owned;
+  final List<PieceTier>? tiers;
+  final ui.Image? image;
+  final Size cell;
+  final double gap;
+  final String Function(int slot) label;
+  final void Function(int slot)? onTap;
+
+  Size get _board => Size(cell.width * cut.cols, cell.height * cut.rows);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final line = _line(cell);
+    final t = tiers;
+    final marks = t != null && cell.shortestSide >= _markMinCell;
+    // The slots still empty first, grey as on the board; then the pieces, lying on the table.
+    for (var i = 0; i < cut.pieces; i++) {
+      if (owned.contains(i)) continue;
+      final path = cut.piece(i, cell).shift(PuzzleSpread.shift(cut, i, gap));
+      canvas.drawPath(path, Paint()..color = VColors.track);
+      if (marks && i < t.length) {
+        canvas.save();
+        canvas.translate(PuzzleSpread.shift(cut, i, gap).dx, PuzzleSpread.shift(cut, i, gap).dy);
+        _drawMark(canvas, t[i], cut.cellRect(i, cell), cell, 0.6);
+        canvas.restore();
+      }
+    }
+    for (final i in owned) {
+      final offset = PuzzleSpread.shift(cut, i, gap);
+      final path = cut.piece(i, cell).shift(offset);
+      for (final s in VShadow.card) {
+        canvas.drawPath(
+          path.shift(s.offset),
+          Paint()
+            ..color = s.color.withValues(alpha: (s.color.a * 2).clamp(0.0, 1.0))
+            ..maskFilter = MaskFilter.blur(BlurStyle.normal, Shadow.convertRadiusToSigma(s.blurRadius)),
+        );
+      }
+      canvas.save();
+      canvas.clipPath(path);
+      final img = image;
+      if (img != null) {
+        canvas.translate(offset.dx, offset.dy);
+        _drawPicture(canvas, img, _board);
+        canvas.translate(-offset.dx, -offset.dy);
+      } else {
+        canvas.drawPath(path, Paint()..color = VColors.hairlineStrong);
+      }
+      canvas.restore();
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = line
+          ..color = VColors.ink.withValues(alpha: 0.2),
+      );
+      if (t != null && i < t.length) {
+        canvas.save();
+        canvas.translate(offset.dx, offset.dy);
+        _drawRim(canvas, cut.piece(i, cell), t[i], cell, 1);
+        if (marks) _drawMark(canvas, t[i], cut.cellRect(i, cell), cell, 1);
+        canvas.restore();
+      }
+    }
+  }
+
+  /// One node per piece you have, in reading order, each a button that lifts it into the hand.
+  @override
+  SemanticsBuilderCallback get semanticsBuilder => (size) => [
+        for (var i = 0; i < cut.pieces; i++)
+          if (owned.contains(i))
+            CustomPainterSemantics(
+              key: ValueKey('spread-$i'),
+              rect: cut.piece(i, cell).shift(PuzzleSpread.shift(cut, i, gap)).getBounds(),
+              properties: SemanticsProperties(
+                label: label(i),
+                button: onTap != null,
+                textDirection: TextDirection.ltr,
+                onTap: onTap == null ? null : () => onTap!(i),
+              ),
+            ),
+      ];
+
+  @override
+  bool shouldRebuildSemantics(_SpreadPainter old) => old.cell != cell || old.gap != gap || old.owned.length != owned.length || !old.owned.containsAll(owned);
+
+  @override
+  bool shouldRepaint(_SpreadPainter old) =>
+      old.cut != cut ||
+      old.image != image ||
+      old.cell != cell ||
+      old.gap != gap ||
+      old.tiers != tiers ||
+      old.owned.length != owned.length ||
+      !old.owned.containsAll(owned);
+}

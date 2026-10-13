@@ -134,6 +134,7 @@ little on purpose; the rest is ours to find out.
   stand for never leave the server. An id we have given out is never reused, and an id from a build
   older than the table still works. There is no live fallback for nearby or search: an empty answer
   means the table is wrong, and the table is ours to fix (issue #37, docs/44).
-- No streaks, no campaigns, no employer matching, no teams: removed on purpose.
+- No streaks, no campaigns, no employer matching, no teams, no Nachtrag (a ride entered after the
+  fact: anyone could claim a late train they were never on; docs/11 E4): removed on purpose.
 - Test customers: the E2E resets only its own customer. Do not reset or locate other people's customers without saying so.
-- Sub-screens use the standard header (caption eyebrow + h2 title); tabs use `TabHeader`. Figures in pairs share one size. See the visual pass notes in docs/30.
+- Sub-screens use the standard header (caption eyebrow + h2 title); tabs use `VTabHeader` (the masthead row: app mark, the tab's word, one line). Figures in pairs share one size. See the visual pass notes in docs/30.

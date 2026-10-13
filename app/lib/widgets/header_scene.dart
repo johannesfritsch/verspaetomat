@@ -44,8 +44,8 @@ enum VHeaderSceneArt {
   /// The file, spelled out in full so a grep for the filename finds the drawing that uses it.
   final String asset;
 
-  /// A corner vignette, drawn against the top of its plate, rather than a landscape band hanging
-  /// from its horizon. The default is the band: a new drawing that forgets to say is far more
+  /// A corner vignette, drawn against the top of its plate, rather than a landscape that covers
+  /// its band. The default is the band: a new drawing that forgets to say is far more
   /// likely to be a landscape, and that is also the harmless way round.
   final bool vignette;
 }
@@ -69,7 +69,7 @@ class VHeaderScene extends StatelessWidget {
         // Two masks. The left one lets the drawing dissolve into the page where the title sits;
         // the bottom one stops it ending on a horizontal line just above the first card, because
         // its own background is a hair brighter than the paper. Nothing fades at the top: the
-        // drawing is meant to run up behind the status bar and off the screen.
+        // drawing runs up behind the status bar to the edge of the screen.
         child: ShaderMask(
           blendMode: BlendMode.dstIn,
           shaderCallback: (rect) => LinearGradient(
@@ -92,14 +92,19 @@ class VHeaderScene extends StatelessWidget {
             child: ClipRect(
               child: Image.asset(
                 art.asset,
-                // fitWidth, not cover. The drawing is shipped at the band's own proportions, so
-                // tying it to the width fills the band top to bottom at exactly the size it was
-                // drawn. Cover would scale it to the height instead and the train would grow
-                // until it filled the screen.
-                fit: BoxFit.fitWidth,
-                // The landscape hangs from its horizon, so it is anchored at the bottom. A corner
-                // vignette is drawn against the top of its plate and has to stay there.
-                alignment: art.vignette ? Alignment.topCenter : Alignment.bottomCenter,
+                // A corner vignette is drawn against the top of its plate, at its own size, and
+                // stays there. A landscape covers its band: the band starts at the top edge of
+                // the screen, and a drawing tied only to the width and hung from its horizon
+                // stopped short of that edge whenever the band was taller than the drawing — its
+                // top ran across the status bar as a line, and on Ich as a sky that began in mid
+                // air. The tab band is shorter than the drawing, so cover is the width fit there
+                // and trims sky and ground; a header that grows taller (large type) scales the
+                // drawing up rather than leaving a strip of paper above it.
+                fit: art.vignette ? BoxFit.fitWidth : BoxFit.cover,
+                // What stands in the hills sits a little below the middle of every landscape,
+                // with empty sky over it and a fade under it, so the band keeps that and trims
+                // more of the sky than of the ground.
+                alignment: art.vignette ? Alignment.topCenter : const Alignment(0, 0.3),
                 filterQuality: FilterQuality.medium,
                 excludeFromSemantics: true,
               ),

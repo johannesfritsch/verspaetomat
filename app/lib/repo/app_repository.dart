@@ -83,7 +83,6 @@ abstract class AppRepository {
   Future<ApiRideLive?> currentRide();
   Future<ApiArrivalResult> arrival(ArrivalRequest request);
   Future<void> dismissRide();
-  Future<ApiArrivalResult> nachtrag(NachtragRequest request);
 
   // -- journeys (docs/17) ---------------------------------------------------
   /// Predicted and recent destinations; `from` is the station the customer stands at.

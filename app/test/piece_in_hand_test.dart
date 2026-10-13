@@ -5,12 +5,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/models.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
+import 'package:verspaetomat/screens/puzzles/piece_in_hand.dart' show PieceBack;
 import 'package:verspaetomat/screens/puzzles/puzzle_widgets.dart' show ArrivalPiece;
 import 'package:verspaetomat/screens/puzzles/puzzles_screen.dart';
 import 'package:verspaetomat/state/demo_state.dart';
+import 'package:verspaetomat/widgets/kit.dart' show VSegmented;
 import 'package:verspaetomat/widgets/puzzle.dart';
 
-/// docs/51 §9a: a tap on a piece you have lifts it into the hand; a tap on a gap does nothing.
+/// docs/51 §6, §9a: a started picture opens whole, with its holes, or laid apart into its pieces;
+/// a tap on a piece you have lifts it into the hand, a tap on a gap does nothing.
 void main() {
   const tiers = 'mqmmHmqmmmqm';
   final puzzle = ApiPuzzle(
@@ -30,8 +33,11 @@ void main() {
   Future<void> pump(WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
     final session = Session(demo: DemoState(), prefs: await SharedPreferences.getInstance(), apiUrl: '');
-    await tester.binding.setSurfaceSize(const Size(393, 852));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+    // A phone's screen, and the same size in MediaQuery: the piece in the hand is laid out from it.
+    tester.view
+      ..physicalSize = const Size(393, 852)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(RepoScope(
       session: session,
       child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: PuzzlesBody(puzzles: ApiPuzzles(puzzles: [puzzle]))))),
@@ -39,16 +45,53 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// The middle of slot [slot] on the started card's board.
+  /// The middle of slot [slot] on an arrival card's board.
   Offset slotCentre(WidgetTester tester, int slot) {
     final r = tester.getRect(find.byType(PuzzleTapArea));
     final cw = r.width / 3, ch = r.height / 4;
     return r.topLeft + Offset((slot % 3 + 0.5) * cw, (slot ~/ 3 + 0.5) * ch);
   }
 
+  /// Opens the picture from its card, and lays it apart into its pieces.
+  Future<void> openPieces(WidgetTester tester) async {
+    await tester.tap(find.text('4 von 12'), warnIfMissed: false); // the card's ink lies over its text
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('segment-Teile')));
+    await tester.pumpAndSettle();
+  }
+
+  /// The middle of slot [slot]'s body among the pieces laid apart.
+  Offset spreadCentre(WidgetTester tester, int slot) {
+    final r = tester.getRect(find.byKey(const Key('puzzle-spread')));
+    final f = PuzzleSpread.fit(const PuzzleCut(imageId: 'a', rows: 4, cols: 3), 0.75, r.size);
+    final cell = Rect.fromLTWH((slot % 3) * f.cell.width, (slot ~/ 3) * f.cell.height, f.cell.width, f.cell.height);
+    return r.topLeft + PuzzleSpread.shift(const PuzzleCut(imageId: 'a', rows: 4, cols: 3), slot, f.gap) + cell.center;
+  }
+
+  testWidgets('the card opens the picture whole, with a hole for each missing piece', (tester) async {
+    await pump(tester);
+    // The card's board lifts nothing by itself any more: the whole card opens the picture.
+    expect(find.byType(PuzzleTapArea), findsNothing);
+    await tester.tap(find.text('4 von 12'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('puzzle-tile')), findsOneWidget);
+    expect(find.byKey(const Key('puzzle-spread')), findsNothing);
+    expect(find.text('Zum Drehen ziehen.'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('segment-Teile')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('puzzle-tile')), findsNothing);
+    expect(find.byKey(const Key('puzzle-spread')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('segment-Puzzle')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('puzzle-tile')), findsOneWidget);
+  });
+
   testWidgets('an owned piece rises into the hand, and goes back', (tester) async {
     await pump(tester);
-    await tester.tapAt(slotCentre(tester, 4));
+    await openPieces(tester);
+    await tester.tapAt(spreadCentre(tester, 4));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('piece-in-hand')), findsOneWidget);
     // On the dark ground the status bar's text is light.
@@ -60,14 +103,47 @@ void main() {
     await tester.tap(find.byKey(const Key('piece-in-hand-close')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('piece-in-hand')), findsNothing);
+    // Back on the pieces, where it was taken from.
+    expect(find.byKey(const Key('puzzle-spread')), findsOneWidget);
+  });
+
+  testWidgets('it rises front up, and the switch turns it over and back', (tester) async {
+    await pump(tester);
+    await openPieces(tester);
+    await tester.tapAt(spreadCentre(tester, 4));
+    await tester.pumpAndSettle();
+    expect(find.byType(PieceBack), findsNothing);
+
+    await tester.tap(find.byKey(const Key('segment-Rückseite')));
+    await tester.pumpAndSettle();
+    expect(find.byType(PieceBack), findsOneWidget);
+    // The back says what the piece is, whose, and where it goes.
+    expect(find.descendant(of: find.byType(PieceBack), matching: find.text('Stunden-Teil')), findsOneWidget);
+    expect(find.descendant(of: find.byType(PieceBack), matching: find.text('Platz 5 von 12')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('segment-Vorderseite')));
+    await tester.pumpAndSettle();
+    expect(find.byType(PieceBack), findsNothing);
+  });
+
+  testWidgets('a swipe that turns it over moves the switch with it', (tester) async {
+    await pump(tester);
+    await openPieces(tester);
+    await tester.tapAt(spreadCentre(tester, 4));
+    await tester.pumpAndSettle();
+    await tester.fling(find.byKey(const Key('piece-in-hand')), const Offset(260, 0), 3000);
+    await tester.pumpAndSettle();
+    expect(find.byType(PieceBack), findsOneWidget);
+    expect(tester.widget<VSegmented<bool>>(find.byKey(const Key('piece-side'))).value, isTrue);
   });
 
   testWidgets('a tap beside the piece puts it back too', (tester) async {
     await pump(tester);
-    await tester.tapAt(slotCentre(tester, 3));
+    await openPieces(tester);
+    await tester.tapAt(spreadCentre(tester, 3));
     await tester.pumpAndSettle();
     expect(find.text('Ein Minuten-Teil'), findsOneWidget);
-    await tester.tapAt(const Offset(30, 820));
+    await tester.tapAt(const Offset(30, 700));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('piece-in-hand')), findsNothing);
   });
@@ -93,25 +169,33 @@ void main() {
 
   testWidgets('a swipe down beside the piece puts it back', (tester) async {
     await pump(tester);
-    await tester.tapAt(slotCentre(tester, 4));
+    await openPieces(tester);
+    await tester.tapAt(spreadCentre(tester, 4));
     await tester.pumpAndSettle();
-    await tester.flingFrom(const Offset(40, 780), const Offset(0, 60), 1200);
+    await tester.flingFrom(const Offset(40, 680), const Offset(0, 60), 1200);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('piece-in-hand')), findsNothing);
   });
 
-  testWidgets('a screen reader can take a piece into the hand from the started card', (tester) async {
+  testWidgets('a screen reader hears each piece laid apart, and can take it into the hand', (tester) async {
     final semantics = tester.ensureSemantics();
     await pump(tester);
-    final node = tester.getSemantics(find.bySemanticsLabel(RegExp(r'^Puzzle Nachtschicht')));
-    final actions = node.getSemanticsData().customSemanticsActionIds ?? const <int>[];
-    expect(actions.map((id) => CustomSemanticsAction.getAction(id)?.label), contains('Teil in die Hand nehmen'));
+    await openPieces(tester);
+    final piece = find.semantics.byLabel('Stunden-Teil, Platz 5 von 12');
+    expect(piece, findsOne);
+    expect(piece.evaluate().single.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+    // A gap is not a piece: it says nothing.
+    expect(find.semantics.byLabel(RegExp(r'Platz 6 von 12')), findsNothing);
+    tester.semantics.tap(piece);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('piece-in-hand')), findsOneWidget);
     semantics.dispose();
   });
 
   testWidgets('a gap is not a piece', (tester) async {
     await pump(tester);
-    await tester.tapAt(slotCentre(tester, 5));
+    await openPieces(tester);
+    await tester.tapAt(spreadCentre(tester, 5));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('piece-in-hand')), findsNothing);
   });
@@ -119,10 +203,41 @@ void main() {
   testWidgets('a screen reader hears what it is, and can close it', (tester) async {
     final semantics = tester.ensureSemantics();
     await pump(tester);
-    await tester.tapAt(slotCentre(tester, 4));
+    await openPieces(tester);
+    await tester.tapAt(spreadCentre(tester, 4));
     await tester.pumpAndSettle();
     expect(find.bySemanticsLabel(RegExp(r'^Ein Stunden-Teil von Bahnhofsmission Köln, Platz 5 von 12')), findsWidgets);
     expect(find.bySemanticsLabel('Schließen'), findsOneWidget);
     semantics.dispose();
+  });
+
+  test('the board as it stands has a hole where each missing piece belongs', () {
+    const cut = PuzzleCut(imageId: 'a', rows: 4, cols: 3);
+    const board = Size(300, 400);
+    final outline = boardOutline(cut, const {0, 3, 4, 7}, board, radius: 10);
+    Offset middle(int slot) => cut.cellRect(slot, const Size(100, 100)).center;
+    for (final owned in [0, 3, 4, 7]) {
+      expect(outline.contains(middle(owned)), isTrue, reason: 'slot $owned');
+    }
+    for (final gap in [1, 2, 5, 6, 8, 9, 10, 11]) {
+      expect(outline.contains(middle(gap)), isFalse, reason: 'slot $gap');
+    }
+    // Whole: no holes at all.
+    final whole = boardOutline(cut, {for (var i = 0; i < 12; i++) i}, board);
+    expect(whole.contains(middle(5)), isTrue);
+  });
+
+  test('pieces laid apart never touch', () {
+    const cut = PuzzleCut(imageId: 'a', rows: 4, cols: 3);
+    final f = PuzzleSpread.fit(cut, 0.75, const Size(340, 380));
+    for (var i = 0; i < 12; i++) {
+      final a = cut.piece(i, f.cell).shift(PuzzleSpread.shift(cut, i, f.gap));
+      for (final j in [i + 1, i + 3]) {
+        if (j >= 12 || (j == i + 1 && j % 3 == 0)) continue;
+        final b = cut.piece(j, f.cell).shift(PuzzleSpread.shift(cut, j, f.gap));
+        final both = Path.combine(PathOperation.intersect, a, b);
+        expect(both.getBounds().isEmpty, isTrue, reason: '$i and $j');
+      }
+    }
   });
 }

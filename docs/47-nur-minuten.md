@@ -22,7 +22,7 @@ Die zwei Ausnahmen der Punkte sind Minuten-Regeln geworden:
 | Fall | Vorher | Jetzt |
 |---|---|---|
 | **Ausfall** | 60 Punkte | zählt mit mindestens **60 Minuten** — das Recht behandelt einen Ausfall wie eine Stunde Verspätung, und ein Zug, der nicht fuhr, hat keine eigene Verspätung. Die App sagt „60 Minuten angerechnet". |
-| **Nachtrag** (Fahrt nachträglich eingetragen) | 1 Punkt | zählt **seine Minuten** für einen selbst, steht als „selbst eingetragen" da und **nicht in den Ranglisten** — wie jede Fahrt ohne Standortbestätigung. Das ist der Schutz gegen erfundene Verspätungen, und er braucht keine zweite Währung. |
+| **Nachtrag** (Fahrt nachträglich eingetragen) | 1 Punkt | zählt **seine Minuten** für einen selbst, steht als „selbst eingetragen" da und **nicht in den Ranglisten** — wie jede Fahrt ohne Standortbestätigung. Das ist der Schutz gegen erfundene Verspätungen, und er braucht keine zweite Währung. **Seit 13. Oktober 2026 entfernt:** Ranglisten schützten, der Antrag nicht — wer einen späten Zug von gestern nannte, bekam einen Fall, ohne drin gesessen zu haben. Alte Nachträge bleiben, neue nimmt der Server nicht mehr an (docs/11 E4). |
 | **Aufgegeben** (docs/22 §1) | Punkte fürs Warten | zählt das **Warten** auf dem Zug, auf dem aufgegeben wurde. Einen Anspruch gibt es nicht. |
 | **Nicht mitgefahren** | nichts | nichts |
 

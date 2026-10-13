@@ -287,8 +287,9 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/rides/current/dismiss", post(handlers::dismiss))
         // A ride entered after the fact. English path since #44; the German one stays for every build
         // that still calls it.
-        .route("/v1/rides/retroactive", post(handlers::nachtrag))
-        .route("/v1/rides/nachtrag", post(handlers::nachtrag))
+        // Gone (the Nachtrag opened claims for trains nobody had ridden); old builds get a 410.
+        .route("/v1/rides/retroactive", post(handlers::nachtrag_gone))
+        .route("/v1/rides/nachtrag", post(handlers::nachtrag_gone))
         .route("/v1/rides/{id}", delete(journeys::delete_ride))
         // ledger and claims
         .route("/v1/incidents", get(handlers::incidents))

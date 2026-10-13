@@ -10,7 +10,6 @@ import '../onboarding/standort_screen.dart';
 import '../onboarding/zweck_screen.dart';
 import '../onboarding/welcome_screen.dart';
 import 'bahnsteig_screen.dart';
-import 'nachtrag_screen.dart';
 
 // Owned by the "ride" builder. Onboarding + Bahnsteig + the ride loop.
 //
@@ -47,5 +46,4 @@ final rideRoutes = <RouteBase>[
       return Routes.home;
     },
   ),
-  GoRoute(path: Routes.addRide, builder: (_, __) => const NachtragScreen()),
 ];

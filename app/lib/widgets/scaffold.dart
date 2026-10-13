@@ -220,22 +220,54 @@ class _VSettingsButton extends StatelessWidget {
   }
 }
 
-/// Home's masthead: the one place in the app where the product says its own name.
+/// A tab's header: the app's mark, the tab's word, and a quiet line under it.
 ///
-/// Every other screen is about the user's minutes; this row is about whose minutes they are being
-/// counted by. It appears on Home and nowhere else, which is why the wordmark and the tagline are
-/// written into the widget rather than passed in — there is no second masthead to configure.
+/// Every tab wears the masthead's layout — the mark, a short bold word, one small line — and puts
+/// its own word where the masthead used to say "Verspätomat". Home said its name and then said
+/// "Willkommen" a size larger, and the other tabs set their title at 30 pt over a band 150 pt
+/// tall; both spent a third of the first screen on saying where you are. One row says it, and the
+/// mark keeps the app's own face on every tab without its name having to be repeated.
 ///
-/// The [caption] is the line the running app needs and the design mockups do not show: which
-/// Stellwerk the build is talking to, or that the location is simulated. It sits under the tagline
-/// rather than beside it, because it is a note about the build and must never crowd the name.
-class VAppMasthead extends StatelessWidget {
-  const VAppMasthead({super.key, this.onSettings, this.caption});
+/// There are two lines under the word and they are not the same thing. [subtitle] is a fact —
+/// "18.420 Fahrgäste", "4 Fälle gesammelt" — and keeps full ink. [tagline] is the promise under
+/// it and stays quiet; Wir is the only tab that has both. [caption] is a note about the build
+/// (the Stellwerk the app is talking to, a simulated location) and never a part of the header.
+///
+/// The gear is top-aligned rather than centred on the text: a line that wraps would otherwise move
+/// it, and a gear that moved would look broken.
+class VTabHeader extends StatelessWidget {
+  const VTabHeader({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.tagline,
+    this.caption,
+    this.trailing,
+    this.onSettings,
+    this.narrow = false,
+  });
 
-  final VoidCallback? onSettings;
+  final String title;
+
+  /// The line directly under the title, in full ink.
+  final String? subtitle;
+
+  /// A second, quieter line. Wir is the only screen that uses both.
+  final String? tagline;
 
   /// A development or diagnostics line: the Stellwerk the app is pointed at, a simulated location.
   final String? caption;
+
+  /// Something of the caller's between the text and the gear: a badge, a spinner while a standing
+  /// reload runs.
+  final Widget? trailing;
+
+  final VoidCallback? onSettings;
+
+  /// Keeps the text column to the left of the page. On a tab with the illustrated band behind it
+  /// the right third belongs to the landscape, and a line running the full width sets straight
+  /// across the train.
+  final bool narrow;
 
   @override
   Widget build(BuildContext context) {
@@ -246,115 +278,23 @@ class VAppMasthead extends StatelessWidget {
         // Measured 13.8 pt; md (12) is the nearest token.
         const SizedBox(width: VSpace.md),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Verspätomat',
-                style: VText.wordmark,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              Text(
-                'Verspätung sammeln. Gutes tun.',
-                style: VText.tagline,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (caption != null) ...[
-                const SizedBox(height: VSpace.xs),
-                Text(
-                  caption!,
-                  style: VText.caption,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ],
-          ),
-        ),
-        if (onSettings != null) ...[
-          const SizedBox(width: VSpace.s),
-          _VSettingsButton(onTap: onSettings),
-        ],
-      ],
-    );
-  }
-}
-
-/// A tab's title block: the big word and the quiet lines under it.
-///
-/// Sub-screens announce themselves with a small-caps eyebrow over a title; a tab does the
-/// opposite, because a tab is a place you chose to be and does not need to justify itself. So the
-/// title comes first and everything else is a footnote to it.
-///
-/// There are two footnote slots and they are not the same thing. [subtitle] is a fact — "18.420
-/// Fahrgäste", "4 Fälle gesammelt" — and when a [tagline] follows it, it keeps full ink, because
-/// the number is what the reader came for. [tagline] is the promise under the fact and stays
-/// quiet. A header with only a subtitle has no number to protect, so that single line is quiet
-/// too.
-///
-/// The gear is top-aligned rather than centred on the title: the title is 30 pt and wraps, and a
-/// gear that moved when a word wrapped would look broken.
-class VTabHeader extends StatelessWidget {
-  const VTabHeader({
-    super.key,
-    required this.title,
-    this.subtitle,
-    this.tagline,
-    this.trailing,
-    this.onSettings,
-    this.narrow = false,
-  });
-
-  final String title;
-
-  /// The line directly under the title. Full ink when a [tagline] follows it.
-  final String? subtitle;
-
-  /// A second, quieter line. Wir is the only screen that uses both.
-  final String? tagline;
-
-  /// Something of the caller's between the text and the gear: a badge, a spinner while a standing
-  /// reload runs.
-  final Widget? trailing;
-
-  final VoidCallback? onSettings;
-
-  /// Keeps the text column to the left of the page. On a tab with the illustrated band behind it
-  /// the right third belongs to the landscape, and a subtitle running the full width sets straight
-  /// across the train.
-  final bool narrow;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasTagline = tagline != null;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
           flex: narrow ? _narrowFlex : _fullFlex,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: VText.h1, maxLines: 2, overflow: TextOverflow.ellipsis),
-              if (subtitle != null) ...[
-                const SizedBox(height: VSpace.xs),
-                Text(
-                  subtitle!,
-                  style: hasTagline ? VText.bodyL : VText.body,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-              if (hasTagline) ...[
-                const SizedBox(height: VSpace.xs),
+              Text(title, style: VText.wordmark, maxLines: 1, overflow: TextOverflow.ellipsis),
+              if (subtitle != null)
+                Text(subtitle!, style: VText.tagline, maxLines: 2, overflow: TextOverflow.ellipsis),
+              if (tagline != null)
                 Text(
                   tagline!,
-                  style: VText.body,
+                  style: VText.tagline.copyWith(color: VColors.ink2),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
+              if (caption != null) ...[
+                const SizedBox(height: VSpace.xs),
+                Text(caption!, style: VText.caption, maxLines: 2, overflow: TextOverflow.ellipsis),
               ],
             ],
           ),
@@ -393,8 +333,8 @@ class VTabHeader extends StatelessWidget {
 ///               padding deep enough to scroll that card clear.
 ///
 /// Every tab wears a band and [art] says which drawing it is: the plain hills on Home, and one
-/// apiece for Anträge, Wir and Ich. That is why a tab's title starts halfway down a hillside
-/// rather than near the top of the screen.
+/// apiece for Anträge, Wir and Ich. The band runs from the top edge of the screen to just past the
+/// header, and the drawing fills it from that top edge down.
 class VTabScaffold extends StatelessWidget {
   const VTabScaffold({
     super.key,
@@ -407,7 +347,7 @@ class VTabScaffold extends StatelessWidget {
     this.onRefresh,
   });
 
-  /// The title block. [VTabHeader], or on Home a column of masthead and header.
+  /// The title block, a [VTabHeader].
   final Widget header;
 
   /// The blocks of the page, stacked with [VSpace.md] between them.
@@ -501,8 +441,11 @@ class VTabScaffold extends StatelessWidget {
     );
   }
 
-  /// How tall a header with a landscape behind it has to be, whatever it holds.
-  static const _minHeaderHeight = 150.0;
+  /// How tall a header with a landscape behind it has to be, whatever it holds. The header row
+  /// itself is the mark's 36 pt; the floor gives the drawing enough of a band below the status
+  /// bar to show what stands in it, and no more — the band used to be 150 pt of title and hills,
+  /// and the first card started a third of the way down the screen.
+  static const _minHeaderHeight = 64.0;
 
   Widget _refreshable(BuildContext context, Widget child) {
     final refresh = onRefresh;

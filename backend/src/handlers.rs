@@ -19,7 +19,7 @@ use base64::Engine;
 use crate::auth::{internal, sha256, Customer};
 use crate::db::rows::*;
 use crate::rules::{self, Cents};
-use crate::train::{agency_to_operator, normalise_station_name, same_platform, StationRef, TripInfo};
+use crate::train::{agency_to_operator, same_platform, StationRef};
 
 pub(crate) fn row_category(c: crate::train::TrainCategory) -> TrainCategory {
     match c.as_str() {
@@ -768,23 +768,6 @@ pub struct LocationFix {
 }
 
 
-/// The stop on this trip that a station id names — our own id, or a MOTIS id from a build older
-/// than the station table (issue #37). The index knows every id the station answers to, because
-/// the trip names its stops under whichever feed ran the train.
-fn find_stop<'a>(t: &'a TripInfo, ix: &crate::stations::Index, id: &str, name: &str) -> Option<&'a crate::train::TripStop> {
-    let n = normalise_station_name(name);
-    let ids = ix.candidate_ids(id);
-    t.stops
-        .iter()
-        .find(|st| st.stop_id.as_ref().is_some_and(|sid| ids.iter().any(|i| i == sid)))
-        .or_else(|| t.stops.iter().find(|st| normalise_station_name(&st.name) == n))
-        .or_else(|| t.stops.iter().find(|st| {
-            let a = normalise_station_name(&st.name);
-            a.starts_with(&n) || n.starts_with(&a)
-        }))
-}
-
-
 pub async fn current_ride(State(s): State<AppState>, c: Customer) -> ApiResult {
     let ride: Option<RideRow> = sqlx::query_as("select * from rides where customer_id = $1 and status = 'riding' order by checked_in_at desc limit 1").bind(c.0.id).fetch_optional(&s.pool).await.map_err(internal)?;
     let Some(r) = ride else {
@@ -963,63 +946,11 @@ pub async fn dismiss(State(s): State<AppState>, c: Customer) -> ApiResult {
     Ok(Json(json!({ "ok": true })))
 }
 
-#[derive(Deserialize)]
-pub struct Nachtrag {
-    pub trip_id: String,
-    pub from_station_id: String,
-    pub from_station_name: String,
-    pub exit_station_id: String,
-    pub exit_station_name: String,
-    /// The ticket the ride was on (docs/50 phase 3). Without it, an older build: the setting.
-    #[serde(default)]
-    pub ticket_id: Option<Uuid>,
-}
-
-pub async fn nachtrag(State(s): State<AppState>, c: Customer, Json(n): Json<Nachtrag>) -> ApiResult {
-    let t = s.train.trip(&n.trip_id).await.map_err(|e| err(StatusCode::NOT_FOUND, &format!("trip: {e}")))?;
-    let from = find_stop(&t, &s.stations(), &n.from_station_id, &n.from_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "from station not on this trip"))?;
-    let exit = find_stop(&t, &s.stations(), &n.exit_station_id, &n.exit_station_name).ok_or_else(|| err(StatusCode::BAD_REQUEST, "exit stop not on this trip"))?;
-    let planned_departure = from.scheduled_departure.or(from.scheduled_arrival).ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled departure"))?;
-    let planned_arrival = exit.scheduled_arrival.ok_or_else(|| err(StatusCode::BAD_REQUEST, "no scheduled arrival"))?;
-    let actual = exit.live_arrival.unwrap_or(planned_arrival);
-    let delay = (actual - planned_arrival).num_minutes().max(0);
-    let ops: Vec<OperatorRow> = sqlx::query_as("select * from operators").fetch_all(&s.pool).await.map_err(internal)?;
-    let operator = map_operator(&ops, &t.agency_name);
-    let ticket = match n.ticket_id {
-        Some(tid) => crate::tickets::owned(&s.pool, c.0.id, tid).await?.ok_or_else(|| err(StatusCode::BAD_REQUEST, "no such ticket"))?,
-        None => crate::tickets::for_legacy(&s.pool, &c.0, c.0.ticket, t.category == crate::train::TrainCategory::Fern).await.map_err(internal)?,
-    };
-    let id = Uuid::new_v4();
-    let row: RideRow = sqlx::query_as(
-        "insert into rides (id, customer_id, trip_id, line, headsign, operator, category, from_station_id, from_station_name, exit_station_id, exit_station_name,
-            planned_departure, planned_arrival, actual_arrival, ticket, status, live_delay_min, final_delay_min, cancelled, nachtrag, points, finalised_at, ticket_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'arrived',$16,$16,$17,true,$18,now(),$19) returning *",
-    )
-    .bind(id)
-    .bind(c.0.id)
-    .bind(&t.trip_id)
-    .bind(&t.line)
-    .bind(&t.headsign)
-    .bind(&operator)
-    .bind(row_category(t.category))
-    .bind(&n.from_station_id)
-    .bind(&n.from_station_name)
-    .bind(exit.stop_id.clone().unwrap_or_else(|| n.exit_station_id.clone()))
-    .bind(&exit.name)
-    .bind(planned_departure)
-    .bind(planned_arrival)
-    .bind(actual)
-    .bind(crate::tickets::legacy_type(&ticket.product))
-    .bind(delay as i32)
-    .bind(t.cancelled || exit.cancelled)
-    .bind(rules::counted_minutes(delay, t.cancelled) as i32)
-    .bind(ticket.id)
-    .fetch_one(&s.pool)
-    .await
-    .map_err(internal)?;
-    rules::audit(&s.pool, "ride", id, None, "arrived", "nachtrag").await.map_err(internal)?;
-    let created = on_ride_finalised(&s, id).await.map_err(internal)?;
-    Ok(Json(json!({ "ride": row, "incident": created.incident })))
+/// A ride entered afterwards (Nachtrag) is gone: it let anyone name a train they were never on and
+/// open a claim on its delay. Older builds still post here, so the route answers 410 and writes
+/// nothing, rather than a 404 that reads like a broken server.
+pub async fn nachtrag_gone(_c: Customer) -> ApiResult {
+    Err(err(StatusCode::GONE, "Fahrten lassen sich nicht mehr nachtragen."))
 }
 
 // ---------------------------------------------------------------------------
@@ -2855,12 +2786,12 @@ pub fn level_progress(minutes: i64) -> (&'static str, &'static str, i64, f64) {
     }
 }
 
-/// One thing the Bahnsteig may point at. Priority: mail, deadline, nachtrag, badge.
+/// One thing the Bahnsteig may point at. Priority: mail, deadline, badge. (Older servers also had
+/// nachtrag, the forgotten ride; it went with the Nachtrag, and old builds never see it now.)
 #[derive(Debug, Clone, PartialEq)]
 pub enum NextThing {
     Mail { claim_id: Option<Uuid>, body: String },
     Deadline { incident_id: Uuid, days_left: i64, body: String },
-    Nachtrag,
     Badge { badge_id: String, name: String },
 }
 
@@ -2869,8 +2800,7 @@ impl NextThing {
         match self {
             NextThing::Mail { .. } => 0,
             NextThing::Deadline { .. } => 1,
-            NextThing::Nachtrag => 2,
-            NextThing::Badge { .. } => 3,
+            NextThing::Badge { .. } => 2,
         }
     }
     pub fn pick(candidates: Vec<NextThing>) -> Option<NextThing> {
@@ -2880,7 +2810,6 @@ impl NextThing {
         match self {
             NextThing::Mail { claim_id, body } => json!({ "kind": "mail", "title": "Post von der Bahn", "body": body, "claim_id": claim_id }),
             NextThing::Deadline { incident_id, days_left, body } => json!({ "kind": "deadline", "title": "Verfällt bald", "body": body, "incident_id": incident_id, "days_left": days_left }),
-            NextThing::Nachtrag => json!({ "kind": "nachtrag", "title": "Gestern vergessen einzuchecken?", "body": "Fahrt nachtragen, deine Minuten zählen trotzdem." }),
             NextThing::Badge { badge_id, name } => json!({ "kind": "badge", "title": "Neues Abzeichen", "body": name, "badge_id": badge_id }),
         }
     }
@@ -3013,21 +2942,6 @@ pub async fn standing(State(s): State<AppState>, c: Customer) -> ApiResult {
             candidates.push(NextThing::Deadline { incident_id: i.id, days_left, body: format!("{} vom {} · noch {} Tage", i.line, i.ride_date.format("%d.%m."), days_left.max(0)) });
         }
     }
-    let (days_with_rides, rode_yesterday): (i64, bool) = sqlx::query_as(
-        "select count(distinct (checked_in_at at time zone 'Europe/Berlin')::date)::bigint,
-                bool_or((checked_in_at at time zone 'Europe/Berlin')::date = $3)
-         from rides where customer_id = $1 and checked_in_at >= $2",
-    )
-    .bind(c.0.id)
-    .bind(now - Duration::days(14))
-    .bind(now.with_timezone(&chrono_tz::Europe::Berlin).date_naive() - Duration::days(1))
-    .fetch_one(pool)
-    .await
-    .map(|(d, y): (i64, Option<bool>)| (d, y.unwrap_or(false)))
-    .map_err(internal)?;
-    if days_with_rides >= 3 && !rode_yesterday {
-        candidates.push(NextThing::Nachtrag);
-    }
     let badge: Option<(String, String)> = sqlx::query_as(
         "select b.id, b.name from badge_awards a join badges b on b.id = a.badge_id where a.customer_id = $1 and a.awarded_at >= $2 order by a.awarded_at desc limit 1",
     )
@@ -3101,13 +3015,14 @@ mod standing_tests {
         let id = Uuid::nil();
         let picked = NextThing::pick(vec![
             NextThing::Badge { badge_id: "x".into(), name: "X".into() },
-            NextThing::Nachtrag,
             NextThing::Deadline { incident_id: id, days_left: 3, body: String::new() },
             NextThing::Mail { claim_id: None, body: String::new() },
         ]);
         assert!(matches!(picked, Some(NextThing::Mail { .. })));
-        let picked = NextThing::pick(vec![NextThing::Badge { badge_id: "x".into(), name: "X".into() }, NextThing::Nachtrag]);
-        assert_eq!(picked, Some(NextThing::Nachtrag));
+        let picked = NextThing::pick(vec![NextThing::Badge { badge_id: "x".into(), name: "X".into() }, NextThing::Deadline { incident_id: id, days_left: 3, body: String::new() }]);
+        assert!(matches!(picked, Some(NextThing::Deadline { .. })));
+        let picked = NextThing::pick(vec![NextThing::Badge { badge_id: "x".into(), name: "X".into() }]);
+        assert!(matches!(picked, Some(NextThing::Badge { .. })));
         assert_eq!(NextThing::pick(vec![]), None);
     }
 }

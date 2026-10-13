@@ -69,7 +69,7 @@ paths:
     get: { summary: Everything about this customer as JSON, responses: { "200": { description: export } } }
   /v1/me/standing:
     get:
-      summary: Everything the Bahnsteig shows above the fold, computed server-side (docs/16). Points this week and last week (Monday–Sunday, Europe/Berlin, simulated clock), rides this week, level progress, the money countdown for the desk closest to (or at) the 4 € minimum, the customer's rank on the line board (city fallback; null when neither has at least five real riders and the customer), community totals with the customer's share, and at most one "next thing" (mail > deadline ≤ 21 days > nachtrag for habitual riders > badge in the last 3 days).
+      summary: Everything the Bahnsteig shows above the fold, computed server-side (docs/16). Points this week and last week (Monday–Sunday, Europe/Berlin, simulated clock), rides this week, level progress, the money countdown for the desk closest to (or at) the 4 € minimum, the customer's rank on the line board (city fallback; null when neither has at least five real riders and the customer), community totals with the customer's share, and at most one "next thing" (mail > deadline ≤ 21 days > badge in the last 3 days).
       security: [{ bearer: [] }]
       responses:
         '200':
@@ -186,9 +186,8 @@ paths:
     post: { summary: Acknowledge the arrival summary, responses: { "200": { description: ok } } }
   /v1/rides/nachtrag:
     post:
-      summary: "Record a forgotten ride from a trip id (claimable if the feed shows 60+, never ranks). Optional ticket_id (#66); without it the setting names the ticket, as for builds before tickets."
-      requestBody: { content: { application/json: { schema: { type: object, required: [trip_id, from_station_id, from_station_name, exit_station_id, exit_station_name], properties: { trip_id: { type: string }, from_station_id: { type: string }, from_station_name: { type: string }, exit_station_id: { type: string }, exit_station_name: { type: string } } } } } }
-      responses: { "200": { description: "{ride, incident?}" } }
+      summary: "Gone since 13 October 2026 (docs/11 E4): a ride entered after the fact let anyone claim a late train they were never on. Also at /v1/rides/retroactive. Answers 410 with {error} and writes nothing, for builds that still post it."
+      responses: { "410": { description: "{error}" } }
 
   /v1/incidents:
     get: { summary: "Ledger: {incidents, claims, summary:{pots:[{id, ticket_id, ticket_name, product, family, window_key, desk, minutes, next_unit_minutes, amount_cents, gross_cents, capped, payable, blockers:[{kind: empty|price_missing|not_money|below_minimum{missing_cents, missing_minutes}|too_few_cases{missing}|window_open{until}}], ready_from, aim, deadline, incident_ids}] (#66: one per ticket, window and desk; what a claim is made of), desks:[{desk, open_cents, ready, missing_cents, incident_ids}], ready_desk, confirmed_cents, submitted_cents, capped_cents, oldest_open:{id,line,date,deadline,days_left,warn_from,aim}, min_payout_cents, dticket_monthly_cap_cents}}. Reading refreshes statuses (each case's amount is its share of its pot; `desks` sums the pots for builds before pots): expiry at the legal deadline (twelve months after the ride; `aim` is three months, what the app asks the passenger to aim for — docs/49 §1), bundle readiness, and the 25 % monthly Deutschlandticket cap (incidents beyond it are `gedeckelt`; capped_cents sums them).", responses: { "200": { description: ledger } } }

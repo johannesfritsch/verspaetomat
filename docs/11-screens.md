@@ -61,7 +61,7 @@ The screen the customer sees a hundred times. Fourth version, decided 10 Septemb
 - Riding: block 1 is the **ride card** (docs/20) on elevated paper: eyebrow "UNTERWEGS", the line badge and "RE 7 nach Rheine", the live delay (or "pünktlich"), then "Nächster Halt · Solingen Hbf 10:06" and "Ziel · Rheine an 12:08", and the caption "Tippen für Details". Tapping it opens the sheet (screen 8). In transfer: eyebrow "UMSTEIGEN", the station as title, the next train as "RE 5 nach Kleve · 10:41 · Gleis 3", "Anschluss verpasst · nächste Möglichkeit" in red when it applies, and the primary button "Ich bin drin". The ride bar above the nav stays as well: the card is the detail, the bar the constant. Seit #78 steht „pünktlich" auf Karte, Leiste und in der Fahrtansicht nur mit Echtzeit (`ride.live_known`), und „Nächster Halt" liegt nie hinter dem Ausstieg (docs/20 §2).
 - Just arrived (sheet closed): the arrival summary with the journey delay, "Anschluss verpasst" when it applies, "Ansehen" and "Fertig", until dismissed.
 
-Under the card, only when the person rides most days and skipped yesterday: the caption link "Gestern vergessen einzuchecken?" (→ Nachtrag).
+There used to be a caption link "Gestern vergessen einzuchecken?" under the card (→ Nachtrag); removed on 13 October 2026: a ride named after the fact let anyone pick a late train they were never on and open a claim on it (see E4).
 
 **2 · Deine Woche.** "+96" in board type, "Geduldspunkte diese Woche · letzte Woche 41", the level bar underneath with "Gleis 7 · 128 bis „Bahnhofsmission“". A quiet week reads "Diese Woche noch keine Fahrt", never a zero. Tap for Ich.
 
@@ -279,7 +279,7 @@ Plain reading pages under `/legal/:id`. Eyebrow "Rechtliches", the title, a two-
 
 **E3 — Keine Daten bei Ankunft.** "Wann bist du angekommen?" with a time picker preset to the planned arrival. The ride earns points; the ledger marks it "selbst eingetragen" and the claim PDF says so in the free text.
 
-**E4 — Nachtrag.** "Gestern vergessen einzuchecken?" from Bahnsteig. The customer picks date, station, train and exit stop. Earns one point, is claimable if the delay data exists, never ranks on boards. The screen says why the two differ: points reward being there, claims rest on the railway's own delay record.
+**E4 — Nachtrag (removed).** "Gestern vergessen einzuchecken?" from Bahnsteig let the customer pick date, station, train and exit stop afterwards, and the ride was claimable if the delay data existed. Removed on purpose on 13 October 2026: nothing tied the passenger to the train, so it was an open door to claims for rides nobody took. It also took a row on Home above the puzzles. The server answers `/v1/rides/retroactive` and `/v1/rides/nachtrag` with 410 and writes nothing; old Nachtrag rides stay in the history. A ride is checked in while it happens, with „Früher" for a train boarded before the app was opened. Do not bring it back.
 
 **E5 — Betreiber nicht im Verzeichnis.** At the claim step: the operator's name, "Wir kennen die Adresse für Anträge noch nicht.", a link to the operator's passenger-rights page, and a field to enter the address. We add it to the directory afterwards.
 

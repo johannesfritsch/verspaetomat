@@ -68,10 +68,15 @@ class _PieceInHandState extends State<PieceInHand> {
   late final CurvedAnimation _flight = CurvedAnimation(parent: widget.animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
   late final CurvedAnimation _words = CurvedAnimation(parent: widget.animation, curve: const Interval(0.5, 1));
 
+  /// The side it rests on: it rises front up, the switch at the bottom turns it over, and so does
+  /// a swipe across it.
+  final _back = ValueNotifier(false);
+
   @override
   void dispose() {
     _flight.dispose();
     _words.dispose();
+    _back.dispose();
     super.dispose();
   }
 
@@ -146,7 +151,8 @@ class _PieceInHandState extends State<PieceInHand> {
                       source: shape.source,
                       tier: tier,
                       width: width,
-                      back: (context) => PieceBack(tier: tier, ngoName: p.ngoName, title: p.title),
+                      side: _back,
+                      back: (context) => PieceBack(tier: tier, ngoName: p.ngoName, title: p.title, place: 'Platz ${slot + 1} von ${p.pieces}'),
                     );
                   },
                 ),
@@ -169,6 +175,32 @@ class _PieceInHandState extends State<PieceInHand> {
                       const VGap.s(),
                       Text('Platz ${slot + 1} von ${p.pieces}', style: VText.caption.copyWith(color: VColors.inkOnDark3), textAlign: TextAlign.center),
                     ],
+                  ),
+                ),
+              ),
+            ),
+            // Front or back, without having to find the swipe that turns it over.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: VSpace.l),
+                  child: FadeTransition(
+                    opacity: words,
+                    child: Center(
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _back,
+                        builder: (context, back, _) => VSegmented<bool>(
+                          key: const Key('piece-side'),
+                          onDark: true,
+                          segments: const [(false, 'Vorderseite'), (true, 'Rückseite')],
+                          value: back,
+                          onChanged: (v) => _back.value = v,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -206,12 +238,16 @@ class _PieceInHandState extends State<PieceInHand> {
   }
 }
 
-/// The back of a piece: the card it is printed on, its tier's clock, whose it is and of what.
+/// The back of a piece: the card it is printed on, its tier's clock and name, whose it is, of
+/// what, and where it goes.
 class PieceBack extends StatelessWidget {
-  const PieceBack({super.key, required this.tier, required this.ngoName, required this.title});
+  const PieceBack({super.key, required this.tier, required this.ngoName, required this.title, this.place});
   final PieceTier tier;
   final String ngoName;
   final String title;
+
+  /// „Platz 5 von 12".
+  final String? place;
 
   @override
   Widget build(BuildContext context) {
@@ -233,9 +269,15 @@ class PieceBack extends StatelessWidget {
                     // Words only where they can be read: a small piece shows its clock alone.
                     if (c.biggest.width >= 160) ...[
                       const VGap.s(),
+                      Text(tierPieceName(tier), style: VText.bodySStrong, textAlign: TextAlign.center),
+                      const VGap.s(),
                       Text(ngoName, style: VText.bodySStrong, textAlign: TextAlign.center),
                       const SizedBox(height: 2),
                       Text(keepLastWord(title), style: VText.caption.copyWith(color: VColors.ink2), textAlign: TextAlign.center),
+                      if (place != null) ...[
+                        const SizedBox(height: 2),
+                        Text(place!, style: VText.caption, textAlign: TextAlign.center),
+                      ],
                     ],
                   ],
                 ),

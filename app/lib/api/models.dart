@@ -660,27 +660,6 @@ class ArrivalRequest {
       };
 }
 
-class NachtragRequest {
-  const NachtragRequest({required this.tripId, required this.fromStationId, required this.fromStationName, required this.exitStationId, required this.exitStationName, required this.date, this.ticketId});
-  /// The ticket the ride was on (#66); without it the server takes the setting.
-  final String? ticketId;
-  final String tripId;
-  final String fromStationId;
-  final String fromStationName;
-  final String exitStationId;
-  final String exitStationName;
-  final DateTime date;
-  Map<String, dynamic> toJson() => {
-        'trip_id': tripId,
-        'from_station_id': fromStationId,
-        'from_station_name': fromStationName,
-        'exit_station_id': exitStationId,
-        'exit_station_name': exitStationName,
-        'date': _fmtDate(date),
-        if (ticketId != null) 'ticket_id': ticketId,
-      };
-}
-
 class ApiRide {
   const ApiRide({
     required this.id,
@@ -1364,7 +1343,8 @@ class ApiStandingCommunity {
       );
 }
 
-/// The one thing the Bahnsteig suggests next: mail | deadline | nachtrag | badge.
+/// The one thing the Bahnsteig suggests next: mail | deadline | badge. Older servers also sent
+/// nachtrag, a ride entered afterwards; that is gone (it opened claims nobody had ridden).
 class ApiStandingNext {
   const ApiStandingNext({required this.kind, required this.title, required this.body, this.claimId, this.incidentId, this.badgeId, this.daysLeft});
   final String kind;

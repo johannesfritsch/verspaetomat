@@ -114,7 +114,6 @@ class ShowcaseScreen extends StatelessWidget {
             _Entry('Antwort: angenommen', 'Post vom Servicecenter', '${Routes.reply}?mail=m-0718-in', demoOnly: true),
             _Entry('Antwort: Rückfrage', 'Ticketkopie nachreichen', '${Routes.reply}?demo=question', demoOnly: true),
             _Entry('Antwort: abgelehnt', 'außergewöhnliche Umstände', '${Routes.reply}?demo=rejected', demoOnly: true),
-            const _Entry('Nachtrag', 'gestern vergessen', Routes.addRide),
             // The walkthrough is safe everywhere: its session is a throwaway on the mock
             // repository, which has no HTTP client at all (issue #25).
             const _Entry('Vorführung', 'der ganze Antrag, ohne zu senden', Routes.demoClaim),

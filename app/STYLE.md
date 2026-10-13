@@ -31,6 +31,8 @@ Where something has to stand out, it stands on one of exactly three surfaces:
 
 **One left edge means the back arrow too.** A sub-screen puts the arrow on its own line above the title, and pulls its 44 pt box half a glyph left so the *arrow itself* lands on the gutter. Beside the title it forced a second edge at 52 pt for no reason anybody could see. Tabs gutter at 16 because cards carry their own padding on top; sub-screens gutter at 24, because prose with nothing around it at 16 runs the full width of the phone.
 
+**A tab says where you are in one row.** Every tab — Home, Anträge, Wir, Ich — wears the masthead's layout (`VTabHeader`): the app mark, the tab's word at wordmark size, one small line under it, the gear on the right. Home's word is „Willkommen"; the app's name is the mark. The 30 pt title and the band of hills it stood in spent a third of the first screen on a word the tab bar already says. The landscape still runs behind the row, from the top edge of the screen to just past it, filled from that edge down — never a drawing that starts somewhere inside the status bar.
+
 ### Rules, sections, figures
 
 - **Cards instead of rules.** Sections are separated by 12 pt of page. A hairline survives only *inside* a card, between the rows of one list (`VDivider`), and never after the last row — a line under the last row is a line under nothing, and it is what makes a list look like a form.

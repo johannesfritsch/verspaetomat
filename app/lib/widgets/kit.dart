@@ -1029,6 +1029,71 @@ class VChip extends StatelessWidget {
 
 enum VTone { neutral, ink, red, green }
 
+/// Two or three ways of looking at the same thing, one of them chosen: „Puzzle | Teile",
+/// „Vorderseite | Rückseite". A pill track with the chosen segment raised on it. [onDark] for a
+/// dark room — the piece in the hand.
+class VSegmented<T> extends StatelessWidget {
+  const VSegmented({super.key, required this.segments, required this.value, required this.onChanged, this.onDark = false, this.width = 240});
+  final List<(T, String)> segments;
+  final T value;
+  final ValueChanged<T> onChanged;
+  final bool onDark;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final chosenFill = onDark ? VColors.inkOnDark : VColors.paperElevated;
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: Container(
+        width: width,
+        height: VControl.touch,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(color: onDark ? VColors.trackOnDark : VColors.greyPill, borderRadius: BorderRadius.circular(VRadius.full)),
+        child: Row(
+          children: [
+            for (final (v, label) in segments)
+              Expanded(
+                child: Semantics(
+                  button: true,
+                  selected: v == value,
+                  inMutuallyExclusiveGroup: true,
+                  label: label,
+                  excludeSemantics: true,
+                  onTap: () => onChanged(v),
+                  child: GestureDetector(
+                    key: ValueKey('segment-$label'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => onChanged(v),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: v == value ? chosenFill : chosenFill.withValues(alpha: 0),
+                        borderRadius: BorderRadius.circular(VRadius.full),
+                        boxShadow: v == value && !onDark ? VShadow.card : null,
+                      ),
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: VText.buttonS.copyWith(
+                          color: v == value ? VColors.ink : (onDark ? VColors.inkOnDark2 : VColors.ink2),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Label on the left, value on the right, on one baseline.
 class VKeyValue extends StatelessWidget {
   const VKeyValue(this.label, this.value, {super.key, this.strong = false, this.valueStyle, this.trailing});

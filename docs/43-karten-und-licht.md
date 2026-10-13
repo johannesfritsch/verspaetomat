@@ -104,7 +104,7 @@ Jede ist ein Token oder ein Schalter und damit billig zurückzunehmen.
   „Mehr erfahren ›" auf Wir.
 - **Wo landen die sechs Zustände**, die in keinem Entwurf vorkommen: die Stumm-Zeile, das
   Offline-Band, die Fehlerzeile, die Ladezeile, die Stellwerk-Bildunterschrift und
-  „Gestern vergessen einzuchecken?". Das sind echte Zustände, keine Dekoration.
+  „Gestern vergessen einzuchecken?" (seit 13. Oktober 2026 entfernt, docs/11 E4). Das sind echte Zustände, keine Dekoration.
 - **Die Leiste unten ist jetzt etwa 100 pt hoch** gegen vorher 60 plus Sicherheitsbereich. Das sind
   vierzig Punkt von jedem Schirm.
 - **Logos der Eisenbahnunternehmen.** Der DB-Keks ist eine eingetragene Marke, und die Doktrin des
@@ -125,6 +125,13 @@ wurde, und nicht im Code noch einmal platziert werden muss. `lib/widgets/header_
 zwei Verläufe darüber: links und oben löst sich das Bild ins Papier auf. Ohne die endet die
 Zeichnung auf einer Kante — senkrecht mitten durch den Schirm, wo der Titel steht, und waagerecht
 unter dem Kopf.
+
+**Nachtrag, Oktober 2026: das Band beginnt an der Oberkante.** Die Kopfzeile jedes Tabs ist jetzt
+eine Zeile im Aufbau des Mastheads — Zeichen, Wort, eine kleine Zeile (`app/STYLE.md`) — und das
+Band dahinter entsprechend niedriger. Die Zeichnung füllt es von der Oberkante des Schirms nach
+unten (`BoxFit.cover`) und schneidet mehr Himmel als Boden. Vorher hing sie an ihrem Horizont und
+war nur so hoch wie die Bildbreite es erlaubte; war das Band höher, begann sie irgendwo in der
+Statusleiste, auf Ich als Himmel, der mitten in der Luft anfing.
 
 **Auf keiner der beiden trägt der Zug eine Lackierung.** Im Original klebte ein rotes Zeichen auf
 der Nase, an der Stelle und in der Form, an der ein Keks klebt. Es ist herausretuschiert, aus

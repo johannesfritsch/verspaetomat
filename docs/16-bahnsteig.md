@@ -33,7 +33,7 @@ One call, computed server-side so Demo mode and the app never recompute rules:
 ```
 
 - `board` is `null` when the customer is on no board with at least 5 entries; `gap_to_next` is `null` at rank 1.
-- `next.kind` ∈ `mail` (an inbound mail in the last 7 days, or a claim in `question`), `deadline` (oldest open incident within 21 days; fields `days_left`, `incident_id`), `nachtrag` (no ride yesterday, but rides on at least 3 of the last 14 days), `badge` (earned in the last 3 days; `badge_id`). Priority in that order. `null` when nothing applies.
+- `next.kind` ∈ `mail` (an inbound mail in the last 7 days, or a claim in `question`), `deadline` (oldest open incident within 21 days; fields `days_left`, `incident_id`), `badge` (earned in the last 3 days; `badge_id`). Priority in that order. `null` when nothing applies. (`nachtrag` — no ride yesterday, rides on 3 of the last 14 days — is gone since 13 October 2026, with the Nachtrag; docs/11 E4.)
 - Week = Monday to Sunday, local time (Europe/Berlin), simulated clock respected.
 
 The station context comes from what the Bahnsteig already has: `GET /v1/stations/nearby` (≤ 300 m → at a station), `GET /v1/me/geofence` (frequent stations for the compact row), `GET /v1/rides/current`.

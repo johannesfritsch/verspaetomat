@@ -45,7 +45,6 @@ class Routes {
   static const ride = '/ride'; // redirects to Home with the ride sheet open (docs/19)
   static const homeWithRide = '/home?ride=1';
   static const arrived = '/arrived'; // ?variant=68|25|14|59|cancelled|nodata|complete (absent = use DemoState)
-  static const addRide = '/add-ride';
 
   static const claim = '/claim'; // ?desk=Servicecenter%20Fahrgastrechte | NordWestBahn | Unbekannt
   static const reply = '/reply'; // ?mail=<mail id>  or  ?demo=question|rejected

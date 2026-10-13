@@ -2015,8 +2015,8 @@ async fn giving_up_brings_a_piece_never_boarding_and_a_nachtrag_do_not(pool: PgP
     assert!(v["piece"].is_object(), "{v}");
     assert_eq!(pieces(&pool, id).await, 1);
 
-    // A ride entered afterwards (`/v1/rides/retroactive`) never has a journey. Should one ever
-    // carry it, the journey brings nothing either.
+    // A ride entered afterwards (an old Nachtrag; the endpoint is gone) never has a journey.
+    // Should one ever carry it, the journey brings nothing either.
     let j = riding_journey(&pool, id).await;
     let r = ride(&pool, id, "RE 1", 0, 0).await;
     sqlx::query("update rides set nachtrag = true, journey_id = $2, leg_no = 1 where id = $1").bind(r).bind(j).execute(&pool).await.unwrap();
@@ -2703,4 +2703,99 @@ async fn a_video_is_streamed_whole_and_cut_off_past_forty_megabytes(pool: PgPool
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
     let (_, v) = admin(&app, "GET", "/admin/puzzle-images?ngo=wald", json!({})).await;
     assert_eq!(v[0]["video_bytes"], big.len(), "the video before stays");
+}
+
+// ---------------------------------------------------------------------------
+// The Nachtrag is gone
+// ---------------------------------------------------------------------------
+
+/// What every build before the removal posts for „Gestern vergessen einzuchecken?": yesterday's
+/// RE 96 from Kißlegg to Memmingen, with or without a ticket.
+fn nachtrag_body(ticket: Option<Uuid>) -> Value {
+    let mut body = json!({
+        "trip_id": "re96", "from_station_id": "test:Kißlegg", "from_station_name": "Kißlegg",
+        "exit_station_id": "test:Memmingen", "exit_station_name": "Memmingen",
+        "date": (Utc::now() - Duration::days(1)).format("%Y-%m-%d").to_string(),
+    });
+    if let Some(t) = ticket {
+        body["ticket_id"] = json!(t);
+    }
+    body
+}
+
+/// A ride named after the fact let anyone pick a late train they were never on and open a claim
+/// on it. Both paths still answer older builds, now with a 410 and a sentence, and nothing is
+/// written: no ride, no case, no audit line — even for a train 70 minutes late at the exit, which
+/// is what used to become a case.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_ride_entered_afterwards_is_refused_and_writes_nothing(pool: PgPool) {
+    let t0 = Utc::now() - Duration::days(1);
+    let mut trip = motis_re96(t0, true, None, None);
+    let memmingen = &mut trip["legs"][0]["intermediateStops"][8];
+    assert_eq!(memmingen["name"], "Memmingen");
+    memmingen["arrival"] = json!(t0 + Duration::minutes(73 + 70));
+    let base = transitous_with_trip(Arc::new(std::sync::RwLock::new(trip))).await;
+    let app = app(pool.clone(), Some(base)).await;
+    let (id, token) = device(&app).await;
+    let ticket: Uuid = sqlx::query_scalar("insert into tickets (id, customer_id, product) values ($1, $2, 'deutschlandticket') returning id")
+        .bind(Uuid::new_v4())
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    for path in ["/v1/rides/retroactive", "/v1/rides/nachtrag"] {
+        for t in [None, Some(ticket)] {
+            let (s, v) = call(&app, "POST", path, Some(&token), Some(nachtrag_body(t))).await;
+            assert_eq!(s, StatusCode::GONE, "{path}: {v}");
+            assert!(v["error"].as_str().is_some_and(|e| e.contains("nicht mehr nachtragen")), "{path}: {v}");
+        }
+    }
+    assert_eq!(count(&pool, "select count(*) from rides where customer_id = $1", id).await, 0);
+    assert_eq!(count(&pool, "select count(*) from incidents where customer_id = $1", id).await, 0);
+    assert_eq!(count(&pool, "select count(*) from claims where customer_id = $1", id).await, 0);
+    let audited: i64 = sqlx::query_scalar("select count(*) from audit_log where reason = 'nachtrag'").fetch_one(&pool).await.unwrap();
+    assert_eq!(audited, 0);
+
+    // Without a device token it is no door either.
+    let (s, _) = call(&app, "POST", "/v1/rides/retroactive", None, Some(nachtrag_body(None))).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+/// Home stopped asking „Gestern vergessen einzuchecken?". The one it used to ask — rides on three
+/// or more of the last fourteen days, none yesterday — now gets nothing pointing back, so no
+/// build, old or new, shows the link.
+#[sqlx::test(migrations = "./migrations")]
+async fn home_never_asks_for_yesterdays_ride(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, token) = device(&app).await;
+    for days_ago in [2, 3, 5, 8] {
+        ride(&pool, id, "RE 1", 5, days_ago).await;
+    }
+    let (s, v) = call(&app, "GET", "/v1/me/standing", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v.get("next").is_some(), "the field stays for older builds: {v}");
+    assert_eq!(v["next"], Value::Null, "{v}");
+    assert!(!v.to_string().contains("nachtrag"), "{v}");
+
+    // The other things Home points at are still there: a case running out comes first.
+    incident(&pool, id, None, 500, "gesammelt").await;
+    sqlx::query("update incidents set legal_deadline = current_date + 5 where customer_id = $1").bind(id).execute(&pool).await.unwrap();
+    let (_, v) = call(&app, "GET", "/v1/me/standing", Some(&token), None).await;
+    assert_eq!(v["next"]["kind"], "deadline", "{v}");
+}
+
+/// Rides entered before the removal stay what they were: listed, marked, and counting their
+/// minutes. Nothing about the past is rewritten.
+#[sqlx::test(migrations = "./migrations")]
+async fn old_nachtrag_rides_stay_in_the_history(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, token) = device(&app).await;
+    let r = ride(&pool, id, "RE 1", 12, 4).await;
+    sqlx::query("update rides set nachtrag = true where id = $1").bind(r).execute(&pool).await.unwrap();
+    let (s, v) = call(&app, "GET", "/v1/rides", Some(&token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let row = v.as_array().unwrap().iter().find(|x| x["id"] == json!(r)).unwrap_or_else(|| panic!("the old Nachtrag is listed: {v}"));
+    assert_eq!(row["nachtrag"], true, "{row}");
+    assert_eq!(row["points"], 12, "{row}");
 }
