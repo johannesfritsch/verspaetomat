@@ -202,7 +202,17 @@ von Ich und von der Karte bei der Ankunft.
   sich groß, ein angefangenes öffnet die Seite.
 
 - **Angefangen:** je Bild eine Karte — das Bild im Raster mit Lücken, Titel, Verein, „7 von 12".
-  Das zuletzt gewachsene oben.
+  Das zuletzt gewachsene oben. Ein Tipp auf die Karte öffnet das Bild groß in einem Blatt, mit
+  einem Umschalter unten (Johannes, 13. Oktober 2026):
+  - **Puzzle:** das ganze Bild, wie es gerade steht, in 3D (§9a) — eine Tafel mit Dicke und einem
+    Loch, wo ein Teil noch fehlt. Drehbar wie ein Teil; die Rückseite ist Karton mit der Uhr jedes
+    Teils an seiner Stelle, spiegelverkehrt, wie man ein Puzzle von hinten sieht.
+  - **Teile:** die Teile flach auseinandergelegt, jedes an seinem Platz, mit Luft dazwischen; was
+    fehlt, liegt als graue Form da. Ein Tipp auf ein Teil hebt es in die Hand.
+  - **Das Teil in der Hand** kommt mit der Vorderseite nach oben; unten schaltet „Vorderseite |
+    Rückseite" um, und ein Wisch dreht es wie bisher. Auf der Rückseite: die Uhr der Stufe, der
+    Name der Stufe, „Platz 5 von 12", und wo Platz ist Verein und Titel — gesetzt in den Körper des
+    Teils, nicht über seine Buchten.
 - **Fertig:** zwei Spalten, die ganzen Bilder ohne Fugen, Titel und Verein darunter, das neueste
   zuerst. Ein Tipp
   öffnet das Bild groß, mit dem Satz des Vereins und dem Tag, an dem das letzte Teil kam.
@@ -356,8 +366,9 @@ Körper mit Dicke (die Kante als Wand aus der Teil-Form), geneigt über eine Per
 Finger und Lagesensor, und beleuchtet von einem Fragment-Shader. So läuft es auf iOS und Android
 gleich und braucht keine 3D-Engine.
 
-- **Wo:** Ein Tipp auf ein Teil (bei der Ankunft, auf der Puzzles-Seite) hebt es heraus; man kann
-  es drehen, die Rückseite ist Karton mit der Uhr der Stufe und dem Namen des Vereins.
+- **Wo:** Ein Tipp auf ein Teil (bei der Ankunft; auf der Puzzles-Seite in der Ansicht „Teile",
+  §6) hebt es heraus; man kann es drehen und mit „Vorderseite | Rückseite" umdrehen, die Rückseite
+  ist Karton mit der Uhr der Stufe, ihrem Namen, dem Platz und dem Verein.
 - **Material nach Stufe:** Minute — Karton, matt. Viertelstunde — Tinte, lackiert. Stunde —
   rotes Email mit Glanz.
 - **Texturen von Johannes**, wenn es so weit ist: je Stufe eine **Matcap** (eine beleuchtete

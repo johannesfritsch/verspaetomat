@@ -152,7 +152,13 @@ class _PieceInHandState extends State<PieceInHand> {
                       tier: tier,
                       width: width,
                       side: _back,
-                      back: (context) => PieceBack(tier: tier, ngoName: p.ngoName, title: p.title, place: 'Platz ${slot + 1} von ${p.pieces}'),
+                      back: (context) => PieceBack(
+                        tier: tier,
+                        ngoName: p.ngoName,
+                        title: p.title,
+                        place: 'Platz ${slot + 1} von ${p.pieces}',
+                        body: pieceBackBody(cut, slot, board),
+                      ),
                     );
                   },
                 ),
@@ -238,10 +244,27 @@ class _PieceInHandState extends State<PieceInHand> {
   }
 }
 
+/// The body of a piece, clear of its knobs and of the holes cut into it, as fractions of the box
+/// its outline spans — mirrored left to right, because the back is seen from behind.
+Rect pieceBackBody(PuzzleCut cut, int slot, Size board) {
+  final cell = Size(board.width / cut.cols, board.height / cut.rows);
+  final bounds = cut.piece(slot, cell).getBounds();
+  final r = cut.cellRect(slot, cell);
+  // A hole reaches about a third of a cell into the body; a knob or a flat side needs only a margin.
+  double inset(PieceSide side) => cell.shortestSide * (cut.tab(slot, side) < 0 ? 0.33 : 0.1);
+  final body = Rect.fromLTRB(r.left + inset(PieceSide.left), r.top + inset(PieceSide.top), r.right - inset(PieceSide.right), r.bottom - inset(PieceSide.bottom));
+  return Rect.fromLTRB(
+    (bounds.right - body.right) / bounds.width,
+    (body.top - bounds.top) / bounds.height,
+    (bounds.right - body.left) / bounds.width,
+    (body.bottom - bounds.top) / bounds.height,
+  );
+}
+
 /// The back of a piece: the card it is printed on, its tier's clock and name, whose it is, of
 /// what, and where it goes.
 class PieceBack extends StatelessWidget {
-  const PieceBack({super.key, required this.tier, required this.ngoName, required this.title, this.place});
+  const PieceBack({super.key, required this.tier, required this.ngoName, required this.title, this.place, this.body});
   final PieceTier tier;
   final String ngoName;
   final String title;
@@ -249,43 +272,60 @@ class PieceBack extends StatelessWidget {
   /// „Platz 5 von 12".
   final String? place;
 
+  /// Where the words may go, from [pieceBackBody]. Without it, a margin all round.
+  final Rect? body;
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, c) => ColoredBox(
-        color: VColors.track,
-        child: Padding(
-          // Clear of the knobs and holes, on the body of the piece.
-          padding: EdgeInsets.all(c.biggest.shortestSide * 0.24),
-          child: Center(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: SizedBox(
-                width: c.biggest.width * 0.52,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TierClock(tier, size: c.biggest.width * 0.2),
-                    // Words only where they can be read: a small piece shows its clock alone.
-                    if (c.biggest.width >= 160) ...[
-                      const VGap.s(),
-                      Text(tierPieceName(tier), style: VText.bodySStrong, textAlign: TextAlign.center),
-                      const VGap.s(),
-                      Text(ngoName, style: VText.bodySStrong, textAlign: TextAlign.center),
-                      const SizedBox(height: 2),
-                      Text(keepLastWord(title), style: VText.caption.copyWith(color: VColors.ink2), textAlign: TextAlign.center),
-                      if (place != null) ...[
-                        const SizedBox(height: 2),
-                        Text(place!, style: VText.caption, textAlign: TextAlign.center),
-                      ],
-                    ],
-                  ],
+      builder: (context, c) {
+        final size = c.biggest;
+        final b = body;
+        final area = b == null
+            ? (Offset.zero & size).deflate(size.shortestSide * 0.24)
+            : Rect.fromLTRB(b.left * size.width, b.top * size.height, b.right * size.width, b.bottom * size.height);
+        return ColoredBox(
+          color: VColors.track,
+          child: Stack(
+            children: [
+              Positioned.fromRect(
+                rect: area,
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: SizedBox(
+                      width: b == null ? size.width * 0.52 : math.max(area.width, 96),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TierClock(tier, size: math.min(size.width * 0.2, area.shortestSide * 0.42)),
+                          // Words only where they can be read: a small piece shows its clock alone,
+                          // and a body cut in on every side what the piece is and where it goes —
+                          // the Verein and the picture stand under it as well.
+                          if (size.width >= 160) ...[
+                            const VGap.s(),
+                            Text(tierPieceName(tier), style: VText.bodySStrong, textAlign: TextAlign.center),
+                            if (area.width >= 120) ...[
+                              const VGap.s(),
+                              Text(ngoName, style: VText.bodySStrong, textAlign: TextAlign.center),
+                              const SizedBox(height: 2),
+                              Text(keepLastWord(title), style: VText.caption.copyWith(color: VColors.ink2), textAlign: TextAlign.center),
+                            ],
+                            if (place != null) ...[
+                              const SizedBox(height: 2),
+                              Text(place!, style: VText.caption, textAlign: TextAlign.center),
+                            ],
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

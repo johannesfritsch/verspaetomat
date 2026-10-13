@@ -144,43 +144,67 @@ class PuzzleTile extends StatelessWidget {
         overlay: IgnorePointer(
           child: CustomPaint(painter: PuzzleMarksPainter(cut: cut, owned: owned, board: board, bounds: bounds, outline: outline, tiers: p.slotTiers)),
         ),
-        back: (context) => PuzzleBack(puzzle: p),
+        back: (context) => PuzzleBack(puzzle: p, board: board, bounds: bounds),
       ),
     );
   }
 }
 
-/// The back of a picture under way: whose it is, what it shows, how far it is, since when.
+/// The back of a picture under way: grey card, the seams between its pieces, and each piece's
+/// clock where it sits — as the back of a puzzle on the table looks, gaps and all. Seen from
+/// behind, so left is right. What it is and how far it has come stand on the sheet around it.
 class PuzzleBack extends StatelessWidget {
-  const PuzzleBack({super.key, required this.puzzle});
+  const PuzzleBack({super.key, required this.puzzle, required this.board, required this.bounds});
   final ApiPuzzle puzzle;
+  final Size board;
+  final Rect bounds;
 
   @override
   Widget build(BuildContext context) {
-    final p = puzzle;
-    final missing = stillMissing(p);
-    final since = p.startedAt;
     return ColoredBox(
       color: VColors.track,
-      child: Padding(
-        padding: const EdgeInsets.all(VSpace.l),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            VEyebrow(p.ngoName),
-            const VGap.s(),
-            Text(keepLastWord(p.title), style: VText.h3),
-            const VGap.s(),
-            Text(puzzleProgress(p), style: VText.title),
-            if (missing != null) ...[
-              const VGap.xs(),
-              Text(missing, style: VText.bodyS),
-            ],
-            const Spacer(),
-            if (since != null) Text('Angefangen am ${finishedOn(since)}', style: VText.caption),
-          ],
-        ),
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _PuzzleBackPainter(cut: cutOf(puzzle), owned: puzzle.owned.toSet(), tiers: puzzle.slotTiers, board: board, bounds: bounds),
       ),
     );
   }
+}
+
+class _PuzzleBackPainter extends CustomPainter {
+  _PuzzleBackPainter({required this.cut, required this.owned, required this.tiers, required this.board, required this.bounds});
+  final PuzzleCut cut;
+  final Set<int> owned;
+  final List<PieceTier> tiers;
+  final Size board;
+  final Rect bounds;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (bounds.isEmpty) return;
+    final s = size.width / bounds.width;
+    final cell = Size(board.width / cut.cols, board.height / cut.rows);
+    // From the board to the back: scaled, and mirrored left to right.
+    Offset at(Offset p) => Offset(size.width - (p.dx - bounds.left) * s, (p.dy - bounds.top) * s);
+    canvas.save();
+    canvas.translate(size.width, 0);
+    canvas.scale(-s, s);
+    canvas.translate(-bounds.left, -bounds.top);
+    final seam = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1 / s
+      ..color = VColors.ink.withValues(alpha: 0.12);
+    for (final i in owned) {
+      canvas.drawPath(cut.piece(i, cell), seam);
+    }
+    canvas.restore();
+    // The clocks the right way round, each in the middle of its piece's body.
+    final r = (cell.shortestSide * s * 0.16).clamp(4.0, 16.0);
+    for (final i in owned) {
+      paintTierClock(canvas, i < tiers.length ? tiers[i] : PieceTier.minute, at(cut.cellRect(i, cell).center), r, alpha: 0.85, hand: true);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PuzzleBackPainter old) => old.cut != cut || old.board != board || old.bounds != bounds || old.owned.length != owned.length || !old.owned.containsAll(owned);
 }

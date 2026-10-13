@@ -16,7 +16,7 @@ import 'package:verspaetomat/main.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/router.dart';
 import 'package:verspaetomat/state/demo_state.dart';
-import 'package:verspaetomat/widgets/kit.dart' show PuzzleTapArea, Tile3D;
+import 'package:verspaetomat/widgets/kit.dart' show PuzzleSpread, Tile3D, VCard;
 
 Future<void> wait(WidgetTester tester, int ms) async {
   final end = DateTime.now().add(Duration(milliseconds: ms));
@@ -49,12 +49,18 @@ void main() {
 
     go(Routes.puzzles);
     await wait(tester, 1500);
-    final board = tester.getRect(find.byType(PuzzleTapArea).first);
-    await tester.tapAt(board.topLeft + Offset(board.width / 2, board.height * 3 / 8));
+    // The picture under way, whole with its holes, then laid apart; slot 4 into the hand.
+    await tester.tap(find.byType(VCard).first, warnIfMissed: false);
+    await shot(tester, 'puzzle-whole');
+    await tester.fling(find.byType(Tile3D), const Offset(260, 0), 3000);
+    await shot(tester, 'puzzle-whole-back');
+    await tester.tap(find.byKey(const Key('segment-Teile')));
+    await shot(tester, 'puzzle-pieces');
+    await tester.tapAt(spreadSlotCentre(tester, 4));
     await shot(tester, 'hand-rest');
 
     // A finger on it, turning it right and tipping it back, and holding there.
-    final centre = tester.getCenter(find.byType(Tile3D));
+    final centre = tester.getCenter(find.byType(Tile3D).last);
     final finger = await tester.startGesture(centre);
     for (var i = 0; i < 12; i++) {
       await finger.moveBy(const Offset(9, -4));
@@ -64,10 +70,15 @@ void main() {
     await finger.up();
     await wait(tester, 1500);
 
-    await tester.fling(find.byType(Tile3D), const Offset(260, 0), 3000);
+    await tester.fling(find.byType(Tile3D).last, const Offset(260, 0), 3000);
     await shot(tester, 'hand-back');
+    // The switch turns it front up again.
+    await tester.tap(find.byKey(const Key('segment-Vorderseite')));
+    await shot(tester, 'hand-front-again');
 
     await tester.tap(find.byKey(const Key('piece-in-hand-close')));
+    await wait(tester, 800);
+    Navigator.of(tester.element(find.byKey(const Key('puzzle-spread')))).pop();
     await wait(tester, 800);
     await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -500));
     await wait(tester, 600);
@@ -79,4 +90,14 @@ void main() {
     await wait(tester, 2500);
     await shot(tester, 'video-playing');
   });
+}
+
+/// The middle of [slot]'s body among the pieces laid apart in the open puzzle sheet (docs/51 §6).
+Offset spreadSlotCentre(WidgetTester tester, int slot) {
+  final spread = tester.widget<PuzzleSpread>(find.byType(PuzzleSpread));
+  final r = tester.getRect(find.byKey(const Key('puzzle-spread')));
+  final cut = spread.cut;
+  final f = PuzzleSpread.fit(cut, spread.aspectRatio ?? cut.cols / cut.rows, r.size);
+  final cell = Rect.fromLTWH((slot % cut.cols) * f.cell.width, (slot ~/ cut.cols) * f.cell.height, f.cell.width, f.cell.height);
+  return r.topLeft + PuzzleSpread.shift(cut, slot, f.gap) + cell.center;
 }

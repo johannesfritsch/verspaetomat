@@ -32,7 +32,7 @@ import 'package:verspaetomat/main.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
 import 'package:verspaetomat/screens/puzzles/puzzle_widgets.dart' show ArrivalPieceCard;
 import 'package:verspaetomat/state/demo_state.dart';
-import 'package:verspaetomat/widgets/puzzle.dart' show PuzzleTapArea;
+import 'package:verspaetomat/widgets/puzzle.dart' show PuzzleBoard, PuzzleSpread;
 
 import 'workflow_test.dart'
     show Stellwerk, chooseJourney, homeIdle, homeOrRide, pumpUntilFound, pumpUntilGone, reopenSheetFromBar, settle, tapIcon, tapInSheet, visibleTexts;
@@ -250,20 +250,37 @@ void main() {
     Navigator.of(tester.element(find.byKey(const Key('film-button')))).pop();
     await pumpUntilGone(tester, find.byKey(const Key('film-button')), timeout: const Duration(seconds: 10));
 
-    // A piece of a started picture into the hand (§9a): the middle of an owned cell.
-    final started = find.byWidgetPredicate((w) => w is PuzzleTapArea && w.owned.isNotEmpty && w.owned.length < w.cut.pieces);
+    // A started picture whole, with its holes (§6); laid apart; one of its pieces into the hand (§9a).
+    final started = find.byWidgetPredicate((w) => w is PuzzleBoard && !w.complete && w.owned.isNotEmpty && w.owned.length < w.cut.pieces);
     await pumpUntilFound(tester, started, timeout: const Duration(seconds: 20));
     await tester.ensureVisible(started.first);
     await settle(tester, 500);
-    final area = tester.widget<PuzzleTapArea>(started.first);
-    final box = tester.renderObject<RenderBox>(started.first);
-    final slot = area.owned.first;
-    final cell = Size(box.size.width / area.cut.cols, box.size.height / area.cut.rows);
-    await tester.tapAt(box.localToGlobal(Offset((slot % area.cut.cols + 0.5) * cell.width, (slot ~/ area.cut.cols + 0.5) * cell.height)));
+    final slot = tester.widget<PuzzleBoard>(started.first).owned.first;
+    await tester.tap(started.first, warnIfMissed: false);
+    await pumpUntilFound(tester, find.byKey(const Key('puzzle-tile')), timeout: const Duration(seconds: 10));
+    await settle(tester, 1500);
+    await shot(tester, 'puzzle-whole');
+    await tester.tap(find.byKey(const Key('segment-Teile')), warnIfMissed: false);
+    await pumpUntilFound(tester, find.byKey(const Key('puzzle-spread')), timeout: const Duration(seconds: 10));
+    await settle(tester, 800);
+    await tester.tapAt(spreadSlotCentre(tester, slot));
     await pumpUntilFound(tester, find.byKey(const Key('piece-in-hand')), timeout: const Duration(seconds: 10));
     await settle(tester, 1500);
     await shot(tester, 'piece-in-hand');
+    await tester.tap(find.byKey(const Key('segment-Rückseite')), warnIfMissed: false);
+    await settle(tester, 1500);
+    await shot(tester, 'piece-in-hand-back');
     await tester.tap(find.byKey(const Key('piece-in-hand-close')), warnIfMissed: false);
     await pumpUntilGone(tester, find.byKey(const Key('piece-in-hand')), timeout: const Duration(seconds: 10));
   }, timeout: const Timeout(Duration(minutes: 10)), skip: mode != 'complete');
+}
+
+/// The middle of [slot]'s body among the pieces laid apart in the open puzzle sheet (docs/51 §6).
+Offset spreadSlotCentre(WidgetTester tester, int slot) {
+  final spread = tester.widget<PuzzleSpread>(find.byType(PuzzleSpread));
+  final r = tester.getRect(find.byKey(const Key('puzzle-spread')));
+  final cut = spread.cut;
+  final f = PuzzleSpread.fit(cut, spread.aspectRatio ?? cut.cols / cut.rows, r.size);
+  final cell = Rect.fromLTWH((slot % cut.cols) * f.cell.width, (slot ~/ cut.cols) * f.cell.height, f.cell.width, f.cell.height);
+  return r.topLeft + PuzzleSpread.shift(cut, slot, f.gap) + cell.center;
 }

@@ -22,7 +22,7 @@ import 'package:verspaetomat/screens/community/community_widgets.dart' show Badg
 import 'package:verspaetomat/screens/ride/welcher_zug_screen.dart' show ItineraryTile;
 import 'package:verspaetomat/screens/share/share_moments.dart' show showConfirmedSheet;
 import 'package:verspaetomat/widgets/ticket.dart' show Ticket;
-import 'package:verspaetomat/widgets/kit.dart' show PuzzleTapArea, Tile3D, VCard, VDropzone, VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
+import 'package:verspaetomat/widgets/kit.dart' show PuzzleSpread, VCard, VDropzone, VGhostButton, VListRow, VOutlineButton, VPrimaryButton, VSelectCard;
 
 // docs/29: there is one check-in and it is the sheets in `checkin_flow.dart`. The screens that
 // used to be listed here — the departures board, "Wo steigst du aus?", the Wohin? and
@@ -409,18 +409,23 @@ void main() {
       await shot(name);
       await dismissSheet(tester);
     }
-    // docs/51 §9a: a piece lifted off the Puzzles page into the hand, at rest and turned over.
+    // docs/51 §6, §9a: a picture under way, whole with its holes and laid apart; then a piece of it
+    // in the hand, front up and turned over.
     demo.reset();
     GoRouter.of(tester.element(find.byType(Scaffold).first)).go(Routes.puzzles);
     await wait(tester, 1500);
-    final board = tester.getRect(find.byType(PuzzleTapArea).first);
+    await tester.tap(find.byType(VCard).first, warnIfMissed: false);
+    await shot('puzzle-ganz');
+    await tester.tap(find.byKey(const Key('segment-Teile')));
+    await shot('puzzle-teile');
     // Slot 4, the middle of the second row: Bahnhofsmission's seed has it.
-    await tester.tapAt(board.topLeft + Offset(board.width / 2, board.height * 3 / 8));
+    await tester.tapAt(spreadSlotCentre(tester, 4));
     await shot('puzzle-hand');
-    await tester.fling(find.byType(Tile3D), const Offset(260, 0), 3000);
+    await tester.tap(find.byKey(const Key('segment-Rückseite')));
     await shot('puzzle-hand-back');
     await tester.tap(find.byKey(const Key('piece-in-hand-close')));
     await wait(tester, 800);
+    await dismissSheet(tester);
     // §9b: a finished picture in its sheet, with its film's button.
     await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -500));
     await wait(tester, 600);
@@ -635,4 +640,14 @@ void main() {
     print('SHOT zweck-pushed');
     await wait(tester, 1500);
   });
+}
+
+/// The middle of [slot]'s body among the pieces laid apart in the open puzzle sheet (docs/51 §6).
+Offset spreadSlotCentre(WidgetTester tester, int slot) {
+  final spread = tester.widget<PuzzleSpread>(find.byType(PuzzleSpread));
+  final r = tester.getRect(find.byKey(const Key('puzzle-spread')));
+  final cut = spread.cut;
+  final f = PuzzleSpread.fit(cut, spread.aspectRatio ?? cut.cols / cut.rows, r.size);
+  final cell = Rect.fromLTWH((slot % cut.cols) * f.cell.width, (slot ~/ cut.cols) * f.cell.height, f.cell.width, f.cell.height);
+  return r.topLeft + PuzzleSpread.shift(cut, slot, f.gap) + cell.center;
 }
