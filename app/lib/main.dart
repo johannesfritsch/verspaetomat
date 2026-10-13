@@ -20,13 +20,16 @@ import 'widgets/demo_band.dart';
 /// Backend base URL. `--dart-define=API_URL=http://192.168.0.10:8080` for a phone.
 const apiUrl = String.fromEnvironment('API_URL', defaultValue: 'http://127.0.0.1:8080');
 
+/// Dark status bar text on the paper, which is every screen but a few dark ones.
+const paperStatusBar = SystemUiOverlayStyle(
+  statusBarColor: Colors.transparent,
+  statusBarIconBrightness: Brightness.dark,
+  statusBarBrightness: Brightness.light,
+);
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.dark,
-    statusBarBrightness: Brightness.light,
-  ));
+  SystemChrome.setSystemUIOverlayStyle(paperStatusBar);
   final prefs = await SharedPreferences.getInstance();
   final demo = DemoState();
   final session = Session(demo: demo, prefs: prefs, apiUrl: apiUrl);
@@ -127,8 +130,14 @@ class _VerspaetomatAppState extends State<VerspaetomatApp> {
           theme: buildAppTheme(),
           routerConfig: router,
           color: VColors.paper,
-          // Over every route and sheet while a walkthrough runs (#72).
-          builder: (context, child) => DemoBand(child: child ?? const SizedBox.shrink()),
+          // Over every route and sheet while a walkthrough runs (#72). Under it, the status bar
+          // default: a screen that asks for light text (the walkthrough band, the piece in the
+          // hand, the film) only overrides it while it is up. Without a region of its own, a
+          // paper screen kept whatever the last one asked for — white on white after the film.
+          builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+            value: paperStatusBar,
+            child: DemoBand(child: child ?? const SizedBox.shrink()),
+          ),
         ),
       ),
     );

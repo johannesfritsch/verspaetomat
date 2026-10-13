@@ -32,14 +32,17 @@ enum VHeaderSceneArt {
   landscape('assets/header/header-scene.webp'),
   landscapeAntraege('assets/header/header-scene-antraege.webp'),
   landscapeWir('assets/header/header-scene-wir.webp'),
-  landscapeIch('assets/header/header-scene-ich.webp'),
+  // The identity card stands higher in its hills than the clipboard or the podium do in theirs,
+  // and trimmed like them its top ran under the status bar. This one keeps all of its sky and
+  // gives up ground instead.
+  landscapeIch('assets/header/header-scene-ich.webp', focus: Alignment.topCenter),
   antragPruefen('assets/header/antrag-pruefen.webp', vignette: true),
   antragTicket('assets/header/antrag-ticket.webp', vignette: true),
   antragZweck('assets/header/antrag-zweck.webp', vignette: true),
   antragUnterschrift('assets/header/antrag-unterschrift.webp', vignette: true),
   antragSenden('assets/header/antrag-senden.webp', vignette: true);
 
-  const VHeaderSceneArt(this.asset, {this.vignette = false});
+  const VHeaderSceneArt(this.asset, {this.vignette = false, this.focus = const Alignment(0, 0.3)});
 
   /// The file, spelled out in full so a grep for the filename finds the drawing that uses it.
   final String asset;
@@ -48,6 +51,11 @@ enum VHeaderSceneArt {
   /// its band. The default is the band: a new drawing that forgets to say is far more
   /// likely to be a landscape, and that is also the harmless way round.
   final bool vignette;
+
+  /// Where a landscape is trimmed when its band is shorter than the drawing. What stands in the
+  /// hills sits a little below the middle of most of them, with empty sky over it and a fade
+  /// under it, so the default trims more of the sky than of the ground.
+  final Alignment focus;
 }
 
 class VHeaderScene extends StatelessWidget {
@@ -101,10 +109,7 @@ class VHeaderScene extends StatelessWidget {
                 // and trims sky and ground; a header that grows taller (large type) scales the
                 // drawing up rather than leaving a strip of paper above it.
                 fit: art.vignette ? BoxFit.fitWidth : BoxFit.cover,
-                // What stands in the hills sits a little below the middle of every landscape,
-                // with empty sky over it and a fade under it, so the band keeps that and trims
-                // more of the sky than of the ground.
-                alignment: art.vignette ? Alignment.topCenter : const Alignment(0, 0.3),
+                alignment: art.vignette ? Alignment.topCenter : art.focus,
                 filterQuality: FilterQuality.medium,
                 excludeFromSemantics: true,
               ),
