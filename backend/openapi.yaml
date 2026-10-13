@@ -109,7 +109,7 @@ paths:
       responses: { '200': { description: the MP4 }, '206': { description: one range of it }, '304': { description: If-None-Match matched }, '403': { description: the picture is not finished }, '404': { description: no such picture or it has no video }, '416': { description: range outside the file } }
   /v1/me/puzzles:
     get:
-      summary: "The pictures this customer has started (docs/51 §6, §8): growing ones by last_piece_at desc, then finished ones by completed_at desc. more_waiting: whether any piece is left to get. With the flag `puzzles` off: {puzzles: [], more_waiting: false}."
+      summary: "The pictures this customer has started (docs/51 §6, §8): growing ones by last_piece_at desc, then finished ones by completed_at desc. more_waiting: whether any piece is left to get. Each puzzle carries rides: [{piece, journey_id, date, from, to, lines, minutes}], the ride on the back of each piece (migration 0052; a piece naming none is left out). With the flag `puzzles` off: {puzzles: [], more_waiting: false}."
       responses: { '200': { description: '{puzzles: [Puzzle], more_waiting}' } }
   /v1/journeys/plan:
     get:

@@ -210,9 +210,17 @@ von Ich und von der Karte bei der Ankunft.
   - **Teile:** die Teile flach auseinandergelegt, jedes an seinem Platz, mit Luft dazwischen; was
     fehlt, liegt als graue Form da. Ein Tipp auf ein Teil hebt es in die Hand.
   - **Das Teil in der Hand** kommt mit der Vorderseite nach oben; unten schaltet „Vorderseite |
-    Rückseite" um, und ein Wisch dreht es wie bisher. Auf der Rückseite: die Uhr der Stufe, der
-    Name der Stufe, „Platz 5 von 12", und wo Platz ist Verein und Titel — gesetzt in den Körper des
-    Teils, nicht über seine Buchten.
+    Rückseite" um, und ein Wisch dreht es wie bisher. Auf der Rückseite die Uhr der Stufe und die
+    Fahrt, die das Teil gebracht hat, eine kurze Sache je Zeile: „RE 1", „12. Okt.", „Köln Hbf",
+    „→ Düsseldorf Hbf", „68 Minuten" (Johannes, 13. Oktober 2026). So passt sie in die Spalte, die
+    ein Körper mit Buchten links und rechts lässt, ohne dass alles kleiner wird. Stufe, Verein,
+    Titel und „Platz 5 von 12" stehen ohnehin unter dem Teil. Ein
+    Teil ohne Fahrt zeigt wie vorher Name der Stufe, Platz und, wo Platz ist, Verein und Titel —
+    alles gesetzt in den Körper des Teils, nicht über seine Buchten.
+  - **Maß und Mitte sind der Körper** (13. Oktober 2026): Das Teil in der Hand wird nach seinem
+    Körper — der Zelle ohne Nasen — bemessen (55 % der Bildschirmbreite) und mit dessen Mitte in
+    die Mitte gestellt; um diese Mitte dreht es sich auch. Vorher galt der Kasten samt Nasen: eine
+    Nase auf nur einer Seite schob das Teil zur anderen, Nasen auf beiden Seiten machten es kleiner.
 - **Fertig:** zwei Spalten, die ganzen Bilder ohne Fugen, Titel und Verein darunter, das neueste
   zuerst. Ein Tipp
   öffnet das Bild groß, mit dem Satz des Vereins und dem Tag, an dem das letzte Teil kam.
@@ -272,8 +280,17 @@ Server vergibt keine Teile, die App zeigt nichts davon. Im Demo-Modus ist das Pu
   "title": "Nachtschicht am Gleis 1", "caption": "Ein Becher Tee um drei Uhr nachts.",
   "ngo_id": "bahnhofsmission", "ngo_name": "Bahnhofsmission Köln", "own_cause": true,
   "image_url": "/v1/puzzle-images/…uuid…", "width": 900, "height": 1200,
-  "awarded_at": "2026-10-12T17:40:00Z" }
+  "awarded_at": "2026-10-12T17:40:00Z",
+  "rides": [{ "piece": 7, "journey_id": "…uuid…", "date": "2026-10-12", "from": "Köln Hbf",
+              "to": "Düsseldorf Hbf", "lines": ["RE 1"], "minutes": 68 }] }
 ```
+
+`rides` (seit 13. Oktober 2026, Migration 0052) nennt für jedes Teil die Fahrt auf seiner Rückseite:
+die Fahrt, die es gebracht hat (`journey_id` des Teils), sonst `named_journey_id` — bei Teilen aus
+dem Stellwerk und bei denen von vorher vorerst eine zufällige angekommene Fahrt desselben Kunden,
+nie die eines anderen. Ein Teil ohne Fahrt (der Kunde hat keine, oder sie wurde gelöscht) fehlt in
+der Liste; seine Rückseite nennt dann keine Fahrt. `date` ist der Tag in Berlin, `minutes` was die
+Fahrt gezählt hat (docs/47), `lines` die gefahrenen Linien, sonst die geplanten.
 
 `piece` zählt zeilenweise von links oben (`row * cols + col`), `owned` enthält das neue Teil schon.
 `tier` ist `minute`, `quarter` oder `hour` (§2a), `tiers` die Stufe jedes Platzes, in derselben

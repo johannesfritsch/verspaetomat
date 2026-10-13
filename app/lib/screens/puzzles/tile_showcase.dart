@@ -24,6 +24,7 @@ class TileShowcase extends StatelessWidget {
             outline: shape.outline,
             image: img,
             source: shape.source,
+            body: shape.body,
             tier: tier,
             width: width,
             tilt: tilt,

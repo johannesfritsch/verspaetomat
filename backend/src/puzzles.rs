@@ -469,7 +469,20 @@ struct Puzzle {
     video_sha256: Option<String>,
     video_width: Option<i32>,
     video_height: Option<i32>,
+    /// What [PIECE_RIDES] makes: one entry per piece that names a journey.
+    rides: Value,
 }
+
+/// The ride on the back of each piece (migration 0052): the journey that brought it, else the one
+/// it was given to name. `lines` are the legs as ridden, else as planned; `minutes` what the
+/// journey counted (docs/47); `date` its day in Berlin.
+const PIECE_RIDES: &str = "coalesce(jsonb_agg(jsonb_build_object(
+        'piece', p.piece, 'journey_id', j.id, 'from', j.origin_station_name, 'to', j.destination_station_name,
+        'date', to_char((j.planned_departure at time zone 'Europe/Berlin')::date, 'YYYY-MM-DD'), 'minutes', j.points,
+        'lines', coalesce((select jsonb_agg(r.line order by r.leg_no) from rides r where r.journey_id = j.id),
+                          case when jsonb_typeof(j.plan) = 'array' then (select jsonb_agg(l->>'line') from jsonb_array_elements(j.plan) l) end,
+                          '[]'::jsonb)
+    ) order by p.piece) filter (where j.id is not null), '[]'::jsonb)";
 
 impl Puzzle {
     fn complete(&self) -> bool {
@@ -488,6 +501,8 @@ impl Puzzle {
             // ist"); where it is, only once the picture is finished.
             "has_video": self.video_sha256.is_some(),
             "video": if self.complete() { self.video() } else { Value::Null },
+            // What stands on the back of each piece. Pieces naming no journey are left out.
+            "rides": self.rides,
         })
     }
 
@@ -516,16 +531,17 @@ impl Puzzle {
 
 /// The pictures this customer has started; one of them when `image` is set.
 async fn puzzles_of(pool: &PgPool, customer: Uuid, image: Option<Uuid>) -> anyhow::Result<Vec<Puzzle>> {
-    Ok(sqlx::query_as(
+    Ok(sqlx::query_as(&format!(
         "select i.id as image_id, i.ngo_id, n.name as ngo_name, i.title, i.caption, i.rows, i.cols, i.width, i.height, i.tiers,
                 array_agg(p.piece order by p.piece) as owned, min(p.awarded_at) as started_at, max(p.awarded_at) as last_piece_at,
-                i.video_bytes, i.video_seconds, i.video_sha256, i.video_width, i.video_height
+                i.video_bytes, i.video_seconds, i.video_sha256, i.video_width, i.video_height, {PIECE_RIDES} as rides
          from puzzle_pieces p
          join puzzle_images i on i.id = p.image_id
          join ngos n on n.id = i.ngo_id
+         left join journeys j on j.id = coalesce(p.journey_id, p.named_journey_id) and j.customer_id = p.customer_id
          where p.customer_id = $1 and ($2::uuid is null or i.id = $2)
          group by i.id, n.name",
-    )
+    ))
     .bind(customer)
     .bind(image)
     .fetch_all(pool)
@@ -657,7 +673,12 @@ pub async fn give(pool: &PgPool, customer: &CustomerRow, g: &Give) -> Result<Opt
     };
     let Some((image, piece)) = chosen else { return Ok(None) };
     let own_cause = images.iter().any(|i| i.id == image && own.contains(&i.ngo_id));
-    sqlx::query("insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, own_cause, stellwerk) values ($1, $2, $3, $4, $5, true)")
+    // No journey brought it: it names one of the customer's at random, as the pieces from before
+    // migration 0052 do, so its back shows a ride like any other.
+    sqlx::query(
+        "insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, own_cause, stellwerk, named_journey_id)
+         values ($1, $2, $3, $4, $5, true, (select id from journeys where customer_id = $1 and status = 'arrived' order by random() limit 1))",
+    )
         .bind(customer.id)
         .bind(image)
         .bind(piece)
@@ -686,8 +707,12 @@ pub async fn fill(pool: &PgPool, customer: &CustomerRow, target: &str, leave: us
     added.sort_unstable();
     let own_cause = own_causes(&mut tx, customer.id).await.map_err(internal)?.contains(&img.ngo_id);
     sqlx::query(
-        "insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, own_cause, stellwerk)
-         select $1, $2, p, $4, $5, true from unnest($3::int[]) p",
+        // Each names one of the customer's journeys at random, like a piece from `give`. The
+        // subquery mentions `p` so that it is asked again for every piece, not once for all.
+        "insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, own_cause, stellwerk, named_journey_id)
+         select $1, $2, p, $4, $5, true,
+                (select j.id from journeys j where j.customer_id = $1 and j.status = 'arrived' and p is not null order by random() limit 1)
+         from unnest($3::int[]) p",
     )
     .bind(customer.id)
     .bind(img.id)

@@ -5,8 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:verspaetomat/api/models.dart';
 import 'package:verspaetomat/repo/repo_scope.dart';
-import 'package:verspaetomat/screens/puzzles/piece_in_hand.dart' show PieceBack;
-import 'package:verspaetomat/screens/puzzles/puzzle_widgets.dart' show ArrivalPiece;
+import 'package:verspaetomat/screens/puzzles/piece_in_hand.dart' show PieceBack, boardFor;
+import 'package:verspaetomat/screens/puzzles/puzzle_widgets.dart' show ArrivalPiece, cutOf;
 import 'package:verspaetomat/screens/puzzles/puzzles_screen.dart';
 import 'package:verspaetomat/state/demo_state.dart';
 import 'package:verspaetomat/widgets/kit.dart' show VSegmented;
@@ -28,6 +28,8 @@ void main() {
     imageUrl: 'assets/demo/puzzles/bahnhofsmission.webp',
     width: 900,
     height: 1200,
+    // Slot 7 names the ride that brought it; the others name none.
+    rides: {7: ApiPieceRide(journeyId: 'j7', date: DateTime(2026, 10, 12), from: 'Köln Hbf', to: 'Düsseldorf Hbf', minutes: 68, lines: ['RE 1'])},
   );
 
   Future<void> pump(WidgetTester tester) async {
@@ -239,5 +241,70 @@ void main() {
         expect(both.getBounds().isEmpty, isTrue, reason: '$i and $j');
       }
     }
+  });
+
+  testWidgets('the body stands in the middle and the piece turns about it, wherever its knobs are', (tester) async {
+    await pump(tester);
+    final cut = cutOf(puzzle);
+    final board = boardFor(puzzle);
+    final cell = Size(board.width / cut.cols, board.height / cut.rows);
+    var lopsided = 0;
+    double? line;
+    await openPieces(tester);
+    for (final slot in puzzle.owned) {
+      final bounds = cut.piece(slot, cell).getBounds();
+      final body = cut.cellRect(slot, cell);
+      // Knobs on one side only: the box they span is off the body's middle.
+      if ((bounds.center.dx - body.center.dx).abs() > 1) lopsided++;
+
+      await tester.tapAt(spreadCentre(tester, slot));
+      await tester.pumpAndSettle();
+      final tile = find.byKey(const Key('piece-in-hand'));
+      final r = tester.getRect(tile);
+      final scale = r.width / bounds.width;
+      final middle = (body.center - bounds.topLeft) * scale;
+      expect(r.left + middle.dx, closeTo(393 / 2, 0.5), reason: 'slot $slot stands in the middle');
+      // Every piece's body on the same line, whatever reaches out above or below it.
+      line ??= r.top + middle.dy;
+      expect(r.top + middle.dy, closeTo(line, 0.5), reason: 'slot $slot keeps the line');
+      final pivot = (tester.state(tile) as dynamic).pivot as Offset;
+      expect(pivot.dx, closeTo(middle.dx, 0.01), reason: 'slot $slot turns about its body');
+      expect(pivot.dy, closeTo(middle.dy, 0.01), reason: 'slot $slot turns about its body');
+
+      await tester.tap(find.byKey(const Key('piece-in-hand-close')));
+      await tester.pumpAndSettle();
+    }
+    expect(lopsided, greaterThan(0), reason: 'at least one piece has a knob on one side only, or this proves nothing');
+  });
+
+  testWidgets('the back names the ride that brought the piece, and a piece without one says nothing of a ride', (tester) async {
+    await pump(tester);
+    await openPieces(tester);
+    await tester.tapAt(spreadCentre(tester, 7));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('segment-Rückseite')));
+    await tester.pumpAndSettle();
+    Finder onBack(String text) => find.descendant(of: find.byType(PieceBack), matching: find.text(text));
+    expect(onBack('RE 1'), findsOneWidget);
+    expect(onBack('12. Okt.'), findsOneWidget);
+    expect(onBack('Köln Hbf'), findsOneWidget);
+    expect(onBack('→ Düsseldorf Hbf'), findsOneWidget);
+    expect(onBack('68 Minuten'), findsOneWidget);
+    // With a ride, the clock and the ride: tier and place stand on the page under the piece.
+    expect(onBack('Minuten-Teil'), findsNothing);
+    expect(onBack('Platz 8 von 12'), findsNothing);
+    expect(find.text('Platz 8 von 12'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('piece-in-hand-close')));
+    await tester.pumpAndSettle();
+    await tester.tapAt(spreadCentre(tester, 0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('segment-Rückseite')));
+    await tester.pumpAndSettle();
+    expect(find.byType(PieceBack), findsOneWidget);
+    expect(onBack('Minuten-Teil'), findsOneWidget, reason: 'without a ride, the back is as it was');
+    expect(find.descendant(of: find.byType(PieceBack), matching: find.textContaining('→')), findsNothing);
+    // „Minuten-Teil" is its tier; a ride's minutes would be a line of their own.
+    expect(find.descendant(of: find.byType(PieceBack), matching: find.textContaining(RegExp(r'^\d+ Minuten?$|^pünktlich$'))), findsNothing);
   });
 }

@@ -134,6 +134,10 @@ class PuzzleCut {
     return piece(index, cell).shift(-cellRect(index, cell).topLeft);
   }
 
+  /// How far a knob reaches past its cell, as a share of the cell's shorter side: the head's
+  /// three tenths, and the most a seed lifts it (`_knob`).
+  static const knobReach = 0.32;
+
   Rect cellRect(int index, Size cell) => Rect.fromLTWH((index % cols) * cell.width, (index ~/ cols) * cell.height, cell.width, cell.height);
 
   @override
@@ -507,12 +511,13 @@ class _RenderHitOnly extends RenderProxyBox {
   bool hitTest(BoxHitTestResult result, {required Offset position}) => size.contains(position) && hit(position, size) && super.hitTest(result, position: position);
 }
 
-/// One piece lifted off its board (docs/51 §9a): its outline on a board of [board] size, and the
-/// part of a picture of [image] pixels that lies under it, as the board draws it (cover, centred).
-({Path outline, Rect source}) pieceShape(PuzzleCut cut, int slot, Size board, Size image) {
+/// One piece lifted off its board (docs/51 §9a): its outline on a board of [board] size, its body
+/// (the cell, without the knobs that reach out of it), and the part of a picture of [image] pixels
+/// that lies under it, as the board draws it (cover, centred).
+({Path outline, Rect body, Rect source}) pieceShape(PuzzleCut cut, int slot, Size board, Size image) {
   final cell = Size(board.width / cut.cols, board.height / cut.rows);
   final outline = cut.piece(slot, cell);
-  return (outline: outline, source: pictureSource(image, board, outline.getBounds()));
+  return (outline: outline, body: cut.cellRect(slot, cell), source: pictureSource(image, board, outline.getBounds()));
 }
 
 /// The part of a picture of [image] pixels under [part] of a board of [board] size that shows

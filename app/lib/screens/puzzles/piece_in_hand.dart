@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../api/models.dart';
+import '../../mock/mock_data.dart' show Mock;
 import '../../repo/repo_scope.dart';
 import '../../state/puzzle_video_store.dart';
 import '../../theme/tokens.dart';
@@ -90,10 +91,18 @@ class _PieceInHandState extends State<PieceInHand> {
     final screen = MediaQuery.sizeOf(context);
     final board = boardFor(p);
     final cut = cutOf(p);
-    final bounds = cut.piece(slot, Size(board.width / cut.cols, board.height / cut.rows)).getBounds();
-    final width = screen.width * 0.7;
-    final height = width * bounds.height / bounds.width;
-    final target = Rect.fromLTWH((screen.width - width) / 2, screen.height * 0.16, width, height);
+    final cell = Size(board.width / cut.cols, board.height / cut.rows);
+    final bounds = cut.piece(slot, cell).getBounds();
+    // Sized and placed by its body, not by the box its knobs span: every piece's body is 55 % of the
+    // screen wide — knobs on both sides then still clear the margins — and stands in the middle. Measured by the box, a knob
+    // on one side only pushed the piece the other way, and knobs on both sides made it smaller.
+    // It stands as low as a piece with knobs above and below would, so none rises above the line.
+    final body = cut.cellRect(slot, cell);
+    final scale = screen.width * 0.55 / body.width;
+    final width = bounds.width * scale;
+    final height = bounds.height * scale;
+    final middle = Offset(screen.width / 2, screen.height * 0.16 + (cell.height / 2 + cell.shortestSide * PuzzleCut.knobReach) * scale);
+    final target = (bounds.topLeft - body.center) * scale + middle & Size(width, height);
     final start = from ?? Rect.fromCenter(center: target.center, width: width * 0.4, height: height * 0.4);
     final flight = _flight;
     final words = _words;
@@ -149,6 +158,7 @@ class _PieceInHandState extends State<PieceInHand> {
                       outline: shape.outline,
                       image: img,
                       source: shape.source,
+                      body: shape.body,
                       tier: tier,
                       width: width,
                       side: _back,
@@ -157,6 +167,7 @@ class _PieceInHandState extends State<PieceInHand> {
                         ngoName: p.ngoName,
                         title: p.title,
                         place: 'Platz ${slot + 1} von ${p.pieces}',
+                        ride: p.rides[slot],
                         body: pieceBackBody(cut, slot, board),
                       ),
                     );
@@ -261,16 +272,33 @@ Rect pieceBackBody(PuzzleCut cut, int slot, Size board) {
   );
 }
 
+/// The ride on the back of a piece, one short thing to a line, so that it fits the column a body
+/// with holes on both sides leaves: „RE 1", „12. Okt.", „Köln Hbf", „→ Düsseldorf Hbf",
+/// „68 Minuten" (or „pünktlich").
+List<String> pieceRideLines(ApiPieceRide r) {
+  final d = r.date;
+  return [
+    r.lines.join(', '),
+    if (d != null) Mock.monthDate(d),
+    r.from,
+    '→ ${r.to}',
+    r.minutes > 0 ? '${r.minutes} ${r.minutes == 1 ? 'Minute' : 'Minuten'}' : 'pünktlich',
+  ].where((l) => l.isNotEmpty).toList();
+}
+
 /// The back of a piece: the card it is printed on, its tier's clock and name, whose it is, of
-/// what, and where it goes.
+/// what, where it goes, and the ride that brought it.
 class PieceBack extends StatelessWidget {
-  const PieceBack({super.key, required this.tier, required this.ngoName, required this.title, this.place, this.body});
+  const PieceBack({super.key, required this.tier, required this.ngoName, required this.title, this.place, this.ride, this.body});
   final PieceTier tier;
   final String ngoName;
   final String title;
 
   /// „Platz 5 von 12".
   final String? place;
+
+  /// The ride that brought it. Null: a piece that names none, or a server before rides.
+  final ApiPieceRide? ride;
 
   /// Where the words may go, from [pieceBackBody]. Without it, a margin all round.
   final Rect? body;
@@ -294,15 +322,24 @@ class PieceBack extends StatelessWidget {
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: SizedBox(
-                      width: b == null ? size.width * 0.52 : math.max(area.width, 96),
+                      // A ride's lines are short enough for the body's own width; set wider, the
+                      // whole back would be scaled down to fit and the clock with it.
+                      width: b == null ? size.width * 0.52 : math.max(area.width, ride != null ? 64 : 96),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           TierClock(tier, size: math.min(size.width * 0.2, area.shortestSide * 0.42)),
-                          // Words only where they can be read: a small piece shows its clock alone,
-                          // and a body cut in on every side what the piece is and where it goes —
-                          // the Verein and the picture stand under it as well.
-                          if (size.width >= 160) ...[
+                          // Words only where they can be read: a small piece shows its clock alone.
+                          // With a ride, the clock and the ride: what it is, whose and where it goes
+                          // stand on the page under the piece, and a body cut in on two sides has
+                          // room for three short lines, not seven. Without one, as before — a body
+                          // cut in on every side what the piece is and where it goes, the Verein
+                          // and the picture under it as well.
+                          if (size.width >= 160 && ride != null) ...[
+                            const VGap.s(),
+                            for (final (i, line) in pieceRideLines(ride!).indexed)
+                              Text(line, style: i == 0 ? VText.bodySStrong : VText.caption, textAlign: TextAlign.center),
+                          ] else if (size.width >= 160) ...[
                             const VGap.s(),
                             Text(tierPieceName(tier), style: VText.bodySStrong, textAlign: TextAlign.center),
                             if (area.width >= 120) ...[

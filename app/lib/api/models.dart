@@ -2301,6 +2301,7 @@ class ApiPuzzle {
     this.completedAt,
     this.hasVideo = false,
     this.video,
+    this.rides = const {},
   });
   final String imageId;
   final int rows;
@@ -2331,6 +2332,10 @@ class ApiPuzzle {
 
   /// Where the film is: only on a finished picture, and only from a server that has films.
   final ApiPuzzleVideo? video;
+
+  /// The ride on the back of each piece, by slot. A piece naming none, and every piece from a
+  /// server before rides, is missing here: its back then names no ride.
+  final Map<int, ApiPieceRide> rides;
 
   int get pieces => rows * cols;
 
@@ -2364,6 +2369,32 @@ class ApiPuzzle {
         completedAt: _dt(j['completed_at']),
         hasVideo: _b(j['has_video']),
         video: _m(j['video']) == null ? null : ApiPuzzleVideo.fromJson(_m(j['video'])!),
+        rides: {
+          for (final r in (j['rides'] as List? ?? const []).whereType<Map>())
+            _i(r['piece'], -1): ApiPieceRide.fromJson(Map<String, dynamic>.from(r)),
+        }..remove(-1),
+      );
+}
+
+/// The ride that brought a piece, on its back: where from, where to, on which lines, which day,
+/// and the minutes it counted (docs/47).
+class ApiPieceRide {
+  const ApiPieceRide({required this.journeyId, this.date, required this.from, required this.to, this.minutes = 0, this.lines = const []});
+  final String journeyId;
+  final DateTime? date;
+  final String from;
+  final String to;
+  final int minutes;
+  final List<String> lines;
+
+  factory ApiPieceRide.fromJson(Map<String, dynamic> j) => ApiPieceRide(
+        journeyId: _s(j['journey_id']),
+        // A day, not a moment: kept as the calendar says it, never moved into UTC.
+        date: _date(j['date']),
+        from: _s(j['from']),
+        to: _s(j['to']),
+        minutes: _i(j['minutes']),
+        lines: _sl(j['lines']).where((l) => l.isNotEmpty).toList(),
       );
 }
 

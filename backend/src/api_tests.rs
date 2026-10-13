@@ -2799,3 +2799,158 @@ async fn old_nachtrag_rides_stay_in_the_history(pool: PgPool) {
     assert_eq!(row["nachtrag"], true, "{row}");
     assert_eq!(row["points"], 12, "{row}");
 }
+
+// ---------------------------------------------------------------------------
+// The ride on the back of a piece (migration 0052)
+// ---------------------------------------------------------------------------
+
+/// An arrived journey of [customer], with no piece: Köln to Düsseldorf, [minutes] counted, [days_ago].
+async fn arrived_journey(pool: &PgPool, customer: Uuid, minutes: i32, days_ago: i64) -> Uuid {
+    let j = riding_journey(pool, customer).await;
+    sqlx::query("update journeys set status = 'arrived', points = $2, finalised_at = now(), planned_departure = planned_departure - make_interval(days => $3) where id = $1")
+        .bind(j)
+        .bind(minutes)
+        .bind(days_ago as i32)
+        .execute(pool)
+        .await
+        .unwrap();
+    j
+}
+
+/// The `rides` of the customer's one started picture, by piece.
+async fn piece_rides(app: &Router, token: &str) -> (Vec<i64>, std::collections::BTreeMap<i64, Value>) {
+    let (s, v) = call(app, "GET", "/v1/me/puzzles", Some(token), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let p = &v["puzzles"][0];
+    let owned = p["owned"].as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).collect();
+    let rides = p["rides"].as_array().unwrap_or_else(|| panic!("rides is a list: {p}")).iter().map(|r| (r["piece"].as_i64().unwrap(), r.clone())).collect();
+    (owned, rides)
+}
+
+/// A piece a journey brought names that journey: where from, where to, which line, which day,
+/// how many minutes — on the puzzle list and on the piece the finish hands back.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_piece_names_the_journey_that_brought_it(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let (id, token) = device(&app).await;
+    picture(&app, "bahnhofsmission", 3, 4).await;
+    puzzles_on(&app, id).await;
+
+    let j = riding_journey(&pool, id).await;
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{j}/finish"), Some(&token), Some(json!({ "arrived": true }))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let piece = v["piece"]["piece"].as_i64().unwrap_or_else(|| panic!("a piece: {v}"));
+    let ride = &v["piece"]["rides"][0];
+    assert_eq!(ride["piece"], piece, "{v}");
+    assert_eq!(ride["journey_id"], json!(j), "{v}");
+
+    let (owned, rides) = piece_rides(&app, &token).await;
+    assert_eq!(owned, vec![piece]);
+    let r = &rides[&piece];
+    assert_eq!(r["journey_id"], json!(j), "{r}");
+    assert_eq!(r["from"], "Köln Hbf");
+    assert_eq!(r["to"], "Düsseldorf Hbf");
+    assert_eq!(r["lines"], json!(["RE 1"]));
+    let points: i32 = sqlx::query_scalar("select points from journeys where id = $1").bind(j).fetch_one(&pool).await.unwrap();
+    assert_eq!(r["minutes"], points);
+    let berlin = (Utc::now() - Duration::minutes(35)).with_timezone(&chrono_tz::Europe::Berlin).date_naive();
+    assert_eq!(r["date"], berlin.format("%Y-%m-%d").to_string());
+}
+
+/// A piece from the Stellwerk came from no journey. It names one of the customer's own at random
+/// — every piece one, the same one twice if it must — and never someone else's.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_stellwerk_piece_names_one_of_the_customers_own_rides(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let image = picture(&app, "bahnhofsmission", 3, 4).await;
+    let (other, _) = device(&app).await;
+    let theirs = arrived_journey(&pool, other, 70, 1).await;
+    let (id, token) = device(&app).await;
+    puzzles_on(&app, id).await;
+    let mine = [arrived_journey(&pool, id, 12, 2).await, arrived_journey(&pool, id, 68, 3).await];
+
+    let (s, v) = admin(&app, "POST", &format!("/admin/customers/{id}/puzzle-pieces"), json!({ "image": image, "count": 3 })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = admin(&app, "POST", &format!("/admin/customers/{id}/puzzles/{image}/fill"), json!({ "leave": 2 })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    let (owned, rides) = piece_rides(&app, &token).await;
+    assert_eq!(owned.len(), 10);
+    assert_eq!(rides.len(), 10, "every piece names a ride: {rides:?}");
+    for (piece, r) in &rides {
+        let j: Uuid = r["journey_id"].as_str().unwrap().parse().unwrap();
+        assert!(mine.contains(&j), "piece {piece} names a ride of its own customer, not {j}");
+        assert_ne!(j, theirs);
+    }
+}
+
+/// Without a single ride of its own the piece still comes, and the list carries it without a
+/// ride rather than failing; a deleted journey takes its name off the piece and leaves the piece.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_piece_without_a_ride_still_works(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let image = picture(&app, "bahnhofsmission", 3, 4).await;
+    let (id, token) = device(&app).await;
+    puzzles_on(&app, id).await;
+
+    let (s, v) = admin(&app, "POST", &format!("/admin/customers/{id}/puzzle-pieces"), json!({ "image": image, "piece": 0 })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (owned, rides) = piece_rides(&app, &token).await;
+    assert_eq!(owned, vec![0]);
+    assert!(rides.is_empty(), "{rides:?}");
+
+    let j = riding_journey(&pool, id).await;
+    let (s, v) = call(&app, "POST", &format!("/v1/journeys/{j}/finish"), Some(&token), Some(json!({ "arrived": true }))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (owned, rides) = piece_rides(&app, &token).await;
+    assert_eq!((owned.len(), rides.len()), (2, 1));
+
+    sqlx::query("delete from journeys where id = $1").bind(j).execute(&pool).await.unwrap();
+    let (owned, rides) = piece_rides(&app, &token).await;
+    assert_eq!((owned.len(), rides.len()), (2, 0), "the piece stays, its ride is gone");
+}
+
+/// The pieces made before migration 0052 named no ride. Applied to them, it gives each one of its
+/// customer's own arrived journeys at random, and leaves a piece that came from a journey as it is.
+#[sqlx::test(migrations = "./migrations")]
+async fn the_migration_gives_the_pieces_there_already_are_a_ride(pool: PgPool) {
+    let app = app(pool.clone(), None).await;
+    let image = picture(&app, "bahnhofsmission", 3, 4).await;
+    let (other, _) = device(&app).await;
+    arrived_journey(&pool, other, 70, 1).await;
+    let (id, token) = device(&app).await;
+    puzzles_on(&app, id).await;
+    let earned = arrived_journey(&pool, id, 30, 1).await;
+    let free = arrived_journey(&pool, id, 64, 4).await;
+    // Still riding: not a ride to name.
+    riding_journey(&pool, id).await;
+    // As the table held them before: one piece from a journey, five from the Stellwerk with nothing.
+    sqlx::query("insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, journey_id) values ($1, $2, 0, now(), $3)")
+        .bind(id)
+        .bind(image)
+        .bind(earned)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for p in 1..6 {
+        sqlx::query("insert into puzzle_pieces (customer_id, image_id, piece, awarded_at, stellwerk) values ($1, $2, $3, now(), true)")
+            .bind(id)
+            .bind(image)
+            .bind(p)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let (_, rides) = piece_rides(&app, &token).await;
+    assert_eq!(rides.len(), 1, "before: only the earned piece names a ride");
+
+    sqlx::raw_sql(include_str!("../migrations/0052_piece_rides.sql")).execute(&pool).await.expect("0052 runs again");
+    let (owned, rides) = piece_rides(&app, &token).await;
+    assert_eq!(owned.len(), 6);
+    assert_eq!(rides.len(), 6, "{rides:?}");
+    assert_eq!(rides[&0]["journey_id"], json!(earned), "the earned piece keeps its own journey");
+    for p in 1..6 {
+        let j: Uuid = rides[&p]["journey_id"].as_str().unwrap().parse().unwrap();
+        assert!(j == earned || j == free, "piece {p}: one of the customer's arrived journeys, not {j}");
+    }
+}

@@ -307,6 +307,7 @@ class Tile3D extends StatefulWidget {
     required this.source,
     required this.back,
     required this.width,
+    this.body,
     this.tier,
     this.depth = 0.05,
     this.overlay,
@@ -334,6 +335,11 @@ class Tile3D extends StatefulWidget {
 
   /// How wide the tile is drawn.
   final double width;
+
+  /// The thing itself without what reaches out of it — a piece's cell, without its knobs — in
+  /// the outline's coordinates. The tile turns about its middle, so a piece with a knob on one
+  /// side only does not swing about a point off its body. Null: the outline's bounds.
+  final Rect? body;
 
   /// The material. Null is a whole picture: board, a little satin, no lip.
   final PieceTier? tier;
@@ -395,6 +401,12 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
   late Path _mirrored;
   late Size _box;
 
+  /// The point the tile turns about, in [_box]: the middle of [Tile3D.body].
+  late Offset _pivot;
+
+  @visibleForTesting
+  Offset get pivot => _pivot;
+
   @override
   void initState() {
     super.initState();
@@ -436,7 +448,7 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
   @override
   void didUpdateWidget(Tile3D old) {
     super.didUpdateWidget(old);
-    if (old.outline != widget.outline || old.width != widget.width) _layout();
+    if (old.outline != widget.outline || old.width != widget.width || old.body != widget.body) _layout();
     if (old.side != widget.side) {
       old.side?.removeListener(_onSide);
       widget.side?.addListener(_onSide);
@@ -465,6 +477,7 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
       ..translateByDouble(-b.left, -b.top, 0, 1);
     _outline = widget.outline.transform(m.storage);
     _box = Size(b.width * s, b.height * s);
+    _pivot = ((widget.body ?? b).center - b.topLeft) * s;
     // The back is seen from behind: its outline is the front's, mirrored left to right.
     final flip = Matrix4.identity()
       ..translateByDouble(_box.width, 0, 0, 1)
@@ -543,10 +556,10 @@ class _Tile3DState extends State<Tile3D> with SingleTickerProviderStateMixin {
     super.dispose();
   }
 
-  /// Turned about the tile's centre and seen in perspective, [z] behind the front face; [flip]
+  /// Turned about the middle of its body and seen in perspective, [z] behind the front face; [flip]
   /// turns it about once more, for the back. Written into [into], or a new matrix.
   Matrix4 _matrix(TileTilt t, {double z = 0, bool flip = false, Matrix4? into}) {
-    final cx = _box.width / 2, cy = _box.height / 2;
+    final cx = _pivot.dx, cy = _pivot.dy;
     _perspective.setEntry(3, 2, 0.0012 * 300 / math.max(_box.longestSide, 1));
     final m = (into ?? Matrix4.zero())
       ..setIdentity()
