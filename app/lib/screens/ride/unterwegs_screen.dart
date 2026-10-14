@@ -1391,7 +1391,7 @@ Future<void> showGaveUpSheet(BuildContext context, TicketType? ticket, [int minu
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // No count-up on this sheet: the piece comes in almost at once.
-                ArrivalPiece(piece: piece, delay: const Duration(milliseconds: 300)),
+                ArrivalPiece(piece: piece, delay: const Duration(milliseconds: 300), lift: true),
                 const VGap.s(),
                 Text('Ein Anspruch entsteht nicht — die Entschädigung hängt an der Ankunft.', style: VText.bodyS.copyWith(color: VColors.ink2)),
                 const VGap.m(),

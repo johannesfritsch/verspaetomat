@@ -186,6 +186,14 @@ hoch wie bisher. Danach, und erst danach:
 5. Alles zusammen ungefähr anderthalb Sekunden. Ein Tipp überspringt es; mit `NO_ANIM` steht
    sofort das Endbild da. Ein Tipp auf die Karte öffnet die Puzzles.
 
+**In die Hand, in 3D** (Johannes, 14. Oktober 2026): Wo eine Fahrt endet — die Ankunft und
+„Aufgegeben" —, hebt sich das neue Teil, sobald die Minuten gezählt sind, aus seinem leeren Platz
+auf der Karte in die Hand (§9a): groß, drehbar, die Fahrt auf der Rückseite, „Bekommen am …"
+darunter. Wird es zurückgelegt, fliegt es an seinen Platz, und Schritt 2 bis 4 laufen von dort: es
+rastet ein, mit Tick und rotem Licht. Einmal je Teil; nie unter Automatisierung (Tour, E2E) und
+nicht, wenn Bewegung abgeschaltet ist — dann steht es gleich an seinem Platz, und ein Tipp nimmt es
+in die Hand.
+
 Keine Konfetti: Die gehören dem Antrag (docs/27 §4).
 
 ## 6. Die Seite „Puzzles"

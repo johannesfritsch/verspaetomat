@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/models.dart';
+import '../../platform/geofence_sync.dart' show GeofenceSync;
 import '../../repo/repo_scope.dart';
 import '../../router.dart';
 import '../../theme/tokens.dart';
@@ -83,11 +84,15 @@ String arrivalPieceLabel(ApiPuzzlePiece piece) {
 /// The piece an arrival brought (docs/51 §5), under the trip — or nothing, when the journey
 /// brought none or the puzzles are switched off. Safe in every phase: no piece, no card.
 class ArrivalPiece extends StatelessWidget {
-  const ArrivalPiece({super.key, required this.piece, this.delay = const Duration(milliseconds: 1300)});
+  const ArrivalPiece({super.key, required this.piece, this.delay = const Duration(milliseconds: 1300), this.lift = false});
   final ApiPuzzlePiece? piece;
 
   /// How long the board waits before the piece comes in: until the minutes have counted up.
   final Duration delay;
+
+  /// Where a ride ends: the piece first rises into the hand, in 3D (§9a), and goes into its slot
+  /// on this card's board when it is put back. See [ArrivalPieceCard.lift].
+  final bool lift;
 
   @override
   Widget build(BuildContext context) {
@@ -95,7 +100,7 @@ class ArrivalPiece extends StatelessWidget {
     if (p == null || !RepoScope.of(context).puzzlesOn) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: VSpace.s),
-      child: ArrivalPieceCard(piece: p, delay: delay),
+      child: ArrivalPieceCard(piece: p, delay: delay, lift: lift),
     );
   }
 }
@@ -103,9 +108,21 @@ class ArrivalPiece extends StatelessWidget {
 /// The card itself: the board with the new piece coming in, whose picture it is, „7 von 12".
 /// A tap while the piece is still on its way puts it in place; after that it opens the Puzzles.
 class ArrivalPieceCard extends StatefulWidget {
-  const ArrivalPieceCard({super.key, required this.piece, this.delay = const Duration(milliseconds: 1300)});
+  const ArrivalPieceCard({super.key, required this.piece, this.delay = const Duration(milliseconds: 1300), this.lift = false});
   final ApiPuzzlePiece piece;
   final Duration delay;
+
+  /// Once the minutes have counted up, the new piece rises out of its empty slot into the hand —
+  /// the 3D piece that turns, its ride on the back — and when it is put back it flies into the
+  /// slot and clicks in (Johannes, 14 October 2026). Once per piece; never under automation (the
+  /// tour and the E2E drive this sheet), nor with animations switched off: there the card shows
+  /// it in place as before, and a tap on it still lifts it.
+  final bool lift;
+
+  /// The pieces already lifted in this run of the app, so a sheet opened again does not lift
+  /// the same piece twice.
+  @visibleForTesting
+  static final lifted = <String>{};
 
   static const _reveal = Duration(milliseconds: 1200);
 
@@ -160,11 +177,39 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
     // The last piece of a picture with a film: the film comes now, while the finish plays (§9b).
     final p = widget.piece.puzzle;
     if (p.complete && p.video != null) RepoScope.read(context).videos.ensure(p);
+    final key = '${p.imageId}/${widget.piece.piece}';
     if (_still || MediaQuery.disableAnimationsOf(context)) {
       _c.value = 1;
+    } else if (widget.lift && !GeofenceSync.automation && ArrivalPieceCard.lifted.add(key)) {
+      _liftAfter(widget.delay);
     } else {
       _c.forward();
     }
+  }
+
+  final _boardKey = GlobalKey();
+
+  /// Into the hand out of its empty slot, and back into it: the board's reveal then runs from
+  /// where its wait for the minutes ended.
+  Future<void> _liftAfter(Duration wait) async {
+    await Future<void>.delayed(wait);
+    if (!mounted) return;
+    final board = _boardKey.currentContext;
+    if (board != null && board.mounted) await Scrollable.ensureVisible(board, alignment: 0.5, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+    if (!mounted) return;
+    await showPieceInHand(context, widget.piece.puzzle, widget.piece.piece, from: _slotRect());
+    if (!mounted) return;
+    _c.value = widget.delay.inMilliseconds / _c.duration!.inMilliseconds;
+    _c.forward();
+  }
+
+  /// The new piece's slot on this card's board, on the screen: the cell with its knobs.
+  Rect? _slotRect() {
+    final box = _boardKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return null;
+    final cut = cutOf(widget.piece.puzzle);
+    final cell = Size(box.size.width / cut.cols, box.size.height / cut.rows);
+    return cut.piece(widget.piece.piece, cell).getBounds().shift(box.localToGlobal(Offset.zero));
   }
 
   /// One tick as the piece clicks in, and only when it was seen doing so.
@@ -230,6 +275,7 @@ class _ArrivalPieceCardState extends State<ArrivalPieceCard> with SingleTickerPr
             children: [
               // Narrow enough that a title like „Nachtschicht am Gleis 1" keeps to one line beside it.
               SizedBox(
+                key: _boardKey,
                 width: 100,
                 child: _c.isCompleted
                     ? PuzzleTapArea(

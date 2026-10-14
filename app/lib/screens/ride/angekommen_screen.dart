@@ -278,7 +278,7 @@ class _AngekommenScreenState extends State<AngekommenScreen> {
           const VGap.m(),
           _TripCard(journey: j, ride: r, arrivedAt: cancelled ? null : actual),
           // docs/51 §5: after the minutes, and only after them — the piece waits for the count-up.
-          ArrivalPiece(piece: result.piece, delay: Duration(milliseconds: delay > 0 && !cancelled ? 1300 : 300)),
+          ArrivalPiece(piece: result.piece, delay: Duration(milliseconds: delay > 0 && !cancelled ? 1300 : 300), lift: true),
           if (result.newBadge != null) ...[
             const VGap.s(),
             VCard(
